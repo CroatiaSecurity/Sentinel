@@ -205,6 +205,7 @@ public static class ServiceCollectionExtensions
         // ── Smart Scoring & Analysis ────────────────────────────────────────────
         services.AddSingleton<AkinatorEngine>();           // Contextual heuristic scoring
         services.AddSingleton<BehavioralBaselineService>(); // Learn normal behavior
+        services.AddHostedService(sp => sp.GetRequiredService<BehavioralBaselineService>()); // Run background learning loop
         services.AddSingleton<FalsePositiveTracker>();      // Self-improving FP reduction
         services.AddSingleton<AllowlistService>();           // Proactive allowlist (vendor trust + dev tools + user)
         services.AddSingleton<ContextualAnalysisEngine>();  // Installer/update context detection
@@ -222,16 +223,16 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<CrudePayloadGuard>();        // Simple payload detection
         services.AddSingleton<ElfCatcher>();                 // ELF/WSL abuse detection
         services.AddSingleton<ShadowProxyDetector>();      // Proxy manipulation detection
-        services.AddHostedService<ShadowProxyDetector>();   // Run as background service
+        services.AddHostedService(sp => sp.GetRequiredService<ShadowProxyDetector>());   // Run as background service
 
         // ── Council of Elders — Consultant Signal Ingestor ───────────────────
         services.AddHostedService<ConsultantSignalIngestor>(); // Tails PS consultant JSONL drops
 
         // ── Honeypot & HID ─────────────────────────────────────────────────────
         services.AddSingleton<HoneypotMonitor>();            // Decoy file monitoring
-        services.AddHostedService<HoneypotMonitor>();         // Run as background service
+        services.AddHostedService(sp => sp.GetRequiredService<HoneypotMonitor>());  // Run as background service
         services.AddSingleton<HIDMacroGuard>();              // USB injection detection
-        services.AddHostedService<HIDMacroGuard>();          // Run as background service
+        services.AddHostedService(sp => sp.GetRequiredService<HIDMacroGuard>());    // Run as background service
 
         // ═══════════════════════════════════════════════════════════════════════
         // 1.7.0 — AGGRESSIVE DECEPTION ENGINE
