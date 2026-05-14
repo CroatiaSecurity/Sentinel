@@ -1,0 +1,313 @@
+# Changelog
+
+## 1.7.0 — Aggressive Deception Engine (May 2026)
+
+### New: Deception Engine (Pre-Kill Attacker Punishment)
+When a President's Law kill is authorized, the new `DeceptionEngine` executes attacker-hostile tactics BEFORE process termination. Every kill now costs the attacker time, pollutes their data, and potentially exposes their infrastructure.
+
+**Philosophy:** Don't just stop the attacker — make them pay. All tactics operate on our own system against a confirmed intruder. Legally defensive (same principle as dye packs in bank robbery).
+
+### Deception Tactics
+
+**Memory Flooding** — Injects up to 256MB of random garbage into the target process's address space via `VirtualAllocEx` + `WriteProcessMemory`. If the attacker has memory dump capabilities or C2 crash-reporting, their data is now gigabytes of noise. Random data (not zeros) ensures it doesn't compress well.
+
+**Implant Destabilizer (DLL Stomping)** — Overwrites the `.text` section of non-system modules with INT3 (0xCC) breakpoint instructions. If the implant has persistence and restarts after kill, it immediately crashes on first instruction fetch — extremely hard to debug remotely. Also corrupts thread stacks (garbage injection into stack regions so C2 crash-reporting sends corrupted telemetry to the operator). Creates 60+ decoy named objects (fake debugger/EDR/C2 mutex names) to pollute handle table forensics.
+
+**Beacon Flooder** — When C2 address and port are identified, sends 50+ fake beacon check-ins mimicking known C2 framework protocols (Cobalt Strike HTTP beacons, Sliver mTLS sessions, generic HTTP C2). Additionally sends 20+ protocol confusion payloads — malformed HTTP with integer overflows in Content-Length, null bytes in headers, impossible chunked encoding, and oversized URIs designed to trigger parsing bugs and crash the C2 team server. The operator's console fills with ghost sessions they must manually triage.
+
+**Clipboard Poisoner** — When clipboard theft is detected, replaces clipboard contents with convincing-looking but fake/trackable data: fake AWS keys, SSH private keys, cryptocurrency addresses, GitHub tokens, Slack tokens, database connection strings. Attacker's stolen clipboard is now useless AND trackable (canary tokens alert when used).
+
+**File Trap Deployer** — Deploys filesystem-based traps in common exfil-target directories:
+- **Sparse file bombs**: Files that report as 500GB via metadata but consume 0 bytes on disk. Automated exfil tools try to read 500GB of zeros, saturating C2 bandwidth for hours.
+- **Symlink loops**: Deeply nested directories (50 levels) with symlinks back to root. Recursive file collection tools infinite-loop and crash.
+- **Polyglot files**: PDF/XLSX/DOCX with valid headers but malformed internals — canary JavaScript callbacks in PDFs, XML entity expansion bombs (billion laughs) in XLSX, XXE payloads in DOCX. Crashes automated parsers (pdftotext, PyPDF2, openpyxl) and phones home when opened.
+- **Corrupted archives**: tar.gz, gz, and 7z files with valid magic bytes/headers that pass initial "is this a real archive?" checks but corrupt during extraction. Attacker wastes hours trying to recover "stolen" data.
+- **File locking**: Exclusively locks files the attacker is trying to read, forcing retry loops.
+
+**Environment Poisoner** — Corrupts registry settings that C2 frameworks depend on:
+- WinINet proxy → 127.0.0.1:1 (HTTP C2 reconnection fails)
+- WinHTTP connection settings → corrupted blob (WinHTTP channels fail)
+- TLS settings → SSL2-only (encrypted C2 handshake fails)
+- Persistence Run keys → replaced with harmless `cmd /c exit`
+
+**Honeypot Weaponizer** — Deploys weaponized fake files that actively harm the attacker when used:
+- Fake SSH keys + config pointing to honeypot servers (captures attacker sessions)
+- Fake AWS/Azure credentials (triggers CloudTrail alerts, exposes attacker IP)
+- Fake `.env.production` with database URLs, Stripe keys, JWT secrets
+- Fake browser password export CSV on Desktop (high-value infostealer target)
+- Zip bombs disguised as `financial_records_2024.zip` (crashes extraction tools)
+- Fake VPN configs routing through logging proxy
+- Fake crypto wallet seed phrases (attacker wastes time on empty wallets)
+
+**Network Honeypot Deployer (Nuclear Option)** — Automatically spins up fake lateral movement targets on the local machine the moment a kill is confirmed:
+- **Fake SMB shares** (3 listeners): Respond to SMB2 negotiation, log attacker's share enumeration attempts
+- **Fake RDP endpoints** (2 listeners): Accept RDP negotiation, log credential attempts
+- **Fake HTTP admin panels** (3 listeners): Serve convincing login pages for "VMware vCenter", "Exchange Admin Center", "Domain Controller Management" — log submitted credentials
+- **Fake SSH servers** (2 listeners): Send OpenSSH banner, log client key exchange and auth attempts
+- All listeners auto-terminate after 30 minutes. Attacker wastes time exploring fake infrastructure while the real system is already clean.
+
+### Safety Guarantees
+- **2-second time budget**: All deception must complete within 2 seconds. Kill always proceeds on timeout.
+- **Non-fatal failures**: Deception failure never prevents the kill from executing.
+- **Self-protection**: Never targets own PID or system-critical processes (PID ≤ 4).
+- **Full logging**: Every tactic execution is logged before and after for forensic review.
+- **No network attacks on private IPs**: Beacon flooding only targets public C2 addresses.
+
+### Architecture
+```
+DetectionEngine → AdvancedResponseEngine
+                       ↓
+                  DeceptionEngine.ExecutePreKillDeceptionAsync()
+                       ↓ (2s max)
+                  ChainTracer.TraceAndEliminateAsync()
+                       ↓
+                  Kill → Quarantine → Persistence Removal → IP Block
+```
+
+### New Files
+- `Deception/IDeceptionEngine.cs` — Interface
+- `Deception/IDeceptionTactic.cs` — Tactic interface
+- `Deception/DeceptionModels.cs` — Context, result, and category models
+- `Deception/DeceptionEngine.cs` — Orchestrator (tactic selection + time budget)
+- `Deception/MemoryFloodingTactic.cs` — Memory pollution via VirtualAllocEx
+- `Deception/ImplantDestabilizer.cs` — DLL stomping + stack corruption + handle pollution
+- `Deception/BeaconFlooder.cs` — C2 server flooding + protocol confusion
+- `Deception/ClipboardPoisonTactic.cs` — Clipboard replacement with fakes
+- `Deception/FileTrapTactic.cs` — Sparse bombs + symlink loops + polyglot files + corrupted archives + file locking
+- `Deception/EnvironmentPoisoner.cs` — Registry/proxy/TLS corruption
+- `Deception/HoneypotWeaponizer.cs` — Weaponized fake credential deployment
+- `Deception/NetworkHoneypotDeployer.cs` — Fake SMB/RDP/HTTP/SSH lateral movement traps
+
+### Infrastructure
+- All version references bumped to 1.7.0 (Core, Service, Agent, Installer).
+- `AdvancedResponseEngine` now accepts `IDeceptionEngine` dependency.
+- DI container registers all 7 tactics + engine.
+- MITRE ATT&CK coverage: T1565 (Data Manipulation), T1036 (Masquerading — decoy objects).
+
+---
+
+## 1.6.0 — Webcam/Mic Exfiltration Guard (May 2026)
+
+### New: Webcam & Microphone Monitor
+Detects unauthorized background access to camera and microphone devices — catches spyware, RATs, and stalkerware secretly recording the user:
+
+- **Background Camera/Mic Capture Detection** (Tier2, 0.70–0.82): Flags processes loading camera/microphone capture DLLs (Media Foundation, DirectShow, WASAPI) with no visible window. Requires confirmation across 2+ scan cycles to avoid transient false positives during app startup.
+- **Strong Camera Indicators**: Processes loading camera-specific DLLs (`mfsensorgroup.dll`, `frameserver.dll`, `avicap32.dll`, `qcap.dll`, `ksproxy.ax`) get higher confidence — these are only loaded for actual camera access, not general media playback.
+
+**How it avoids false positives on legitimate use:**
+- Comprehensive allowlist: Teams, Zoom, Discord, Slack, OBS, Chrome, Firefox, Edge, Brave, Opera, Vivaldi, Windows Camera, Steam, and 40+ other legitimate apps
+- Browsers are fully allowlisted — users on Google Meet, streaming sites, or any web-based video call are never interrupted
+- Only background processes (no visible window) trigger detection — if the user can see the app, it's allowed
+- Standalone detection is Tier2 (log only) — only composites with network activity authorize kills
+- Confirmation threshold prevents alerts from transient DLL loads during app startup
+
+### New Composite Correlation Rules (2 new, total: 30)
+- **Camera/Mic Exfiltration: Capture + Network [COMPOSITE]** (0.94): Background webcam/mic access + outbound network activity = spyware streaming to C2. This is the kill trigger — standalone camera access is log-only, but camera + network = exfiltration.
+- **Total AV Surveillance: Camera + Screen Capture [COMPOSITE]** (0.95): Webcam/mic capture + screen capture from background = total audio-visual surveillance (FinFisher, Pegasus-like, DarkComet pattern).
+
+### Updated: Full Surveillance Suite Composite
+- Now includes webcam/mic as a 4th surveillance vector (was 3: screen + clipboard + audio-to-mic)
+- 4/4 vectors active → confidence 0.99 (was max 0.98 with 3/3)
+- 3/4 vectors → 0.98, 2/4 vectors → 0.94
+
+### President's Law Kill List Additions
+- `"camera/mic exfiltration"` — webcam/mic + network composite
+- `"total av surveillance"` — camera + screen capture composite
+
+### Infrastructure
+- All version references bumped to 1.6.0 (Core, Service, Agent, Installer).
+- MITRE ATT&CK coverage added: T1125 (Video Capture), T1123 (Audio Capture) for webcam/mic detection.
+
+---
+
+## 1.5.0 — Anti-Spyware Suite (May 2026)
+
+### New: Screen Capture & Overlay Monitor
+Detects unauthorized screen capture and credential phishing overlays:
+
+- **Background Screen Capture Detection** (Tier2, 0.75): Flags processes loading DXGI/D3D11 + image encoding DLLs with no visible window — catches silent screenshot malware invisible to the user.
+- **Transparent Overlay Phishing Detection** (Tier1, 0.70–0.88): Enumerates all top-level windows for the `WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST` combination from non-allowlisted processes. Requires persistence across 3 scan cycles (45s) to avoid tooltip false positives. Catches banking trojan overlays and credential phishing attacks that can also cause screen glitches.
+
+Comprehensive allowlists for browsers, games, GPU tools, IDEs, streaming software, and system UI prevent false positives.
+
+### New: Local Server Monitor
+Detects suspicious processes listening on localhost — closes the gap where attackers serve exploits via local web servers invisible to outbound network monitoring:
+
+- **Mounted ISO/VHD Origin Detection** (Tier1, 0.85): Processes running from mounted ISO, VHD, CD-ROM, or removable media that bind listening sockets are flagged with high confidence.
+- **Staging Path Listeners** (Tier1, 0.78): Processes from Temp/AppData/Downloads binding ports.
+- **Unknown Path Listeners** (Tier2, 0.75): Processes whose path cannot be determined (possible WPD or hidden volume origin).
+- **Unknown Listeners on Non-Dev Ports** (Tier2, 0.60): Catch-all for unrecognized processes on non-standard ports.
+
+Developer-friendly: node, python, dotnet, java, IDEs, Docker, and common dev ports (3000, 5173, 8080, etc.) are all allowlisted.
+
+### New: Volume Dismount on Read-Only Media
+The `ChainTracer` response engine now handles read-only media (mounted ISO, CD-ROM, write-protected VHD):
+
+- When `File.Delete` fails due to read-only filesystem, Sentinel attempts to **dismount the volume** using `FSCTL_DISMOUNT_VOLUME` + `IOCTL_STORAGE_EJECT_MEDIA`.
+- For VHDs, attempts WMI `Dismount` method first, then falls back to FSCTL.
+- Safety: never dismounts C: or fixed system drives.
+- Effect: process is killed AND the volume is ejected, preventing re-execution from read-only media.
+
+### Updated: AudioHijackMonitor
+- Now feeds into `TelemetryFusionEngine` for composite correlation with screen capture and clipboard signals.
+- Audio-to-mic routing remains a standalone Tier1 kill (no network correlation required) — the attack is local by nature.
+
+### New Composite Correlation Rules (5 new, total: 28)
+- **Screen Exfiltration: Capture + Network [COMPOSITE]** (0.93): Screen capture + outbound network = spyware streaming screenshots to C2.
+- **Data Harvesting: Screen + Clipboard [COMPOSITE]** (0.92): Screen capture + clipboard access = comprehensive infostealer (RedLine, Raccoon, Vidar pattern).
+- **Credential Phishing: Overlay + Injection [COMPOSITE]** (0.96): Transparent overlay + DLL injection = banking trojan drawing fake login UI (Zeus, TrickBot, Dridex).
+- **Full Surveillance Suite [COMPOSITE]** (0.94–0.98): 2+ of (screen capture, clipboard/keylogger, audio-to-mic hijack) = comprehensive surveillance implant.
+
+### President's Law Kill List Additions
+- `"overlay attack"` — transparent overlay phishing windows
+- `"screen exfiltration"` — screen capture + network composite
+- `"surveillance suite"` — multi-vector surveillance composite
+- `"credential phishing: overlay"` — overlay + injection composite
+
+### Infrastructure
+- All version references bumped to 1.5.0 (Core, Service, Agent, Installer).
+- MITRE ATT&CK coverage: T1113 (Screen Capture), T1056.004 (Credential API Hooking), T1571 (Non-Standard Port), T1090 (Proxy).
+
+---
+
+## 1.4.0 — Clipboard Guardian (May 2026)
+
+### New: Clipboard Security Monitor
+Detects unauthorized clipboard access, hijacking, and exfiltration via Win32 API polling:
+
+- **Clipboard Scraping Detection**: Alerts when a process causes 5+ clipboard changes within 10 seconds — catches crypto address swappers and automated clipboard stealers.
+- **Background Clipboard Hijack**: Detects background processes (no visible window) repeatedly taking clipboard ownership without user interaction — the signature pattern of clipboard-stealing malware.
+- **Extended Clipboard Lock**: Identifies processes holding the clipboard locked for extended periods, blocking copy/paste for all other applications.
+- **Trusted Process Hijack Detection**: Even allowlisted processes (browsers, explorer) are flagged if they exhibit abnormal clipboard rates from the background — catches DLL injection using trusted processes as proxies.
+
+Comprehensive allowlists for browsers, editors, IDEs, password managers, and legitimate clipboard tools prevent false positives.
+
+### New: Runtime Module Integrity Monitor (System-Wide)
+Validates ALL loaded modules across ALL running processes. Maintains per-process module baselines and detects deviations at runtime:
+
+- **Runtime DLL Injection**: Detects new unsigned/suspicious modules appearing in any process after baseline — catches CreateRemoteThread, manual mapping, reflective loading, APC injection.
+- **Phantom Module Detection**: Flags modules whose backing file has been deleted from disk (classic dropper pattern: load → delete → execute in memory).
+- **Tiered Scanning**: System-critical processes (lsass, svchost, etc.) scanned every 30s; browsers/office every 60s; all other processes in rotating batches every 2 min.
+- **Smart Filtering**: Trusted publishers (Microsoft, Google, NVIDIA, etc.), known late-load system DLLs, and Program Files paths are auto-allowed to minimize noise.
+
+MITRE ATT&CK: T1055 (Process Injection), T1574 (Hijack Execution Flow), T1129 (Shared Modules).
+
+### New: Clipboard Exfiltration Composite Rule
+- **Clipboard Access + Network [COMPOSITE]** (0.93): Clipboard scraping/hijacking signal + ANY outbound network activity on the same PID within 120s = kill-authorized composite.
+
+### New: Module Injection Composite Rules
+- **Injected Implant + Network C2 [COMPOSITE]** (0.95): DLL injection signal + network activity = injected C2 beacon (Cobalt Strike, Sliver, etc.).
+- **Clipboard Theft via Injected Module [COMPOSITE]** (0.94): DLL injection + clipboard access = clipboard exfiltration through injected DLL in trusted process.
+
+Total composites: 23 (20 from v1.3.0 + 3 new).
+
+MITRE ATT&CK: T1115 — Clipboard Data.
+
+### Fixed: Event Viewer Flooding
+- EventLog provider now filtered to `Warning` level and above only.
+- Information-level telemetry (Tier2 detections, monitor status, etc.) still logged to the JSONL event file but no longer floods Windows Event Viewer with hundreds of entries per minute.
+- Dramatically reduces Event Viewer noise while preserving full forensic detail in the JSONL log.
+
+### Infrastructure
+- All version references bumped to 1.4.0 (Core, Service, Agent, Installer).
+
+---
+
+## 1.3.0 — Aggressive Correlation (May 2026)
+
+### New Anchor-Based Composite Rules
+8 new composites that use a "suspicion anchor + second signal = kill" philosophy. If a process is ALREADY suspicious, then ANY additional activity becomes the kill trigger:
+
+- **Spoofed Process Phoning Home** (0.95): PPID spoof + ANY network activity. Legitimate processes never spoof parents.
+- **Dump Tool + Network Exfil** (0.94): dbghelp.dll loaded + ANY outbound connection. If you loaded the dump library and you're talking to the network, you're exfiltrating.
+- **Staged Payload + Non-Standard Port** (0.92): Unsigned binary from Temp/AppData + connection to non-80/443 port. Classic dropper→beacon.
+- **Mass File Operation + DNS** (0.93): 50+ file writes/renames + DNS resolution. Ransomware completion or infostealer exfil pattern.
+- **Privilege Escalation + Network** (0.94): Token escalation + ANY network. Attacker establishing privileged reverse shell.
+- **Injection Tool + File Staging** (0.91): Injection API in cmdline + file writes. Loader/dropper staging payloads.
+- **DGA + File Operations** (0.94): DGA DNS + ANY file access. Malware doing C2 while collecting/encrypting data.
+- **In-Memory Implant + Network** (0.96): Memory anomaly (RWX/shellcode/unbacked) + ANY network. Definitive in-memory beacon pattern.
+
+Total composite rules: 20 (6 original + 6 v1.2.0 + 8 v1.3.0).
+
+### Philosophy
+The anchor-based approach means: a single suspicious signal alone doesn't kill (it's Tier2). But once a process has an anchor signal establishing it as suspicious, the bar for the second signal drops dramatically — ANY network activity, ANY file access, ANY DNS resolution becomes sufficient for a composite kill. This catches sophisticated attackers who avoid known-bad ports/domains but can't avoid making network connections entirely.
+
+---
+
+## 1.2.0 — Correlated Kill (May 2026)
+
+### New Composite Correlation Rules
+6 new composites wiring the anti-APT monitors into kill-authorized detections via the BehavioralCorrelationEngine. No single monitor kills alone — all require multiple independent signals correlating on the same PID within 120 seconds:
+
+- **PPID Spoof + C2 Channel** (0.96): Parent PID spoofing + C2 network connection. Catches Cobalt Strike, Sliver, Brute Ratel default spawn behavior.
+- **Confirmed LSASS Dump** (0.97): dbghelp.dll loaded in non-debugger + LSASS-targeting cmdline pattern. Catches custom dumpers regardless of tool name.
+- **Privilege Escalation + Persistence** (0.94): Token integrity escalation + persistence mechanism installation. Catches post-exploitation foothold securing.
+- **DGA + C2 Beaconing** (0.95): High-entropy DNS resolution + statistical beacon pattern. Catches DGA-based malware (Emotet, TrickBot, Conficker).
+- **Credential Theft + Exfiltration** (0.97): Credential canary tripped + outbound network activity. Catches active credential harvesting + exfil.
+- **Advanced Attack Chain** (0.98): 2 of 3: PPID spoof + token escalation + injection. Catches full implant lifecycle (Cobalt Strike, APT tooling).
+
+Total composite rules: 12 (6 original + 6 new).
+
+### Architecture Note
+All new anti-APT monitors (DNS, PPID spoof, token integrity, credential canary, dbghelp) emit **Tier2 corroborating signals**. They never kill independently. The correlation engine combines them with other signals to produce high-confidence composite kills. This preserves the "kill only on advanced corroboration" philosophy.
+
+---
+
+## 1.1.0 — Hardened Foundations (May 2026)
+
+### Anti-APT Monitors (NEW)
+- **DnsQueryMonitor**: ETW DNS-Client provider. Detects DGA domains (Shannon entropy > 3.8, 3+ hits), DNS tunneling (>30 queries/min sustained). Catches iodine, dnscat2, dns2tcp, DGA-based C2. **Tier2 — corroborating signal, feeds correlation engine.**
+- **ParentPidSpoofDetector**: Compares ETW-reported parent PID (kernel truth) against CreateToolhelp32Snapshot (declared parent). Detects Cobalt Strike PPID spoofing, PROC_THREAD_ATTRIBUTE_PARENT_PROCESS abuse. Near-zero false positives. **Tier2 — corroborating signal, feeds correlation engine.**
+- **SyscallStubMonitor**: Baselines first 16 bytes of critical ntdll/amsi exports at startup, checks every 10s. Detects ntdll unhooking (fresh ntdll remapping), ETW blinding, AMSI patching in Sentinel's own process. **Tier1 — self-protection (President's Law: "self-protection:" fragment match).**
+- **CredentialCanaryMonitor**: Plants a honeypot credential in Windows Credential Manager. If accessed, modified, or deleted — zero-FP indicator of credential harvesting (Mimikatz vault, LaZagne, infostealers). **Tier2 — no PID to kill, feeds correlation engine.**
+- **TokenIntegrityMonitor**: Scans process tokens every 20s. Detects medium→high integrity transitions that bypass UAC consent. Catches UAC bypass exploits, token manipulation, named pipe impersonation. **Tier2 — corroborating signal, feeds correlation engine.**
+- **LsassDumpCanaryMonitor**: Scans for dbghelp.dll loaded in non-debugger processes every 15s. This DLL is a prerequisite for MiniDumpWriteDump — catches custom LSASS dumpers regardless of tool name. **Tier2 — dbghelp alone doesn't prove malice, feeds correlation engine.**
+
+### Security Hardening
+- **SecureCacheStore v2**: HMAC key now incorporates system boot-time nonce. Caches from previous boot sessions are automatically rejected. Narrows the window for SYSTEM-context replay attacks.
+- **Removed placeholder hashes** from LsassAccessRule. The `KnownDumperHashes` set contained fake SHA256 values that gave false confidence. Hash-based detection is now exclusively handled by `HashReputationService` (live 3-API lookup).
+- **ProcessInjectionRule tightened**: Tool-name matching (`KnownInjectionTools`) no longer triggers detection — trivially bypassed by renaming. Retained as metadata enrichment only. Detection fires on injection API patterns in command line + suspicious parent-child context.
+
+### Documentation
+- Added `THREAT_MODEL.md` — 8 specific bypass scenarios with honest residual risk ratings, detection confidence table, and "what Sentinel cannot protect against" section.
+- Updated all documentation to reflect behavioral-only detection philosophy.
+- Added Detection Integrity Constraints to `constraints.md`.
+
+### Philosophy
+- "Fewer rock-solid detections > many fragile ones"
+- "Assume the attacker reads the code"
+- "No security theater"
+
+---
+
+## 1.0.0 — Telemetry Fusion (May 2026)
+
+### New Features
+- **TelemetryFusionEngine**: Unified event chain store correlating raw telemetry across all sources (ETW process, file I/O, network, ThreatIntel injection, memory behavior) into per-process event chains.
+- **EventGraph**: In-memory graph maintaining temporal and causal relationships between processes, files, and network endpoints. Supports incident timeline queries, process tree traversal, file accessor lookup.
+- **MemoryBehaviorAnalyzer**: Active memory scanning every 45s. Detects RWX regions, unbacked executables, shellcode prologues (Metasploit/Cobalt Strike patterns), NOP sleds.
+- All monitors wired to feed TelemetryFusionEngine before DetectionEngine.
+
+### Removed
+- **Key Scrambler** (agent + service): Fake keystroke injection was security theater. Replaced with keylogger hook detection (service-only, detection-only).
+- **LearningModeService**: Dead code — protection is active by default.
+- **Password Rotator**: Disabled stub that did nothing.
+- **Old ResponseEngine**: Superseded by AdvancedResponseEngine since 0.7.0.
+
+### Agent
+- Simplified to watchdog-only (service heartbeat monitor + restart). No keyboard hooks, no P/Invoke, no user32.dll dependency.
+
+---
+
+## 0.9.0 — False Positive Reduction (May 2026)
+
+### New Features
+- **AllowlistService**: 3-tier trust (signed vendor, dev tools, user allowlist). President's Law rules NEVER respect allowlists.
+- **CPU Throttling**: Job scheduler backs off under memory/thread pressure.
+- **Context Awareness**: Development (-25) and gaming (-30) suspicion reduction.
+- **Security Hardening**: DPAPI quarantine encryption, CIG audit, self-kill guards, watchdog, NtTraceEvent/CLR.DLL monitoring, expanded BYOVD detection.
+- Zero LOLBin dependencies in response path.
+
+### Architecture
+- All detection and hardening logic built into C# binary (no external PowerShell scripts required).
+- ConsultantSignalIngestor retained for optional external integration.
