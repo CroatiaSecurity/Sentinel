@@ -48,6 +48,33 @@ public sealed class DnsQueryMonitor : IMonitor
         "dnscat", "iodine", "dns2tcp", "dnsexfil", "dnstunnel"
     };
 
+    // Known exfiltration / file-sharing / paste service domains (v1.8.0)
+    // Resolution of these by non-browser processes = immediate Tier1 exfil alert
+    private static readonly HashSet<string> ExfilServiceDomains = new(StringComparer.OrdinalIgnoreCase)
+    {
+        // File sharing / upload services
+        "mega.nz", "mega.co.nz", "transfer.sh", "file.io", "0x0.st",
+        "anonfiles.com", "gofile.io", "pixeldrain.com", "catbox.moe",
+        "temp.sh", "uguu.se", "pomf.cat",
+        "send-anywhere.com", "wetransfer.com", "filebin.net",
+        "uploadfiles.io", "bayfiles.com",
+        "zippyshare.com", "1fichier.com", "rapidgator.net",
+        "turbobit.net", "nitroflare.com", "uploaded.net",
+        // Paste services (credential exfil)
+        "pastebin.com", "paste.ee", "dpaste.org", "hastebin.com",
+        "ghostbin.com", "rentry.co", "privatebin.net",
+        // Telegram bot API (common infostealer exfil channel)
+        "api.telegram.org",
+        // Discord webhooks (common infostealer exfil channel)
+        "discord.com", "discordapp.com",
+        // Ngrok / tunneling services (reverse tunnel exfil)
+        "ngrok.io", "ngrok-free.app", "trycloudflare.com",
+        "localhost.run", "serveo.net", "bore.digital",
+        // Known C2/exfil infrastructure
+        "interactsh.com", "oast.fun", "oast.live", "oast.site",
+        "burpcollaborator.net", "canarytokens.com",
+    };
+
     // Legitimate high-query domains to ignore
     private static readonly HashSet<string> SafeDomains = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -158,6 +185,44 @@ public sealed class DnsQueryMonitor : IMonitor
         while (stats.RecentDomains.Count > 100)
             stats.RecentDomains.TryDequeue(out _);
 
+        // ═══════════════════════════════════════════════════════════════════
+        // v1.8.0: EXFILTRATION SERVICE DETECTION
+        // If a non-browser process resolves a known exfil/upload/paste domain,
+        // emit Tier2 signal. Correlation engine combines with network for kill.
+        // Browsers are allowlisted because users legitimately visit these sites.
+        // ═══════════════════════════════════════════════════════════════════
+        if (IsExfilServiceDomain(queryName))
+        {
+            var processName = GetProcessNameSafe(processPid);
+            if (!IsBrowserOrAllowlisted(processName))
+            {
+                stats.ExfilDomainHits++;
+
+                _ = _detectionEngine.EmitAsync(new DetectionEvent
+                {
+                    RuleName = "Data Exfiltration: Upload Service DNS",
+                    Evidence = $"Process '{processName}' (PID {processPid}) resolved known exfiltration domain: {queryName}. " +
+                              $"Total exfil domain lookups from this process: {stats.ExfilDomainHits}",
+                    Reasoning = "Non-browser processes resolving file-sharing, paste, or upload service domains " +
+                               "indicates potential data exfiltration staging. This is a corroborating signal — " +
+                               "combined with outbound network activity, it confirms active exfil.",
+                    Confidence = Math.Min(0.70 + (stats.ExfilDomainHits * 0.05), 0.85),
+                    Tier = DetectionTier.Tier2Indicator, // Corroborating — needs network correlation to kill
+                    ProcessName = processName ?? processPid.ToString(),
+                    ProcessId = processPid,
+                    Timestamp = DateTimeOffset.UtcNow,
+                    Metadata = new Dictionary<string, string>
+                    {
+                        ["domain"] = queryName,
+                        ["exfil_hits"] = stats.ExfilDomainHits.ToString(),
+                        ["process_name"] = processName ?? "unknown",
+                        ["technique"] = "T1567 - Exfiltration Over Web Service",
+                        ["remote_address"] = queryName
+                    }
+                }, ct);
+            }
+        }
+
         // Check 1: DGA detection (high-entropy domain names)
         var domainPart = GetSecondLevelDomain(queryName);
         if (domainPart.Length >= DgaMinLength)
@@ -244,6 +309,52 @@ public sealed class DnsQueryMonitor : IMonitor
         return false;
     }
 
+    /// <summary>
+    /// Checks if the resolved domain matches a known exfiltration/upload service.
+    /// </summary>
+    private static bool IsExfilServiceDomain(string domain)
+    {
+        var lower = domain.ToLowerInvariant().TrimEnd('.');
+        foreach (var exfil in ExfilServiceDomains)
+        {
+            if (lower == exfil || lower.EndsWith("." + exfil))
+                return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Browsers and known legitimate apps that may resolve exfil domains as part of normal browsing.
+    /// Only these are allowed to resolve exfil domains without triggering a kill.
+    /// </summary>
+    private static bool IsBrowserOrAllowlisted(string? processName)
+    {
+        if (string.IsNullOrEmpty(processName)) return false;
+        var lower = processName.ToLowerInvariant();
+        var allowlisted = new HashSet<string>
+        {
+            "chrome", "firefox", "msedge", "brave", "opera", "vivaldi",
+            "iexplore", "safari", "chromium", "waterfox", "librewolf",
+            "explorer", // Windows Explorer (user clicking links)
+            "teams", "slack", "discord", // Chat apps where users share links
+            "sentinelservice", "sentinelagent" // Ourselves
+        };
+        return allowlisted.Contains(lower);
+    }
+
+    private static string? GetProcessNameSafe(int pid)
+    {
+        try
+        {
+            using var proc = System.Diagnostics.Process.GetProcessById(pid);
+            return proc.ProcessName;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     private static string GetSecondLevelDomain(string domain)
     {
         var parts = domain.TrimEnd('.').Split('.');
@@ -298,6 +409,7 @@ internal sealed class DnsQueryStats
 {
     public int TotalQueries { get; set; }
     public int DgaHits { get; set; }
+    public int ExfilDomainHits { get; set; }
     public bool TunnelingAlerted { get; set; }
     public DateTimeOffset FirstSeen { get; init; } = DateTimeOffset.UtcNow;
     public DateTimeOffset LastQuery { get; set; } = DateTimeOffset.UtcNow;

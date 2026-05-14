@@ -10,11 +10,11 @@
     <Authors>Gorstak</Authors>
     <Company>github.com/tandrlemandrle/Sentinel</Company>
     <Product>Windows Sentinel</Product>
-    <Description>Userland EDR for Windows — Behavioral detection and response (v1.7.0 Aggressive Deception Engine)</Description>
-    <Version>1.7.0</Version>
-    <AssemblyVersion>1.7.0.0</AssemblyVersion>
-    <FileVersion>1.7.0.0</FileVersion>
-    <InformationalVersion>1.7.0</InformationalVersion>
+    <Description>Userland EDR for Windows — Behavioral detection and response (v1.8.0 Data Exfiltration Prevention)</Description>
+    <Version>1.8.0</Version>
+    <AssemblyVersion>1.8.0.0</AssemblyVersion>
+    <FileVersion>1.8.0.0</FileVersion>
+    <InformationalVersion>1.8.0</InformationalVersion>
   </PropertyGroup>
 
   <ItemGroup>

@@ -1,5 +1,50 @@
 # Changelog
 
+## 1.8.0 — Data Exfiltration Prevention (May 2026)
+
+### New: DataExfiltrationMonitor
+Correlation-based DLP that stops data theft without false positives. Every detection requires 2+ independent signals correlating on the same process within 120 seconds — single signals are ALWAYS Tier2 (log only).
+
+**Monitoring layers:**
+- **Outbound connection tracking**: Detects non-allowlisted processes maintaining sustained (60s+) connections to external IPs. Tier2 signal — feeds correlation engine.
+- **Sensitive directory monitoring**: Watches SSH keys, cloud credentials, browser password databases, Windows credential stores, crypto wallets. Tier2 signal on access.
+- **Removable media monitoring**: Watches all USB/removable drives for file activity. Disk image access (.iso, .vhd, .img) gets higher confidence. Tier2 signal.
+
+**Why zero false positives:**
+- Chrome visiting mega.nz → No alert (browser allowlisted in DNS check)
+- Git reading ~/.ssh/id_rsa → No alert (git in credential allowlist)
+- Unknown process resolves pastebin.com → Tier2 log only (no kill)
+- Unknown process resolves pastebin.com AND has outbound connection → **KILL + deception**
+
+### Enhanced: DnsQueryMonitor (Exfil Domain Detection)
+Added detection of 40+ known exfiltration service domains: file-sharing (Mega, transfer.sh, gofile.io), paste services (pastebin, paste.ee), messaging APIs (Telegram bot API, Discord webhooks), tunneling services (ngrok, Cloudflare tunnels). Non-browser processes resolving these emit Tier2 signals that feed the correlation engine.
+
+### New Composite Correlation Rules (4 new, total: 34)
+- **Data Exfiltration: Upload Service + Network [COMPOSITE]** (0.96): Exfil DNS resolution + outbound connection on same PID = confirmed upload in progress.
+- **Data Exfiltration: Credential Theft + Network [COMPOSITE]** (0.95): Sensitive file access + outbound connection = infostealer exfiltrating credentials.
+- **Data Exfiltration: USB Media + Network Upload [COMPOSITE]** (0.96): Removable media read + outbound connection = USB-to-network data theft.
+- **Data Exfiltration: Staging + Upload Service [COMPOSITE]** (0.94): Exfil DNS + sensitive/removable file access = pre-exfil staging (kill before upload starts).
+
+### President's Law Kill List Additions
+- `"data exfiltration"` — all exfil composite rules
+- `"exfiltration: upload service + network"` — DNS + network composite
+- `"exfiltration: credential theft + network"` — cred access + network composite
+- `"exfiltration: usb media + network"` — USB + network composite
+- `"exfiltration: staging + upload service"` — pre-staging composite
+
+### Allowlist Architecture
+Three separate allowlists prevent false positives on legitimate software:
+- **CredentialAccessAllowlist**: Processes that legitimately read SSH keys, cloud creds (git, ssh, kubectl, password managers, IDEs)
+- **NetworkAllowlist**: Processes that legitimately make sustained outbound connections (browsers, cloud sync, dev tools, games)
+- **RemovableMediaAllowlist**: Processes that legitimately read from USB (explorer, file managers, backup tools)
+
+### Infrastructure
+- All version references bumped to 1.8.0.
+- DI registration: `DataExfiltrationMonitor` as hosted service.
+- MITRE ATT&CK coverage: T1041, T1052, T1552, T1567.
+
+---
+
 ## 1.7.0 — Aggressive Deception Engine (May 2026)
 
 ### New: Deception Engine (Pre-Kill Attacker Punishment)

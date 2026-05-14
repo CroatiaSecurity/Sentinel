@@ -128,7 +128,12 @@ public sealed class BehavioralCorrelationEngine : IAsyncDisposable
                      ?? EvaluateFullSurveillanceSuite(recent, scopePid)
                      // v1.6.0 — webcam/mic exfiltration composites
                      ?? EvaluateWebcamMicWithNetwork(recent, scopePid)
-                     ?? EvaluateWebcamMicWithScreenCapture(recent, scopePid);
+                     ?? EvaluateWebcamMicWithScreenCapture(recent, scopePid)
+                     // v1.8.0 — data exfiltration composites
+                     ?? EvaluateExfilDnsWithNetwork(recent, scopePid)
+                     ?? EvaluateSensitiveFileWithNetwork(recent, scopePid)
+                     ?? EvaluateRemovableMediaWithNetwork(recent, scopePid)
+                     ?? EvaluateExfilDnsWithSensitiveFile(recent, scopePid);
 
         if (composite is null) return;
 
@@ -1088,6 +1093,132 @@ public sealed class BehavioralCorrelationEngine : IAsyncDisposable
             "nation-state surveillance implants (FinFisher, Pegasus-like, DarkComet). " +
             "No legitimate application performs both from the background simultaneously.",
             0.95,
+            scopePid,
+            signals.Last().Timestamp);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // v1.8.0 — DATA EXFILTRATION COMPOSITES
+    // These fire when exfil indicators correlate with network activity.
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Process resolved a known exfil service domain (Mega, pastebin, transfer.sh, Telegram API)
+    /// AND has an active network connection = confirmed data exfiltration in progress.
+    /// </summary>
+    private static DetectionEvent? EvaluateExfilDnsWithNetwork(
+        IReadOnlyList<Signal> signals, int scopePid)
+    {
+        bool hasExfilDns = signals.Any(s =>
+            s.RuleName.Contains("Exfiltration: Upload Service DNS") ||
+            s.RuleName.Contains("exfiltration") && s.Metadata.ContainsKey("domain"));
+        bool hasNetwork = signals.Any(s =>
+            s.RuleName.Contains("Network") ||
+            s.Metadata.ContainsKey("remote_address") ||
+            s.Metadata.ContainsKey("remote_port"));
+
+        if (!hasExfilDns || !hasNetwork) return null;
+
+        var domain = signals.FirstOrDefault(s => s.Metadata.ContainsKey("domain"))?.Metadata["domain"] ?? "unknown";
+
+        return MakeComposite(
+            "Data Exfiltration: Upload Service + Network [COMPOSITE]",
+            $"Process resolved exfil domain '{domain}' AND has active network connection. " +
+            $"Signals: {string.Join(", ", signals.Select(s => s.RuleName).Distinct())}",
+            "A non-browser process resolved a known file-sharing/paste/upload service domain " +
+            "and has an active outbound network connection. This is confirmed data exfiltration — " +
+            "the process is actively uploading stolen data to an external service.",
+            0.96,
+            scopePid,
+            signals.Last().Timestamp);
+    }
+
+    /// <summary>
+    /// Process accessed sensitive files (SSH keys, cloud creds, browser passwords)
+    /// AND has network activity = credential theft + exfiltration.
+    /// </summary>
+    private static DetectionEvent? EvaluateSensitiveFileWithNetwork(
+        IReadOnlyList<Signal> signals, int scopePid)
+    {
+        bool hasSensitiveAccess = signals.Any(s =>
+            s.RuleName.Contains("Sensitive File Access") ||
+            s.RuleName.Contains("Credential") ||
+            (s.Metadata.ContainsKey("category") && (
+                s.Metadata["category"] == "ssh_keys" ||
+                s.Metadata["category"] == "cloud_credentials" ||
+                s.Metadata["category"] == "browser_credentials" ||
+                s.Metadata["category"] == "cryptocurrency")));
+        bool hasNetwork = signals.Any(s =>
+            s.RuleName.Contains("Network") ||
+            s.Metadata.ContainsKey("remote_address"));
+
+        if (!hasSensitiveAccess || !hasNetwork) return null;
+
+        return MakeComposite(
+            "Data Exfiltration: Credential Theft + Network [COMPOSITE]",
+            $"Process accessed sensitive credential files AND has network activity. " +
+            $"Signals: {string.Join(", ", signals.Select(s => s.RuleName).Distinct())}",
+            "A process accessed SSH keys, cloud credentials, browser password databases, or " +
+            "cryptocurrency wallets and then initiated a network connection. This is the classic " +
+            "infostealer pattern: harvest credentials locally, then exfiltrate to C2/upload service.",
+            0.95,
+            scopePid,
+            signals.Last().Timestamp);
+    }
+
+    /// <summary>
+    /// Process read files from removable media (USB) AND has network activity = USB-to-network exfil.
+    /// This is exactly the attack vector that was missed.
+    /// </summary>
+    private static DetectionEvent? EvaluateRemovableMediaWithNetwork(
+        IReadOnlyList<Signal> signals, int scopePid)
+    {
+        bool hasRemovableRead = signals.Any(s =>
+            s.RuleName.Contains("Removable Media") ||
+            (s.Metadata.ContainsKey("drive_path") && s.Metadata.ContainsKey("file_path")));
+        bool hasNetwork = signals.Any(s =>
+            s.RuleName.Contains("Network") ||
+            s.Metadata.ContainsKey("remote_address"));
+
+        if (!hasRemovableRead || !hasNetwork) return null;
+
+        var filePath = signals.FirstOrDefault(s => s.Metadata.ContainsKey("file_path"))?.Metadata["file_path"] ?? "unknown";
+
+        return MakeComposite(
+            "Data Exfiltration: USB Media + Network Upload [COMPOSITE]",
+            $"Process read from removable media ('{filePath}') AND has outbound network connection. " +
+            $"Signals: {string.Join(", ", signals.Select(s => s.RuleName).Distinct())}",
+            "A process read files from a USB/removable drive and then initiated a network connection. " +
+            "This is USB-to-network data exfiltration — the attacker is stealing data from removable " +
+            "media and uploading it to their infrastructure.",
+            0.96,
+            scopePid,
+            signals.Last().Timestamp);
+    }
+
+    /// <summary>
+    /// Process resolved exfil domain AND accessed sensitive files = pre-exfil staging confirmed.
+    /// Kill before the upload even starts.
+    /// </summary>
+    private static DetectionEvent? EvaluateExfilDnsWithSensitiveFile(
+        IReadOnlyList<Signal> signals, int scopePid)
+    {
+        bool hasExfilDns = signals.Any(s =>
+            s.RuleName.Contains("Exfiltration: Upload Service DNS"));
+        bool hasSensitiveAccess = signals.Any(s =>
+            s.RuleName.Contains("Sensitive File Access") ||
+            s.RuleName.Contains("Removable Media"));
+
+        if (!hasExfilDns || !hasSensitiveAccess) return null;
+
+        return MakeComposite(
+            "Data Exfiltration: Staging + Upload Service [COMPOSITE]",
+            $"Process resolved exfil service domain AND accessed sensitive/removable files. " +
+            $"Signals: {string.Join(", ", signals.Select(s => s.RuleName).Distinct())}",
+            "A process accessed sensitive files or removable media AND resolved a known upload " +
+            "service domain. This is pre-exfiltration staging — the process is preparing to upload " +
+            "stolen data. Kill immediately before the transfer begins.",
+            0.94,
             scopePid,
             signals.Last().Timestamp);
     }

@@ -26,9 +26,9 @@ namespace WindowsSentinel.Core;
 public static class SentinelVersion
 {
     /// <summary>
-    /// Current version - 1.7.0 Aggressive Deception Engine
+    /// Current version - 1.8.0 Data Exfiltration Prevention
     /// </summary>
-    public const string Version = "1.7.0";
+    public const string Version = "1.8.0";
 
     /// <summary>
     /// Release date
@@ -39,15 +39,13 @@ public static class SentinelVersion
     /// Version description
     /// </summary>
     public const string Description =
-        "1.7.0 — Aggressive Deception Engine. " +
-        "New DeceptionEngine executes attacker-hostile tactics BEFORE process kill: " +
-        "memory flooding (pollute crash dumps), DLL stomping (crash on restart), " +
-        "beacon flooding (pollute C2 console), clipboard poisoning (fake credentials), " +
-        "sparse file bombs (exhaust exfil bandwidth), symlink loops (crash recursive tools), " +
-        "environment poisoning (break reconnection), honeypot weaponization (expose attacker infra). " +
-        "All tactics operate on own system against confirmed intruders. " +
-        "2-second time budget ensures kill is never delayed. " +
-        "Total composites: 30.";
+        "1.8.0 — Data Exfiltration Prevention. " +
+        "New DataExfiltrationMonitor: outbound volume tracking, sensitive file access monitoring, " +
+        "removable media read detection, disk image access alerting, cloud upload service detection. " +
+        "DnsQueryMonitor enhanced with known exfil domain detection (Mega, pastebin, Telegram, Discord webhooks, etc.). " +
+        "4 new composite rules: ExfilDNS+Network, SensitiveFile+Network, RemovableMedia+Network, ExfilDNS+SensitiveFile. " +
+        "President's Law updated: all exfil detections are kill-authorized. " +
+        "Total composites: 34.";
 }
 
 public static class ServiceCollectionExtensions
@@ -350,6 +348,13 @@ public static class ServiceCollectionExtensions
 
         // ── Webcam/Mic Monitor (background camera/mic access, exfiltration composites) ─
         services.AddHostedService<WebcamMicMonitor>();
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // 1.8.0 — DATA EXFILTRATION PREVENTION
+        // ═══════════════════════════════════════════════════════════════════════
+
+        // ── Data Exfiltration Monitor (outbound volume, sensitive file access, USB reads) ─
+        services.AddHostedService<DataExfiltrationMonitor>();
 
         // ═══════════════════════════════════════════════════════════════════════
 

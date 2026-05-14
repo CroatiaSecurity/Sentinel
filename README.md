@@ -2,7 +2,7 @@
 
 **Userland EDR for Windows — Behavioral Detection, Automated Response & Aggressive Deception**
 
-> Version: 1.7.0 (Aggressive Deception Engine)  
+> Version: 1.8.0 (Data Exfiltration Prevention)  
 > Author: [Gorstak](https://github.com/tandrlemandrle/Sentinel)  
 > License: MIT
 
@@ -290,7 +290,7 @@ All tactics:
 
 ```powershell
 # Run installer as Administrator
-.\WindowsSentinelSetup-1.7.0.exe
+.\WindowsSentinelSetup-1.8.0.exe
 ```
 
 The installer:
@@ -336,7 +336,7 @@ cd installer
 .\build.ps1
 ```
 
-Output: `installer\output\WindowsSentinelSetup-1.7.0.exe`
+Output: `installer\output\WindowsSentinelSetup-1.8.0.exe`
 
 ---
 
@@ -383,6 +383,7 @@ installer/
 | 1.5.0 | Anti-Spyware Suite | ScreenCaptureMonitor, LocalServerMonitor, overlay phishing detection, volume dismount on read-only media, 5 new composites. Total: 28. |
 | 1.6.0 | Webcam/Mic Exfiltration Guard | WebcamMicMonitor, background camera/mic detection, 2 new composites (camera+network, camera+screen). Total: 30. |
 | 1.7.0 | Aggressive Deception | DeceptionEngine with 8 pre-kill tactic classes: memory flooding, implant destabilization (DLL stomping + stack corruption + handle pollution), beacon flooding + protocol confusion, clipboard poisoning, file traps (sparse bombs + symlink loops + polyglot files + corrupted archives + file locking), environment poisoning, honeypot weaponization, network honeypot deployment (fake SMB/RDP/HTTP/SSH). |
+| 1.8.0 | Data Exfiltration Prevention | DataExfiltrationMonitor (outbound volume, sensitive file access, USB reads, path-verified allowlists). DnsQueryMonitor enhanced with 40+ exfil domain detection. 4 new composites (ExfilDNS+Network, SensitiveFile+Network, USB+Network, ExfilDNS+SensitiveFile). Zero false positives via correlation-only kills. Total: 34. |
 
 ---
 

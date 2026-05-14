@@ -174,6 +174,12 @@ public sealed class AdvancedResponseEngine : IResponseEngine
         // Webcam/mic exfiltration (spyware / RAT)
         "camera/mic exfiltration",
         "total av surveillance",
+        // Data exfiltration composites (v1.8.0) — only composites kill, never single signals
+        "data exfiltration",
+        "exfiltration: upload service + network",
+        "exfiltration: credential theft + network",
+        "exfiltration: usb media + network",
+        "exfiltration: staging + upload service",
         // Honeypot trip
         "honeypot: decoy",
         // NeuroBehavior anomaly
