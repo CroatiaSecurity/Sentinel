@@ -49,7 +49,7 @@ class Program
         var host = builder.Build();
 
         var logger = host.Services.GetRequiredService<ILogger<Program>>();
-        logger.LogInformation("Windows Sentinel Agent v1.0.0 starting in user session");
+        logger.LogInformation("Windows Sentinel Agent v1.9.0 starting in user session");
 
         await host.RunAsync();
 

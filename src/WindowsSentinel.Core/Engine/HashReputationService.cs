@@ -47,7 +47,7 @@ public sealed class HashReputationService : IDisposable
         {
             Timeout = TimeSpan.FromSeconds(5)
         };
-        _httpClient.DefaultRequestHeaders.Add("User-Agent", "WindowsSentinel-EDR/0.4.0");
+        _httpClient.DefaultRequestHeaders.Add("User-Agent", "WindowsSentinel-EDR/1.9.0");
         _cacheStore = new SecureCacheStore(logger, "hash_reputation");
         _rateLimiter = new SemaphoreSlim(1, 1);
         

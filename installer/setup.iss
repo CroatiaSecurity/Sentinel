@@ -14,7 +14,7 @@
 ; Output: installer\output\WindowsSentinelSetup.exe
 
 #define AppName      "Windows Sentinel"
-#define AppVersion   "1.8.0"
+#define AppVersion   "1.9.0"
 #define AppPublisher "Gorstak"
 #define AppURL       "https://github.com/tandrlemandrle/Sentinel"
 #define ServiceName  "Windows Sentinel"

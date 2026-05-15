@@ -43,7 +43,7 @@ public sealed class SentinelService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("=== Windows Sentinel starting ===");
+        _logger.LogInformation("=== Windows Sentinel v{Version} starting ===", SentinelVersion.Version);
         _logger.LogInformation("Author: Gorstak | github.com/tandrlemandrle/Sentinel");
 
         // Start advanced analysis components

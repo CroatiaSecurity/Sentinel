@@ -18,6 +18,8 @@ using WindowsSentinel.Core.Response;
 using WindowsSentinel.Core.SelfProtection;
 using WindowsSentinel.Core.Session;
 
+// 1.9.0 — DLL Analysis & Response additions (ported from Antivirus.ps1)
+
 namespace WindowsSentinel.Core;
 
 /// <summary>
@@ -26,26 +28,28 @@ namespace WindowsSentinel.Core;
 public static class SentinelVersion
 {
     /// <summary>
-    /// Current version - 1.8.0 Data Exfiltration Prevention
+    /// Current version - 1.9.0 DLL Analysis &amp; Active Response
     /// </summary>
-    public const string Version = "1.8.0";
+    public const string Version = "1.9.0";
 
     /// <summary>
     /// Release date
     /// </summary>
-    public static readonly DateTime ReleaseDate = new(2026, 5, 14);
+    public static readonly DateTime ReleaseDate = new(2026, 5, 15);
 
     /// <summary>
     /// Version description
     /// </summary>
     public const string Description =
-        "1.8.0 — Data Exfiltration Prevention. " +
-        "New DataExfiltrationMonitor: outbound volume tracking, sensitive file access monitoring, " +
-        "removable media read detection, disk image access alerting, cloud upload service detection. " +
-        "DnsQueryMonitor enhanced with known exfil domain detection (Mega, pastebin, Telegram, Discord webhooks, etc.). " +
-        "4 new composite rules: ExfilDNS+Network, SensitiveFile+Network, RemovableMedia+Network, ExfilDNS+SensitiveFile. " +
-        "President's Law updated: all exfil detections are kill-authorized. " +
-        "Total composites: 34.";
+        "1.9.0 — DLL Analysis & Active Response. " +
+        "New DllUnloadEngine: active DLL unloading via CreateRemoteThread+FreeLibrary (response to injection). " +
+        "New UacBypassSurfaceMonitor: COM AutoElevation vector scanning, manifest autoElevate detection, copy-drop vulnerability checks. " +
+        "New DllEntropyAnalyzer: Shannon entropy analysis for packed/encrypted DLLs, random hex-named DLL detection. " +
+        "New DllLoadFailureMonitor: Event Log ID 7 monitoring, SideBySide manifest error detection. " +
+        "New BrowserDllMonitor (ELF Catcher): browser-specific DLL injection detection with active unload response. " +
+        "New DiskWideDllScanner: disk-wide unsigned DLL scanning across all drives with IoC matching and active unload. " +
+        "HashReputationService now feeds DiskWideDllScanner for live threat intel enrichment. " +
+        "Total new monitors: 6. Total new response capability: active DLL unloading.";
 }
 
 public static class ServiceCollectionExtensions
@@ -355,6 +359,28 @@ public static class ServiceCollectionExtensions
 
         // ── Data Exfiltration Monitor (outbound volume, sensitive file access, USB reads) ─
         services.AddHostedService<DataExfiltrationMonitor>();
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // 1.9.0 — DLL ANALYSIS & ACTIVE RESPONSE (ported from Antivirus.ps1)
+        // ═══════════════════════════════════════════════════════════════════════
+
+        // ── DLL Unload Engine (active response: FreeLibrary via CreateRemoteThread) ─
+        services.AddSingleton<DllUnloadEngine>();
+
+        // ── UAC Bypass Surface Monitor (COM AutoElevation, manifest autoElevate, copy-drop) ─
+        services.AddHostedService<UacBypassSurfaceMonitor>();
+
+        // ── DLL Entropy Analyzer (Shannon entropy, hex-named DLL detection, packed/encrypted) ─
+        services.AddHostedService<DllEntropyAnalyzer>();
+
+        // ── DLL Load Failure Monitor (Event Log ID 7, SideBySide errors) ─
+        services.AddHostedService<DllLoadFailureMonitor>();
+
+        // ── Browser DLL Monitor / ELF Catcher (browser-specific injection detection + unload) ─
+        services.AddHostedService<BrowserDllMonitor>();
+
+        // ── Disk-Wide DLL Scanner (all drives, unsigned DLL detection, IoC matching + unload) ─
+        services.AddHostedService<DiskWideDllScanner>();
 
         // ═══════════════════════════════════════════════════════════════════════
 

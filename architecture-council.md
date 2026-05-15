@@ -3,6 +3,8 @@
 **Status:** Architecture spec. Extends, does not replace, `requirements.md`,
 `design.md`, `constraints.md` (all v0.9.0).
 
+**Last updated:** v1.9.0 (May 2026) — DLL Analysis & Active Response additions.
+
 ---
 
 ## The model in one paragraph
@@ -63,6 +65,7 @@ Nothing else kills.
 | ETW / AMSI tampering | `EtwTampering` checks |
 | Autonomous malware phoning home from temp/appdata | `NetworkMonitor` + path heuristic |
 | DLL hijacking with module integrity mismatch | `ModuleValidationDetection` |
+| DLL injection detected + active unload response | `BrowserDllMonitor` / `DiskWideDllScanner` + `DllUnloadEngine` |
 | Lateral movement (PsExec / WMI exec / WinRM unexpected) | `ProcessMonitor` + `NetworkMonitor` |
 | Honeypot decoy access | `HoneypotMonitor` |
 | ADS verdict = `unsafe` from 3-API consensus | `VerdictGateRule` (E1) |
@@ -131,6 +134,16 @@ Composite-grade detection → kill via the v2.0 composite path.
 | `GEdr` | 32 .cs + 18 .yar | Detection rule library, YARA signatures |
 | `GIDR` | 28 .cs + 18 .yar | Reference architecture, ChainTracer, YARA |
 | `LocalEDR` | 14 .cs | Additional detection rules |
+
+### v1.9.0 — DLL Analysis & Active Response (ported from Antivirus.ps1)
+| Component | Role |
+|-----------|------|
+| `DllUnloadEngine` | Active response: unloads malicious DLLs via CreateRemoteThread+FreeLibrary. Rate-limited (10/min), never touches system-critical processes. |
+| `UacBypassSurfaceMonitor` | Proactive scan: COM AutoElevation vectors, manifest autoElevate binaries, copy-drop vulnerabilities. Scan interval: 15 min. |
+| `DllEntropyAnalyzer` | Shannon entropy analysis on DLLs in high-risk paths + loaded modules. Detects packed/encrypted payloads (threshold 7.2) and random hex-named DLLs. |
+| `DllLoadFailureMonitor` | Event Log monitoring: System Event ID 7 (DLL load failures), SideBySide manifest errors. Indicators of failed hijacking attempts. |
+| `BrowserDllMonitor` | ELF Catcher: browser-specific DLL injection detection. Scans chrome/edge/firefox/brave/opera for injected modules. Active unload for ELF-pattern DLLs. |
+| `DiskWideDllScanner` | Disk-wide scan: all drives for unsigned/suspicious DLLs not yet loaded. Feeds HashReputationService for live threat intel. Active unload on IoC match. |
 
 ### Detection consultants (PowerShell → JSONL drop)
 Each drops `%ProgramData%\WindowsSentinel\consultants\<name>.jsonl`, ingested by
