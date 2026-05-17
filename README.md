@@ -2,7 +2,7 @@
 
 **Userland EDR for Windows — Behavioral Detection, Automated Response & Aggressive Deception**
 
-> Version: 2.1.0 (Community Threat Intelligence Reporting)  
+> Version: 2.2.0 (Pre-Kill Validation Gate)  
 > Author: [Gorstak](https://github.com/tandrlemandrle/Sentinel)  
 > License: MIT
 
@@ -306,7 +306,7 @@ All tactics:
 
 ```powershell
 # Run installer as Administrator
-.\WindowsSentinelSetup-2.1.0.exe
+.\WindowsSentinelSetup-2.2.0.exe
 ```
 
 The installer:
@@ -383,7 +383,7 @@ cd installer
 .\build.ps1
 ```
 
-Output: `installer\output\WindowsSentinelSetup-2.1.0.exe`
+Output: `installer\output\WindowsSentinelSetup-2.2.0.exe`
 
 ---
 
@@ -456,6 +456,7 @@ installer/
 | 1.9.0 | DLL Analysis & Active Response | DllUnloadEngine (active DLL unloading via CreateRemoteThread+FreeLibrary). UacBypassSurfaceMonitor (COM AutoElevation, manifest autoElevate, copy-drop vulnerability scanning). DllEntropyAnalyzer (Shannon entropy, hex-named DLL detection). DllLoadFailureMonitor (Event Log ID 7, SideBySide errors). BrowserDllMonitor/ELF Catcher (browser-specific injection detection + active unload). DiskWideDllScanner (disk-wide unsigned DLL scanning with HashReputationService integration + active unload on IoC match). 6 new monitors, 1 new response engine. |
 | 2.0.0 | Hardened & Portable | Graceful fallbacks for barebone/minimal Windows (Server Core, IoT, stripped builds). UserSessionLauncher no longer crash-loops on missing WTS APIs. Toast notifications bounds-safe. LsassDumpCanary allowlist expanded (Electron, browsers, crash handlers). All P/Invoke wrapped with EntryPointNotFoundException guards. Event Log/Registry monitors degrade gracefully. |
 | 2.1.0 | Community Threat Intel Reporting | ThreatIntelReporter: after confirmed kills, reports attacker C2 IPs to AbuseIPDB, malicious URLs to URLhaus (abuse.ch), hashes to MalwareBazaar. All reporting opt-in, rate-limited (10/hour), never reports private IPs. Exposes attacker infrastructure to authorities and security community. |
+| 2.2.0 | Pre-Kill Validation Gate | AdvancedResponseEngine pre-kill sanity check: before executing a President's Law kill, validates the target is not a user-interactive foreground app running stably for 5+ minutes. Prevents false-positive kills on games (DXGI + network + dbghelp mimics spyware pattern). ScreenCaptureMonitor fix: enumerates all top-level windows via EnumWindows instead of relying on Process.MainWindowHandle (unreliable for fullscreen/multi-window apps). No allowlists added — detection logic improved to distinguish covert threats from visible user applications. |
 
 ---
 

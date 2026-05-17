@@ -69,7 +69,7 @@ public sealed class ThreatIntelReporter : BackgroundService
         {
             Timeout = TimeSpan.FromSeconds(15)
         };
-        _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("WindowsSentinel-EDR/2.1.0");
+        _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("WindowsSentinel-EDR/2.2.0");
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -271,10 +271,10 @@ public sealed class ThreatIntelReporter : BackgroundService
     /// Reports a malicious hash to MalwareBazaar (https://bazaar.abuse.ch/).
     /// No API key required for hash submissions.
     /// </summary>
-    private async Task ReportToMalwareBazaarAsync(ThreatReport report, CancellationToken ct)
+    private Task ReportToMalwareBazaarAsync(ThreatReport report, CancellationToken ct)
     {
         var dedupKey = $"bazaar:{report.FileHash}";
-        if (_reportedItems.ContainsKey(dedupKey)) return;
+        if (_reportedItems.ContainsKey(dedupKey)) return Task.CompletedTask;
 
         try
         {
@@ -290,6 +290,8 @@ public sealed class ThreatIntelReporter : BackgroundService
         {
             _logger.LogDebug(ex, "ThreatIntelReporter: MalwareBazaar report error");
         }
+
+        return Task.CompletedTask;
     }
 
     private static string DetermineAbuseCategories(ThreatReport report)

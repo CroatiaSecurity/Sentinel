@@ -1,5 +1,33 @@
 # Changelog
 
+## 2.2.0 — Pre-Kill Validation Gate (May 2026)
+
+### New: Pre-Kill Validation Gate in AdvancedResponseEngine
+Before executing a President's Law kill, the response engine now performs a final sanity check to verify the target process is not a user-interactive application whose normal behavior mimics threat patterns.
+
+**Validation checks:**
+- **Visible window ownership**: Enumerates all top-level windows (via `EnumWindows`) to determine if the process has a visible, non-trivial window. Real spyware hides — it does not render UI the user interacts with.
+- **Foreground status**: Checks if the process owns the current foreground window. Malware does not operate as the active foreground application.
+- **Process age**: Verifies the process has been running stably for 5+ minutes. Implants beacon immediately; a long-running interactive app is not a covert threat.
+
+**Decision logic**: Kill is downgraded to log-only ONLY when the process is both user-interactive (visible window OR foreground) AND long-running (5+ min). This combination is incompatible with covert malware. A hidden process running for hours still gets killed. A visible process that just spawned still gets killed.
+
+**No allowlists**: This fix does not whitelist any paths, publishers, or process names. It validates behavioral properties inherently incompatible with being a hidden threat.
+
+### Fix: ScreenCaptureMonitor visible-window detection
+- `Process.MainWindowHandle` is unreliable for games and multi-window applications (returns `IntPtr.Zero` for fullscreen exclusive, borderless fullscreen, and engines with separate render windows).
+- Added `ProcessOwnsVisibleWindow()`: enumerates all top-level windows via `EnumWindows` and checks if any visible, non-tool window ≥224×224px belongs to the process.
+- Added `IsProcessForegroundFullscreen()`: checks if the process owns the foreground window and that window covers the entire monitor.
+- These checks run before classifying a process as "background" — prevents games from triggering the "Background Process with Capture DLLs" rule.
+
+### Bug fixed
+- Star Trek Online (GameClient.exe) killed mid-gameplay: game's normal behavior (DXGI rendering + 5s server keepalive + dbghelp for crash reporting + MainWindowHandle not recognized) triggered composite "Screen Exfiltration: Capture + Network" at 93% confidence.
+
+### Infrastructure
+- All version references bumped to 2.2.0.
+
+---
+
 ## 2.1.0 — Community Threat Intelligence Reporting (May 2026)
 
 ### New: ThreatIntelReporter

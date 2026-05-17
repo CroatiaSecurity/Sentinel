@@ -3,7 +3,7 @@
 **Status:** Architecture spec. Extends, does not replace, `requirements.md`,
 `design.md`, `constraints.md` (all v0.9.0).
 
-**Last updated:** v2.1.0 (May 2026) — Community Threat Intelligence Reporting.
+**Last updated:** v2.2.0 (May 2026) — Pre-Kill Validation Gate.
 
 ---
 

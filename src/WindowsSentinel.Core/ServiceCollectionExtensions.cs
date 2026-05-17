@@ -20,6 +20,7 @@ using WindowsSentinel.Core.Session;
 
 // 2.0.0 — Hardened & Portable (DLL Analysis, Active Response, Barebone Windows fallbacks)
 // 2.1.0 — Community Threat Intelligence Reporting (AbuseIPDB, URLhaus, MalwareBazaar)
+// 2.2.0 — Pre-Kill Validation Gate (prevents killing user-interactive processes)
 
 namespace WindowsSentinel.Core;
 
@@ -29,25 +30,27 @@ namespace WindowsSentinel.Core;
 public static class SentinelVersion
 {
     /// <summary>
-    /// Current version - 2.1.0 Community Threat Intelligence Reporting
+    /// Current version - 2.2.0 Pre-Kill Validation Gate
     /// </summary>
-    public const string Version = "2.1.0";
+    public const string Version = "2.2.0";
 
     /// <summary>
     /// Release date
     /// </summary>
-    public static readonly DateTime ReleaseDate = new(2026, 5, 17);
+    public static readonly DateTime ReleaseDate = new(2026, 5, 18);
 
     /// <summary>
     /// Version description
     /// </summary>
     public const string Description =
-        "2.1.0 — Community Threat Intelligence Reporting. " +
-        "New ThreatIntelReporter: after confirmed kills, reports attacker C2 IPs to AbuseIPDB, " +
-        "malicious URLs to URLhaus (abuse.ch), and hashes to MalwareBazaar. " +
-        "All reporting is opt-in, rate-limited (10/hour), and never reports private IPs. " +
-        "Exposes attacker infrastructure to authorities and the security community. " +
-        "Includes all v2.0.0 hardening (barebone Windows fallbacks).";
+        "2.2.0 — Pre-Kill Validation Gate. " +
+        "New pre-kill sanity check in AdvancedResponseEngine: before executing a President's Law kill, " +
+        "validates the target process is not a user-interactive foreground application that has been " +
+        "running stably. Prevents false-positive kills on games, media players, and creative tools " +
+        "whose normal behavior (DXGI + network + dbghelp) mimics threat patterns. " +
+        "Also fixes ScreenCaptureMonitor visible-window detection to enumerate all top-level windows " +
+        "instead of relying solely on Process.MainWindowHandle. " +
+        "Includes all v2.1.0 features (Community Threat Intel Reporting).";
 }
 
 public static class ServiceCollectionExtensions

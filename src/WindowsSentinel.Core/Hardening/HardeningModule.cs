@@ -565,7 +565,7 @@ public sealed class HardeningModule : BackgroundService
 
         foreach (var check in checks)
         {
-            var current = GetRegistryValue(check.Value.path, check.Value.name, check.Value.expected);
+            var current = GetRegistryValue(check.Value.path, check.Value.name, check.Value.expected ?? 0);
             
             if (!current.Equals(check.Value.expected))
             {

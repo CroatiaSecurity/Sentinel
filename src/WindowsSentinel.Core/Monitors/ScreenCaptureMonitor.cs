@@ -260,6 +260,31 @@ public sealed class ScreenCaptureMonitor : BackgroundService
     [DllImport("user32.dll", CharSet = CharSet.Auto)]
     private static extern int GetClassName(IntPtr hWnd, char[] className, int maxCount);
 
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetClientRect(IntPtr hWnd, out RECT lpRect);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint dwFlags);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetMonitorInfoW(IntPtr hMonitor, ref MONITORINFO lpmi);
+
+    private const uint MONITOR_DEFAULTTONEAREST = 2;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MONITORINFO
+    {
+        public int cbSize;
+        public RECT rcMonitor;
+        public RECT rcWork;
+        public uint dwFlags;
+    }
+
     private const int GWL_EXSTYLE = -20;
     private const int WS_EX_LAYERED = 0x00080000;
     private const int WS_EX_TRANSPARENT = 0x00000020;
@@ -342,7 +367,10 @@ public sealed class ScreenCaptureMonitor : BackgroundService
                 if (_alertedCapturePids.ContainsKey(p.Id)) continue;
 
                 // Skip processes with visible windows (user is likely aware of them)
-                // We only care about BACKGROUND screen capture
+                // We only care about BACKGROUND screen capture.
+                // Note: Process.MainWindowHandle is unreliable — some apps (games, multi-window
+                // engines) don't have a .NET-recognized "main" window. We also enumerate all
+                // top-level windows owned by this PID to catch those cases.
                 bool hasVisibleWindow;
                 try
                 {
@@ -351,7 +379,17 @@ public sealed class ScreenCaptureMonitor : BackgroundService
                 }
                 catch { continue; }
 
+                if (!hasVisibleWindow)
+                {
+                    // Fallback: check if the process owns ANY visible top-level window
+                    hasVisibleWindow = ProcessOwnsVisibleWindow(p.Id);
+                }
+
                 if (hasVisibleWindow) continue;
+
+                // Also skip if this process owns the foreground window (fullscreen games
+                // often don't set MainWindowHandle but ARE the active foreground app)
+                if (IsProcessForegroundFullscreen(p.Id)) continue;
 
                 // Check loaded modules for screen capture DLL combination
                 bool hasPrimaryCapture = false;
@@ -431,6 +469,84 @@ public sealed class ScreenCaptureMonitor : BackgroundService
         finally
         {
             // Process objects already disposed via 'using var p = proc' above
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // HELPER: Check if a process owns any visible top-level window
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Enumerates all top-level windows and returns true if the given PID owns at least
+    /// one that is visible and has a non-trivial size. This catches cases where
+    /// Process.MainWindowHandle fails (multi-window apps, games with separate render
+    /// windows, launcher→game handoffs, etc.)
+    /// </summary>
+    private static bool ProcessOwnsVisibleWindow(int pid)
+    {
+        bool found = false;
+
+        EnumWindows((hWnd, _) =>
+        {
+            if (!IsWindowVisible(hWnd)) return true;
+
+            GetWindowThreadProcessId(hWnd, out int windowPid);
+            if (windowPid != pid) return true;
+
+            // Ignore tiny windows (tray icons, hidden helper windows)
+            if (!GetWindowRect(hWnd, out RECT rect)) return true;
+            if (rect.Area < 50000) return true; // ~224x224 minimum
+
+            // Skip tool windows (tooltips, floating toolbars) — they don't count as "visible app"
+            var exStyle = GetWindowLongW(hWnd, GWL_EXSTYLE);
+            if ((exStyle & WS_EX_TOOLWINDOW) != 0) return true;
+
+            found = true;
+            return false; // Stop enumerating
+        }, IntPtr.Zero);
+
+        return found;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // HELPER: Detect if a process is the foreground fullscreen application
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Returns true if the given PID owns the current foreground window AND that window
+    /// covers the full monitor (fullscreen exclusive or borderless fullscreen).
+    /// This prevents false positives on games and media players that don't report
+    /// a MainWindowHandle but are clearly the active user-facing application.
+    /// </summary>
+    private static bool IsProcessForegroundFullscreen(int pid)
+    {
+        try
+        {
+            var fgHwnd = GetForegroundWindow();
+            if (fgHwnd == IntPtr.Zero) return false;
+
+            GetWindowThreadProcessId(fgHwnd, out int fgPid);
+            if (fgPid != pid) return false;
+
+            // The process owns the foreground window — now check if it's fullscreen
+            if (!GetWindowRect(fgHwnd, out RECT windowRect)) return false;
+
+            var monitor = MonitorFromWindow(fgHwnd, MONITOR_DEFAULTTONEAREST);
+            if (monitor == IntPtr.Zero) return false;
+
+            var monitorInfo = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
+            if (!GetMonitorInfoW(monitor, ref monitorInfo)) return false;
+
+            // Window covers the entire monitor = fullscreen (exclusive or borderless)
+            var mr = monitorInfo.rcMonitor;
+            return windowRect.Left <= mr.Left &&
+                   windowRect.Top <= mr.Top &&
+                   windowRect.Right >= mr.Right &&
+                   windowRect.Bottom >= mr.Bottom;
+        }
+        catch
+        {
+            return false;
         }
     }
 

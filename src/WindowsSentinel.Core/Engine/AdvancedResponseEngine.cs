@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using Microsoft.Extensions.Logging;
 using WindowsSentinel.Core.Deception;
 using WindowsSentinel.Core.Health;
@@ -201,6 +202,172 @@ public sealed class AdvancedResponseEngine : IResponseEngine
 
     private const double MustKillConfidenceThreshold = 0.85;
 
+    // ═══════════════════════════════════════════════════════════════════════════
+    // PRE-KILL VALIDATION GATE
+    //
+    // Purpose: Prevent killing user-interactive processes whose normal behavior
+    // mimics threat patterns (games, media players, creative tools).
+    //
+    // Philosophy: Real malware HIDES. If a process is the foreground app, owns
+    // visible windows, and has been running stably for minutes — it's not covert.
+    // This gate does NOT whitelist anything by path or name. It checks behavioral
+    // properties that are inherently incompatible with being a hidden threat.
+    //
+    // Returns null if kill should proceed, or a reason string if downgraded.
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Performs final sanity checks before a President's Law kill is executed.
+    /// Returns null if the kill should proceed, or a descriptive reason if the
+    /// kill should be downgraded to log-only.
+    /// </summary>
+    private string? EvaluatePreKillValidation(DetectionEvent detection)
+    {
+        if (detection.ProcessId <= 0) return null; // Can't validate, let kill proceed
+
+        try
+        {
+            using var process = Process.GetProcessById(detection.ProcessId);
+
+            // ── CHECK 1: Does the process own a visible window? ──────────────
+            // Real spyware/RATs doing screen exfiltration, credential phishing,
+            // or data theft operate WITHOUT visible windows. A process with a
+            // visible, non-trivial window is something the user is aware of.
+            bool ownsVisibleWindow = ProcessOwnsVisibleWindow(process.Id);
+
+            // ── CHECK 2: Is it the foreground application? ───────────────────
+            // The foreground app is what the user is actively interacting with.
+            // Malware does not operate as the foreground window — that would
+            // immediately alert the user to its presence.
+            bool isForeground = IsProcessForeground(process.Id);
+
+            // ── CHECK 3: Process age — has it been running stably? ───────────
+            // Implants/RATs typically beacon within seconds of injection or launch.
+            // A process that has been running for 5+ minutes without escalation
+            // and is only NOW triggering a composite is more likely a false positive
+            // from accumulated benign signals.
+            TimeSpan processAge = TimeSpan.Zero;
+            try { processAge = DateTimeOffset.UtcNow - process.StartTime.ToUniversalTime(); }
+            catch { /* Access denied — can't determine age, don't use this check */ }
+
+            bool isLongRunning = processAge > TimeSpan.FromMinutes(5);
+
+            // ── DECISION LOGIC ───────────────────────────────────────────────
+            // We require BOTH visibility AND longevity to downgrade.
+            // A hidden process that's been running a long time? Still kill it.
+            // A visible process that just spawned? Still kill it (could be a
+            // just-launched attack tool with a decoy window).
+            //
+            // Only downgrade when the process is clearly user-interactive AND
+            // has been stable — this combination is incompatible with being
+            // a covert threat.
+
+            if ((ownsVisibleWindow || isForeground) && isLongRunning)
+            {
+                var reasons = new List<string>();
+                if (isForeground) reasons.Add("foreground app");
+                else if (ownsVisibleWindow) reasons.Add("has visible window");
+                reasons.Add($"running for {processAge.TotalMinutes:F0} min");
+
+                return $"Process is user-interactive ({string.Join(", ", reasons)}). " +
+                       $"Covert malware does not operate as a visible foreground application for extended periods.";
+            }
+
+            return null; // Kill proceeds
+        }
+        catch (ArgumentException)
+        {
+            // Process already exited — no need to kill
+            return "Process no longer exists";
+        }
+        catch (Exception ex)
+        {
+            // If we can't validate, err on the side of caution — let the kill proceed.
+            // We don't want validation failures to become a bypass vector.
+            _logger.LogDebug(ex, "[PRE-KILL GATE] Validation failed for PID {Pid}, allowing kill to proceed",
+                detection.ProcessId);
+            return null;
+        }
+    }
+
+    // ── P/Invoke for pre-kill validation ─────────────────────────────────────
+
+    private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    private static extern int GetWindowLongW(IntPtr hWnd, int nIndex);
+
+    [DllImport("user32.dll")]
+    private static extern int GetWindowThreadProcessId(IntPtr hWnd, out int processId);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsWindowVisible(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
+    private const int GWL_EXSTYLE_GATE = -20;
+    private const int WS_EX_TOOLWINDOW_GATE = 0x00000080;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct RECT
+    {
+        public int Left, Top, Right, Bottom;
+        public int Width => Right - Left;
+        public int Height => Bottom - Top;
+        public int Area => Width * Height;
+    }
+
+    /// <summary>
+    /// Returns true if the process owns at least one visible, non-trivial top-level window.
+    /// </summary>
+    private static bool ProcessOwnsVisibleWindow(int pid)
+    {
+        bool found = false;
+
+        EnumWindows((hWnd, _) =>
+        {
+            if (!IsWindowVisible(hWnd)) return true;
+
+            GetWindowThreadProcessId(hWnd, out int windowPid);
+            if (windowPid != pid) return true;
+
+            // Ignore tiny windows (tray icons, hidden helpers)
+            if (!GetWindowRect(hWnd, out RECT rect)) return true;
+            if (rect.Area < 50000) return true; // ~224x224 minimum
+
+            // Skip tool windows (tooltips, floating toolbars)
+            var exStyle = GetWindowLongW(hWnd, GWL_EXSTYLE_GATE);
+            if ((exStyle & WS_EX_TOOLWINDOW_GATE) != 0) return true;
+
+            found = true;
+            return false; // Stop enumerating
+        }, IntPtr.Zero);
+
+        return found;
+    }
+
+    /// <summary>
+    /// Returns true if the process owns the current foreground window.
+    /// </summary>
+    private static bool IsProcessForeground(int pid)
+    {
+        var fgHwnd = GetForegroundWindow();
+        if (fgHwnd == IntPtr.Zero) return false;
+
+        GetWindowThreadProcessId(fgHwnd, out int fgPid);
+        return fgPid == pid;
+    }
+
     private bool EvaluateMustKill(DetectionEvent detection)
     {
         if (detection.Confidence < MustKillConfidenceThreshold) return false;
@@ -217,6 +384,49 @@ public sealed class AdvancedResponseEngine : IResponseEngine
         // PRESIDENT'S LAW — only the closed kill list authorizes immediate chain-nuke.
         if (_activeResponseEnabled && EvaluateMustKill(detection))
         {
+            // ═══════════════════════════════════════════════════════════════════
+            // PRE-KILL VALIDATION GATE — sanity check before lethal action.
+            //
+            // The composite/rule fired legitimately, but before killing we verify
+            // the process isn't a user-interactive application whose normal behavior
+            // mimics the threat pattern (e.g., games: DXGI + network + dbghelp).
+            //
+            // This does NOT weaken detection — real threats hide from the user.
+            // A process the user is actively interacting with is not covert malware.
+            // ═══════════════════════════════════════════════════════════════════
+            var downgradeReason = EvaluatePreKillValidation(detection);
+            if (downgradeReason != null)
+            {
+                _logger.LogWarning(
+                    "[PRE-KILL GATE] Kill DOWNGRADED to log-only for {Rule} | PID {Pid} ({Name}) — Reason: {Reason}",
+                    detection.RuleName, detection.ProcessId, detection.ProcessName, downgradeReason);
+
+                var downgradedScore = new ThreatScore
+                {
+                    Score = 150,
+                    Verdict = Verdict.Critical,
+                    Category = "downgraded_by_validation_gate",
+                    Source = MapToDetectionSource(detection),
+                    OriginalConfidence = detection.Confidence,
+                    CorroboratingSources = 0
+                };
+
+                await _eventLogger.LogDetectionAsync(detection, cancellationToken);
+
+                _toastService?.ShowThreatDetected(
+                    detection.RuleName,
+                    detection.ProcessName,
+                    detection.ProcessId,
+                    "Critical (Downgraded)",
+                    $"Kill blocked: {downgradeReason}");
+
+                await LogOnlyAsync(detection, downgradedScore,
+                    $"President's Law matched but pre-kill validation gate blocked execution: {downgradeReason}. " +
+                    $"Process appears to be user-interactive. Review manually.",
+                    cancellationToken);
+                return;
+            }
+
             _logger.LogCritical(
                 "[CHAIN-NUKE] {Rule} | Conf {Conf:P0} | {Process} (PID {Pid}) — President's Law kill",
                 detection.RuleName, detection.Confidence, detection.ProcessName,
