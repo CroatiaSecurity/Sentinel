@@ -31,6 +31,7 @@ public sealed class AdvancedResponseEngine : IResponseEngine
     private readonly ReputationCache? _reputationCache;
     private readonly ToastNotificationService? _toastService;
     private readonly IDeceptionEngine? _deceptionEngine;
+    private readonly ThreatIntelReporter? _threatReporter;
     private readonly bool _activeResponseEnabled;
 
     public AdvancedResponseEngine(
@@ -48,6 +49,7 @@ public sealed class AdvancedResponseEngine : IResponseEngine
         ReputationCache? reputationCache = null,
         ToastNotificationService? toastService = null,
         IDeceptionEngine? deceptionEngine = null,
+        ThreatIntelReporter? threatReporter = null,
         bool activeResponseEnabled = false)
     {
         _eventLogger = eventLogger;
@@ -64,6 +66,7 @@ public sealed class AdvancedResponseEngine : IResponseEngine
         _reputationCache = reputationCache;
         _toastService = toastService;
         _deceptionEngine = deceptionEngine;
+        _threatReporter = threatReporter;
         _activeResponseEnabled = activeResponseEnabled;
     }
 
@@ -483,6 +486,27 @@ public sealed class AdvancedResponseEngine : IResponseEngine
                 detection.ProcessName,
                 detection.ProcessId,
                 $"Chain trace: {chainResult.KilledProcesses.Count} processes killed");
+
+            // v2.1.0: Report confirmed threat to community threat intelligence platforms
+            if (_threatReporter != null)
+            {
+                string? remoteAddr = null;
+                int? remotePort = null;
+                string? fileHash = null;
+
+                detection.Metadata.TryGetValue("remote_address", out remoteAddr);
+                if (remoteAddr == null) detection.Metadata.TryGetValue("RemoteAddress", out remoteAddr);
+
+                if (detection.Metadata.TryGetValue("remote_port", out var portStr) && int.TryParse(portStr, out var port))
+                    remotePort = port;
+
+                detection.Metadata.TryGetValue("file_hash", out fileHash);
+                if (fileHash == null) detection.Metadata.TryGetValue("module_hash", out fileHash);
+
+                detection.Metadata.TryGetValue("technique", out var technique);
+
+                _threatReporter.QueueReport(detection, remoteAddr, remotePort, fileHash, technique);
+            }
         }
     }
 

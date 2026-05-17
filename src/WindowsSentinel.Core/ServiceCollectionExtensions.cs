@@ -19,6 +19,7 @@ using WindowsSentinel.Core.SelfProtection;
 using WindowsSentinel.Core.Session;
 
 // 2.0.0 — Hardened & Portable (DLL Analysis, Active Response, Barebone Windows fallbacks)
+// 2.1.0 — Community Threat Intelligence Reporting (AbuseIPDB, URLhaus, MalwareBazaar)
 
 namespace WindowsSentinel.Core;
 
@@ -28,9 +29,9 @@ namespace WindowsSentinel.Core;
 public static class SentinelVersion
 {
     /// <summary>
-    /// Current version - 2.0.0 Hardened &amp; Portable
+    /// Current version - 2.1.0 Community Threat Intelligence Reporting
     /// </summary>
-    public const string Version = "2.0.0";
+    public const string Version = "2.1.0";
 
     /// <summary>
     /// Release date
@@ -41,15 +42,12 @@ public static class SentinelVersion
     /// Version description
     /// </summary>
     public const string Description =
-        "2.0.0 — Hardened & Portable. " +
-        "All features from 1.9.0 (DLL Analysis & Active Response) plus: " +
-        "Graceful fallbacks for barebone/minimal Windows installations (Server Core, IoT, stripped builds). " +
-        "UserSessionLauncher no longer crash-loops when WTS APIs are unavailable. " +
-        "Toast notifications fail silently with bounds-safe XML access. " +
-        "LsassDumpCanaryMonitor allowlist expanded for Electron apps, browsers, and crash handlers. " +
-        "All P/Invoke calls wrapped with EntryPointNotFoundException/DllNotFoundException guards. " +
-        "Event Log monitors degrade gracefully when logs are inaccessible. " +
-        "Registry-based monitors handle missing hives without exceptions.";
+        "2.1.0 — Community Threat Intelligence Reporting. " +
+        "New ThreatIntelReporter: after confirmed kills, reports attacker C2 IPs to AbuseIPDB, " +
+        "malicious URLs to URLhaus (abuse.ch), and hashes to MalwareBazaar. " +
+        "All reporting is opt-in, rate-limited (10/hour), and never reports private IPs. " +
+        "Exposes attacker infrastructure to authorities and the security community. " +
+        "Includes all v2.0.0 hardening (barebone Windows fallbacks).";
 }
 
 public static class ServiceCollectionExtensions
@@ -275,6 +273,7 @@ public static class ServiceCollectionExtensions
                 sp.GetRequiredService<ReputationCache>(),          // File reputation
                 sp.GetRequiredService<ToastNotificationService>(), // Notifications
                 sp.GetRequiredService<IDeceptionEngine>(),        // Pre-kill deception (v1.7.0)
+                sp.GetRequiredService<ThreatIntelReporter>(),     // Community reporting (v2.1.0)
                 activeResponseEnabled));
 
         // ── Monitors ─────────────────────────────────────────────────────────
@@ -366,6 +365,11 @@ public static class ServiceCollectionExtensions
 
         // ── DLL Unload Engine (active response: FreeLibrary via CreateRemoteThread) ─
         services.AddSingleton<DllUnloadEngine>();
+
+        // ── Threat Intelligence Reporter (reports C2 IPs to AbuseIPDB, hashes to community) ─
+        services.AddSingleton<ThreatReportingConfig>();
+        services.AddSingleton<ThreatIntelReporter>();
+        services.AddHostedService(sp => sp.GetRequiredService<ThreatIntelReporter>());
 
         // ── UAC Bypass Surface Monitor (COM AutoElevation, manifest autoElevate, copy-drop) ─
         services.AddHostedService<UacBypassSurfaceMonitor>();

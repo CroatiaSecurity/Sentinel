@@ -1,5 +1,47 @@
 # Changelog
 
+## 2.1.0 — Community Threat Intelligence Reporting (May 2026)
+
+### New: ThreatIntelReporter
+After a confirmed kill (President's Law, confidence ≥ 0.85), Sentinel now reports attacker infrastructure to community threat intelligence platforms, exposing their network to authorities and the security community.
+
+**Reporting targets:**
+- **AbuseIPDB**: Reports C2 IP addresses with attack category (Hacking, Exploited Host, etc.) and evidence summary. ISPs and hosting providers receive automated abuse notifications.
+- **URLhaus (abuse.ch)**: Reports C2 URLs/IP:port combinations. Added to community blocklists used by firewalls, DNS filters, and EDRs worldwide.
+- **MalwareBazaar (abuse.ch)**: Logs malicious file hashes with tags for community signature generation.
+
+**Safety guarantees:**
+- All reporting is opt-in (`ThreatReporting.Enabled=true` in appsettings.json)
+- Only reports CONFIRMED threats (post-kill, confidence ≥ 0.85)
+- Never reports private/internal IPs (RFC1918, link-local, loopback)
+- Never uploads file contents — only hashes and metadata
+- Rate-limited: max 10 reports per hour
+- Deduplication: same IP/hash never reported twice
+- Reports queued and sent asynchronously (never blocks kill response)
+
+**Configuration:**
+```json
+{
+  "ThreatReporting": {
+    "Enabled": true,
+    "AbuseIpDbApiKey": "your-free-api-key",
+    "UrlhausAuthToken": "your-free-token",
+    "ReportToMalwareBazaar": true,
+    "ReportToUrlhaus": true
+  }
+}
+```
+
+**Integration point:** Wired into `AdvancedResponseEngine` — called automatically after every successful chain trace kill. Extracts C2 address, port, and file hash from detection metadata.
+
+### Infrastructure
+- All version references bumped to 2.1.0.
+- DI registration: ThreatReportingConfig (singleton), ThreatIntelReporter (singleton + hosted service).
+- AdvancedResponseEngine constructor extended with ThreatIntelReporter parameter.
+- MITRE D3FEND coverage: D3-TIRA (Threat Intelligence Reporting).
+
+---
+
 ## 1.9.0 / 2.0.0 — DLL Analysis & Active Response + Hardened & Portable (May 2026)
 
 ### New: DllUnloadEngine (Active DLL Response)

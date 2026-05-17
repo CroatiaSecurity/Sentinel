@@ -2,7 +2,7 @@
 
 **Userland EDR for Windows — Behavioral Detection, Automated Response & Aggressive Deception**
 
-> Version: 2.0.0 (Hardened & Portable)  
+> Version: 2.1.0 (Community Threat Intelligence Reporting)  
 > Author: [Gorstak](https://github.com/tandrlemandrle/Sentinel)  
 > License: MIT
 
@@ -306,7 +306,7 @@ All tactics:
 
 ```powershell
 # Run installer as Administrator
-.\WindowsSentinelSetup-2.0.0.exe
+.\WindowsSentinelSetup-2.1.0.exe
 ```
 
 The installer:
@@ -327,12 +327,43 @@ The installer:
     "ActiveResponse": true,
     "LogPath": null,
     "WatchPath": null
+  },
+  "ThreatReporting": {
+    "Enabled": false,
+    "AbuseIpDbApiKey": null,
+    "UrlhausAuthToken": null,
+    "ReportToMalwareBazaar": true,
+    "ReportToUrlhaus": true
   }
 }
 ```
 
 - `ActiveResponse: true` (default) — Kills on President's Law detections (with pre-kill deception)
 - `ActiveResponse: false` — Monitor-only, all detections logged
+- `ThreatReporting.Enabled: true` — Reports confirmed C2 IPs/hashes to community platforms after kills
+- `AbuseIpDbApiKey` — Free API key from https://www.abuseipdb.com/account/api
+- `UrlhausAuthToken` — Free token from https://urlhaus.abuse.ch/api/#account
+
+---
+
+## Threat Intelligence Reporting (v2.1.0)
+
+After a confirmed kill (President's Law, confidence ≥ 0.85), Sentinel can report the attacker's infrastructure to community threat intelligence platforms:
+
+| Platform | What's Reported | Effect |
+|----------|----------------|--------|
+| AbuseIPDB | C2 IP address + attack category + evidence summary | IP gets flagged in global abuse database; ISPs/hosting providers receive abuse reports |
+| URLhaus (abuse.ch) | C2 URL/IP:port | URL added to community blocklist used by firewalls, DNS filters, and other EDRs worldwide |
+| MalwareBazaar (abuse.ch) | Malicious file SHA-256 hash + tags | Hash added to community malware database for signature generation |
+
+**Safety guarantees:**
+- All reporting is **opt-in** (disabled by default)
+- Only reports **confirmed threats** (post-kill, confidence ≥ 0.85)
+- **Never reports private/internal IPs** (RFC1918, link-local, loopback)
+- **Never uploads file contents** — only hashes and metadata
+- **Rate-limited**: max 10 reports per hour
+- **Deduplication**: same IP/hash never reported twice
+- Reports are queued and sent asynchronously (never blocks kill response)
 
 ---
 
@@ -352,7 +383,7 @@ cd installer
 .\build.ps1
 ```
 
-Output: `installer\output\WindowsSentinelSetup-2.0.0.exe`
+Output: `installer\output\WindowsSentinelSetup-2.1.0.exe`
 
 ---
 
@@ -424,6 +455,7 @@ installer/
 | 1.8.0 | Data Exfiltration Prevention | DataExfiltrationMonitor (outbound volume, sensitive file access, USB reads, path-verified allowlists). DnsQueryMonitor enhanced with 40+ exfil domain detection. 4 new composites (ExfilDNS+Network, SensitiveFile+Network, USB+Network, ExfilDNS+SensitiveFile). Zero false positives via correlation-only kills. Total: 34. |
 | 1.9.0 | DLL Analysis & Active Response | DllUnloadEngine (active DLL unloading via CreateRemoteThread+FreeLibrary). UacBypassSurfaceMonitor (COM AutoElevation, manifest autoElevate, copy-drop vulnerability scanning). DllEntropyAnalyzer (Shannon entropy, hex-named DLL detection). DllLoadFailureMonitor (Event Log ID 7, SideBySide errors). BrowserDllMonitor/ELF Catcher (browser-specific injection detection + active unload). DiskWideDllScanner (disk-wide unsigned DLL scanning with HashReputationService integration + active unload on IoC match). 6 new monitors, 1 new response engine. |
 | 2.0.0 | Hardened & Portable | Graceful fallbacks for barebone/minimal Windows (Server Core, IoT, stripped builds). UserSessionLauncher no longer crash-loops on missing WTS APIs. Toast notifications bounds-safe. LsassDumpCanary allowlist expanded (Electron, browsers, crash handlers). All P/Invoke wrapped with EntryPointNotFoundException guards. Event Log/Registry monitors degrade gracefully. |
+| 2.1.0 | Community Threat Intel Reporting | ThreatIntelReporter: after confirmed kills, reports attacker C2 IPs to AbuseIPDB, malicious URLs to URLhaus (abuse.ch), hashes to MalwareBazaar. All reporting opt-in, rate-limited (10/hour), never reports private IPs. Exposes attacker infrastructure to authorities and security community. |
 
 ---
 
