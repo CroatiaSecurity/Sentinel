@@ -16,7 +16,7 @@ public sealed class UserSessionLauncher : BackgroundService
     private int _currentSessionId = -1;
 
     // WTS API imports
-    [DllImport("wtsapi32.dll", SetLastError = true)]
+    [DllImport("kernel32.dll", SetLastError = true)]
     private static extern int WTSGetActiveConsoleSessionId();
 
     [DllImport("wtsapi32.dll", SetLastError = true)]
@@ -102,6 +102,27 @@ public sealed class UserSessionLauncher : BackgroundService
     {
         _logger.LogInformation("User Session Launcher: Starting...");
 
+        // Test if WTS APIs are available on this system
+        try
+        {
+            _ = WTSGetActiveConsoleSessionId();
+        }
+        catch (EntryPointNotFoundException)
+        {
+            _logger.LogWarning(
+                "User Session Launcher: WTSGetActiveConsoleSessionId not available on this OS. " +
+                "Agent will not be auto-launched into user session. " +
+                "This is expected on Windows Server Core or minimal installations.");
+            return; // Exit gracefully — don't spam errors every 30s
+        }
+        catch (DllNotFoundException)
+        {
+            _logger.LogWarning(
+                "User Session Launcher: kernel32.dll WTS function not found. " +
+                "Agent will not be auto-launched.");
+            return;
+        }
+
         // Initial launch
         LaunchAgent();
 
@@ -130,6 +151,12 @@ public sealed class UserSessionLauncher : BackgroundService
             catch (OperationCanceledException)
             {
                 break;
+            }
+            catch (EntryPointNotFoundException)
+            {
+                // API became unavailable mid-run (shouldn't happen, but be safe)
+                _logger.LogWarning("User Session Launcher: WTS API no longer available, stopping monitor.");
+                return;
             }
             catch (Exception ex)
             {

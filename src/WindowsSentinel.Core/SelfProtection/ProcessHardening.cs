@@ -100,15 +100,21 @@ public static class ProcessHardening
             // Application directory is needed for our own native deps (KernelTraceControl, msdia140).
             if (!SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32 | LOAD_LIBRARY_SEARCH_APPLICATION_DIR))
             {
-                logger?.LogWarning("ProcessHardening: SetDefaultDllDirectories failed (err {Err})",
+                logger?.LogDebug("ProcessHardening: SetDefaultDllDirectories failed (err {Err}) — " +
+                    "expected on Windows 7 without KB2533623",
                     Marshal.GetLastWin32Error());
             }
             // Remove CWD from DLL search path
             SetDllDirectory("");
         }
+        catch (EntryPointNotFoundException)
+        {
+            // SetDefaultDllDirectories requires Win8+ or Win7 with KB2533623
+            logger?.LogDebug("ProcessHardening: SetDefaultDllDirectories not available (pre-Win8 without KB2533623)");
+        }
         catch (Exception ex)
         {
-            logger?.LogWarning(ex, "ProcessHardening: DLL search hardening threw");
+            logger?.LogDebug(ex, "ProcessHardening: DLL search hardening threw");
         }
 
         try

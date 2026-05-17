@@ -18,7 +18,7 @@ using WindowsSentinel.Core.Response;
 using WindowsSentinel.Core.SelfProtection;
 using WindowsSentinel.Core.Session;
 
-// 1.9.0 — DLL Analysis & Response additions (ported from Antivirus.ps1)
+// 2.0.0 — Hardened & Portable (DLL Analysis, Active Response, Barebone Windows fallbacks)
 
 namespace WindowsSentinel.Core;
 
@@ -28,28 +28,28 @@ namespace WindowsSentinel.Core;
 public static class SentinelVersion
 {
     /// <summary>
-    /// Current version - 1.9.0 DLL Analysis &amp; Active Response
+    /// Current version - 2.0.0 Hardened &amp; Portable
     /// </summary>
-    public const string Version = "1.9.0";
+    public const string Version = "2.0.0";
 
     /// <summary>
     /// Release date
     /// </summary>
-    public static readonly DateTime ReleaseDate = new(2026, 5, 15);
+    public static readonly DateTime ReleaseDate = new(2026, 5, 17);
 
     /// <summary>
     /// Version description
     /// </summary>
     public const string Description =
-        "1.9.0 — DLL Analysis & Active Response. " +
-        "New DllUnloadEngine: active DLL unloading via CreateRemoteThread+FreeLibrary (response to injection). " +
-        "New UacBypassSurfaceMonitor: COM AutoElevation vector scanning, manifest autoElevate detection, copy-drop vulnerability checks. " +
-        "New DllEntropyAnalyzer: Shannon entropy analysis for packed/encrypted DLLs, random hex-named DLL detection. " +
-        "New DllLoadFailureMonitor: Event Log ID 7 monitoring, SideBySide manifest error detection. " +
-        "New BrowserDllMonitor (ELF Catcher): browser-specific DLL injection detection with active unload response. " +
-        "New DiskWideDllScanner: disk-wide unsigned DLL scanning across all drives with IoC matching and active unload. " +
-        "HashReputationService now feeds DiskWideDllScanner for live threat intel enrichment. " +
-        "Total new monitors: 6. Total new response capability: active DLL unloading.";
+        "2.0.0 — Hardened & Portable. " +
+        "All features from 1.9.0 (DLL Analysis & Active Response) plus: " +
+        "Graceful fallbacks for barebone/minimal Windows installations (Server Core, IoT, stripped builds). " +
+        "UserSessionLauncher no longer crash-loops when WTS APIs are unavailable. " +
+        "Toast notifications fail silently with bounds-safe XML access. " +
+        "LsassDumpCanaryMonitor allowlist expanded for Electron apps, browsers, and crash handlers. " +
+        "All P/Invoke calls wrapped with EntryPointNotFoundException/DllNotFoundException guards. " +
+        "Event Log monitors degrade gracefully when logs are inaccessible. " +
+        "Registry-based monitors handle missing hives without exceptions.";
 }
 
 public static class ServiceCollectionExtensions
@@ -361,7 +361,7 @@ public static class ServiceCollectionExtensions
         services.AddHostedService<DataExfiltrationMonitor>();
 
         // ═══════════════════════════════════════════════════════════════════════
-        // 1.9.0 — DLL ANALYSIS & ACTIVE RESPONSE (ported from Antivirus.ps1)
+        // 2.0.0 — DLL ANALYSIS & ACTIVE RESPONSE (ported from Antivirus.ps1)
         // ═══════════════════════════════════════════════════════════════════════
 
         // ── DLL Unload Engine (active response: FreeLibrary via CreateRemoteThread) ─

@@ -1,5 +1,99 @@
 # Changelog
 
+## 1.9.0 / 2.0.0 — DLL Analysis & Active Response + Hardened & Portable (May 2026)
+
+### New: DllUnloadEngine (Active DLL Response)
+Active response capability that forcefully unloads malicious/suspicious DLLs from running processes using CreateRemoteThread + FreeLibrary. Ported from Antivirus.ps1's `Invoke-ElfDLLUnloader` and `Invoke-UnsignedDLLRemover`.
+
+**Safety constraints:**
+- Rate-limited: max 10 unloads per minute
+- Never touches system-critical processes (lsass, csrss, smss, services, etc.)
+- Never unloads system DLLs (ntdll, kernel32, kernelbase, etc.)
+- Never targets Sentinel's own processes
+- All unloads logged with full forensic context
+
+### New: UacBypassSurfaceMonitor
+Proactive scanning for DLL hijacking vectors that could be exploited for privilege escalation via UAC bypass. Scan interval: 15 minutes.
+
+**Detection vectors:**
+- **COM AutoElevation**: Scans HKLM\SOFTWARE\Classes\CLSID for COM objects with Elevation\Enabled=1 whose InprocServer32/LocalServer32 targets are writable or missing.
+- **Manifest AutoElevate**: Scans System32/SysWOW64 for binaries with `<autoElevate>true</autoElevate>` manifest.
+- **Copy-Drop Vulnerability**: Checks autoElevate binaries for missing SetDllDirectory/SetDefaultDllDirectories hardening (vulnerable to copy-to-temp sideload).
+- **PATH Directory DLLs**: Detects recently-created DLLs in user-writable PATH directories.
+
+### New: DllEntropyAnalyzer
+Shannon entropy analysis for detecting packed, encrypted, or obfuscated DLLs. Ported from Antivirus.ps1's `Measure-FileEntropy` + `Invoke-FileEntropyDetection`.
+
+**Capabilities:**
+- Shannon entropy calculation (8KB sample, threshold: 7.2 normal, 7.6 critical)
+- Random hex-named DLL detection (`^[a-f0-9]{8,}\.dll$`)
+- Scans high-risk directories (AppData, Temp, Downloads) every 3 minutes
+- Scans loaded modules in running processes every 5 minutes
+- IoC hash matching for detected high-entropy files
+
+### New: DllLoadFailureMonitor
+Monitors Windows Event Log for DLL load failures that indicate hijacking attempts. Ported from Antivirus.ps1's Event Log monitoring.
+
+**Monitored events:**
+- System Event ID 7 (Service Control Manager DLL load failures)
+- Application SideBySide errors (manifest/activation context failures)
+- Polls every 30 seconds
+
+### New: BrowserDllMonitor (ELF Catcher)
+Browser-specific DLL injection detection with active unload response. Ported from Antivirus.ps1's `Invoke-ElfCatcher` and `Test-SuspiciousDLL`.
+
+**Browser-specific heuristics:**
+- Known ELF/malware DLL name patterns (*_elf.dll, *_hook.dll, *_inject.dll, etc.)
+- .winmd files outside Windows directory (WinRT abuse)
+- Random hex-named DLLs in browser processes
+- DLLs from TEMP loaded into browsers (excluding browser cache)
+- DLLs in browser profile folders with non-browser names
+- Unsigned DLLs in browser processes (outside system paths)
+- Active unload via DllUnloadEngine for confirmed ELF-pattern DLLs
+
+**Monitored browsers:** Chrome, Edge, Firefox, Brave, Opera, Vivaldi, Waterfox, Palemoon, Chromium, Arc. Scan interval: 45 seconds.
+
+### New: DiskWideDllScanner
+Disk-wide scanning for unsigned/suspicious DLLs across all drives. Ported from Antivirus.ps1's `Invoke-UnsignedDLLRemover`.
+
+**Scanning strategy:**
+- High-risk paths (AppData, Temp, Downloads, Desktop, ProgramData): every 5 minutes
+- Drive roots (fixed, removable, network — depth 2): every 15 minutes
+- Max 500 files per scan cycle
+- Results cached by SHA-256 hash
+
+**Analysis pipeline:**
+- Signature validation (Authenticode)
+- IoC hash matching (local IoCScanner)
+- External hash reputation (HashReputationService: Cymru, MalwareBazaar, CIRCL)
+- Entropy analysis (via DllEntropyAnalyzer)
+- Hex-name pattern detection
+- Active unload via DllUnloadEngine on IoC match
+
+### Enhanced: HashReputationService Integration
+The existing HashReputationService (Cymru, MalwareBazaar, CIRCL APIs) now feeds the DiskWideDllScanner for live threat intelligence enrichment of disk-scanned DLLs. Previously only triggered on process-start events.
+
+### Infrastructure
+- All version references bumped to 2.0.0 (Core, Service, Agent, installer, build script).
+- DI registration: DllUnloadEngine (singleton), 5 new hosted services.
+- architecture-council.md updated with v2.0.0 component roster.
+- MITRE ATT&CK coverage: T1548.002, T1574, T1574.001, T1055, T1027, T1027.002, T1185, T1036, T1539.
+
+### Hardened & Portable (v2.0.0 — Barebone Windows Compatibility)
+
+**Problem:** Sentinel crashed or spammed errors on minimal Windows installations (Server Core, IoT Enterprise, stripped/debloated builds) where certain APIs or services are unavailable.
+
+**Fixes:**
+- **UserSessionLauncher**: `WTSGetActiveConsoleSessionId` P/Invoke moved from `wtsapi32.dll` to `kernel32.dll` (correct location). Added startup probe — if the API throws `EntryPointNotFoundException` or `DllNotFoundException`, the launcher exits gracefully instead of crash-looping every 30 seconds.
+- **ToastNotificationService**: Changed from `ToastImageAndText04` (requires image asset) to `ToastText04` (text-only). Added bounds checking on `XmlNodeList` access — no more `ArgumentOutOfRangeException`. All toast failures downgraded from `LogError` to `LogDebug` (non-critical).
+- **LsassDumpCanaryMonitor**: Expanded allowlist with 30+ legitimate dbghelp.dll users: all Chromium browsers, Electron apps (Kiro, VS Code, Cursor, Discord, Slack, Teams), Steam, Google crash handlers, JetBrains IDEs, svchost.exe (WER). Eliminates false positive composites.
+- **DllLoadFailureMonitor**: Catches `EventLogNotFoundException` when System/Application logs are inaccessible (Server Core without Event Log service).
+- **UacBypassSurfaceMonitor**: Registry scanning wrapped in try-catch per key — missing hives don't crash the scan.
+- **ProcessHardening**: `SetProcessMitigationPolicy` failures logged at Debug level (expected on older Windows builds that don't support CIG/ImageLoad policies).
+- **EtwProcessMonitor/EtwThreatIntelMonitor**: Already had WMI fallback — no changes needed, but documented as a design pattern for barebone compatibility.
+
+---
+
 ## 1.8.0 — Data Exfiltration Prevention (May 2026)
 
 ### New: DataExfiltrationMonitor

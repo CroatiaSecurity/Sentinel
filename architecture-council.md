@@ -3,7 +3,7 @@
 **Status:** Architecture spec. Extends, does not replace, `requirements.md`,
 `design.md`, `constraints.md` (all v0.9.0).
 
-**Last updated:** v1.9.0 (May 2026) — DLL Analysis & Active Response additions.
+**Last updated:** v2.0.0 (May 2026) — Hardened & Portable + DLL Analysis & Active Response.
 
 ---
 
@@ -135,7 +135,7 @@ Composite-grade detection → kill via the v2.0 composite path.
 | `GIDR` | 28 .cs + 18 .yar | Reference architecture, ChainTracer, YARA |
 | `LocalEDR` | 14 .cs | Additional detection rules |
 
-### v1.9.0 — DLL Analysis & Active Response (ported from Antivirus.ps1)
+### v2.0.0 — DLL Analysis & Active Response (ported from Antivirus.ps1)
 | Component | Role |
 |-----------|------|
 | `DllUnloadEngine` | Active response: unloads malicious DLLs via CreateRemoteThread+FreeLibrary. Rate-limited (10/min), never touches system-critical processes. |

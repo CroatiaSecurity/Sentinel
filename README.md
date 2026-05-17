@@ -2,7 +2,7 @@
 
 **Userland EDR for Windows — Behavioral Detection, Automated Response & Aggressive Deception**
 
-> Version: 1.8.0 (Data Exfiltration Prevention)  
+> Version: 2.0.0 (Hardened & Portable)  
 > Author: [Gorstak](https://github.com/tandrlemandrle/Sentinel)  
 > License: MIT
 
@@ -98,6 +98,8 @@ These rules can trigger immediate process termination + quarantine:
 | NeuroBehavior Anomaly | Process behavior entropy, multi-vector activity scoring | Behavioral (statistical) |
 | Honeypot Trip | Decoy file access detection | Behavioral (canary) |
 | Transparent Overlay Phishing | WS_EX_LAYERED + WS_EX_TRANSPARENT + WS_EX_TOPMOST from non-allowlisted processes | Behavioral (window enumeration) |
+| Browser DLL Injection (ELF) | ELF-pattern DLLs in browser processes → active unload | Behavioral (module analysis + response) |
+| Malicious DLL on Disk (IoC) | Disk-scanned DLL matches threat intel hash → active unload from all processes | Behavioral (hash reputation + response) |
 
 ### Tier 2 — Advisory / Corroborating (Log Only, Feeds Correlation)
 
@@ -122,6 +124,11 @@ These never kill independently. Multiple Tier2 signals on the same PID within 12
 | Module Injection (Runtime) | New suspicious DLL appears in any process after baseline |
 | Phantom Module | Loaded DLL's file deleted from disk (dropper pattern) |
 | Module Validation | DLL hijacking, sideloading |
+| UAC Bypass Surface | COM AutoElevation vectors, manifest autoElevate + copy-drop vulnerable binaries |
+| DLL Entropy | Packed/encrypted DLLs (Shannon entropy ≥ 7.2), random hex-named DLLs |
+| DLL Load Failure | Event Log ID 7 failures, SideBySide manifest errors (failed hijacking indicators) |
+| Browser DLL (ELF Catcher) | Suspicious DLLs in browser processes (ELF patterns, unsigned, temp-loaded) |
+| Disk-Wide DLL Scan | Unsigned/suspicious DLLs on disk in user-writable locations |
 | Unsigned Binary | Unsigned executables in staging paths |
 | Beaconing (Statistical) | Coefficient of variation analysis for C2 patterns |
 | Keylogger Detection | Suspicious keyboard hook DLLs (service-only) |
@@ -186,7 +193,11 @@ When a President's Law detection fires above confidence 0.85:
    - Environment poisoning (break proxy/TLS/persistence registry)
    - Honeypot weaponization (fake SSH keys, cloud creds, wallet seeds, zip bombs)
    - Network honeypots (fake SMB/RDP/HTTP/SSH listeners for lateral movement traps)
-2. **Chain Trace** — Walk parent chain (forensic), collect descendants
+2. **Active DLL Unloading** (v1.9.0) — Forcefully unload injected/malicious DLLs:
+   - CreateRemoteThread + FreeLibrary to eject DLLs from live processes
+   - Rate-limited (10 unloads/minute), never touches system-critical processes
+   - Used by BrowserDllMonitor (ELF patterns) and DiskWideDllScanner (IoC matches)
+3. **Chain Trace** — Walk parent chain (forensic), collect descendants
 3. **Kill process tree** — Leaves first, root last
 4. **Quarantine binaries** — DPAPI-encrypted, ACL-hardened (SYSTEM + Admins only)
 5. **Remove persistence** — Registry Run keys, startup folder, scheduled tasks, services
@@ -283,6 +294,11 @@ All tactics:
 | AV/Spyware | AudioHijackMonitor | Audio-to-mic redirection | 0.4.0 |
 | AV/Spyware | ClipboardMonitor | Win32 clipboard API polling | 1.4.0 |
 | Injection | EtwThreatIntelMonitor | Microsoft-Windows-Threat-Intelligence | 0.1.0 |
+| DLL Analysis | DllEntropyAnalyzer | Shannon entropy + hex-name detection | 1.9.0 |
+| DLL Analysis | BrowserDllMonitor (ELF Catcher) | Browser-specific DLL injection detection | 1.9.0 |
+| DLL Analysis | DiskWideDllScanner | Disk-wide unsigned DLL scanning (all drives) | 1.9.0 |
+| DLL Analysis | DllLoadFailureMonitor | Event Log ID 7 + SideBySide errors | 1.9.0 |
+| DLL Analysis | UacBypassSurfaceMonitor | COM AutoElevation + manifest autoElevate | 1.9.0 |
 
 ---
 
@@ -290,7 +306,7 @@ All tactics:
 
 ```powershell
 # Run installer as Administrator
-.\WindowsSentinelSetup-1.8.0.exe
+.\WindowsSentinelSetup-2.0.0.exe
 ```
 
 The installer:
@@ -336,7 +352,7 @@ cd installer
 .\build.ps1
 ```
 
-Output: `installer\output\WindowsSentinelSetup-1.8.0.exe`
+Output: `installer\output\WindowsSentinelSetup-2.0.0.exe`
 
 ---
 
@@ -351,6 +367,28 @@ Output: `installer\output\WindowsSentinelSetup-1.8.0.exe`
 - **Deception is best-effort** — Tactics may fail if process is already dying or access is denied. Kill always proceeds.
 
 See [THREAT_MODEL.md](THREAT_MODEL.md) for detailed bypass analysis.
+
+---
+
+## Barebone Windows Compatibility (v2.0.0)
+
+Sentinel runs on minimal Windows installations with graceful degradation:
+
+| Feature | Full Desktop | Server Core / IoT | Stripped/Debloated |
+|---------|-------------|-------------------|-------------------|
+| ETW Process Monitoring | ✅ Full | ✅ Full | ✅ Full |
+| ETW Threat Intelligence | ✅ Full | ✅ Full (if elevated) | ⚠️ Falls back to WMI |
+| Toast Notifications | ✅ Full | ❌ Disabled (no shell) | ❌ Disabled |
+| User Session Agent Launch | ✅ Full | ⚠️ Disabled if no WTS | ⚠️ Disabled |
+| DLL Search Hardening | ✅ Full | ✅ Full | ⚠️ Skipped on pre-Win8 |
+| CIG (Code Integrity Guard) | ✅ Audit mode | ✅ Audit mode | ⚠️ Skipped if unsupported |
+| Event Log Monitoring | ✅ Full | ✅ Full | ⚠️ Skipped if logs unavailable |
+| Registry Scanning (UAC) | ✅ Full | ✅ Full | ⚠️ Per-key fallback |
+| File/Network/Memory Monitors | ✅ Full | ✅ Full | ✅ Full |
+| Active DLL Unloading | ✅ Full | ✅ Full | ✅ Full |
+| Detection + Kill Response | ✅ Full | ✅ Full | ✅ Full |
+
+**Design principle:** Detection and response ALWAYS work. UI features (toasts, agent session) degrade gracefully. No crash loops, no error spam — just a single informational log at startup explaining what's unavailable.
 
 ---
 
@@ -384,6 +422,8 @@ installer/
 | 1.6.0 | Webcam/Mic Exfiltration Guard | WebcamMicMonitor, background camera/mic detection, 2 new composites (camera+network, camera+screen). Total: 30. |
 | 1.7.0 | Aggressive Deception | DeceptionEngine with 8 pre-kill tactic classes: memory flooding, implant destabilization (DLL stomping + stack corruption + handle pollution), beacon flooding + protocol confusion, clipboard poisoning, file traps (sparse bombs + symlink loops + polyglot files + corrupted archives + file locking), environment poisoning, honeypot weaponization, network honeypot deployment (fake SMB/RDP/HTTP/SSH). |
 | 1.8.0 | Data Exfiltration Prevention | DataExfiltrationMonitor (outbound volume, sensitive file access, USB reads, path-verified allowlists). DnsQueryMonitor enhanced with 40+ exfil domain detection. 4 new composites (ExfilDNS+Network, SensitiveFile+Network, USB+Network, ExfilDNS+SensitiveFile). Zero false positives via correlation-only kills. Total: 34. |
+| 1.9.0 | DLL Analysis & Active Response | DllUnloadEngine (active DLL unloading via CreateRemoteThread+FreeLibrary). UacBypassSurfaceMonitor (COM AutoElevation, manifest autoElevate, copy-drop vulnerability scanning). DllEntropyAnalyzer (Shannon entropy, hex-named DLL detection). DllLoadFailureMonitor (Event Log ID 7, SideBySide errors). BrowserDllMonitor/ELF Catcher (browser-specific injection detection + active unload). DiskWideDllScanner (disk-wide unsigned DLL scanning with HashReputationService integration + active unload on IoC match). 6 new monitors, 1 new response engine. |
+| 2.0.0 | Hardened & Portable | Graceful fallbacks for barebone/minimal Windows (Server Core, IoT, stripped builds). UserSessionLauncher no longer crash-loops on missing WTS APIs. Toast notifications bounds-safe. LsassDumpCanary allowlist expanded (Electron, browsers, crash handlers). All P/Invoke wrapped with EntryPointNotFoundException guards. Event Log/Registry monitors degrade gracefully. |
 
 ---
 

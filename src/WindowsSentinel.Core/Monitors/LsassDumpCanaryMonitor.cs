@@ -57,7 +57,30 @@ public sealed class LsassDumpCanaryMonitor : BackgroundService
         "sentinelagent.exe",                // Our agent
         "dotnet.exe",                       // .NET runtime (crash dumps)
         "crashpad_handler.exe",             // Chrome/Electron crash handler
-        "dumpminitool.exe"                  // VS crash dump tool
+        "dumpminitool.exe",                 // VS crash dump tool
+        // v1.9.0: Crash handlers and Electron apps that legitimately load dbghelp.dll
+        "steamwebhelper", "steamwebhelper.exe",   // Steam crash reporting
+        "steam", "steam.exe",                     // Steam client
+        "GoogleCrashHandler", "GoogleCrashHandler.exe",     // Google crash handler (32-bit)
+        "GoogleCrashHandler64", "GoogleCrashHandler64.exe", // Google crash handler (64-bit)
+        "Kiro", "Kiro.exe",                       // Kiro IDE (Electron — uses crashpad)
+        "Code", "Code.exe",                       // VS Code (Electron — uses crashpad)
+        "code", "code.exe",                       // VS Code lowercase
+        "cursor", "Cursor.exe",                   // Cursor IDE (Electron)
+        "electron", "electron.exe",               // Generic Electron apps
+        "msedge", "msedge.exe",                   // Edge (Chromium crash reporting)
+        "chrome", "chrome.exe",                   // Chrome (crash reporting)
+        "firefox", "firefox.exe",                 // Firefox (crash reporting)
+        "brave", "brave.exe",                     // Brave (Chromium crash reporting)
+        "opera", "opera.exe",                     // Opera (Chromium crash reporting)
+        "discord", "Discord.exe",                 // Discord (Electron)
+        "slack", "Slack.exe",                     // Slack (Electron)
+        "teams", "Teams.exe",                     // Teams (Electron)
+        "svchost", "svchost.exe",                 // Windows service host (WER integration)
+        "rider64", "rider64.exe",                 // JetBrains Rider
+        "idea64", "idea64.exe",                   // JetBrains IntelliJ
+        "pycharm64", "pycharm64.exe",             // JetBrains PyCharm
+        "webstorm64", "webstorm64.exe"            // JetBrains WebStorm
     };
 
     // Track which PIDs we've already alerted on

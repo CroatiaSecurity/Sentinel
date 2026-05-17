@@ -1,197 +1,159 @@
-using System.Diagnostics;
 using System.Runtime.InteropServices;
-using System.Xml;
 using Microsoft.Extensions.Logging;
-using Windows.Data.Xml.Dom;
-using Windows.UI.Notifications;
 
 namespace WindowsSentinel.Core.Notifications;
 
 /// <summary>
 /// Toast Notification Service - Windows native toast notifications for threat alerts.
+/// 
+/// v2.0.0: Fully defensive against missing WinRT APIs (Server Core, IoT, stripped builds).
+/// If Windows.UI.Notifications is unavailable, all methods become no-ops.
 /// </summary>
 public sealed class ToastNotificationService
 {
     private readonly ILogger<ToastNotificationService> _logger;
     private readonly string _appId = "WindowsSentinel.EDR";
+    private readonly bool _toastsAvailable;
 
     public ToastNotificationService(ILogger<ToastNotificationService> logger)
     {
         _logger = logger;
-        
-        // Register notification app if not already registered
-        RegisterAppForNotification();
+        _toastsAvailable = CheckToastAvailability();
+
+        if (!_toastsAvailable)
+        {
+            _logger.LogInformation(
+                "Toast: WinRT notification APIs not available (Server Core / minimal install). " +
+                "Notifications disabled — detections still logged to event log and JSONL.");
+        }
+        else
+        {
+            _logger.LogDebug("Toast: Notification service initialized");
+        }
     }
 
-    /// <summary>
-    /// Shows a threat detected toast notification.
-    /// </summary>
     public void ShowThreatDetected(string ruleName, string processName, int pid, string verdict, string? actionTaken = null)
     {
+        if (!_toastsAvailable) return;
         try
         {
-            var toastXml = ToastNotificationManager.GetTemplateContent(ToastTemplateType.ToastImageAndText04);
-            
+            var toastXml = Windows.UI.Notifications.ToastNotificationManager
+                .GetTemplateContent(Windows.UI.Notifications.ToastTemplateType.ToastText04);
             var textElements = toastXml.GetElementsByTagName("text");
-            textElements[0].AppendChild(toastXml.CreateTextNode($"⚠ {verdict} Threat Detected"));
-            textElements[1].AppendChild(toastXml.CreateTextNode($"{ruleName}"));
-            textElements[2].AppendChild(toastXml.CreateTextNode($"Process: {processName} (PID {pid})"));
-            
-            if (!string.IsNullOrEmpty(actionTaken))
+            var n = textElements.Count;
+            if (n > 0) textElements[0].AppendChild(toastXml.CreateTextNode($"\u26a0 {verdict} Threat Detected"));
+            if (n > 1) textElements[1].AppendChild(toastXml.CreateTextNode(ruleName));
+            if (n > 2)
             {
-                textElements[3]?.AppendChild(toastXml.CreateTextNode($"Action: {actionTaken}"));
+                var detail = $"Process: {processName} (PID {pid})";
+                if (!string.IsNullOrEmpty(actionTaken)) detail += $" | Action: {actionTaken}";
+                textElements[2].AppendChild(toastXml.CreateTextNode(detail));
             }
-
-            var toast = new ToastNotification(toastXml);
-            toast.Tag = "threat";
-            toast.Group = "sentinel";
-            
-            ToastNotificationManager.CreateToastNotifier(_appId).Show(toast);
-            
-            _logger.LogDebug("Toast: Threat notification shown for {Process}", processName);
+            var toast = new Windows.UI.Notifications.ToastNotification(toastXml) { Tag = "threat", Group = "sentinel" };
+            Windows.UI.Notifications.ToastNotificationManager.CreateToastNotifier(_appId).Show(toast);
         }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Toast: Failed to show threat notification");
-        }
+        catch (Exception ex) { _logger.LogDebug(ex, "Toast: show failed (non-critical)"); }
     }
 
-    /// <summary>
-    /// Shows a quarantine notification.
-    /// </summary>
     public void ShowQuarantine(string fileName, string threatName, bool successful)
     {
+        if (!_toastsAvailable) return;
         try
         {
-            var toastXml = ToastNotificationManager.GetTemplateContent(ToastTemplateType.ToastText02);
-            
+            var toastXml = Windows.UI.Notifications.ToastNotificationManager
+                .GetTemplateContent(Windows.UI.Notifications.ToastTemplateType.ToastText02);
             var textElements = toastXml.GetElementsByTagName("text");
+            var n = textElements.Count;
             if (successful)
             {
-                textElements[0].AppendChild(toastXml.CreateTextNode($"✓ Threat Quarantined"));
-                textElements[1].AppendChild(toastXml.CreateTextNode($"{fileName} - {threatName}"));
+                if (n > 0) textElements[0].AppendChild(toastXml.CreateTextNode("\u2713 Threat Quarantined"));
+                if (n > 1) textElements[1].AppendChild(toastXml.CreateTextNode($"{fileName} - {threatName}"));
             }
             else
             {
-                textElements[0].AppendChild(toastXml.CreateTextNode($"⚠ Quarantine Failed"));
-                textElements[1].AppendChild(toastXml.CreateTextNode($"{fileName} - Manual action required"));
+                if (n > 0) textElements[0].AppendChild(toastXml.CreateTextNode("\u26a0 Quarantine Failed"));
+                if (n > 1) textElements[1].AppendChild(toastXml.CreateTextNode($"{fileName} - Manual action required"));
             }
-
-            var toast = new ToastNotification(toastXml);
-            toast.Tag = "quarantine";
-            toast.Group = "sentinel";
-            
-            ToastNotificationManager.CreateToastNotifier(_appId).Show(toast);
+            var toast = new Windows.UI.Notifications.ToastNotification(toastXml) { Tag = "quarantine", Group = "sentinel" };
+            Windows.UI.Notifications.ToastNotificationManager.CreateToastNotifier(_appId).Show(toast);
         }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Toast: Failed to show quarantine notification");
-        }
+        catch (Exception ex) { _logger.LogDebug(ex, "Toast: show failed (non-critical)"); }
     }
 
-    /// <summary>
-    /// Shows a process termination notification.
-    /// </summary>
     public void ShowProcessTerminated(string processName, int pid, string reason)
     {
+        if (!_toastsAvailable) return;
         try
         {
-            var toastXml = ToastNotificationManager.GetTemplateContent(ToastTemplateType.ToastText02);
-            
+            var toastXml = Windows.UI.Notifications.ToastNotificationManager
+                .GetTemplateContent(Windows.UI.Notifications.ToastTemplateType.ToastText02);
             var textElements = toastXml.GetElementsByTagName("text");
-            textElements[0].AppendChild(toastXml.CreateTextNode($"🛡 Process Terminated"));
-            textElements[1].AppendChild(toastXml.CreateTextNode($"{processName} (PID {pid}) - {reason}"));
-
-            var toast = new ToastNotification(toastXml);
-            toast.Tag = "terminated";
-            toast.Group = "sentinel";
-            
-            ToastNotificationManager.CreateToastNotifier(_appId).Show(toast);
+            var n = textElements.Count;
+            if (n > 0) textElements[0].AppendChild(toastXml.CreateTextNode("\U0001f6e1 Process Terminated"));
+            if (n > 1) textElements[1].AppendChild(toastXml.CreateTextNode($"{processName} (PID {pid}) - {reason}"));
+            var toast = new Windows.UI.Notifications.ToastNotification(toastXml) { Tag = "terminated", Group = "sentinel" };
+            Windows.UI.Notifications.ToastNotificationManager.CreateToastNotifier(_appId).Show(toast);
         }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Toast: Failed to show termination notification");
-        }
+        catch (Exception ex) { _logger.LogDebug(ex, "Toast: show failed (non-critical)"); }
     }
 
-    /// <summary>
-    /// Shows a self-protection alert.
-    /// </summary>
     public void ShowSelfProtectionAlert(string threat, string action)
     {
+        if (!_toastsAvailable) return;
         try
         {
-            var toastXml = ToastNotificationManager.GetTemplateContent(ToastTemplateType.ToastText02);
-            
+            var toastXml = Windows.UI.Notifications.ToastNotificationManager
+                .GetTemplateContent(Windows.UI.Notifications.ToastTemplateType.ToastText02);
             var textElements = toastXml.GetElementsByTagName("text");
-            textElements[0].AppendChild(toastXml.CreateTextNode($"🔒 Sentinel Self-Protection"));
-            textElements[1].AppendChild(toastXml.CreateTextNode($"{threat} - {action}"));
-
-            var toast = new ToastNotification(toastXml);
-            toast.Tag = "selfprotection";
-            toast.Group = "sentinel";
-            
-            ToastNotificationManager.CreateToastNotifier(_appId).Show(toast);
+            var n = textElements.Count;
+            if (n > 0) textElements[0].AppendChild(toastXml.CreateTextNode("\U0001f512 Sentinel Self-Protection"));
+            if (n > 1) textElements[1].AppendChild(toastXml.CreateTextNode($"{threat} - {action}"));
+            var toast = new Windows.UI.Notifications.ToastNotification(toastXml) { Tag = "selfprotection", Group = "sentinel" };
+            Windows.UI.Notifications.ToastNotificationManager.CreateToastNotifier(_appId).Show(toast);
         }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Toast: Failed to show self-protection notification");
-        }
+        catch (Exception ex) { _logger.LogDebug(ex, "Toast: show failed (non-critical)"); }
     }
 
-    /// <summary>
-    /// Shows a general info notification.
-    /// </summary>
     public void ShowInfo(string title, string message)
     {
+        if (!_toastsAvailable) return;
         try
         {
-            var toastXml = ToastNotificationManager.GetTemplateContent(ToastTemplateType.ToastText02);
-            
+            var toastXml = Windows.UI.Notifications.ToastNotificationManager
+                .GetTemplateContent(Windows.UI.Notifications.ToastTemplateType.ToastText02);
             var textElements = toastXml.GetElementsByTagName("text");
-            textElements[0].AppendChild(toastXml.CreateTextNode(title));
-            textElements[1].AppendChild(toastXml.CreateTextNode(message));
+            var n = textElements.Count;
+            if (n > 0) textElements[0].AppendChild(toastXml.CreateTextNode(title));
+            if (n > 1) textElements[1].AppendChild(toastXml.CreateTextNode(message));
+            var toast = new Windows.UI.Notifications.ToastNotification(toastXml) { Tag = "info", Group = "sentinel" };
+            Windows.UI.Notifications.ToastNotificationManager.CreateToastNotifier(_appId).Show(toast);
+        }
+        catch (Exception ex) { _logger.LogDebug(ex, "Toast: show failed (non-critical)"); }
+    }
 
-            var toast = new ToastNotification(toastXml);
-            toast.Tag = "info";
-            toast.Group = "sentinel";
-            
-            ToastNotificationManager.CreateToastNotifier(_appId).Show(toast);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Toast: Failed to show info notification");
-        }
+    public void ClearAllNotifications()
+    {
+        if (!_toastsAvailable) return;
+        try { Windows.UI.Notifications.ToastNotificationManager.History.Clear(_appId); }
+        catch { /* best-effort */ }
     }
 
     /// <summary>
-    /// Clears all Sentinel notifications.
+    /// Checks if WinRT toast notification APIs are available on this system.
+    /// Returns false on Server Core, IoT Enterprise LTSC without shell, or stripped builds.
     /// </summary>
-    public void ClearAllNotifications()
+    private bool CheckToastAvailability()
     {
         try
         {
-            ToastNotificationManager.History.Clear(_appId);
-            _logger.LogDebug("Toast: All notifications cleared");
+            // Probe: access ToastNotificationManager — throws on systems without WinRT shell
+            _ = Windows.UI.Notifications.ToastNotificationManager.History;
+            return true;
         }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Toast: Failed to clear notifications");
-        }
-    }
-
-    private void RegisterAppForNotification()
-    {
-        try
-        {
-            // In a real implementation, this would register with the Windows notification system
-            // For now, we rely on the standard ToastNotifier which works for desktop apps
-            _logger.LogDebug("Toast: Notification service initialized");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Toast: Failed to register for notifications");
-        }
+        catch (TypeLoadException) { return false; }
+        catch (FileNotFoundException) { return false; }
+        catch (COMException) { return false; }
+        catch (Exception) { return false; }
     }
 }
 
@@ -204,5 +166,5 @@ public sealed class ToastConfig
     public bool EnableQuarantineToasts { get; set; } = true;
     public bool EnableTerminationToasts { get; set; } = true;
     public bool EnableSelfProtectionToasts { get; set; } = true;
-    public bool EnableInfoToasts { get; set; } = false; // Off by default
+    public bool EnableInfoToasts { get; set; } = false;
 }

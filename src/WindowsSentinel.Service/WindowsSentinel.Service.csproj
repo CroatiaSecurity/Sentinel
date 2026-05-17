@@ -9,11 +9,11 @@
     <Authors>Gorstak</Authors>
     <Company>github.com/tandrlemandrle/Sentinel</Company>
     <Product>Windows Sentinel</Product>
-    <Description>Windows Sentinel Service - v1.9.0 DLL Analysis &amp; Active Response</Description>
-    <Version>1.9.0</Version>
-    <AssemblyVersion>1.9.0.0</AssemblyVersion>
-    <FileVersion>1.9.0.0</FileVersion>
-    <InformationalVersion>1.9.0</InformationalVersion>
+    <Description>Windows Sentinel Service - v2.0.0 Hardened &amp; Portable</Description>
+    <Version>2.0.0</Version>
+    <AssemblyVersion>2.0.0.0</AssemblyVersion>
+    <FileVersion>2.0.0.0</FileVersion>
+    <InformationalVersion>2.0.0</InformationalVersion>
     <!-- ApplicationIcon: add sentinel.ico to installer\assets\ to enable -->
     <ApplicationIcon Condition="Exists('..\..\installer\assets\sentinel.ico')">..\..\installer\assets\sentinel.ico</ApplicationIcon>
     <OutputType>WinExe</OutputType>
