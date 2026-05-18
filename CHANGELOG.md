@@ -1,5 +1,42 @@
 # Changelog
 
+## 2.4.0 — ADS Staging Detection + Agent Architecture (May 2026)
+
+### New: AdsDataStagingMonitor
+Detects large NTFS Alternate Data Streams used to hide exfiltration staging data. ADS are invisible to Explorer, `dir`, and standard file listings — attackers use them to stage hundreds of GBs of stolen data that causes "invisible" disk usage.
+
+**How it works:**
+- Scans high-value directories (Temp, AppData, ProgramData, Public) every 2 minutes
+- Uses `FindFirstStreamW`/`FindNextStreamW` to enumerate ADS on files
+- Flags any non-standard ADS larger than 10 MB (legitimate ADS are always <1 KB)
+- Fires as Tier1Behavioral at 0.80-0.90 confidence
+- Added `"data staging"` to President's Law kill list
+
+### Architecture: User-Session Monitors Moved to Agent
+Monitors that require user-session context have been moved from the SYSTEM service to the Agent process:
+
+**Moved to Agent:**
+- `ClipboardMonitor` — clipboard ownership is per-session
+- `ScreenCaptureMonitor` — window visibility/foreground detection requires user desktop
+- `WebcamMicMonitor` — camera/mic DLL scanning in user processes
+- `AudioHijackMonitor` — audio routing detection
+- `MicSessionMonitor` — WASAPI session enumeration is per-user-session
+
+**Agent now has its own detection pipeline:**
+- `AgentDetectionPipeline` — reads DetectionEngine channel, routes to response engine
+- `AgentResponseEngine` — lightweight response engine with President's Law kill authority
+- `AgentEventLogger` — writes to shared `events.jsonl`
+
+### Fix: MemoryBehaviorAnalyzer virtual memory explosion
+- Added user-mode address space cap (`0x7FFFFFFEFFFF`) to the `VirtualQueryEx` scan loop
+- Fixes the 2.3 TB virtual memory allocation on SentinelService
+
+### Infrastructure
+- All version references bumped to 2.4.0.
+- President's Law fragment list extended with `"data staging"`.
+
+---
+
 ## 2.3.0 — Mic Session Injection Detection (May 2026)
 
 ### New: MicSessionMonitor
@@ -25,7 +62,6 @@ Detects unauthorized processes holding active audio sessions on microphone captu
 
 ### Infrastructure
 - All version references bumped to 2.3.0.
-- DI registration: `MicSessionMonitor` as hosted service.
 - President's Law fragment list extended with `"audio injection"`.
 
 ---

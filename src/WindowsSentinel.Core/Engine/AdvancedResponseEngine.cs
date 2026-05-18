@@ -181,6 +181,7 @@ public sealed class AdvancedResponseEngine : IResponseEngine
         "total av surveillance",
         // Data exfiltration composites (v1.8.0) — only composites kill, never single signals
         "data exfiltration",
+        "data staging",
         "exfiltration: upload service + network",
         "exfiltration: credential theft + network",
         "exfiltration: usb media + network",

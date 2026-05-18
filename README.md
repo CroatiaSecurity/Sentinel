@@ -2,7 +2,7 @@
 
 **Userland EDR for Windows — Behavioral Detection, Automated Response & Aggressive Deception**
 
-> Version: 2.3.0 (Mic Session Injection Detection)  
+> Version: 2.4.0 (ADS Staging + Agent Architecture)  
 > Author: [Gorstak](https://github.com/tandrlemandrle/Sentinel)  
 > License: MIT
 
@@ -306,7 +306,7 @@ All tactics:
 
 ```powershell
 # Run installer as Administrator
-.\WindowsSentinelSetup-2.3.0.exe
+.\WindowsSentinelSetup-2.4.0.exe
 ```
 
 The installer:
@@ -383,7 +383,7 @@ cd installer
 .\build.ps1
 ```
 
-Output: `installer\output\WindowsSentinelSetup-2.3.0.exe`
+Output: `installer\output\WindowsSentinelSetup-2.4.0.exe`
 
 ---
 
@@ -457,7 +457,8 @@ installer/
 | 2.0.0 | Hardened & Portable | Graceful fallbacks for barebone/minimal Windows (Server Core, IoT, stripped builds). UserSessionLauncher no longer crash-loops on missing WTS APIs. Toast notifications bounds-safe. LsassDumpCanary allowlist expanded (Electron, browsers, crash handlers). All P/Invoke wrapped with EntryPointNotFoundException guards. Event Log/Registry monitors degrade gracefully. |
 | 2.1.0 | Community Threat Intel Reporting | ThreatIntelReporter: after confirmed kills, reports attacker C2 IPs to AbuseIPDB, malicious URLs to URLhaus (abuse.ch), hashes to MalwareBazaar. All reporting opt-in, rate-limited (10/hour), never reports private IPs. Exposes attacker infrastructure to authorities and security community. |
 | 2.2.0 | Pre-Kill Validation Gate | AdvancedResponseEngine pre-kill sanity check: before executing a President's Law kill, validates the target is not a user-interactive foreground app running stably for 5+ minutes. Prevents false-positive kills on games (DXGI + network + dbghelp mimics spyware pattern). ScreenCaptureMonitor fix: enumerates all top-level windows via EnumWindows instead of relying on Process.MainWindowHandle (unreliable for fullscreen/multi-window apps). No allowlists added — detection logic improved to distinguish covert threats from visible user applications. |
-| 2.3.0 | Mic Session Injection Detection | MicSessionMonitor: enumerates active WASAPI audio sessions on capture (microphone) endpoints via COM (IMMDeviceEnumerator → IAudioSessionManager2 → IAudioSessionControl2::GetProcessId). Flags background processes holding mic sessions that aren't allowlisted conferencing/recording apps. Catches DLL injection feeding fake audio into mic (deepfake impersonation) without command-line flags or virtual cable software. Added "audio injection" to President's Law kill list. Tier1Behavioral at 0.85 confidence for new participants. |
+| 2.3.0 | Mic Session Injection Detection | MicSessionMonitor: WASAPI capture session enumeration detects unauthorized mic access (deepfake audio injection). Added "audio injection" to President's Law kill list. Tier1Behavioral at 0.85 confidence for new participants. |
+| 2.4.0 | ADS Staging + Agent Architecture | AdsDataStagingMonitor: detects large NTFS Alternate Data Streams used to hide exfiltration staging data (invisible disk fill). User-session monitors (clipboard, screen capture, webcam/mic, audio hijack, mic sessions) moved from SYSTEM service to Agent for correct user-context access. MemoryBehaviorAnalyzer fix: capped VirtualQueryEx scan at user-mode limit (fixes 2.3TB virtual memory). Added "data staging" to President's Law kill list. Agent now has own detection pipeline with kill authority. |
 
 ---
 

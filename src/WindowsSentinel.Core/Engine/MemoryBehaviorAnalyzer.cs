@@ -274,6 +274,8 @@ public sealed class MemoryBehaviorAnalyzer : BackgroundService
                 // Advance to next region
                 address = (IntPtr)((long)mbi.BaseAddress + (long)mbi.RegionSize);
                 if ((long)address < 0) break; // Overflow guard
+                // Cap at user-mode address space limit (128 TB on 64-bit Windows)
+                if ((ulong)(long)address > 0x7FFFFFFEFFFF) break;
             }
 
             // Update profile

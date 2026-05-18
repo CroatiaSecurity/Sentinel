@@ -22,6 +22,7 @@ using WindowsSentinel.Core.Session;
 // 2.1.0 — Community Threat Intelligence Reporting (AbuseIPDB, URLhaus, MalwareBazaar)
 // 2.2.0 — Pre-Kill Validation Gate (prevents killing user-interactive processes)
 // 2.3.0 — Mic Session Injection Detection (WASAPI capture session enumeration)
+// 2.4.0 — ADS Staging Detection + Agent Architecture (user-session monitors moved to Agent)
 
 namespace WindowsSentinel.Core;
 
@@ -31,9 +32,9 @@ namespace WindowsSentinel.Core;
 public static class SentinelVersion
 {
     /// <summary>
-    /// Current version - 2.3.0 Mic Session Injection Detection
+    /// Current version - 2.4.0 ADS Staging + Agent Architecture
     /// </summary>
-    public const string Version = "2.3.0";
+    public const string Version = "2.4.0";
 
     /// <summary>
     /// Release date
@@ -44,13 +45,12 @@ public static class SentinelVersion
     /// Version description
     /// </summary>
     public const string Description =
-        "2.3.0 — Mic Session Injection Detection. " +
-        "New MicSessionMonitor: enumerates active WASAPI audio sessions on capture (microphone) " +
-        "endpoints and flags unauthorized background processes holding mic sessions. " +
-        "Catches DLL injection attacks that feed fake audio into the mic (deepfake impersonation, " +
-        "social engineering) without command-line flags or virtual cable software. " +
-        "Added 'audio injection' to President's Law kill list. " +
-        "Includes all v2.2.0 features (Pre-Kill Validation Gate).";
+        "2.4.0 — ADS Staging Detection + Agent Architecture. " +
+        "New AdsDataStagingMonitor: detects large NTFS Alternate Data Streams used to hide " +
+        "exfiltration staging data (invisible disk fill). User-session monitors (clipboard, " +
+        "screen capture, webcam/mic, audio hijack, mic sessions) moved from SYSTEM service " +
+        "to Agent for correct user-context access. MemoryBehaviorAnalyzer fix: capped " +
+        "VirtualQueryEx scan at user-mode limit. Includes all v2.3.0 features.";
 }
 
 public static class ServiceCollectionExtensions
@@ -301,7 +301,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IMonitor>(sp => sp.GetRequiredService<INetworkMonitor>());
 
         // ── 0.4.0 — Ports from GIDR (security-hardened) ──────────────────────
-        services.AddHostedService<AudioHijackMonitor>();
+        // NOTE: AudioHijackMonitor moved to Agent (v2.3.0 — requires user session)
         services.AddHostedService<RansomwareIoMonitor>();
         services.AddHostedService<MemoryExecutionMonitor>();
         services.AddHostedService<ModuleValidationMonitor>();
@@ -332,8 +332,8 @@ public static class ServiceCollectionExtensions
         // 1.4.0 — CLIPBOARD SECURITY MONITOR
         // ═══════════════════════════════════════════════════════════════════════
 
-        // ── Clipboard Monitor (clipboard hijacking, scraping, exfiltration) ───
-        services.AddHostedService<ClipboardMonitor>();
+        // ── Clipboard Monitor — MOVED TO AGENT (v2.3.0 — requires user session for clipboard ownership) ─
+        // services.AddHostedService<ClipboardMonitor>();
 
         // ── Runtime Module Integrity Monitor (injection, replacement, phantoms) ─
         services.AddHostedService<RuntimeModuleIntegrityMonitor>();
@@ -342,8 +342,8 @@ public static class ServiceCollectionExtensions
         // 1.5.0 — SCREEN CAPTURE & OVERLAY MONITOR
         // ═══════════════════════════════════════════════════════════════════════
 
-        // ── Screen Capture Monitor (DXGI capture, overlay phishing, background grabbers) ─
-        services.AddHostedService<ScreenCaptureMonitor>();
+        // ── Screen Capture Monitor — MOVED TO AGENT (v2.3.0 — requires user session for window enumeration) ─
+        // services.AddHostedService<ScreenCaptureMonitor>();
 
         // ── Local Server Monitor (localhost listeners, mounted ISO/VHD attacks) ─
         services.AddHostedService<LocalServerMonitor>();
@@ -352,11 +352,14 @@ public static class ServiceCollectionExtensions
         // 1.6.0 — WEBCAM & MICROPHONE EXFILTRATION MONITOR
         // ═══════════════════════════════════════════════════════════════════════
 
-        // ── Webcam/Mic Monitor (background camera/mic access, exfiltration composites) ─
-        services.AddHostedService<WebcamMicMonitor>();
+        // ── Webcam/Mic Monitor — MOVED TO AGENT (v2.3.0 — requires user session) ─
+        // services.AddHostedService<WebcamMicMonitor>();
 
-        // ── Mic Session Monitor (v2.3.0 — detects unauthorized processes with active mic sessions) ─
-        services.AddHostedService<MicSessionMonitor>();
+        // ── Mic Session Monitor — MOVED TO AGENT (v2.3.0 — WASAPI requires user session) ─
+        // services.AddHostedService<MicSessionMonitor>();
+
+        // ── ADS Data Staging Monitor (v2.3.0 — detects large NTFS alternate data streams) ─
+        services.AddHostedService<AdsDataStagingMonitor>();
 
         // ═══════════════════════════════════════════════════════════════════════
         // 1.8.0 — DATA EXFILTRATION PREVENTION

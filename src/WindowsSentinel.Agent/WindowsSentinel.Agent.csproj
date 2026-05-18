@@ -8,13 +8,14 @@
     <ApplicationIcon Condition="Exists('..\..\installer\assets\sentinel.ico')">..\..\installer\assets\sentinel.ico</ApplicationIcon>
     <AssemblyName>SentinelAgent</AssemblyName>
     <Authors>Gorstak</Authors>
-    <Version>2.3.0</Version>
+    <Version>2.4.0</Version>
     <RootNamespace>WindowsSentinel.Agent</RootNamespace>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.0" />
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="8.0.0" />
+    <PackageReference Include="System.Management" Version="8.0.0" />
     <ProjectReference Include="..\WindowsSentinel.Core\WindowsSentinel.Core.csproj" />
   </ItemGroup>
 

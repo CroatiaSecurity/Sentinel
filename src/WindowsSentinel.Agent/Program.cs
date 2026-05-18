@@ -3,18 +3,28 @@ using System.Runtime.InteropServices;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using WindowsSentinel.Core;
+using WindowsSentinel.Core.Engine;
+using WindowsSentinel.Core.Interfaces;
+using WindowsSentinel.Core.Models;
+using WindowsSentinel.Core.Monitors;
 using WindowsSentinel.Core.SelfProtection;
 
 namespace WindowsSentinel.Agent;
 
 /// <summary>
-/// Windows Sentinel Agent - Runs in user session for UI interaction and service watchdog.
-/// Launched by the SYSTEM service via CreateProcessAsUser.
+/// Windows Sentinel Agent - Runs in user session for:
+///   1. Service watchdog (heartbeat monitoring + restart)
+///   2. User-session monitors that require user-context access:
+///      - ClipboardMonitor (clipboard ownership is per-session)
+///      - ScreenCaptureMonitor (window enumeration is per-session)
+///      - WebcamMicMonitor (camera/mic DLL scanning in user processes)
+///      - AudioHijackMonitor (audio routing detection)
+///      - MicSessionMonitor (WASAPI session enumeration is per-session)
 ///
-/// v1.0.0 CHANGE: Key Scrambler removed entirely. The fake-keystroke injection approach
-/// was security theater — it only confused primitive loggers and broke legitimate apps.
-/// Keylogger detection is now handled by the service (HardeningModule) via hook enumeration.
-/// The agent's role is now: service watchdog + future UI notifications.
+/// v2.3.0: Moved user-session monitors from Service to Agent. The SYSTEM service
+/// cannot enumerate WASAPI audio sessions, clipboard ownership, or reliably detect
+/// foreground/visible windows in the user's desktop session.
 /// </summary>
 class Program
 {
@@ -43,13 +53,33 @@ class Program
         });
         builder.Logging.SetMinimumLevel(LogLevel.Information);
 
-        // Service watchdog — monitors the service heartbeat file and restarts if stale
+        // ── Core detection infrastructure (lightweight — no scoring/akinator/chain-tracer) ──
+        builder.Services.AddSingleton<IDetectionEngine>(sp =>
+            new DetectionEngine(
+                Enumerable.Empty<IDetectionRule>(),
+                sp.GetRequiredService<ILogger<DetectionEngine>>()));
+        builder.Services.AddSingleton<IEventLogger, AgentEventLogger>();
+        builder.Services.AddSingleton<IResponseEngine, AgentResponseEngine>();
+        // TelemetryFusionEngine is optional for monitors — register as null
+        builder.Services.AddSingleton<TelemetryFusionEngine>(_ => null!);
+
+        // ── User-session monitors ────────────────────────────────────────────
+        builder.Services.AddHostedService<ClipboardMonitor>();
+        builder.Services.AddHostedService<ScreenCaptureMonitor>();
+        builder.Services.AddHostedService<WebcamMicMonitor>();
+        builder.Services.AddHostedService<AudioHijackMonitor>();
+        builder.Services.AddHostedService<MicSessionMonitor>();
+
+        // ── Detection pipeline consumer (reads channel, routes to response engine) ──
+        builder.Services.AddHostedService<AgentDetectionPipeline>();
+
+        // ── Service watchdog ─────────────────────────────────────────────────
         builder.Services.AddHostedService<ServiceWatchdogService>();
 
         var host = builder.Build();
 
         var logger = host.Services.GetRequiredService<ILogger<Program>>();
-        logger.LogInformation("Windows Sentinel Agent v2.3.0 starting in user session");
+        logger.LogInformation("Windows Sentinel Agent v2.4.0 starting in user session (with user-context monitors)");
 
         await host.RunAsync();
 
