@@ -170,6 +170,7 @@ public sealed class AdvancedResponseEngine : IResponseEngine
         "audiohijack",
         "audio hijack",
         "audio routed to microphone",
+        "audio injection",
         // Screen capture / overlay (spyware / phishing)
         "overlay attack",
         "screen exfiltration",

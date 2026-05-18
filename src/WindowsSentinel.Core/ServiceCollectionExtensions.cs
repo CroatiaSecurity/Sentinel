@@ -21,6 +21,7 @@ using WindowsSentinel.Core.Session;
 // 2.0.0 — Hardened & Portable (DLL Analysis, Active Response, Barebone Windows fallbacks)
 // 2.1.0 — Community Threat Intelligence Reporting (AbuseIPDB, URLhaus, MalwareBazaar)
 // 2.2.0 — Pre-Kill Validation Gate (prevents killing user-interactive processes)
+// 2.3.0 — Mic Session Injection Detection (WASAPI capture session enumeration)
 
 namespace WindowsSentinel.Core;
 
@@ -30,9 +31,9 @@ namespace WindowsSentinel.Core;
 public static class SentinelVersion
 {
     /// <summary>
-    /// Current version - 2.2.0 Pre-Kill Validation Gate
+    /// Current version - 2.3.0 Mic Session Injection Detection
     /// </summary>
-    public const string Version = "2.2.0";
+    public const string Version = "2.3.0";
 
     /// <summary>
     /// Release date
@@ -43,14 +44,13 @@ public static class SentinelVersion
     /// Version description
     /// </summary>
     public const string Description =
-        "2.2.0 — Pre-Kill Validation Gate. " +
-        "New pre-kill sanity check in AdvancedResponseEngine: before executing a President's Law kill, " +
-        "validates the target process is not a user-interactive foreground application that has been " +
-        "running stably. Prevents false-positive kills on games, media players, and creative tools " +
-        "whose normal behavior (DXGI + network + dbghelp) mimics threat patterns. " +
-        "Also fixes ScreenCaptureMonitor visible-window detection to enumerate all top-level windows " +
-        "instead of relying solely on Process.MainWindowHandle. " +
-        "Includes all v2.1.0 features (Community Threat Intel Reporting).";
+        "2.3.0 — Mic Session Injection Detection. " +
+        "New MicSessionMonitor: enumerates active WASAPI audio sessions on capture (microphone) " +
+        "endpoints and flags unauthorized background processes holding mic sessions. " +
+        "Catches DLL injection attacks that feed fake audio into the mic (deepfake impersonation, " +
+        "social engineering) without command-line flags or virtual cable software. " +
+        "Added 'audio injection' to President's Law kill list. " +
+        "Includes all v2.2.0 features (Pre-Kill Validation Gate).";
 }
 
 public static class ServiceCollectionExtensions
@@ -354,6 +354,9 @@ public static class ServiceCollectionExtensions
 
         // ── Webcam/Mic Monitor (background camera/mic access, exfiltration composites) ─
         services.AddHostedService<WebcamMicMonitor>();
+
+        // ── Mic Session Monitor (v2.3.0 — detects unauthorized processes with active mic sessions) ─
+        services.AddHostedService<MicSessionMonitor>();
 
         // ═══════════════════════════════════════════════════════════════════════
         // 1.8.0 — DATA EXFILTRATION PREVENTION

@@ -1,5 +1,35 @@
 # Changelog
 
+## 2.3.0 — Mic Session Injection Detection (May 2026)
+
+### New: MicSessionMonitor
+Detects unauthorized processes holding active audio sessions on microphone capture endpoints — the attack vector where an attacker injects a DLL (or runs a hidden tool) that feeds fake audio directly into the mic capture buffer without any command-line flags or virtual cable software.
+
+**How it works:**
+- Enumerates active WASAPI audio sessions on all capture (microphone) devices via COM: `IMMDeviceEnumerator` → `IMMDevice::Activate(IAudioSessionManager2)` → `IAudioSessionEnumerator` → `IAudioSessionControl2::GetProcessId`
+- For each PID holding a mic session, checks:
+  - Is it allowlisted? (conferencing, browsers, recording apps, system audio)
+  - Does it own a visible window? (user is aware of it)
+  - Is it the foreground app?
+- Flags background processes with no visible window that hold mic sessions
+- Tracks session participants over time — a NEW participant appearing on a previously-stable mic endpoint gets higher confidence (0.85)
+- Confirmation threshold: must persist across 2 scan cycles (avoids transient opens)
+
+**What it catches:**
+- DLL injection into any process that then opens a mic session to feed audio
+- Standalone hidden tools writing to mic capture buffer
+- Virtual audio driver abuse from background processes
+- Any unauthorized process with an active mic session
+
+**President's Law:** Added `"audio injection"` to the kill list — this rule can trigger a kill at ≥85% confidence.
+
+### Infrastructure
+- All version references bumped to 2.3.0.
+- DI registration: `MicSessionMonitor` as hosted service.
+- President's Law fragment list extended with `"audio injection"`.
+
+---
+
 ## 2.2.0 — Pre-Kill Validation Gate (May 2026)
 
 ### New: Pre-Kill Validation Gate in AdvancedResponseEngine

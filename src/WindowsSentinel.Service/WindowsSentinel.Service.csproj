@@ -9,11 +9,11 @@
     <Authors>Gorstak</Authors>
     <Company>github.com/tandrlemandrle/Sentinel</Company>
     <Product>Windows Sentinel</Product>
-    <Description>Windows Sentinel Service - v2.2.0 Pre-Kill Validation Gate</Description>
-    <Version>2.2.0</Version>
-    <AssemblyVersion>2.2.0.0</AssemblyVersion>
-    <FileVersion>2.2.0.0</FileVersion>
-    <InformationalVersion>2.2.0</InformationalVersion>
+    <Description>Windows Sentinel Service - v2.3.0 Mic Session Injection Detection</Description>
+    <Version>2.3.0</Version>
+    <AssemblyVersion>2.3.0.0</AssemblyVersion>
+    <FileVersion>2.3.0.0</FileVersion>
+    <InformationalVersion>2.3.0</InformationalVersion>
     <!-- ApplicationIcon: add sentinel.ico to installer\assets\ to enable -->
     <ApplicationIcon Condition="Exists('..\..\installer\assets\sentinel.ico')">..\..\installer\assets\sentinel.ico</ApplicationIcon>
     <OutputType>WinExe</OutputType>

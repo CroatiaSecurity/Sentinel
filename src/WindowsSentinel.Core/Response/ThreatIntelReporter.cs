@@ -69,7 +69,7 @@ public sealed class ThreatIntelReporter : BackgroundService
         {
             Timeout = TimeSpan.FromSeconds(15)
         };
-        _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("WindowsSentinel-EDR/2.2.0");
+        _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("WindowsSentinel-EDR/2.3.0");
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
