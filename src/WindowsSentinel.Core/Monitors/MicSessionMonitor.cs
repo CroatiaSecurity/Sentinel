@@ -55,7 +55,7 @@ public sealed class MicSessionMonitor : BackgroundService
     private readonly ILogger<MicSessionMonitor> _logger;
     private readonly TelemetryFusionEngine? _fusionEngine;
 
-    private static readonly TimeSpan ScanInterval = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan ScanInterval = TimeSpan.FromSeconds(30);
 
     // Track known mic session PIDs — used to detect NEW participants
     private readonly ConcurrentDictionary<int, DateTimeOffset> _knownMicPids = new();
@@ -141,6 +141,15 @@ public sealed class MicSessionMonitor : BackgroundService
     [DllImport("ole32.dll")]
     private static extern int CoCreateInstance(
         ref Guid rclsid, IntPtr pUnkOuter, uint dwClsContext, ref Guid riid, out IntPtr ppv);
+
+    [DllImport("ole32.dll")]
+    private static extern int CoInitializeEx(IntPtr pvReserved, uint dwCoInit);
+
+    [DllImport("ole32.dll")]
+    private static extern void CoUninitialize();
+
+    private const uint COINIT_MULTITHREADED = 0x0;
+    private const uint COINIT_APARTMENTTHREADED = 0x2;
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -347,6 +356,11 @@ public sealed class MicSessionMonitor : BackgroundService
     {
         var pids = new List<int>();
 
+        // WASAPI COM requires COM initialization on the calling thread
+        int coHr = CoInitializeEx(IntPtr.Zero, COINIT_MULTITHREADED);
+        // S_OK (0) or S_FALSE (1) = already initialized — both are fine
+        bool comInitialized = coHr == 0 || coHr == 1;
+
         IntPtr pEnumerator = IntPtr.Zero;
         IntPtr pDevices = IntPtr.Zero;
 
@@ -377,6 +391,9 @@ public sealed class MicSessionMonitor : BackgroundService
             for (int i = 0; i < deviceCount; i++)
             {
                 IntPtr pDevice = IntPtr.Zero;
+                IntPtr pSessionMgr = IntPtr.Zero;
+                IntPtr pSessionEnum = IntPtr.Zero;
+
                 try
                 {
                     // IMMDeviceCollection::Item(i, &pDevice)
@@ -390,86 +407,76 @@ public sealed class MicSessionMonitor : BackgroundService
                     var activate = Marshal.GetDelegateForFunctionPointer<ActivateDelegate>(
                         Marshal.ReadIntPtr(devVtbl, 3 * IntPtr.Size));
 
-                    IntPtr pSessionMgr = IntPtr.Zero;
                     var sessionMgrIid = IID_IAudioSessionManager2;
                     hr = activate(pDevice, ref sessionMgrIid, 0 /* CLSCTX_ALL */, IntPtr.Zero, out pSessionMgr);
                     if (hr != 0 || pSessionMgr == IntPtr.Zero) continue;
 
-                    try
-                    {
-                        // IAudioSessionManager2::GetSessionEnumerator
-                        var mgrVtbl = GetVtblPtr(pSessionMgr);
-                        var getSessionEnum = Marshal.GetDelegateForFunctionPointer<GetSessionEnumeratorDelegate>(
-                            Marshal.ReadIntPtr(mgrVtbl, 5 * IntPtr.Size));
+                    // IAudioSessionManager2::GetSessionEnumerator (slot 5)
+                    var mgrVtbl = GetVtblPtr(pSessionMgr);
+                    var getSessionEnum = Marshal.GetDelegateForFunctionPointer<GetSessionEnumeratorDelegate>(
+                        Marshal.ReadIntPtr(mgrVtbl, 5 * IntPtr.Size));
 
-                        IntPtr pSessionEnum = IntPtr.Zero;
-                        hr = getSessionEnum(pSessionMgr, out pSessionEnum);
-                        if (hr != 0 || pSessionEnum == IntPtr.Zero) continue;
+                    hr = getSessionEnum(pSessionMgr, out pSessionEnum);
+                    if (hr != 0 || pSessionEnum == IntPtr.Zero) continue;
+
+                    // IAudioSessionEnumerator::GetCount
+                    var sessEnumVtbl = GetVtblPtr(pSessionEnum);
+                    var getSessCount = Marshal.GetDelegateForFunctionPointer<GetCountDelegate>(
+                        Marshal.ReadIntPtr(sessEnumVtbl, 3 * IntPtr.Size));
+
+                    hr = getSessCount(pSessionEnum, out int sessionCount);
+                    if (hr != 0) continue;
+
+                    for (int j = 0; j < sessionCount; j++)
+                    {
+                        IntPtr pSessionCtrl = IntPtr.Zero;
+                        IntPtr pSessionCtrl2 = IntPtr.Zero;
 
                         try
                         {
-                            // IAudioSessionEnumerator::GetCount
-                            var sessEnumVtbl = GetVtblPtr(pSessionEnum);
-                            var getSessCount = Marshal.GetDelegateForFunctionPointer<GetCountDelegate>(
-                                Marshal.ReadIntPtr(sessEnumVtbl, 3 * IntPtr.Size));
+                            // IAudioSessionEnumerator::GetSession(j)
+                            var getSession = Marshal.GetDelegateForFunctionPointer<GetSessionDelegate>(
+                                Marshal.ReadIntPtr(sessEnumVtbl, 4 * IntPtr.Size));
+                            hr = getSession(pSessionEnum, j, out pSessionCtrl);
+                            if (hr != 0 || pSessionCtrl == IntPtr.Zero) continue;
 
-                            hr = getSessCount(pSessionEnum, out int sessionCount);
-                            if (hr != 0) continue;
+                            // QI for IAudioSessionControl2
+                            var iidCtrl2 = new Guid("BFB7FF88-7239-4FC9-8FA2-07C950BE9C6D");
+                            var qi = Marshal.GetDelegateForFunctionPointer<QueryInterfaceDelegate>(
+                                Marshal.ReadIntPtr(GetVtblPtr(pSessionCtrl), 0));
+                            hr = qi(pSessionCtrl, ref iidCtrl2, out pSessionCtrl2);
+                            if (hr != 0 || pSessionCtrl2 == IntPtr.Zero) continue;
 
-                            for (int j = 0; j < sessionCount; j++)
+                            // IAudioSessionControl2::GetProcessId (slot 14)
+                            // IUnknown(3) + IAudioSessionControl(9) + GetSessionIdentifier(1) + GetSessionInstanceIdentifier(1) = slot 14
+                            var ctrl2Vtbl = GetVtblPtr(pSessionCtrl2);
+                            var getProcessId = Marshal.GetDelegateForFunctionPointer<GetProcessIdDelegate>(
+                                Marshal.ReadIntPtr(ctrl2Vtbl, 14 * IntPtr.Size));
+                            hr = getProcessId(pSessionCtrl2, out int sessionPid);
+                            if (hr == 0 && sessionPid > 0)
                             {
-                                IntPtr pSessionCtrl = IntPtr.Zero;
-                                try
-                                {
-                                    // IAudioSessionEnumerator::GetSession(j)
-                                    var getSession = Marshal.GetDelegateForFunctionPointer<GetSessionDelegate>(
-                                        Marshal.ReadIntPtr(sessEnumVtbl, 4 * IntPtr.Size));
-                                    hr = getSession(pSessionEnum, j, out pSessionCtrl);
-                                    if (hr != 0 || pSessionCtrl == IntPtr.Zero) continue;
-
-                                    // QI for IAudioSessionControl2
-                                    IntPtr pSessionCtrl2 = IntPtr.Zero;
-                                    var iidCtrl2 = new Guid("BFB7FF88-7239-4FC9-8FA2-07C950BE9C6D");
-                                    var qi = Marshal.GetDelegateForFunctionPointer<QueryInterfaceDelegate>(
-                                        Marshal.ReadIntPtr(GetVtblPtr(pSessionCtrl), 0));
-                                    hr = qi(pSessionCtrl, ref iidCtrl2, out pSessionCtrl2);
-                                    if (hr != 0 || pSessionCtrl2 == IntPtr.Zero) continue;
-
-                                    try
-                                    {
-                                        // IAudioSessionControl2::GetProcessId
-                                        var ctrl2Vtbl = GetVtblPtr(pSessionCtrl2);
-                                        var getProcessId = Marshal.GetDelegateForFunctionPointer<GetProcessIdDelegate>(
-                                            Marshal.ReadIntPtr(ctrl2Vtbl, 14 * IntPtr.Size));
-                                        hr = getProcessId(pSessionCtrl2, out int sessionPid);
-                                        if (hr == 0 && sessionPid > 0)
-                                        {
-                                            pids.Add(sessionPid);
-                                        }
-                                    }
-                                    finally
-                                    {
-                                        Marshal.Release(pSessionCtrl2);
-                                    }
-                                }
-                                finally
-                                {
-                                    if (pSessionCtrl != IntPtr.Zero) Marshal.Release(pSessionCtrl);
-                                }
+                                pids.Add(sessionPid);
                             }
+                        }
+                        catch
+                        {
+                            // Individual session failure — continue to next
                         }
                         finally
                         {
-                            Marshal.Release(pSessionEnum);
+                            if (pSessionCtrl2 != IntPtr.Zero) Marshal.Release(pSessionCtrl2);
+                            if (pSessionCtrl != IntPtr.Zero) Marshal.Release(pSessionCtrl);
                         }
                     }
-                    finally
-                    {
-                        Marshal.Release(pSessionMgr);
-                    }
+                }
+                catch
+                {
+                    // Individual device failure — continue to next
                 }
                 finally
                 {
+                    if (pSessionEnum != IntPtr.Zero) Marshal.Release(pSessionEnum);
+                    if (pSessionMgr != IntPtr.Zero) Marshal.Release(pSessionMgr);
                     if (pDevice != IntPtr.Zero) Marshal.Release(pDevice);
                 }
             }
@@ -482,6 +489,7 @@ public sealed class MicSessionMonitor : BackgroundService
         {
             if (pDevices != IntPtr.Zero) Marshal.Release(pDevices);
             if (pEnumerator != IntPtr.Zero) Marshal.Release(pEnumerator);
+            if (comInitialized) CoUninitialize();
         }
 
         return pids;
