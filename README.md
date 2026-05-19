@@ -2,7 +2,7 @@
 
 **Userland EDR for Windows — Behavioral Detection, Automated Response & Aggressive Deception**
 
-> Version: 2.4.0 (ADS Staging + Agent Architecture)  
+> Version: 2.5.0 (NeuroBehavior Visual Monitor + AudioHijack Enhancement)  
 > Author: [Gorstak](https://github.com/tandrlemandrle/Sentinel)  
 > License: MIT
 
@@ -93,9 +93,10 @@ These rules can trigger immediate process termination + quarantine:
 | Ransomware (Unified) | Shadow copy deletion + bulk renames + I/O rate + 100+ extensions | Behavioral (multi-signal scoring) |
 | Process Injection (Kernel) | VirtualAllocEx, VirtualProtect RWX, MapViewOfSection, QueueUserAPC, SetThreadContext | Kernel ETW (API observation) |
 | Memory Behavior | RWX regions, unbacked executables, shellcode prologues | Behavioral (memory scanning) |
-| Audio/Webcam Hijack | Output-to-mic redirection, virtual audio cable abuse | Behavioral (device state) |
+| Audio/Webcam Hijack | Output-to-mic redirection, virtual audio cable abuse | Behavioral (device state + module analysis) |
 | Self-Protection | AMSI repair, ETW repair, DLL hijacking, config tampering, service tampering | Behavioral (integrity monitoring) |
 | NeuroBehavior Anomaly | Process behavior entropy, multi-vector activity scoring | Behavioral (statistical) |
+| NeuroBehavior Visual | Focus abuse, flash stimulus, topmost abuse, cursor jitter, color distortion | Behavioral (screen/input analysis) |
 | Honeypot Trip | Decoy file access detection | Behavioral (canary) |
 | Transparent Overlay Phishing | WS_EX_LAYERED + WS_EX_TRANSPARENT + WS_EX_TOPMOST from non-allowlisted processes | Behavioral (window enumeration) |
 | Browser DLL Injection (ELF) | ELF-pattern DLLs in browser processes → active unload | Behavioral (module analysis + response) |
@@ -136,6 +137,12 @@ These never kill independently. Multiple Tier2 signals on the same PID within 12
 | Local Server (Mounted Media) | Processes from ISO/VHD/removable media binding listening sockets |
 | Local Server (Staging Path) | Processes from Temp/AppData/Downloads binding ports |
 | Background Webcam/Mic | Camera/microphone DLLs loaded by background processes |
+| NeuroBehavior: Focus Abuse | Process stealing focus >8 times in 10 seconds |
+| NeuroBehavior: Flash Stimulus | Rapid screen brightness oscillation (strobing) |
+| NeuroBehavior: Topmost Abuse | Non-allowlisted process forcing WS_EX_TOPMOST |
+| NeuroBehavior: Cursor Jitter | Rapid programmatic cursor movement (>6 jumps in 10s) |
+| NeuroBehavior: Color Inversion | Screen colors inverted (current ≈ inverse of previous frame) |
+| NeuroBehavior: Screen Distortion | Rapid color channel shifts without inversion |
 
 ### Composite Detections (Behavioral Correlation Engine)
 
@@ -172,8 +179,12 @@ Multiple weak signals within a 120-second window produce high-confidence composi
 | Full Surveillance Suite | 0.94–0.99 | 2+ of (screen, clipboard, audio, webcam) |
 | Camera/Mic Exfiltration: Capture + Network | 0.94 | Background webcam/mic + outbound network |
 | Total AV Surveillance: Camera + Screen | 0.95 | Webcam/mic + screen capture |
+| Sensory Manipulation: Visual + Mic Session | 0.93 | NeuroBehavior visual signal + unauthorized mic session |
+| Sensory Manipulation: Visual + Audio Hijack | 0.94 | NeuroBehavior visual signal + audio output-to-mic routing |
+| Injected Visual Manipulator | 0.92 | Process injection + NeuroBehavior visual manipulation |
+| Coordinated Visual Manipulation Attack | 0.90 | 3+ distinct NeuroBehavior signal types from same process |
 
-Total: 30 composite rules.
+Total: 34 composite rules.
 
 ---
 
@@ -299,6 +310,7 @@ All tactics:
 | DLL Analysis | DiskWideDllScanner | Disk-wide unsigned DLL scanning (all drives) | 1.9.0 |
 | DLL Analysis | DllLoadFailureMonitor | Event Log ID 7 + SideBySide errors | 1.9.0 |
 | DLL Analysis | UacBypassSurfaceMonitor | COM AutoElevation + manifest autoElevate | 1.9.0 |
+| NeuroBehavior | NeuroBehaviorVisualMonitor | Screen capture + foreground window + cursor analysis | 2.5.0 |
 
 ---
 
@@ -306,7 +318,7 @@ All tactics:
 
 ```powershell
 # Run installer as Administrator
-.\WindowsSentinelSetup-2.4.0.exe
+.\WindowsSentinelSetup-2.5.0.exe
 ```
 
 The installer:
@@ -383,7 +395,7 @@ cd installer
 .\build.ps1
 ```
 
-Output: `installer\output\WindowsSentinelSetup-2.4.0.exe`
+Output: `installer\output\WindowsSentinelSetup-2.5.0.exe`
 
 ---
 
@@ -459,6 +471,7 @@ installer/
 | 2.2.0 | Pre-Kill Validation Gate | AdvancedResponseEngine pre-kill sanity check: before executing a President's Law kill, validates the target is not a user-interactive foreground app running stably for 5+ minutes. Prevents false-positive kills on games (DXGI + network + dbghelp mimics spyware pattern). ScreenCaptureMonitor fix: enumerates all top-level windows via EnumWindows instead of relying on Process.MainWindowHandle (unreliable for fullscreen/multi-window apps). No allowlists added — detection logic improved to distinguish covert threats from visible user applications. |
 | 2.3.0 | Mic Session Injection Detection | MicSessionMonitor: WASAPI capture session enumeration detects unauthorized mic access (deepfake audio injection). Added "audio injection" to President's Law kill list. Tier1Behavioral at 0.85 confidence for new participants. |
 | 2.4.0 | ADS Staging + Agent Architecture | AdsDataStagingMonitor: detects large NTFS Alternate Data Streams used to hide exfiltration staging data (invisible disk fill). User-session monitors (clipboard, screen capture, webcam/mic, audio hijack, mic sessions) moved from SYSTEM service to Agent for correct user-context access. MemoryBehaviorAnalyzer fix: capped VirtualQueryEx scan at user-mode limit (fixes 2.3TB virtual memory). Added "data staging" to President's Law kill list. Agent now has own detection pipeline with kill authority. |
+| 2.5.0 | NeuroBehavior Visual + AudioHijack Enhancement | NeuroBehaviorVisualMonitor: ported from Antivirus.ps1, detects focus abuse (>8 focus steals in 10s), flash stimulus (rapid brightness oscillation), topmost abuse (non-allowlisted WS_EX_TOPMOST), cursor jitter (>6 large jumps in 10s), color distortion/inversion. All signals emit as Tier2 advisory — never kill independently, safe for games/browsers. 4 new composite rules: Neuro+MicSession (0.93), Neuro+AudioHijack (0.94), Neuro+Injection (0.92), MultipleNeuroSignals (0.90). AudioHijackMonitor enhanced: no longer requires command-line tokens — detects output-to-mic routing by module analysis alone (background process with audio-out + mic-in modules and no visible window). Total composites: 34. |
 
 ---
 

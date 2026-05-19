@@ -1,5 +1,47 @@
 # Changelog
 
+## 2.5.0 — NeuroBehavior Visual Monitor + AudioHijack Enhancement (May 2026)
+
+### New: NeuroBehaviorVisualMonitor (ported from Antivirus.ps1)
+Detects visual/input manipulation attacks by monitoring the user's screen and input devices. Ported from the original `Invoke-NeuroBehaviorMonitor` in Antivirus.ps1 which was previously lost during the C# port.
+
+**Detections (all Tier2 advisory — never kill independently):**
+- **Focus Abuse** — Process stealing focus >8 times in 10 seconds
+- **Flash Stimulus** — Rapid brightness oscillation (6+ large brightness changes)
+- **Topmost Abuse** — Non-allowlisted process forcing WS_EX_TOPMOST
+- **Cursor Jitter** — Rapid programmatic cursor movement (>6 large jumps in 10s)
+- **Color Inversion** — Screen colors inverted (current ≈ inverse of previous frame)
+- **Screen Distortion** — Rapid color channel shifts without inversion
+
+**Why Tier2:** Games, video players, and browsers legitimately cause rapid brightness changes, topmost windows, and cursor movement. Killing on these alone would destroy the user experience. But combined with other signals (mic session, audio hijack, injection), they produce composite kills.
+
+**Safe for games/browsers:** The Pre-Kill Validation Gate (v2.2.0) provides additional safety — even if a composite fires, user-interactive foreground apps running stably for 5+ minutes are never killed.
+
+### New: 4 Composite Correlation Rules
+| Composite | Confidence | Trigger |
+|-----------|-----------|---------|
+| Sensory Manipulation: Visual + Mic Session | 0.93 | NeuroBehavior signal + unauthorized mic session |
+| Sensory Manipulation: Visual + Audio Hijack | 0.94 | NeuroBehavior signal + audio output-to-mic routing |
+| Injected Visual Manipulator | 0.92 | Process injection + NeuroBehavior visual manipulation |
+| Coordinated Visual Manipulation Attack | 0.90 | 3+ distinct NeuroBehavior signal types from same process |
+
+Total composites: 34.
+
+### Enhanced: AudioHijackMonitor (no longer command-line dependent)
+Previously, the AudioHijackMonitor only fired if it found specific command-line tokens like `-output=mic` or `virtualmic`. This was trivially bypassed by any tool that doesn't advertise its intent in the command line.
+
+**New detection path (module-based):**
+- If a background process (no visible window) loads BOTH audio-output modules AND mic-input modules, AND is not in the allowlist of legitimate audio apps → fires at 0.75 confidence
+- Command-line token detection still works (fires at 0.85 confidence when found)
+- Allowlist covers: Discord, Teams, Zoom, browsers, OBS, Audacity, Spotify, etc.
+
+### Infrastructure
+- All version references bumped to 2.5.0
+- NeuroBehaviorVisualMonitor registered in Agent (requires user session for screen capture, cursor, foreground window)
+- Feeds TelemetryFusionEngine for cross-monitor composite correlation
+
+---
+
 ## 2.4.0 — ADS Staging Detection + Agent Architecture (May 2026)
 
 ### New: AdsDataStagingMonitor

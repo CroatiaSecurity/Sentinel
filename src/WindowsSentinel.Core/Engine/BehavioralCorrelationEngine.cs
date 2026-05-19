@@ -133,7 +133,12 @@ public sealed class BehavioralCorrelationEngine : IAsyncDisposable
                      ?? EvaluateExfilDnsWithNetwork(recent, scopePid)
                      ?? EvaluateSensitiveFileWithNetwork(recent, scopePid)
                      ?? EvaluateRemovableMediaWithNetwork(recent, scopePid)
-                     ?? EvaluateExfilDnsWithSensitiveFile(recent, scopePid);
+                     ?? EvaluateExfilDnsWithSensitiveFile(recent, scopePid)
+                     // v2.5.0 — NeuroBehavior visual manipulation composites
+                     ?? EvaluateNeuroWithMicSession(recent, scopePid)
+                     ?? EvaluateNeuroWithAudioHijack(recent, scopePid)
+                     ?? EvaluateNeuroWithInjection(recent, scopePid)
+                     ?? EvaluateMultipleNeuroSignals(recent, scopePid);
 
         if (composite is null) return;
 
@@ -1219,6 +1224,152 @@ public sealed class BehavioralCorrelationEngine : IAsyncDisposable
             "service domain. This is pre-exfiltration staging — the process is preparing to upload " +
             "stolen data. Kill immediately before the transfer begins.",
             0.94,
+            scopePid,
+            signals.Last().Timestamp);
+    }
+
+    // ── v2.5.0 NeuroBehavior Visual Manipulation Composites ──────────────────
+    // Philosophy: visual manipulation signals (flash, color, focus, cursor) are
+    // individually low-confidence (games/video cause them). But combined with
+    // audio injection, mic sessions, or process injection, they indicate a
+    // coordinated attack on the user's senses.
+
+    /// <summary>
+    /// NeuroBehavior signal + unauthorized mic session = sensory manipulation attack.
+    /// A process is manipulating the screen AND injecting audio into the mic.
+    /// This is the "hypno command" scenario: visual distraction + audio injection.
+    /// </summary>
+    private static DetectionEvent? EvaluateNeuroWithMicSession(
+        IReadOnlyList<Signal> signals, int scopePid)
+    {
+        bool hasNeuro = signals.Any(s =>
+            s.RuleName.Contains("NeuroBehavior") &&
+            s.Metadata.ContainsKey("neuro_signal"));
+
+        bool hasMicSession = signals.Any(s =>
+            s.RuleName.Contains("Mic Session") ||
+            s.RuleName.Contains("Audio Injection"));
+
+        if (!hasNeuro || !hasMicSession) return null;
+
+        var neuroSignals = signals.Where(s => s.RuleName.Contains("NeuroBehavior")).ToList();
+        var neuroTypes = neuroSignals
+            .Select(s => s.Metadata.GetValueOrDefault("neuro_signal", "unknown"))
+            .Distinct().ToList();
+
+        return MakeComposite(
+            "Sensory Manipulation: Visual + Audio Injection [COMPOSITE]",
+            $"NeuroBehavior visual manipulation ({string.Join(", ", neuroTypes)}) detected " +
+            $"alongside unauthorized microphone session. " +
+            $"Signals: {string.Join(", ", signals.Select(s => s.RuleName).Distinct())}",
+            "A process is simultaneously manipulating the user's visual environment (screen " +
+            "flashing, color distortion, focus stealing, or cursor manipulation) AND holding " +
+            "an unauthorized audio session on the microphone. This combination indicates a " +
+            "coordinated sensory manipulation attack — visual distraction paired with audio " +
+            "injection (deepfake voice, subliminal audio, or command injection via mic feed). " +
+            "No legitimate application performs both operations simultaneously.",
+            0.93,
+            scopePid,
+            signals.Last().Timestamp);
+    }
+
+    /// <summary>
+    /// NeuroBehavior signal + audio-to-mic routing = output-to-mic manipulation.
+    /// Visual manipulation combined with audio routing into the mic device.
+    /// </summary>
+    private static DetectionEvent? EvaluateNeuroWithAudioHijack(
+        IReadOnlyList<Signal> signals, int scopePid)
+    {
+        bool hasNeuro = signals.Any(s =>
+            s.RuleName.Contains("NeuroBehavior") &&
+            s.Metadata.ContainsKey("neuro_signal"));
+
+        bool hasAudioHijack = signals.Any(s =>
+            s.RuleName.Contains("AudioHijack") ||
+            s.RuleName.Contains("Audio routed to microphone"));
+
+        if (!hasNeuro || !hasAudioHijack) return null;
+
+        var neuroSignals = signals.Where(s => s.RuleName.Contains("NeuroBehavior")).ToList();
+        var neuroTypes = neuroSignals
+            .Select(s => s.Metadata.GetValueOrDefault("neuro_signal", "unknown"))
+            .Distinct().ToList();
+
+        return MakeComposite(
+            "Sensory Manipulation: Visual + Audio Hijack [COMPOSITE]",
+            $"NeuroBehavior visual manipulation ({string.Join(", ", neuroTypes)}) detected " +
+            $"alongside audio output-to-microphone routing. " +
+            $"Signals: {string.Join(", ", signals.Select(s => s.RuleName).Distinct())}",
+            "A process is manipulating the user's visual environment AND routing audio output " +
+            "into the microphone device. This is a coordinated attack: visual manipulation " +
+            "(flashing, color shifts) combined with audio injection into voice chat. The attacker " +
+            "is using both visual and auditory channels to influence or impersonate.",
+            0.94,
+            scopePid,
+            signals.Last().Timestamp);
+    }
+
+    /// <summary>
+    /// NeuroBehavior signal + process injection = injected visual manipulator.
+    /// A process was injected into AND is now manipulating the screen.
+    /// </summary>
+    private static DetectionEvent? EvaluateNeuroWithInjection(
+        IReadOnlyList<Signal> signals, int scopePid)
+    {
+        bool hasNeuro = signals.Any(s =>
+            s.RuleName.Contains("NeuroBehavior") &&
+            s.Metadata.ContainsKey("neuro_signal"));
+
+        bool hasInjection = signals.Any(s =>
+            s.RuleName.Contains("Injection") ||
+            s.RuleName.Contains("ThreatIntel") ||
+            s.RuleName.Contains("Module Injection"));
+
+        if (!hasNeuro || !hasInjection) return null;
+
+        return MakeComposite(
+            "Injected Visual Manipulator [COMPOSITE]",
+            $"Process injection detected alongside NeuroBehavior visual manipulation. " +
+            $"Signals: {string.Join(", ", signals.Select(s => s.RuleName).Distinct())}",
+            "A process that received injected code is now manipulating the user's visual " +
+            "environment. This indicates malicious code was injected into a legitimate process " +
+            "and is using it to perform visual manipulation (flashing, color distortion, " +
+            "focus stealing). The injection provides stealth; the visual manipulation is the payload.",
+            0.92,
+            scopePid,
+            signals.Last().Timestamp);
+    }
+
+    /// <summary>
+    /// Multiple distinct NeuroBehavior signals from same process = coordinated visual attack.
+    /// If a single process triggers 3+ different neuro detections, it's not accidental.
+    /// </summary>
+    private static DetectionEvent? EvaluateMultipleNeuroSignals(
+        IReadOnlyList<Signal> signals, int scopePid)
+    {
+        var neuroSignals = signals
+            .Where(s => s.RuleName.Contains("NeuroBehavior") && s.Metadata.ContainsKey("neuro_signal"))
+            .ToList();
+
+        var distinctTypes = neuroSignals
+            .Select(s => s.Metadata.GetValueOrDefault("neuro_signal", ""))
+            .Where(s => !string.IsNullOrEmpty(s))
+            .Distinct()
+            .ToList();
+
+        // Need 3+ distinct neuro signal types from same scope
+        if (distinctTypes.Count < 3) return null;
+
+        return MakeComposite(
+            "Coordinated Visual Manipulation Attack [COMPOSITE]",
+            $"Multiple distinct NeuroBehavior signals detected: {string.Join(", ", distinctTypes)}. " +
+            $"Total neuro signals: {neuroSignals.Count} across {distinctTypes.Count} categories.",
+            "A single process or scope triggered 3+ distinct visual manipulation techniques " +
+            "(e.g., flashing + color distortion + focus stealing + cursor jitter). Individual " +
+            "signals are low-confidence, but 3+ distinct techniques from the same source is " +
+            "not accidental — it indicates a coordinated visual manipulation attack designed " +
+            "to disorient, influence, or incapacitate the user.",
+            0.90,
             scopePid,
             signals.Last().Timestamp);
     }

@@ -118,21 +118,44 @@ public sealed class AudioHijackMonitor : BackgroundService
 
                 if (!(hasAudioOut && hasMicIn)) continue;
 
+                // Detection path 1: Command-line tokens (original detection)
                 var cmdLine = TryGetCommandLine(p.Id);
-                if (string.IsNullOrEmpty(cmdLine)) continue;
+                string? matchedToken = null;
+                if (!string.IsNullOrEmpty(cmdLine))
+                {
+                    var lower = cmdLine.ToLowerInvariant();
+                    matchedToken = OutputToMicTokens.FirstOrDefault(t => lower.Contains(t));
+                }
 
-                var lower = cmdLine.ToLowerInvariant();
-                string? token = OutputToMicTokens.FirstOrDefault(t => lower.Contains(t));
-                if (token is null) continue;
+                // Detection path 2: Module-only detection (no command-line required)
+                // If a process loads BOTH audio output AND mic input modules AND is not
+                // in the allowlist of legitimate audio apps, flag it.
+                // This catches tools that don't advertise their intent in command-line args.
+                bool isAllowedAudioApp = IsAllowedAudioProcess(p.ProcessName);
+
+                // Need either a command-line match OR (both module types + not allowlisted + no visible window)
+                if (matchedToken is null && (isAllowedAudioApp || ProcessHasVisibleWindow(p.Id)))
+                    continue;
+
+                // If no command-line token and it IS allowlisted, skip entirely
+                if (matchedToken is null && isAllowedAudioApp)
+                    continue;
 
                 lock (_alertedLock) { _alertedPids.Add(p.Id); }
+
+                var evidence = matchedToken is not null
+                    ? $"Process loads audio-out + mic-in modules and command line contains '{matchedToken}'"
+                    : $"Process loads audio-out + mic-in modules without visible window (background audio routing). " +
+                      $"No command-line token needed — module combination alone indicates output-to-mic routing.";
+
+                var confidence = matchedToken is not null ? 0.85 : 0.75;
 
                 await _engine.EmitAsync(new DetectionEvent
                 {
                     RuleName    = "AudioHijack: Audio routed to microphone",
-                    Evidence    = $"Process loads audio-out + mic-in modules and command line contains '{token}'",
+                    Evidence    = evidence,
                     Reasoning   = "A non-conferencing process routing playback into a mic device is the classic voice-impersonation primitive (virtual cable / stereo mix / loopback). Combined with mic-input modules, it is unlikely to be benign.",
-                    Confidence  = 0.85,
+                    Confidence  = confidence,
                     Tier        = DetectionTier.Tier1Behavioral,
                     ProcessName = p.ProcessName,
                     ProcessId   = p.Id,
@@ -140,8 +163,9 @@ public sealed class AudioHijackMonitor : BackgroundService
                     Metadata    = new Dictionary<string, string>
                     {
                         ["technique"] = "T1123 - Audio Capture (inverse: audio replay to capture device)",
-                        ["matched_token"] = token,
-                        ["module_indicators"] = "audio-out + mic-in"
+                        ["matched_token"] = matchedToken ?? "none (module-based detection)",
+                        ["module_indicators"] = "audio-out + mic-in",
+                        ["detection_method"] = matchedToken is not null ? "cmdline_token" : "module_analysis"
                     }
                 }, cancellationToken);
 
@@ -157,6 +181,36 @@ public sealed class AudioHijackMonitor : BackgroundService
                 if (!p.HasExited) { try { p.Dispose(); } catch { } }
             }
         }
+    }
+
+    /// <summary>
+    /// Processes that legitimately load both audio output and mic input modules.
+    /// These should not be flagged for having both module types.
+    /// </summary>
+    private static bool IsAllowedAudioProcess(string processName)
+    {
+        var name = processName.ToLowerInvariant();
+        return name is "discord" or "teams" or "ms-teams" or "zoom" or "slack"
+            or "skype" or "obs64" or "obs" or "streamlabs" or "audacity"
+            or "chrome" or "msedge" or "firefox" or "brave" or "opera" or "vivaldi"
+            or "spotify" or "vlc" or "wmplayer" or "reaper" or "fl64" or "flstudio"
+            or "ableton live" or "voicemeeter" or "voicemeeterpro"
+            or "audiodg" or "svchost" or "runtimebroker"
+            or "sentinelservice" or "sentinelagent";
+    }
+
+    /// <summary>
+    /// Check if a process has a visible window (user is aware of it).
+    /// Background processes with no window are more suspicious.
+    /// </summary>
+    private static bool ProcessHasVisibleWindow(int pid)
+    {
+        try
+        {
+            using var proc = Process.GetProcessById(pid);
+            return proc.MainWindowHandle != IntPtr.Zero;
+        }
+        catch { return false; }
     }
 
     private static string? TryGetCommandLine(int pid)
