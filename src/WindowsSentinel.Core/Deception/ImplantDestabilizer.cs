@@ -63,6 +63,12 @@ public sealed class ImplantDestabilizer : IDeceptionTactic
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool GetThreadContext(IntPtr hThread, ref CONTEXT lpContext);
 
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern uint SuspendThread(IntPtr hThread);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern uint ResumeThread(IntPtr hThread);
+
     private const uint PROCESS_ALL_ACCESS = 0x001F0FFF;
     private const uint TH32CS_SNAPMODULE = 0x00000008;
     private const uint TH32CS_SNAPTHREAD = 0x00000004;
@@ -101,13 +107,52 @@ public sealed class ImplantDestabilizer : IDeceptionTactic
         public uint dwFlags;
     }
 
-    [StructLayout(LayoutKind.Sequential)]
+    [StructLayout(LayoutKind.Sequential, Size = 1232, Pack = 16)]
     private struct CONTEXT
     {
+        public ulong P1Home;
+        public ulong P2Home;
+        public ulong P3Home;
+        public ulong P4Home;
+        public ulong P5Home;
+        public ulong P6Home;
+
         public uint ContextFlags;
-        // Simplified — we only need RSP for stack location
-        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 1232)]
-        public byte[] RegisterArea;
+        public uint MxCsr;
+
+        public ushort SegCs;
+        public ushort SegDs;
+        public ushort SegEs;
+        public ushort SegFs;
+        public ushort SegGs;
+        public ushort SegSs;
+        public uint EFlags;
+
+        public ulong Dr0;
+        public ulong Dr1;
+        public ulong Dr2;
+        public ulong Dr3;
+        public ulong Dr6;
+        public ulong Dr7;
+
+        public ulong Rax;
+        public ulong Rcx;
+        public ulong Rdx;
+        public ulong Rbx;
+        public ulong Rsp;
+        public ulong Rbp;
+        public ulong Rsi;
+        public ulong Rdi;
+        public ulong R8;
+        public ulong R9;
+        public ulong R10;
+        public ulong R11;
+        public ulong R12;
+        public ulong R13;
+        public ulong R14;
+        public ulong R15;
+
+        public ulong Rip;
     }
 
     public ImplantDestabilizer(ILogger<ImplantDestabilizer> logger)
@@ -153,8 +198,9 @@ public sealed class ImplantDestabilizer : IDeceptionTactic
     }
 
     /// <summary>
-    /// Overwrites the .text section of non-system modules with INT3 (0xCC) instructions.
-    /// If the implant persists and restarts, it crashes immediately on first instruction fetch.
+    /// Overwrites the .text section of non-system modules loaded in the target process's virtual memory with INT3 (0xCC) instructions.
+    /// Note: This stomping affects the current virtual memory space of the process to crash active execution threads;
+    /// it does not modify the persistent binary on disk.
     /// </summary>
     private string? StompMaliciousModules(int pid, string? imagePath)
     {
@@ -193,7 +239,7 @@ public sealed class ImplantDestabilizer : IDeceptionTactic
                 }
 
                 return modulesStomped > 0
-                    ? $"Stomped {modulesStomped} non-system modules with INT3 — implant restart will crash"
+                    ? $"Stomped {modulesStomped} non-system modules with INT3 — implant active execution threads will crash"
                     : null;
             }
             finally
@@ -241,20 +287,31 @@ public sealed class ImplantDestabilizer : IDeceptionTactic
 
                         try
                         {
-                            // Get thread's stack pointer via context
-                            // Write garbage near the stack pointer to corrupt local variables
-                            // and any crash-report data structures
-                            var ctx = new CONTEXT { ContextFlags = CONTEXT_FULL, RegisterArea = new byte[1232] };
-
-                            if (GetThreadContext(hThread, ref ctx))
+                            // Safely suspend thread before querying context on x64
+                            uint suspendResult = SuspendThread(hThread);
+                            if (suspendResult != uint.MaxValue)
                             {
-                                // Write garbage at stack-adjacent regions
-                                // The exact RSP offset is in the register area but we can
-                                // write to the module base regions we already know about
-                                // to corrupt any data structures the implant holds
-                                WriteProcessMemory(hProcess, IntPtr.Zero + (int)te.th32ThreadID * 0x1000,
-                                    garbage, (uint)garbage.Length, out _);
-                                stacksCorrupted++;
+                                try
+                                {
+                                    if (RuntimeInformation.ProcessArchitecture == Architecture.X64)
+                                    {
+                                        var ctx = new CONTEXT { ContextFlags = CONTEXT_FULL };
+                                        if (GetThreadContext(hThread, ref ctx))
+                                        {
+                                            if (ctx.Rsp != 0)
+                                            {
+                                                // Write garbage directly at the thread's stack pointer (Rsp)
+                                                // Stack is PAGE_READWRITE so we write directly.
+                                                WriteProcessMemory(hProcess, (IntPtr)ctx.Rsp, garbage, (uint)garbage.Length, out _);
+                                                stacksCorrupted++;
+                                            }
+                                        }
+                                    }
+                                }
+                                finally
+                                {
+                                    ResumeThread(hThread);
+                                }
                             }
                         }
                         finally

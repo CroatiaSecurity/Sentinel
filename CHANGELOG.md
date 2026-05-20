@@ -1,5 +1,31 @@
 # Changelog
 
+## 2.6.0 — Deception Refinements & Ransomware Fast-Path (May 2026)
+
+### New: Ransomware Response Fast-Path
+Ransomware attacks require immediate containment. In `AdvancedResponseEngine.cs`, we introduced a high-priority bypass for ransomware detections.
+- Checks if the rule name or reasoning contains `"ransomware"`.
+- If matched, the engine completely bypasses the 2-second `DeceptionEngine` window.
+- The process kill proceeds immediately, prioritizing zero-latency termination to protect files on disk.
+
+### Fix: x64 Thread Stack Corruption Bug
+The `ImplantDestabilizer` previously queried thread contexts using a simplified byte-array representation of the `CONTEXT` structure, which suffered from layout misalignment on x64, leading to random access violations and stack corruption.
+- Replaced the byte-array with a fully aligned, 16-byte packed native `CONTEXT` struct.
+- Added `SuspendThread` and `ResumeThread` P/Invokes to safely pause target threads before querying context.
+- Extracted the stack pointer (`Rsp`) directly on x64 processes, enabling precise target writing for stack corruption without causing process instability.
+
+### New: Asynchronous / Background Deception Tactics
+Off-host and network-based deception tactics can take considerable time. Awaiting them sequentially within the 2-second pre-kill budget can delay process termination.
+- Network-based tactics (`BeaconFlooder`, `NetworkHoneypotDeployer`) are now executed asynchronously in the background.
+- They run as fire-and-forget tasks, letting the EDR proceed immediately to the process kill step.
+- Only local-process deception (memory flooding, DLL/module stomping, clipboard/file traps) blocks the kill within the pre-kill window.
+
+### Infrastructure
+- All version references bumped to 2.6.0 across source files, project files, and installers.
+- Released May 20, 2026.
+
+---
+
 ## 2.5.0 — NeuroBehavior Visual Monitor + AudioHijack Enhancement (May 2026)
 
 ### New: NeuroBehaviorVisualMonitor (ported from Antivirus.ps1)

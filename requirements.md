@@ -1,6 +1,6 @@
 # Windows Sentinel — Requirements
 
-**Version: 2.5.0**
+**Version: 2.6.0**
 
 ---
 
@@ -124,6 +124,9 @@ Constraints:
 - Never target own PID or system-critical processes
 - Beacon flooding only targets public IP addresses
 - All actions must be logged before execution
+- Ransomware Fast-Path: If 'ransomware' is detected in rule or reasoning, the pre-kill deception phase is bypassed entirely to prioritize immediate termination.
+- Thread context queries: Context retrieval must suspend target threads on x64 and map to a 16-byte packed native struct to avoid access violations or stack corruption.
+- Async background deception: Off-host and network-based deception tactics (BeaconFlooder, NetworkHoneypotDeployer) run asynchronously in the background, without blocking process termination or consuming the pre-kill budget.
 
 ### FR-7: Logging
 

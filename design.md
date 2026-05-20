@@ -1,6 +1,6 @@
 # Windows Sentinel — Design Document
 
-**Version: 2.5.0**
+**Version: 2.6.0**
 
 ---
 
@@ -245,6 +245,14 @@ Composite detections are emitted as Tier1 `DetectionEvent`s directly into the de
 | `EnvironmentPoisoner` | Corrupts proxy, TLS, and persistence registry settings (HKCU only) |
 | `HoneypotWeaponizer` | Deploys weaponized fake credentials, zip bombs, wallet seeds, VPN configs |
 | `NetworkHoneypotDeployer` | Spins up fake SMB/RDP/HTTP/SSH listeners as lateral movement traps (30min lifetime) |
+
+## Added in 2.6.0
+
+| Component | Purpose |
+|-----------|---------|
+| `Ransomware Fast-Path` | Instantly bypasses the deception engine execution window if "ransomware" is detected in rule or reasoning, terminating processes immediately to minimize encryption speed damage. |
+| `x64 Context Aligned Stack Corruption` | Suspends thread and queries thread context using a native 16-byte packed CONTEXT struct, safely targeting stack pointer (Rsp) on x64 processes. |
+| `Asynchronous Deception` | Refactors execution of off-host/network deception tactics (BeaconFlooder, NetworkHoneypotDeployer) into fire-and-forget background tasks. |
 
 ---
 

@@ -3,7 +3,7 @@
 **Status:** Architecture spec. Extends, does not replace, `requirements.md`,
 `design.md`, `constraints.md` (all v0.9.0).
 
-**Last updated:** v2.5.0 (May 2026) — NeuroBehavior Visual Monitor + AudioHijack Enhancement.
+**Last updated:** v2.6.0 (May 2026) — Deception Refinements & Ransomware Fast-Path.
 
 ---
 

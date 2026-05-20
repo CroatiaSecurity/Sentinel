@@ -600,7 +600,11 @@ public sealed class AdvancedResponseEngine : IResponseEngine
             detection.RuleName, detection.ProcessId);
 
         // ── v1.7.0: Pre-kill deception — poison, destabilize, and flood BEFORE killing ──
-        if (_deceptionEngine != null)
+        // Ransomware has a fast-path bypass: terminate immediately to prevent mass file encryption
+        bool isRansomware = detection.RuleName.Contains("ransomware", StringComparison.OrdinalIgnoreCase) ||
+                            (detection.Reasoning != null && detection.Reasoning.Contains("ransomware", StringComparison.OrdinalIgnoreCase));
+
+        if (_deceptionEngine != null && !isRansomware)
         {
             try
             {
@@ -620,6 +624,10 @@ public sealed class AdvancedResponseEngine : IResponseEngine
                 // Deception failure NEVER prevents the kill
                 _logger.LogDebug(ex, "[DECEPTION] Pre-kill deception failed (non-fatal, proceeding to kill)");
             }
+        }
+        else if (isRansomware)
+        {
+            _logger.LogWarning("[RESPONSE] Ransomware threat detected. Bypassing pre-kill deception engine to minimize file encryption latency.");
         }
 
         ChainTraceResult? chainResult = null;

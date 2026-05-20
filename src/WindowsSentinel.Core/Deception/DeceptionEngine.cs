@@ -109,6 +109,50 @@ public sealed class DeceptionEngine : IDeceptionEngine
                 break;
             }
 
+            // Run network-based and lateral movement deception tactics asynchronously 
+            // in the background without blocking the pre-kill execution path or budget.
+            if (tactic is BeaconFlooder || tactic is NetworkHoneypotDeployer)
+            {
+                _logger.LogWarning("[DECEPTION] Spawning asynchronous background deception tactic: {Tactic}", tactic.GetType().Name);
+                
+                // Fire and forget using Task.Run
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        var tacticSw = Stopwatch.StartNew();
+                        // Use original cancellationToken to avoid being aborted by the 2s pre-kill timeoutCts
+                        var result = await tactic.ExecuteAsync(context, cancellationToken);
+                        tacticSw.Stop();
+                        
+                        if (result.Success)
+                        {
+                            _logger.LogWarning(
+                                "[DECEPTION] [ASYNC] ✓ {Tactic}: {Description} (Duration: {Duration}ms)",
+                                result.TacticName, result.Description, tacticSw.ElapsedMilliseconds);
+                        }
+                        else
+                        {
+                            _logger.LogDebug(
+                                "[DECEPTION] [ASYNC] ✗ {Tactic}: {Error}",
+                                result.TacticName, result.Error);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug(ex, "[DECEPTION] [ASYNC] Tactic {Tactic} failed", tactic.GetType().Name);
+                    }
+                }, cancellationToken);
+
+                results.Add(new DeceptionTacticResult
+                {
+                    TacticName = tactic.GetType().Name,
+                    Success = true,
+                    Description = "Delegated to background execution"
+                });
+                continue;
+            }
+
             try
             {
                 var tacticSw = Stopwatch.StartNew();

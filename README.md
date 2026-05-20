@@ -2,7 +2,7 @@
 
 **Userland EDR for Windows — Behavioral Detection, Automated Response & Aggressive Deception**
 
-> Version: 2.5.0 (NeuroBehavior Visual Monitor + AudioHijack Enhancement)  
+> Version: 2.6.0 (Deception Refinements & Ransomware Fast-Path)  
 > Author: [Gorstak](https://github.com/tandrlemandrle/Sentinel)  
 > License: MIT
 
@@ -318,7 +318,7 @@ All tactics:
 
 ```powershell
 # Run installer as Administrator
-.\WindowsSentinelSetup-2.5.0.exe
+.\WindowsSentinelSetup-2.6.0.exe
 ```
 
 The installer:
@@ -395,7 +395,7 @@ cd installer
 .\build.ps1
 ```
 
-Output: `installer\output\WindowsSentinelSetup-2.5.0.exe`
+Output: `installer\output\WindowsSentinelSetup-2.6.0.exe`
 
 ---
 
@@ -472,6 +472,7 @@ installer/
 | 2.3.0 | Mic Session Injection Detection | MicSessionMonitor: WASAPI capture session enumeration detects unauthorized mic access (deepfake audio injection). Added "audio injection" to President's Law kill list. Tier1Behavioral at 0.85 confidence for new participants. |
 | 2.4.0 | ADS Staging + Agent Architecture | AdsDataStagingMonitor: detects large NTFS Alternate Data Streams used to hide exfiltration staging data (invisible disk fill). User-session monitors (clipboard, screen capture, webcam/mic, audio hijack, mic sessions) moved from SYSTEM service to Agent for correct user-context access. MemoryBehaviorAnalyzer fix: capped VirtualQueryEx scan at user-mode limit (fixes 2.3TB virtual memory). Added "data staging" to President's Law kill list. Agent now has own detection pipeline with kill authority. |
 | 2.5.0 | NeuroBehavior Visual + AudioHijack Enhancement | NeuroBehaviorVisualMonitor: ported from Antivirus.ps1, detects focus abuse (>8 focus steals in 10s), flash stimulus (rapid brightness oscillation), topmost abuse (non-allowlisted WS_EX_TOPMOST), cursor jitter (>6 large jumps in 10s), color distortion/inversion. All signals emit as Tier2 advisory — never kill independently, safe for games/browsers. 4 new composite rules: Neuro+MicSession (0.93), Neuro+AudioHijack (0.94), Neuro+Injection (0.92), MultipleNeuroSignals (0.90). AudioHijackMonitor enhanced: no longer requires command-line tokens — detects output-to-mic routing by module analysis alone (background process with audio-out + mic-in modules and no visible window). Total composites: 34. |
+| 2.6.0 | Deception Refinements & Ransomware Fast-Path | Ransomware Response Fast-Path: immediately kills process chains without running deception. x64 stack corruption fix: corrected context layout for thread stacks with thread suspension. Asynchronous deception: runs off-host and network-based deception (BeaconFlooder, NetworkHoneypotDeployer) asynchronously in the background. |
 
 ---
 

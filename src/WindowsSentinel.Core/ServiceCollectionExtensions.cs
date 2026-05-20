@@ -24,6 +24,7 @@ using WindowsSentinel.Core.Session;
 // 2.3.0 — Mic Session Injection Detection (WASAPI capture session enumeration)
 // 2.4.0 — ADS Staging Detection + Agent Architecture (user-session monitors moved to Agent)
 // 2.5.0 — NeuroBehavior Visual Monitor + AudioHijack module-based detection
+// 2.6.0 — Deception Refinements, Ransomware Fast-Path, Asynchronous Off-host Deception
 
 namespace WindowsSentinel.Core;
 
@@ -33,28 +34,24 @@ namespace WindowsSentinel.Core;
 public static class SentinelVersion
 {
     /// <summary>
-    /// Current version - 2.5.0 NeuroBehavior Visual Monitor + AudioHijack Enhancement
+    /// Current version - 2.6.0 Deception Refinements + Ransomware Fast-Path
     /// </summary>
-    public const string Version = "2.5.0";
+    public const string Version = "2.6.0";
 
     /// <summary>
     /// Release date
     /// </summary>
-    public static readonly DateTime ReleaseDate = new(2026, 5, 19);
+    public static readonly DateTime ReleaseDate = new(2026, 5, 20);
 
     /// <summary>
     /// Version description
     /// </summary>
     public const string Description =
-        "2.5.0 — NeuroBehavior Visual Monitor + AudioHijack Enhancement. " +
-        "New NeuroBehaviorVisualMonitor: ported from Antivirus.ps1, detects focus abuse, " +
-        "flash stimulus, topmost abuse, cursor jitter, and color distortion/inversion. " +
-        "All neuro signals emit as Tier2 advisory — they feed composite correlation but " +
-        "never kill independently (safe for games/browsers). 4 new composite rules: " +
-        "Neuro+MicSession, Neuro+AudioHijack, Neuro+Injection, MultipleNeuroSignals. " +
-        "AudioHijackMonitor enhanced: no longer requires command-line tokens — detects " +
-        "output-to-mic routing by module analysis alone (background process with audio-out " +
-        "+ mic-in modules and no visible window). Includes all v2.4.0 features.";
+        "2.6.0 — Deception Refinements & Ransomware Fast-Path. " +
+        "Ransomware fast-path: immediately kills process chains without running deception. " +
+        "Stack corruption bug fix: corrected context layout for x64 thread stacks with thread suspension. " +
+        "Asynchronous deception: runs off-host/network deception (BeaconFlooder, NetworkHoneypotDeployer) asynchronously without blocking the pre-kill window. " +
+        "Includes all v2.5.0 features.";
 }
 
 public static class ServiceCollectionExtensions

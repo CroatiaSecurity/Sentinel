@@ -1,6 +1,6 @@
 # Windows Sentinel — Threat Model
 
-**Version: 2.5.0**
+**Version: 2.6.0**
 
 This document assumes the attacker has read the source code.
 
@@ -251,3 +251,22 @@ The attacker could theoretically:
 **Mitigation:** All deception actions are logged with full detail. Proxy/TLS poisoning is HKCU-scoped and easily reversed. Fake credential files are clearly named (.bak, backup) and placed in non-standard locations.
 
 **Residual risk:** LOW. The user's legitimate applications are unaffected (they don't read .bak files or backup SSH keys). Proxy poisoning may briefly affect the user's browser until reverted — acceptable tradeoff for breaking C2 reconnection.
+
+---
+
+## Deception Threat Analysis (v2.6.0 Updates)
+
+### B11: Deception time budget delays critical ransomware containment
+**Attack:** Ransomware encrypts files at a high rate. If the EDR delays termination by executing a 2-second pre-kill deception window, more files will be encrypted.
+**Mitigation:** The EDR implements a Ransomware Response Fast-Path. Detections matching "ransomware" in their rule name or reasoning bypass the `DeceptionEngine` completely and proceed immediately to process termination, achieving near-zero latency.
+**Residual risk:** LOW. Bypassing deception is the safest approach for high-speed destructive threats like ransomware.
+
+### B12: Querying thread context causes target process crash or EDR instability
+**Attack:** If thread contexts are queried on x64 without proper structure alignment and thread suspension, it triggers native access violations or stack corruption, potentially causing the EDR process or target system components to crash.
+**Mitigation:** Replaced the unaligned byte-array CONTEXT layout with a fully aligned, 16-byte packed native struct representation of x64 CONTEXT. Target threads are explicitly suspended via `SuspendThread` before context retrieval and resumed via `ResumeThread` immediately after, ensuring safe, stable stack corruption.
+**Residual risk:** LOW. Safe thread state manipulation prevents process corruption.
+
+### B13: Off-host or network deception delays process termination
+**Attack:** Network-based deception tactics (e.g., BeaconFlooder, NetworkHoneypotDeployer) wait on sockets or remote connections, which easily exhausts the 2-second pre-kill budget and delays target process termination.
+**Mitigation:** All network-based and lateral movement deception tactics are executed asynchronously in the background. They run as fire-and-forget background tasks (`Task.Run`), allowing the pre-kill pipeline to immediately proceed with process termination without blocking.
+**Residual risk:** LOW. Network latency cannot affect containment times.

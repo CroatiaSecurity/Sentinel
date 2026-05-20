@@ -1,6 +1,6 @@
 # Windows Sentinel — Constraints
 
-**Version: 2.5.0**
+**Version: 2.6.0**
 
 ---
 
@@ -75,6 +75,9 @@
 | Environment poisoning is HKCU-scoped only | Never modify HKLM (system-wide). Limits blast radius to the compromised user session. |
 | Honeypot files use non-standard names (.bak, backup) | Prevents confusion with real credentials. Legitimate applications won't read these files. |
 | Sparse files and symlinks are deployed in hidden/cache directories | Minimizes user-visible filesystem clutter. |
+| Ransomware bypasses deception | Ransomware kills proceed instantly without running deception tactics to minimize file encryption damage. |
+| Thread suspension for context queries | Thread context queries on x64 must suspend target threads to avoid random access violations or stack corruption. |
+| Async execution for network/off-host deception | Network-based deception (BeaconFlooder, NetworkHoneypotDeployer) must run asynchronously in the background so they do not block process termination or exhaust the pre-kill budget. |
 
 ---
 
