@@ -118,3 +118,4 @@ catch (Exception ex)
     catch { /* Last resort - can't do anything */ }
     throw;
 }
+

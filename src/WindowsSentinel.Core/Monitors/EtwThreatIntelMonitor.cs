@@ -360,3 +360,4 @@ public sealed class ThreatIntelTelemetry
     public required DateTimeOffset       Timestamp       { get; init; }
     public required Dictionary<string, string> RawData   { get; init; }
 }
+

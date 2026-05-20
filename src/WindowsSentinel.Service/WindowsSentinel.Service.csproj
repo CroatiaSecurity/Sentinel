@@ -9,11 +9,11 @@
     <Authors>Gorstak</Authors>
     <Company>github.com/tandrlemandrle/Sentinel</Company>
     <Product>Windows Sentinel</Product>
-    <Description>Windows Sentinel Service - v2.6.0 Deception Refinements + Ransomware Fast-Path</Description>
-    <Version>2.6.0</Version>
-    <AssemblyVersion>2.6.0.0</AssemblyVersion>
-    <FileVersion>2.6.0.0</FileVersion>
-    <InformationalVersion>2.6.0</InformationalVersion>
+    <Description>Windows Sentinel Service - v2.7.0 Deception Refinements + Ransomware Fast-Path</Description>
+    <Version>2.7.0</Version>
+    <AssemblyVersion>2.7.0.0</AssemblyVersion>
+    <FileVersion>2.7.0.0</FileVersion>
+    <InformationalVersion>2.7.0</InformationalVersion>
     <!-- ApplicationIcon: add sentinel.ico to installer\assets\ to enable -->
     <ApplicationIcon Condition="Exists('..\..\installer\assets\sentinel.ico')">..\..\installer\assets\sentinel.ico</ApplicationIcon>
     <OutputType>WinExe</OutputType>
@@ -27,3 +27,4 @@
   </ItemGroup>
 
 </Project>
+

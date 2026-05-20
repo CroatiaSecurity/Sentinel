@@ -297,3 +297,4 @@ internal sealed class IntegrityRecord
     public DateTimeOffset FirstSeen { get; init; }
     public DateTimeOffset LastSeen { get; set; }
 }
+

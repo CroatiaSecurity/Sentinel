@@ -127,3 +127,4 @@ public sealed class SentinelService : BackgroundService
         _logger.LogInformation("=== Windows Sentinel stopped ===");
     }
 }
+

@@ -369,3 +369,4 @@ public sealed class FalsePositiveStatistics
     public int TotalSignerPatterns { get; set; }
     public int TotalPathPatterns { get; set; }
 }
+

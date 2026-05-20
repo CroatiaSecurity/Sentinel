@@ -889,3 +889,4 @@ public enum SandboxVerdict
     Suspicious,
     Malicious
 }
+

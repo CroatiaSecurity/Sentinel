@@ -180,3 +180,4 @@ public sealed class ClipboardPoisonTactic : IDeceptionTactic
         return new string(result);
     }
 }
+

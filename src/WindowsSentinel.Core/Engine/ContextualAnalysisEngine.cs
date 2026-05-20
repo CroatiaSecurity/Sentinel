@@ -493,3 +493,4 @@ public sealed class InstallerContextInfo
     public string CommandLine { get; set; } = "";
     public bool IsInstaller { get; set; }
 }
+

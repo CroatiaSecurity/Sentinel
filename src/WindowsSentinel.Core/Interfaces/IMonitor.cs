@@ -10,3 +10,4 @@ public interface IMonitor : IAsyncDisposable
     Task StartAsync(CancellationToken cancellationToken);
     Task StopAsync(CancellationToken cancellationToken);
 }
+

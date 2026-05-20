@@ -432,3 +432,4 @@ public sealed class EventGraphStats
     public int NetworkNodes { get; init; }
     public int TotalEdges { get; init; }
 }
+

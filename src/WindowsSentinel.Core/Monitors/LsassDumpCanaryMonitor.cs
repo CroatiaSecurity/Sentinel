@@ -240,3 +240,4 @@ public sealed class LsassDumpCanaryMonitor : BackgroundService
         }
     }
 }
+

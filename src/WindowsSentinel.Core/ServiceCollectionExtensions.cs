@@ -24,7 +24,7 @@ using WindowsSentinel.Core.Session;
 // 2.3.0 — Mic Session Injection Detection (WASAPI capture session enumeration)
 // 2.4.0 — ADS Staging Detection + Agent Architecture (user-session monitors moved to Agent)
 // 2.5.0 — NeuroBehavior Visual Monitor + AudioHijack module-based detection
-// 2.6.0 — Deception Refinements, Ransomware Fast-Path, Asynchronous Off-host Deception
+// 2.7.0 — Deception Refinements, Ransomware Fast-Path, Asynchronous Off-host Deception
 
 namespace WindowsSentinel.Core;
 
@@ -34,9 +34,9 @@ namespace WindowsSentinel.Core;
 public static class SentinelVersion
 {
     /// <summary>
-    /// Current version - 2.6.0 Deception Refinements + Ransomware Fast-Path
+    /// Current version - 2.7.0 Deception Refinements + Ransomware Fast-Path
     /// </summary>
-    public const string Version = "2.6.0";
+    public const string Version = "2.7.0";
 
     /// <summary>
     /// Release date
@@ -47,7 +47,7 @@ public static class SentinelVersion
     /// Version description
     /// </summary>
     public const string Description =
-        "2.6.0 — Deception Refinements & Ransomware Fast-Path. " +
+        "2.7.0 — Deception Refinements & Ransomware Fast-Path. " +
         "Ransomware fast-path: immediately kills process chains without running deception. " +
         "Stack corruption bug fix: corrected context layout for x64 thread stacks with thread suspension. " +
         "Asynchronous deception: runs off-host/network deception (BeaconFlooder, NetworkHoneypotDeployer) asynchronously without blocking the pre-kill window. " +
@@ -407,3 +407,4 @@ public static class ServiceCollectionExtensions
         return services;
     }
 }
+

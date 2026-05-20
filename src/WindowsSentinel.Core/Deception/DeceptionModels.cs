@@ -88,3 +88,4 @@ public sealed record DeceptionTacticResult
     /// <summary>Time spent on this tactic.</summary>
     public TimeSpan Duration { get; init; }
 }
+

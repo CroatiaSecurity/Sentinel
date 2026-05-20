@@ -297,3 +297,4 @@ internal sealed class InMemoryEventLogger : WindowsSentinel.Core.Interfaces.IEve
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }
+

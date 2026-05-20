@@ -204,3 +204,4 @@ public sealed class CircuitStatus
         _ => "Unknown"
     };
 }
+

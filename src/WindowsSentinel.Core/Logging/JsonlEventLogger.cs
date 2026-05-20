@@ -246,3 +246,4 @@ public sealed class JsonlEventLogger : IEventLogger
         public required object Data { get; init; }
     }
 }
+

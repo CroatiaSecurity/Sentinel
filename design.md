@@ -1,6 +1,6 @@
 # Windows Sentinel — Design Document
 
-**Version: 2.6.0**
+**Version: 2.7.0**
 
 ---
 
@@ -246,7 +246,7 @@ Composite detections are emitted as Tier1 `DetectionEvent`s directly into the de
 | `HoneypotWeaponizer` | Deploys weaponized fake credentials, zip bombs, wallet seeds, VPN configs |
 | `NetworkHoneypotDeployer` | Spins up fake SMB/RDP/HTTP/SSH listeners as lateral movement traps (30min lifetime) |
 
-## Added in 2.6.0
+## Added in 2.7.0
 
 | Component | Purpose |
 |-----------|---------|
@@ -275,3 +275,4 @@ Composite detections are emitted as Tier1 `DetectionEvent`s directly into the de
 | Process ancestry resolution | ✅ | ✅ |
 | Behavioral correlation | ✅ | ✅ |
 | Statistical beaconing detection | ✅ | ✅ |
+

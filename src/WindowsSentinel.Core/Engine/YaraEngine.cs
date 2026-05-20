@@ -681,3 +681,4 @@ public sealed class YaraMatch
     public string FilePath { get; set; } = "";
     public List<string> Matches { get; set; } = new();
 }
+

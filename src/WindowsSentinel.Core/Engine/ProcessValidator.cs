@@ -1,4 +1,6 @@
+using System.Diagnostics;
 using System.Globalization;
+using System.Runtime.InteropServices;
 using System.Text;
 using Microsoft.Extensions.Logging;
 
@@ -13,6 +15,19 @@ namespace WindowsSentinel.Core.Engine;
 /// </summary>
 public sealed class ProcessValidator
 {
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern bool QueryFullProcessImageName(IntPtr hProcess, int dwFlags, [Out] StringBuilder lpExeName, ref int lpdwSize);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr OpenProcess(int processAccess, bool bInheritHandle, int processId);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CloseHandle(IntPtr hObject);
+
+    private const int PROCESS_QUERY_INFORMATION = 0x0400;
+    private const int PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
+
     private readonly ILogger<ProcessValidator> _logger;
 
     // Unicode characters used for spoofing
@@ -116,6 +131,34 @@ public sealed class ProcessValidator
         // System processes: 0 (idle), 4 (system)
         // Allow some buffer for edge cases but reject obvious invalid values
         return pid > 0 && pid <= 999999;
+    }
+
+    /// <summary>
+    /// Attempts to securely retrieve the full image path for a running PID using native APIs.
+    /// Used as a fallback when ETW or WMI events are missing the ImagePath.
+    /// </summary>
+    public string? TryGetProcessImagePath(int pid)
+    {
+        if (!IsValidPid(pid)) return null;
+
+        IntPtr hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
+        if (hProcess == IntPtr.Zero)
+            return null;
+
+        try
+        {
+            int capacity = 1024;
+            StringBuilder sb = new StringBuilder(capacity);
+            if (QueryFullProcessImageName(hProcess, 0, sb, ref capacity))
+            {
+                return sb.ToString();
+            }
+            return null;
+        }
+        finally
+        {
+            CloseHandle(hProcess);
+        }
     }
 
     /// <summary>
@@ -327,3 +370,4 @@ public sealed class ProcessValidator
         return true;
     }
 }
+

@@ -227,3 +227,4 @@ public sealed class HeartbeatStatistics
     public double DetectionsPerHour => Uptime.TotalHours > 0 ? TotalDetections / Uptime.TotalHours : 0;
     public string Status => Uptime.TotalMinutes > 0 ? "Running" : "Starting";
 }
+

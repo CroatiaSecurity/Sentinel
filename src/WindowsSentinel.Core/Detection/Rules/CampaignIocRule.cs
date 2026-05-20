@@ -338,3 +338,4 @@ public sealed class CampaignIocRule : IDetectionRule
         return null;
     }
 }
+

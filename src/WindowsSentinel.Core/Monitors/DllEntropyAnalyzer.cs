@@ -416,3 +416,4 @@ public sealed class DllEntropyAnalyzer : BackgroundService
         public DateTimeOffset ScannedAt { get; init; }
     }
 }
+

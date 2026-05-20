@@ -117,3 +117,4 @@ public sealed class HighEntropyRule : IDetectionRule
         return entropy;
     }
 }
+

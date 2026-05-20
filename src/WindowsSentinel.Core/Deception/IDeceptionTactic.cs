@@ -12,3 +12,4 @@ public interface IDeceptionTactic
     /// </summary>
     Task<DeceptionTacticResult> ExecuteAsync(DeceptionContext context, CancellationToken cancellationToken);
 }
+

@@ -1,6 +1,6 @@
 # Windows Sentinel — Constraints
 
-**Version: 2.6.0**
+**Version: 2.7.0**
 
 ---
 
@@ -89,3 +89,4 @@
 - Must function as an elevated user (full capability)
 - Log files must not grow unbounded — rotation required (50 MB / 5 files)
 - Detection deduplication required — same signal must not flood the log
+

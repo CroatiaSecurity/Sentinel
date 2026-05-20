@@ -169,3 +169,4 @@ internal sealed class EtwParentRecord
     public int EtwParentPid { get; init; }
     public DateTimeOffset Timestamp { get; init; }
 }
+

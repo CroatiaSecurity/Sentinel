@@ -10,3 +10,4 @@ public enum DetectionTier
     Tier1Behavioral = 1,
     Tier2Indicator  = 2
 }
+

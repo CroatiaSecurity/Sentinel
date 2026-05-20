@@ -272,3 +272,4 @@ internal sealed class IoCSnapshot
 {
     public List<IoCRecord> Records { get; set; } = new();
 }
+

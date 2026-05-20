@@ -30,6 +30,9 @@ public sealed class EtwTamperingRule : IDetectionRule
         "SharpBlock",       // blocks ETW / AMSI in .NET
         "Ghostpack",
         "ConfuserEx",       // .NET obfuscator used to evade AMSI
+        "phollow",
+        "unhook",
+        "amsi.fail"
     };
 
     // ETW patching / disabling patterns.
@@ -44,6 +47,7 @@ public sealed class EtwTamperingRule : IDetectionRule
         "EtwUnregister",
         // Disabling ETW via registry
         "HKLM\\SYSTEM\\CurrentControlSet\\Control\\WMI\\Autologger",
+        "HKLM:\\SYSTEM\\CurrentControlSet\\Control\\WMI\\Autologger"
     };
 
     // AMSI bypass patterns — used to disable script scanning before running malicious PS.
@@ -94,6 +98,9 @@ public sealed class EtwTamperingRule : IDetectionRule
         "cyserver", "cyoptics",         // Cybereason
         "elastic-agent",
         "wdfilter",
+        "MsSense", "senseir",           // Microsoft Defender for Endpoint
+        "sysmon",                       // Sysinternals Sysmon
+        "splunkd", "splunk-optimize"    // Splunk
     };
 
     public DetectionEvent? Evaluate(object telemetry)
@@ -200,3 +207,4 @@ public sealed class EtwTamperingRule : IDetectionRule
         };
     }
 }
+

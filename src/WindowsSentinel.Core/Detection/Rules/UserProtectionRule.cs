@@ -291,3 +291,4 @@ public sealed class UserProtectionRule : IDetectionRule
         return false;
     }
 }
+

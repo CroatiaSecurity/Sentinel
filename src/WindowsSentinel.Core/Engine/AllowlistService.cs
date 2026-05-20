@@ -345,3 +345,4 @@ public sealed class AllowlistData
     public List<AllowlistEntry> Entries { get; set; } = new();
     public DateTimeOffset SavedAt { get; set; }
 }
+

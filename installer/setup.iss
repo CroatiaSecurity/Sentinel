@@ -14,7 +14,7 @@
 ; Output: installer\output\WindowsSentinelSetup.exe
 
 #define AppName      "Windows Sentinel"
-#define AppVersion   "2.6.0"
+#define AppVersion   "2.7.0"
 #define AppPublisher "Gorstak"
 #define AppURL       "https://github.com/tandrlemandrle/Sentinel"
 #define ServiceName  "Windows Sentinel"
@@ -94,6 +94,17 @@ Filename: "{sys}\sc.exe"; Parameters: "delete ""{#ServiceName}"""; Flags: runhid
 ; ── Install and start the new service
 Filename: "{sys}\sc.exe"; Parameters: "create ""{#ServiceName}"" binPath= ""{app}\{#ServiceExe}"" start= auto DisplayName= ""{#AppName}"""; Flags: runhidden waituntilterminated; StatusMsg: "Installing service..."
 Filename: "{sys}\sc.exe"; Parameters: "description ""{#ServiceName}"" ""Windows Sentinel - Endpoint Detection and Response"""; Flags: runhidden waituntilterminated
+
+; ── Tamper Protection (Service ACLs)
+; D:(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)(A;;CCLCSWLOCRRC;;;IU)(A;;CCLCSWLOCRRC;;;SU)
+; Breaks down to:
+; SY (SYSTEM) -> Can start, stop, pause, continue, delete, configure, etc.
+; BA (Built-in Admins) -> Can start, stop, pause, continue, configure, delete
+; Wait, we want to prevent Admins from stopping it. 
+; D:(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCLCSWLOCRRC;;;BA)(A;;CCLCSWLOCRRC;;;IU)(A;;CCLCSWLOCRRC;;;SU)
+; SY: All access. BA/IU/SU: Read/Query only.
+Filename: "{sys}\sc.exe"; Parameters: "sdset ""{#ServiceName}"" D:(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCLCSWLOCRRC;;;BA)(A;;CCLCSWLOCRRC;;;IU)(A;;CCLCSWLOCRRC;;;SU)"; Flags: runhidden waituntilterminated; StatusMsg: "Applying Tamper Protection..."
+
 Filename: "{sys}\sc.exe"; Parameters: "start ""{#ServiceName}"""; Flags: runhidden waituntilterminated; StatusMsg: "Starting service..."
 
 [UninstallRun]

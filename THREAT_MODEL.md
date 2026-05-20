@@ -1,6 +1,6 @@
 # Windows Sentinel — Threat Model
 
-**Version: 2.6.0**
+**Version: 2.7.0**
 
 This document assumes the attacker has read the source code.
 
@@ -254,7 +254,7 @@ The attacker could theoretically:
 
 ---
 
-## Deception Threat Analysis (v2.6.0 Updates)
+## Deception Threat Analysis (v2.7.0 Updates)
 
 ### B11: Deception time budget delays critical ransomware containment
 **Attack:** Ransomware encrypts files at a high rate. If the EDR delays termination by executing a 2-second pre-kill deception window, more files will be encrypted.
@@ -270,3 +270,4 @@ The attacker could theoretically:
 **Attack:** Network-based deception tactics (e.g., BeaconFlooder, NetworkHoneypotDeployer) wait on sockets or remote connections, which easily exhausts the 2-second pre-kill budget and delays target process termination.
 **Mitigation:** All network-based and lateral movement deception tactics are executed asynchronously in the background. They run as fire-and-forget background tasks (`Task.Run`), allowing the pre-kill pipeline to immediately proceed with process termination without blocking.
 **Residual risk:** LOW. Network latency cannot affect containment times.
+

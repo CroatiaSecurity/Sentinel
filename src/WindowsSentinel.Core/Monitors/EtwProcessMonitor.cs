@@ -213,3 +213,4 @@ public sealed class ProcessTelemetry
     public          string ParentProcessName { get; init; } = string.Empty;
     public required DateTimeOffset Timestamp { get; init; }
 }
+

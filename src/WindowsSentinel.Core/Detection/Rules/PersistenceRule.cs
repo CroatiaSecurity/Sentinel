@@ -267,3 +267,4 @@ public sealed class PersistenceRule : IDetectionRule
         return null;
     }
 }
+

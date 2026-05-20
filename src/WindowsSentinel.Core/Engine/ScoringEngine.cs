@@ -384,3 +384,4 @@ public sealed class ProcessThreatProfile
     public bool IsMultiCategoryAttack => UniqueCategories >= 3;
     public bool IsCorroborated => UniqueSources >= 3;
 }
+

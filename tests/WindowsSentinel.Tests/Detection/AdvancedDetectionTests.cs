@@ -421,3 +421,4 @@ internal sealed class CapturingDetectionEngine : IDetectionEngine
         return Task.CompletedTask;
     }
 }
+

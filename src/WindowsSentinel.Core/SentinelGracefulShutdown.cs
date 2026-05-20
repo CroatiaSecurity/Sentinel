@@ -105,3 +105,4 @@ public sealed class ShutdownTask
     public Func<CancellationToken, Task> Task { get; set; } = _ => System.Threading.Tasks.Task.CompletedTask;
     public int Priority { get; set; } = 100;
 }
+

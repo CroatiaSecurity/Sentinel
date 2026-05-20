@@ -10,3 +10,4 @@ public sealed record NetworkConnection
     public required int    ProcessId    { get; init; }
     public required string State        { get; init; }
 }
+

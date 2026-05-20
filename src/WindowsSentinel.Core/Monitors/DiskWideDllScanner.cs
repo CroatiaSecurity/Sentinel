@@ -459,3 +459,4 @@ public sealed class DiskWideDllScanner : BackgroundService
         public DateTimeOffset ScannedAt { get; init; }
     }
 }
+

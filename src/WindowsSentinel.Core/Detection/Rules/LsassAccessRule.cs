@@ -245,3 +245,4 @@ public sealed class LsassAccessRule : IDetectionRule
         return tokens;
     }
 }
+

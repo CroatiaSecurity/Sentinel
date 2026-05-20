@@ -10,3 +10,4 @@ public interface IResponseEngine
 {
     Task HandleAsync(DetectionEvent detection, CancellationToken cancellationToken);
 }
+

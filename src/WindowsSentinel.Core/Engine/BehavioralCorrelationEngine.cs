@@ -1490,3 +1490,4 @@ public sealed class SignalBuffer
         get { lock (_lock) { return _signals.Count == 0; } }
     }
 }
+

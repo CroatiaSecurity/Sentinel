@@ -135,9 +135,16 @@ public sealed class MemoryExecutionRule : IDetectionRule
     private DetectionEvent? CheckFilelessExecution(ProcessTelemetry proc)
     {
         // Check if ImagePath is missing/empty - potential hollowed/injected process
-        if (string.IsNullOrEmpty(proc.ImagePath) || proc.ImagePath == "N/A")
+        string? imagePath = proc.ImagePath;
+        if (string.IsNullOrEmpty(imagePath) || imagePath == "N/A")
         {
-            return new DetectionEvent
+            // Fallback: try to resolve the path natively before firing a detection
+            // to avoid false positives due to delayed ETW image path resolution.
+            imagePath = _processValidator.TryGetProcessImagePath(proc.ProcessId);
+            
+            if (string.IsNullOrEmpty(imagePath))
+            {
+                return new DetectionEvent
             {
                 RuleName = Name,
                 Evidence = $"Process '{proc.ProcessName}' (PID {proc.ProcessId}) has no executable path - " +
@@ -155,10 +162,11 @@ public sealed class MemoryExecutionRule : IDetectionRule
                 {
                     ["DetectionType"] = "FilelessExecution",
                     ["ImagePath"] = proc.ImagePath ?? "null",
+                    ["ResolvedImagePath"] = imagePath ?? "null",
                     ["CommandLine"] = proc.CommandLine?.Substring(0, Math.Min(proc.CommandLine?.Length ?? 0, 500)) ?? "",
-                    ["ParentProcessId"] = proc.ParentProcessId.ToString()
                 }
             };
+            }
         }
 
         return null;
@@ -290,6 +298,7 @@ public sealed class MemoryExecutionRule : IDetectionRule
 
         bool isSuspiciousParent = SuspiciousParents.Contains(proc.ParentProcessName);
         bool isScriptProcess = proc.ProcessName.Contains("powershell") ||
+                               proc.ProcessName.Contains("pwsh") ||
                                proc.ProcessName.Contains("cmd") ||
                                proc.ProcessName.Contains("wscript") ||
                                proc.ProcessName.Contains("cscript") ||
@@ -337,3 +346,4 @@ public sealed class MemoryExecutionRule : IDetectionRule
         return null;
     }
 }
+

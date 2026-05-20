@@ -262,3 +262,4 @@ public sealed class RansomwareBehaviorRule : IDetectionRule
         public DateTime LastUpdate { get; set; } = DateTime.UtcNow;
     }
 }
+

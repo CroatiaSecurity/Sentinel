@@ -1,6 +1,6 @@
 # Windows Sentinel — Requirements
 
-**Version: 2.6.0**
+**Version: 2.7.0**
 
 ---
 
@@ -194,3 +194,4 @@ The CLI must support:
 - Beacon flooding must only target public IP addresses (never private/loopback)
 - All deception actions must be logged with full detail for forensic review and reversal
 - Honeypot files must use non-standard names to avoid confusion with real credentials
+

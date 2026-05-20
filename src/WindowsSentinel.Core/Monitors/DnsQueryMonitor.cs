@@ -415,3 +415,4 @@ internal sealed class DnsQueryStats
     public DateTimeOffset LastQuery { get; set; } = DateTimeOffset.UtcNow;
     public System.Collections.Concurrent.ConcurrentQueue<string> RecentDomains { get; } = new();
 }
+

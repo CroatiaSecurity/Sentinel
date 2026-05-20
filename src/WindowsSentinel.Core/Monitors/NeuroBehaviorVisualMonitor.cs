@@ -648,3 +648,4 @@ public sealed class NeuroBehaviorVisualMonitor : BackgroundService
         public DateTimeOffset FirstSeen = DateTimeOffset.UtcNow;
     }
 }
+

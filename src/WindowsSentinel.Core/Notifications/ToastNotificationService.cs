@@ -168,3 +168,4 @@ public sealed class ToastConfig
     public bool EnableSelfProtectionToasts { get; set; } = true;
     public bool EnableInfoToasts { get; set; } = false;
 }
+

@@ -219,3 +219,4 @@ public sealed class CampaignDetectionRule : IDetectionRule
         public string[] MitreTechniques { get; set; } = Array.Empty<string>();
     }
 }
+

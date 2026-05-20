@@ -629,3 +629,4 @@ public sealed class QuarantineAnalysis
         _ => IsPacked ? "Packed (Possible Obfuscation)" : "Clean"
     };
 }
+

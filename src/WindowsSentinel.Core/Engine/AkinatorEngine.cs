@@ -444,3 +444,4 @@ public enum AkinatorVerdict
     HighRisk,   // 65-79
     Critical    // 80-100
 }
+

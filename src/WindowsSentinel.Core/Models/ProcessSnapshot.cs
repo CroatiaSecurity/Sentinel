@@ -10,3 +10,4 @@ public sealed record ProcessSnapshot
     public required bool   IsSigned    { get; init; }
     public required DateTimeOffset StartTime { get; init; }
 }
+

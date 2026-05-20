@@ -480,3 +480,4 @@ public sealed class BaselineStatistics
 
     public double EstablishedRatio => KnownProcesses > 0 ? (double)EstablishedProcesses / KnownProcesses : 0;
 }
+

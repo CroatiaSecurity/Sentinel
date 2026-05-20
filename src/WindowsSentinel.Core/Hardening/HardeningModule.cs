@@ -754,3 +754,4 @@ public sealed class HardeningOptions
     public bool EnableRegistrySecurityMonitor { get; set; } = true;
     public bool EnableUSBDeviceMonitor { get; set; } = true;
 }
+

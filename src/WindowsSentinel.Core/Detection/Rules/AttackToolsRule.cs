@@ -366,3 +366,4 @@ public sealed class AttackToolsRule : IDetectionRule
         return null;
     }
 }
+

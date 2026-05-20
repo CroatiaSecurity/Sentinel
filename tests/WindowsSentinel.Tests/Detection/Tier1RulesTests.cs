@@ -750,3 +750,4 @@ public sealed class Tier1RulesTests
         Assert.Equal(DetectionTier.Tier1Behavioral, result!.Tier);
     }
 }
+

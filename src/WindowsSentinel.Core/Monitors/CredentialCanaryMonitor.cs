@@ -284,3 +284,4 @@ public sealed class CredentialCanaryMonitor : BackgroundService
         return $"{CanaryTarget}|{CanaryUsername}|{CanaryPassword.Length}";
     }
 }
+

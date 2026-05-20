@@ -665,3 +665,4 @@ public sealed class SelfProtectionService : BackgroundService
         await base.StopAsync(cancellationToken);
     }
 }
+

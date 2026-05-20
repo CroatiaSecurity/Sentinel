@@ -637,3 +637,4 @@ public sealed class MitreSummaryReport
     public List<KeyValuePair<string, int>> TopTactics { get; set; } = new();
     public DateTimeOffset GeneratedAt { get; set; }
 }
+

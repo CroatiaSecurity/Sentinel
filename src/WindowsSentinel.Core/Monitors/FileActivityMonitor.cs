@@ -192,3 +192,4 @@ public sealed class FileActivityTelemetry
     public required DateTimeOffset Timestamp    { get; init; }
     public Dictionary<string, string> Metadata  { get; init; } = new();
 }
+

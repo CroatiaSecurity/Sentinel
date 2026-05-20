@@ -62,3 +62,4 @@ internal sealed class AgentEventLogger : IEventLogger
         }
     }
 }
+

@@ -18,3 +18,4 @@ public sealed record DetectionEvent
     /// <summary>Optional extra context (e.g. network endpoint, file path).</summary>
     public Dictionary<string, string> Metadata { get; init; } = new();
 }
+

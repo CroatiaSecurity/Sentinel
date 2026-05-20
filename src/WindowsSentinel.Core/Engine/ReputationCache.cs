@@ -402,3 +402,4 @@ internal sealed class ReputationCacheFile
 {
     public List<ReputationEntry> Entries { get; set; } = new();
 }
+

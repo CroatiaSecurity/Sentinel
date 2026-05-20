@@ -73,26 +73,43 @@ public sealed class AdvancedResponseEngine : IResponseEngine
 
     public async Task HandleAsync(DetectionEvent detection, CancellationToken cancellationToken)
     {
-        // Record detection in heartbeat
-        _heartbeat?.RecordDetection();
+        // Enforce a strict 2000ms global timeout for the entire evaluation and response pipeline
+        using var pipelineCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        pipelineCts.CancelAfter(TimeSpan.FromMilliseconds(2000));
+        var token = pipelineCts.Token;
 
-        // Check reputation cache first
-        if (CheckReputationCache(detection))
+        try
         {
-            // Known safe file - reduce priority
-            _logger.LogDebug("[REPUTATION] {Rule} detected but file has good reputation - reducing priority", 
-                detection.RuleName);
-        }
+            // Record detection in heartbeat
+            _heartbeat?.RecordDetection();
 
-        // Tier2 is ALWAYS log-only — no exceptions
-        if (detection.Tier == DetectionTier.Tier2Indicator)
+            // Check reputation cache first
+            if (CheckReputationCache(detection))
+            {
+                // Known safe file - reduce priority
+                _logger.LogDebug("[REPUTATION] {Rule} detected but file has good reputation - reducing priority", 
+                    detection.RuleName);
+            }
+
+            // Tier2 is ALWAYS log-only — no exceptions
+            if (detection.Tier == DetectionTier.Tier2Indicator)
+            {
+                await HandleTier2Async(detection, token);
+                return;
+            }
+
+            // Tier1 behavioral — calculate score and determine response
+            await HandleTier1Async(detection, token);
+        }
+        catch (OperationCanceledException)
         {
-            await HandleTier2Async(detection, cancellationToken);
-            return;
+            _logger.LogError("[TIMEOUT] AdvancedResponseEngine pipeline timed out after 2000ms for PID {Pid} / Rule: {Rule}",
+                detection.ProcessId, detection.RuleName);
         }
-
-        // Tier1 behavioral — calculate score and determine response
-        await HandleTier1Async(detection, cancellationToken);
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[ERROR] AdvancedResponseEngine failed processing detection for PID {Pid}", detection.ProcessId);
+        }
     }
 
     private bool CheckReputationCache(DetectionEvent detection)
@@ -914,3 +931,4 @@ public sealed class AdvancedResponseEngine : IResponseEngine
         };
     }
 }
+

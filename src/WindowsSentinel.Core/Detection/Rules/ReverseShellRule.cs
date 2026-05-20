@@ -416,3 +416,4 @@ public sealed class ReverseShellRule : IDetectionRule
         return totalChars > 0 && (double)base64Chars / totalChars > 0.9;
     }
 }
+

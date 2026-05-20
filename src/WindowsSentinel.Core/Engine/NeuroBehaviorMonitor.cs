@@ -422,3 +422,4 @@ public sealed class NeuroBehaviorStats
     public int HighAnomalyProcesses { get; set; }
     public double AverageEntropy { get; set; }
 }
+

@@ -484,3 +484,4 @@ public sealed class MemoryAnalyzerStats
     public int CleanProcesses { get; init; }
     public int SuspiciousProcesses { get; init; }
 }
+

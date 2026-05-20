@@ -308,3 +308,4 @@ public sealed class ProxyConfiguration
         ? $"Proxy enabled: {ProxyServer} {(IsSuspicious ? "[SUSPICIOUS]" : "")}"
         : "No proxy configured";
 }
+

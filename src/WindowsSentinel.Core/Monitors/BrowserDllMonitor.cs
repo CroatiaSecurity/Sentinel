@@ -376,3 +376,4 @@ public sealed class BrowserDllMonitor : BackgroundService
         public bool IsElfPattern { get; init; }
     }
 }
+

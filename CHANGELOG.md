@@ -1,5 +1,25 @@
 # Changelog
 
+## 2.7.0 — Tamper Protection & Pipeline Resilience (May 2026)
+
+### Security: Service ACL Tamper Protection
+- Introduced strict Security Descriptors (SDDL) in `setup.iss` to protect the Sentinel Service from being stopped or modified by standard local administrators.
+- The service can now only be stopped by `SYSTEM`, mitigating `net stop` and `taskkill` evasion attempts by attackers who have bypassed UAC but lack SYSTEM privileges.
+
+### Reliability: Pipeline & Deception Timeouts
+- **Global Pipeline Timeout:** Added a strict 2000ms `CancellationToken` wrapper in `AdvancedResponseEngine.cs` to prevent the agent from hanging due to ReDoS or locked files during the evaluation and response phase.
+- **Background Deception Timeout:** Added a 10-second `CancellationToken` to asynchronous network deception tasks (`BeaconFlooder`, `NetworkHoneypotDeployer`) in `DeceptionEngine.cs` to prevent thread pool exhaustion from hanging sockets.
+
+### Detection Rule Enhancements
+- **MemoryExecutionRule:** Added coverage for `pwsh.exe` (PowerShell Core). Replaced naive empty-path checks with a native `QueryFullProcessImageName` fallback in `ProcessValidator` to prevent false positives from ETW delays.
+- **EtwTamperingRule:** Added missing EDR tools (`MsSense.exe`, `senseir.exe`, `sysmon.exe`, Splunk). Fixed registry pattern to catch PSDrive variations (`HKLM:\SYSTEM\...`). Added evasion patterns `phollow`, `unhook`, and `amsi.fail`.
+
+### Infrastructure
+- All version references bumped to 2.7.0.
+- Released May 20, 2026.
+
+---
+
 ## 2.6.0 — Deception Refinements & Ransomware Fast-Path (May 2026)
 
 ### New: Ransomware Response Fast-Path
@@ -654,3 +674,4 @@ All new anti-APT monitors (DNS, PPID spoof, token integrity, credential canary, 
 ### Architecture
 - All detection and hardening logic built into C# binary (no external PowerShell scripts required).
 - ConsultantSignalIngestor retained for optional external integration.
+

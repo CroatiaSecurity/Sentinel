@@ -377,3 +377,4 @@ internal static class NativeMethods
         public uint   OwningPid;
     }
 }
+

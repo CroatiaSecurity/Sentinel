@@ -348,3 +348,4 @@ public sealed class SecureCacheStore
         }
     }
 }
+

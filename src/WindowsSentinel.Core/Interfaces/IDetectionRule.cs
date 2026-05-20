@@ -28,3 +28,4 @@ public interface IAsyncDetectionRule : IDetectionRule
     /// </summary>
     Task<DetectionEvent?> EvaluateAsync(object telemetry, CancellationToken cancellationToken);
 }
+

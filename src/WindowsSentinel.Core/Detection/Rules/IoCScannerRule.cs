@@ -86,3 +86,4 @@ public sealed class IoCScannerRule : IDetectionRule
         return Convert.ToHexString(sha.ComputeHash(fs));
     }
 }
+

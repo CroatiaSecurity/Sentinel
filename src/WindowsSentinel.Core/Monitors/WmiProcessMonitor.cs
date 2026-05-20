@@ -127,3 +127,4 @@ public sealed class WmiProcessMonitor : IAsyncDisposable
         _cts?.Dispose();
     }
 }
+

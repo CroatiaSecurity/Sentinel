@@ -380,3 +380,4 @@ public sealed class HollowProcessTelemetry
     public required double Confidence   { get; init; }
     public required DateTimeOffset Timestamp { get; init; }
 }
+

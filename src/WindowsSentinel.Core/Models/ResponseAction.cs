@@ -18,3 +18,4 @@ public sealed record ResponseAction
     public required DateTimeOffset     Timestamp   { get; init; }
     public string? Notes { get; init; }
 }
+

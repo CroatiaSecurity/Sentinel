@@ -282,3 +282,4 @@ public sealed class CrudePayloadAnalysis
         ? $"{Verdict} - Score: {SuspicionScore}/100, {Indicators.Count} indicators"
         : $"{Verdict} - Score: {SuspicionScore}/100";
 }
+

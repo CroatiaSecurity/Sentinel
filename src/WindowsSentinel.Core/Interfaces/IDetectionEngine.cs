@@ -20,3 +20,4 @@ public interface IDetectionEngine
     /// </summary>
     Task EmitAsync(DetectionEvent detection, CancellationToken cancellationToken);
 }
+

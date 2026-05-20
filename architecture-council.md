@@ -3,7 +3,7 @@
 **Status:** Architecture spec. Extends, does not replace, `requirements.md`,
 `design.md`, `constraints.md` (all v0.9.0).
 
-**Last updated:** v2.6.0 (May 2026) — Deception Refinements & Ransomware Fast-Path.
+**Last updated:** v2.7.0 (May 2026) — Deception Refinements & Ransomware Fast-Path.
 
 ---
 
@@ -254,3 +254,4 @@ additive Councilor wiring.
 - **ADS round-trip / HMAC tamper / expiry** as standard.
 - **Signed-doing-ransomware:** ADS-`safe` PID exhibiting
   `RansomwareDetection` mass-write → still killed.
+

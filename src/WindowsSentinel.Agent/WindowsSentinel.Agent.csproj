@@ -8,7 +8,7 @@
     <ApplicationIcon Condition="Exists('..\..\installer\assets\sentinel.ico')">..\..\installer\assets\sentinel.ico</ApplicationIcon>
     <AssemblyName>SentinelAgent</AssemblyName>
     <Authors>Gorstak</Authors>
-    <Version>2.6.0</Version>
+    <Version>2.7.0</Version>
     <RootNamespace>WindowsSentinel.Agent</RootNamespace>
   </PropertyGroup>
 
@@ -20,3 +20,4 @@
   </ItemGroup>
 
 </Project>
+

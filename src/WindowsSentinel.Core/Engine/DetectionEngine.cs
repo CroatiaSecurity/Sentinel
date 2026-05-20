@@ -124,3 +124,4 @@ public sealed class DetectionEngine : IDetectionEngine, IAsyncDisposable
         return ValueTask.CompletedTask;
     }
 }
+

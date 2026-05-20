@@ -318,3 +318,4 @@ public sealed class RansomwareDetectionRule : IDetectionRule
         public DateTime LastUpdate { get; set; } = DateTime.UtcNow;
     }
 }
+

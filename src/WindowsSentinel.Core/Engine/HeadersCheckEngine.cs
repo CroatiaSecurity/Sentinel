@@ -478,3 +478,4 @@ public sealed class HeaderAnalysisResult
         ? $"SUSPICIOUS {DetectedType}: {string.Join(", ", Anomalies.Take(3))}"
         : $"{DetectedType} - {(IsValidStructure ? "Valid" : "Invalid")} structure";
 }
+

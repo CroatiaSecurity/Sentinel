@@ -180,3 +180,4 @@ public sealed class SuspiciousImportsRule : IDetectionRule
         return null;
     }
 }
+

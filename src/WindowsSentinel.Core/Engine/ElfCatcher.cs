@@ -196,3 +196,4 @@ public sealed class ElfAnalysisResult
         ? $"SUSPICIOUS {Type} ({Bitness} {Architecture}) - {SuspicionReason}"
         : $"{Type} ({Bitness} {Architecture})";
 }
+

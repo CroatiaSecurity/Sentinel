@@ -741,3 +741,4 @@ public sealed class YaraXMatch
     public string FilePath { get; set; } = "";
     public Dictionary<string, string> Metadata { get; set; } = new();
 }
+

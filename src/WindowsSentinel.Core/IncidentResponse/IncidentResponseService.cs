@@ -832,3 +832,4 @@ public sealed class ProcessSnapshot
     public DateTime StartTime { get; set; }
     public string? CommandLine { get; set; }
 }
+

@@ -529,3 +529,4 @@ public sealed class ClipboardMonitor : BackgroundService
         public List<DateTimeOffset> SequenceChanges { get; } = new();
     }
 }
+

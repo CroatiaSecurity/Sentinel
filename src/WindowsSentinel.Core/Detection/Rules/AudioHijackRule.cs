@@ -210,3 +210,4 @@ public sealed class AudioHijackRule : IDetectionRule
         return dlls;
     }
 }
+

@@ -249,3 +249,4 @@ public sealed class ConsultantSignalIngestor : BackgroundService
         }
     }
 }
+

@@ -161,3 +161,4 @@ public sealed class ProcessInjectionRule : IDetectionRule
         return null;
     }
 }
+
