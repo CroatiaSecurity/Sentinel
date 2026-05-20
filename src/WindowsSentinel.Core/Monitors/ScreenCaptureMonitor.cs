@@ -697,3 +697,4 @@ public sealed class ScreenCaptureMonitor : BackgroundService
     }
 }
 
+

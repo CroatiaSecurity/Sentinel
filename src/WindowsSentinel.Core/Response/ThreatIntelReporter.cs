@@ -69,7 +69,7 @@ public sealed class ThreatIntelReporter : BackgroundService
         {
             Timeout = TimeSpan.FromSeconds(15)
         };
-        _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("WindowsSentinel-EDR/2.7.0");
+        _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("WindowsSentinel-EDR/2.8.0");
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -403,4 +403,5 @@ public sealed class ThreatReportingConfig
     /// <summary>Whether to report C2 URLs to URLhaus.</summary>
     public bool ReportToUrlhaus { get; set; } = true;
 }
+
 

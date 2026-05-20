@@ -18,6 +18,8 @@ namespace WindowsSentinel.Core.Engine;
 /// </summary>
 public sealed class AdvancedResponseEngine : IResponseEngine
 {
+    [DllImport("ntdll.dll", PreserveSig = false)]
+    public static extern void NtSuspendProcess(IntPtr processHandle);
     private readonly IEventLogger _eventLogger;
     private readonly ILogger<AdvancedResponseEngine> _logger;
     private readonly ScoringEngine _scoringEngine;
@@ -788,8 +790,19 @@ public sealed class AdvancedResponseEngine : IResponseEngine
             }
 
             _logger.LogCritical(
-                "[RESPONSE] Terminating process {Name} (PID {Pid}) and its children",
+                "[RESPONSE] Suspending and terminating process {Name} (PID {Pid}) and its children",
                 process.ProcessName, detection.ProcessId);
+
+            // Suspend the process first (Freezes the threat instantly, allowing for future memory forensics)
+            try
+            {
+                NtSuspendProcess(process.Handle);
+                _logger.LogDebug("[RESPONSE] Process {Pid} suspended successfully prior to termination", detection.ProcessId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[RESPONSE] Failed to suspend process {Pid}, proceeding directly to kill", detection.ProcessId);
+            }
 
             process.Kill(entireProcessTree: true);
 
@@ -931,4 +944,5 @@ public sealed class AdvancedResponseEngine : IResponseEngine
         };
     }
 }
+
 

@@ -361,3 +361,4 @@ public sealed class ThreatIntelTelemetry
     public required Dictionary<string, string> RawData   { get; init; }
 }
 
+

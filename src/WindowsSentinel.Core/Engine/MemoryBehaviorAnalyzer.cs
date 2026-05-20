@@ -485,3 +485,4 @@ public sealed class MemoryAnalyzerStats
     public int SuspiciousProcesses { get; init; }
 }
 
+

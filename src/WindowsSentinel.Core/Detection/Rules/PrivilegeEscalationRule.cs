@@ -284,3 +284,4 @@ public sealed class PrivilegeEscalationRule : IDetectionRule
     }
 }
 
+

@@ -370,3 +370,4 @@ public sealed class FalsePositiveStatistics
     public int TotalPathPatterns { get; set; }
 }
 
+

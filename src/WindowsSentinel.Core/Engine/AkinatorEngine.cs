@@ -445,3 +445,4 @@ public enum AkinatorVerdict
     Critical    // 80-100
 }
 
+

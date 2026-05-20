@@ -423,3 +423,4 @@ public sealed class NeuroBehaviorStats
     public double AverageEntropy { get; set; }
 }
 
+

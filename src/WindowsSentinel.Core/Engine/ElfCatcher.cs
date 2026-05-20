@@ -197,3 +197,4 @@ public sealed class ElfAnalysisResult
         : $"{Type} ({Bitness} {Architecture})";
 }
 
+

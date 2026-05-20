@@ -52,8 +52,21 @@ public sealed class JsonlEventLogger : IEventLogger
         var dir = Path.GetDirectoryName(logPath);
         if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
 
-        _writer = OpenWriter();
-        _logger.LogInformation("[EventLogger] Writing events to '{Path}'", logPath);
+        try
+        {
+            _writer = OpenWriter();
+            _logger.LogInformation("[EventLogger] Writing events to '{Path}'", logPath);
+        }
+        catch (Exception ex)
+        {
+            // CRITICAL: Do NOT let a log-file failure crash the entire service.
+            // The service must start even if event logging is degraded.
+            _writer = null;
+            _logger.LogError(ex,
+                "[EventLogger] Failed to open log file '{Path}'. Event logging is degraded — " +
+                "detections will still be processed but not persisted to disk until the file becomes accessible.",
+                logPath);
+        }
     }
 
     public async Task LogDetectionAsync(DetectionEvent detection, CancellationToken cancellationToken)
@@ -97,7 +110,21 @@ public sealed class JsonlEventLogger : IEventLogger
         await _writeLock.WaitAsync(cancellationToken);
         try
         {
-            if (_writer is null || _disposed) return;
+            if (_disposed) return;
+
+            // Self-healing: if writer was null (failed to open at startup), try again
+            if (_writer is null)
+            {
+                try
+                {
+                    _writer = OpenWriter();
+                    _logger.LogInformation("[EventLogger] Self-healed — log file '{Path}' is now accessible.", _logPath);
+                }
+                catch
+                {
+                    return; // Still can't open — silently skip this entry
+                }
+            }
 
             // Check if rotation is needed before writing
             await RotateIfNeededAsync();
@@ -202,15 +229,60 @@ public sealed class JsonlEventLogger : IEventLogger
         {
             _logger.LogError(ex, "[EventLogger] Log rotation failed — continuing with current file.");
             // Re-open writer if it was closed before the error
-            _writer ??= OpenWriter();
+            if (_writer is null)
+            {
+                try { _writer = OpenWriter(); }
+                catch { /* If we can't re-open, self-healing in WriteLineAsync will retry later */ }
+            }
         }
     }
 
-    private StreamWriter OpenWriter() =>
-        new StreamWriter(_logPath, append: true, encoding: System.Text.Encoding.UTF8)
+    /// <summary>
+    /// Opens the log file with explicit FileShare.ReadWrite so other processes
+    /// (e.g. log readers, SIEMs) can read concurrently. If the file is locked
+    /// or inaccessible, renames the old file out of the way and creates fresh.
+    /// </summary>
+    private StreamWriter OpenWriter()
+    {
+        try
         {
-            AutoFlush = true
-        };
+            var fs = new FileStream(
+                _logPath,
+                FileMode.Append,
+                FileAccess.Write,
+                FileShare.ReadWrite,
+                bufferSize: 4096,
+                FileOptions.SequentialScan);
+            return new StreamWriter(fs, System.Text.Encoding.UTF8) { AutoFlush = true };
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+        {
+            // The existing file is locked or has hostile ACLs.
+            // Rename it out of the way and create a fresh log.
+            _logger.LogWarning(ex,
+                "[EventLogger] Cannot open '{Path}' — renaming and creating fresh.", _logPath);
+
+            try
+            {
+                var stale = $"{_logPath}.stale.{DateTime.UtcNow:yyyyMMddHHmmss}";
+                File.Move(_logPath, stale, overwrite: true);
+            }
+            catch
+            {
+                // If even rename fails, just delete
+                try { File.Delete(_logPath); } catch { /* give up on old file */ }
+            }
+
+            var fs = new FileStream(
+                _logPath,
+                FileMode.Create,
+                FileAccess.Write,
+                FileShare.ReadWrite,
+                bufferSize: 4096,
+                FileOptions.SequentialScan);
+            return new StreamWriter(fs, System.Text.Encoding.UTF8) { AutoFlush = true };
+        }
+    }
 
     public async ValueTask DisposeAsync()
     {
@@ -246,4 +318,5 @@ public sealed class JsonlEventLogger : IEventLogger
         public required object Data { get; init; }
     }
 }
+
 

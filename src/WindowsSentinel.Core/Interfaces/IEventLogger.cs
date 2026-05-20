@@ -11,3 +11,4 @@ public interface IEventLogger : IAsyncDisposable
     Task LogResponseAsync(ResponseAction action, CancellationToken cancellationToken);
 }
 
+

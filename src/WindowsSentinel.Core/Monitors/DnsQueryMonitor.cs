@@ -416,3 +416,4 @@ internal sealed class DnsQueryStats
     public System.Collections.Concurrent.ConcurrentQueue<string> RecentDomains { get; } = new();
 }
 
+

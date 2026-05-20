@@ -742,3 +742,4 @@ public sealed class YaraXMatch
     public Dictionary<string, string> Metadata { get; set; } = new();
 }
 
+

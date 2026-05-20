@@ -638,3 +638,4 @@ public sealed class MitreSummaryReport
     public DateTimeOffset GeneratedAt { get; set; }
 }
 
+

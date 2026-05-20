@@ -14,9 +14,9 @@
 ; Output: installer\output\WindowsSentinelSetup.exe
 
 #define AppName      "Windows Sentinel"
-#define AppVersion   "2.7.0"
+#define AppVersion   "2.8.0"
 #define AppPublisher "Gorstak"
-#define AppURL       "https://github.com/tandrlemandrle/Sentinel"
+#define AppURL       "https://github.com/CroatiaSecurity/Sentinel"
 #define ServiceName  "Windows Sentinel"
 #define ServiceExe   "SentinelService.exe"
 #define AgentExe     "SentinelAgent.exe"
@@ -80,38 +80,28 @@ Name: "{commonappdata}\WindowsSentinel\Quarantine"; Permissions: system-full adm
 Name: "{commonappdata}\WindowsSentinel\Logs";       Permissions: system-full admins-full users-readexec
 
 [Run]
-; ── Stop and remove any previous installation of the service
-Filename: "{sys}\sc.exe"; Parameters: "stop ""{#ServiceName}""";   Flags: runhidden waituntilterminated; StatusMsg: "Stopping existing service..."; Check: ServiceExists
-; Wait for service to fully stop and release file handles
-Filename: "{sys}\timeout.exe"; Parameters: "/t 3 /nobreak"; Flags: runhidden waituntilterminated
-; Kill any lingering process (handles race condition with crashing service)
-Filename: "{sys}\taskkill.exe"; Parameters: "/f /im {#ServiceExe}"; Flags: runhidden waituntilterminated
-Filename: "{sys}\taskkill.exe"; Parameters: "/f /im {#AgentExe}"; Flags: runhidden waituntilterminated
-; Wait again for handles to release
-Filename: "{sys}\timeout.exe"; Parameters: "/t 2 /nobreak"; Flags: runhidden waituntilterminated
-Filename: "{sys}\sc.exe"; Parameters: "delete ""{#ServiceName}"""; Flags: runhidden waituntilterminated; StatusMsg: "Removing existing service..."; Check: ServiceExists
+; ── Service teardown is now handled in [Code] CurStepChanged(ssInstall)
+; ── so it runs BEFORE file extraction. Only post-install steps remain here.
 
 ; ── Install and start the new service
 Filename: "{sys}\sc.exe"; Parameters: "create ""{#ServiceName}"" binPath= ""{app}\{#ServiceExe}"" start= auto DisplayName= ""{#AppName}"""; Flags: runhidden waituntilterminated; StatusMsg: "Installing service..."
 Filename: "{sys}\sc.exe"; Parameters: "description ""{#ServiceName}"" ""Windows Sentinel - Endpoint Detection and Response"""; Flags: runhidden waituntilterminated
 
-; ── Tamper Protection (Service ACLs)
-; D:(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)(A;;CCLCSWLOCRRC;;;IU)(A;;CCLCSWLOCRRC;;;SU)
-; Breaks down to:
-; SY (SYSTEM) -> Can start, stop, pause, continue, delete, configure, etc.
-; BA (Built-in Admins) -> Can start, stop, pause, continue, configure, delete
-; Wait, we want to prevent Admins from stopping it. 
-; D:(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCLCSWLOCRRC;;;BA)(A;;CCLCSWLOCRRC;;;IU)(A;;CCLCSWLOCRRC;;;SU)
-; SY: All access. BA/IU/SU: Read/Query only.
-Filename: "{sys}\sc.exe"; Parameters: "sdset ""{#ServiceName}"" D:(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCLCSWRPWDLOCRRC;;;BA)(A;;CCLCSWLOCRRC;;;IU)(A;;CCLCSWLOCRRC;;;SU)"; Flags: runhidden waituntilterminated; StatusMsg: "Applying Tamper Protection..."
-
+; ── Start the service BEFORE applying tamper protection
+; (BA needs SERVICE_START permission, which the tamper DACL removes)
 Filename: "{sys}\sc.exe"; Parameters: "start ""{#ServiceName}"""; Flags: runhidden waituntilterminated; StatusMsg: "Starting service..."
 
+; ── Tamper Protection (Service ACLs) — applied AFTER start
+; SY: All access. BA/IU/SU: Read/Query only (no stop, no delete, no start).
+Filename: "{sys}\sc.exe"; Parameters: "sdset ""{#ServiceName}"" D:(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCLCSWLOCRRC;;;BA)(A;;CCLCSWLOCRRC;;;IU)(A;;CCLCSWLOCRRC;;;SU)"; Flags: runhidden waituntilterminated; StatusMsg: "Applying Tamper Protection..."
+
 [UninstallRun]
-; Restore permissions so the uninstaller can stop and delete the service
+; Reset DACL to allow uninstallation (admins back to full control)
 Filename: "{sys}\sc.exe"; Parameters: "sdset ""{#ServiceName}"" D:(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)(A;;CCLCSWLOCRRC;;;IU)(A;;CCLCSWLOCRRC;;;SU)"; Flags: runhidden waituntilterminated
-; Stop and remove the service
+; Kill agent first, then stop and remove the service
+Filename: "{sys}\taskkill.exe"; Parameters: "/f /im {#AgentExe}"; Flags: runhidden waituntilterminated
 Filename: "{sys}\sc.exe"; Parameters: "stop ""{#ServiceName}""";   Flags: runhidden waituntilterminated
+Filename: "{sys}\taskkill.exe"; Parameters: "/f /im {#ServiceExe}"; Flags: runhidden waituntilterminated
 Filename: "{sys}\sc.exe"; Parameters: "delete ""{#ServiceName}"""; Flags: runhidden waituntilterminated
 ; Remove Defender exclusions
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NonInteractive -WindowStyle Hidden -Command ""Remove-MpPreference -ExclusionPath '{app}' -ErrorAction SilentlyContinue"""; Flags: runhidden waituntilterminated
@@ -194,12 +184,100 @@ begin
        '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
 
+// Check whether the service already exists before trying to stop/delete it.
+function ServiceExists(): Boolean;
+var
+  ResultCode: Integer;
+begin
+  Exec(ExpandConstant('{sys}\sc.exe'), 'query "' + '{#ServiceName}' + '"',
+       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Result := (ResultCode = 0);
+end;
+
+// Tear down the previous Sentinel installation BEFORE files are extracted.
+// This must run in [Code] because [Run] fires AFTER file extraction,
+// and the service EXE cannot be overwritten while the process is running.
+procedure TearDownExistingService();
+var
+  ResultCode: Integer;
+  Retries   : Integer;
+  DataDir   : String;
+begin
+  if not ServiceExists() then
+    Exit;
+
+  Log('Upgrade: tearing down existing service...');
+
+  // 1. Reset tamper-protected ACLs so we can interact with the service via SCM.
+  //    (The hardened DACL strips BA's stop/delete rights.)
+  Exec(ExpandConstant('{sys}\sc.exe'),
+       'sdset "' + '{#ServiceName}' + '" D:(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)(A;;CCLCSWLOCRRC;;;IU)(A;;CCLCSWLOCRRC;;;SU)',
+       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Log('  ACL reset result: ' + IntToStr(ResultCode));
+
+  // 2. Kill agent first — this typically crashes the service as well.
+  Exec(ExpandConstant('{sys}\taskkill.exe'),
+       '/f /im {#AgentExe}',
+       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+  // 3. Try sc stop (may work now that ACLs are reset).
+  Exec(ExpandConstant('{sys}\sc.exe'),
+       'stop "' + '{#ServiceName}' + '"',
+       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+  // 4. Force-kill service process (belt and suspenders).
+  Exec(ExpandConstant('{sys}\taskkill.exe'),
+       '/f /im {#ServiceExe}',
+       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+  // 5. Wait for processes to fully exit and release file handles.
+  Sleep(3000);
+
+  // 6. Delete the service from SCM.
+  Exec(ExpandConstant('{sys}\sc.exe'),
+       'delete "' + '{#ServiceName}' + '"',
+       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Log('  sc delete result: ' + IntToStr(ResultCode));
+
+  // 7. Poll until SCM fully purges the service entry (max ~15 seconds).
+  //    sc delete only marks for deletion; the entry lingers until all handles close.
+  Retries := 0;
+  while ServiceExists() and (Retries < 15) do
+  begin
+    Log('  Waiting for SCM to purge service entry (attempt ' + IntToStr(Retries + 1) + ')...');
+    Sleep(1000);
+    Retries := Retries + 1;
+  end;
+
+  if ServiceExists() then
+    Log('  WARNING: Service entry still present after 15 seconds (SCM ghost) — will attempt sc create anyway')
+  else
+    Log('  Service entry fully purged from SCM.');
+
+  // 8. Clean up stale log files that might be locked or have bad ACLs.
+  //    This prevents the new service from crashing on startup due to
+  //    UnauthorizedAccessException on events.jsonl left by previous installs.
+  DataDir := ExpandConstant('{commonappdata}\WindowsSentinel');
+  if FileExists(DataDir + '\events.jsonl') then
+  begin
+    Log('  Renaming stale events.jsonl to prevent startup failures...');
+    if not RenameFile(DataDir + '\events.jsonl', DataDir + '\events.jsonl.upgrade-backup') then
+    begin
+      Log('  Rename failed — attempting delete...');
+      DeleteFile(DataDir + '\events.jsonl');
+    end;
+  end;
+end;
+
 // CurStepChanged fires at well-defined points in the install lifecycle.
 // ssInstall fires just before files are extracted — exactly what we need.
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssInstall then
+  begin
+    TearDownExistingService();
     AddDefenderExclusions();
+  end;
 end;
 
 // CurUninstallStepChanged fires during uninstall.
@@ -210,12 +288,4 @@ begin
     RemoveDefenderExclusions();
 end;
 
-// Check whether the service already exists before trying to stop/delete it.
-function ServiceExists(): Boolean;
-var
-  ResultCode: Integer;
-begin
-  Exec(ExpandConstant('{sys}\sc.exe'), 'query "' + '{#ServiceName}' + '"',
-       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Result := (ResultCode = 0);
-end;
+

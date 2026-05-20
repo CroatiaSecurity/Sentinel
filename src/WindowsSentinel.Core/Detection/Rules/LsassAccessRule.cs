@@ -246,3 +246,4 @@ public sealed class LsassAccessRule : IDetectionRule
     }
 }
 
+

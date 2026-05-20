@@ -24,7 +24,7 @@ using WindowsSentinel.Core.Session;
 // 2.3.0 — Mic Session Injection Detection (WASAPI capture session enumeration)
 // 2.4.0 — ADS Staging Detection + Agent Architecture (user-session monitors moved to Agent)
 // 2.5.0 — NeuroBehavior Visual Monitor + AudioHijack module-based detection
-// 2.7.0 — Deception Refinements, Ransomware Fast-Path, Asynchronous Off-host Deception
+// 2.8.0 — Deception Refinements, Ransomware Fast-Path, Asynchronous Off-host Deception
 
 namespace WindowsSentinel.Core;
 
@@ -34,9 +34,9 @@ namespace WindowsSentinel.Core;
 public static class SentinelVersion
 {
     /// <summary>
-    /// Current version - 2.7.0 Deception Refinements + Ransomware Fast-Path
+    /// Current version - 2.8.0 Deception Refinements + Ransomware Fast-Path
     /// </summary>
-    public const string Version = "2.7.0";
+    public const string Version = "2.8.0";
 
     /// <summary>
     /// Release date
@@ -47,7 +47,7 @@ public static class SentinelVersion
     /// Version description
     /// </summary>
     public const string Description =
-        "2.7.0 — Deception Refinements & Ransomware Fast-Path. " +
+        "2.8.0 — Deception Refinements & Ransomware Fast-Path. " +
         "Ransomware fast-path: immediately kills process chains without running deception. " +
         "Stack corruption bug fix: corrected context layout for x64 thread stacks with thread suspension. " +
         "Asynchronous deception: runs off-host/network deception (BeaconFlooder, NetworkHoneypotDeployer) asynchronously without blocking the pre-kill window. " +
@@ -108,6 +108,11 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IDetectionRule, HashReputationRule>();       // Hash reputation checking
         services.AddSingleton<IDetectionRule, FileEntropyRule>();          // Packed/encrypted file detection
         services.AddSingleton<IDetectionRule, CertificateTamperingRule>(); // Certificate store tampering detection
+
+        // ── 2.8.0 — Quick Wins (Anti-Evasion & Lateral Movement) ─────────────
+        services.AddSingleton<IDetectionRule, FirewallTamperingRule>();
+        services.AddSingleton<IDetectionRule, AccountManipulationRule>();
+        services.AddSingleton<IDetectionRule, DataExfiltrationRule>();
 
         // ── Detection engine ─────────────────────────────────────────────────
         services.AddSingleton<IDetectionEngine, DetectionEngine>();
@@ -307,6 +312,9 @@ public static class ServiceCollectionExtensions
         services.AddHostedService<MemoryExecutionMonitor>();
         services.AddHostedService<ModuleValidationMonitor>();
 
+        // ── 2.8.0 — Canary File Monitor (Ransomware) ──────────────────────────
+        services.AddHostedService<CanaryFileMonitor>();
+
         // ═══════════════════════════════════════════════════════════════════════
         // 1.1.0 — ADVANCED ANTI-APT MONITORS
         // ═══════════════════════════════════════════════════════════════════════
@@ -407,4 +415,5 @@ public static class ServiceCollectionExtensions
         return services;
     }
 }
+
 

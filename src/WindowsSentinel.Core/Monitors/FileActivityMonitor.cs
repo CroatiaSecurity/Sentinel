@@ -193,3 +193,4 @@ public sealed class FileActivityTelemetry
     public Dictionary<string, string> Metadata  { get; init; } = new();
 }
 
+

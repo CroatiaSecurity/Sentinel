@@ -259,3 +259,4 @@ public sealed class HIDDeviceInfo
     public string Status => IsTrusted ? "Trusted" : IsNew ? "New (Monitoring)" : "Monitoring";
 }
 
+

@@ -494,3 +494,4 @@ public sealed class InstallerContextInfo
     public bool IsInstaller { get; set; }
 }
 
+

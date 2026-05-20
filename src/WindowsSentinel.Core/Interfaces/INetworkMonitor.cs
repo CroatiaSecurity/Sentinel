@@ -7,3 +7,4 @@ public interface INetworkMonitor : IMonitor
     IReadOnlyList<NetworkConnection> GetCurrentConnections();
 }
 
+

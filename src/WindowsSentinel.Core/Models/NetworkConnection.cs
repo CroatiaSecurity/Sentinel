@@ -11,3 +11,4 @@ public sealed record NetworkConnection
     public required string State        { get; init; }
 }
 
+

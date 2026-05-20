@@ -1,5 +1,40 @@
 # Changelog
 
+## 2.8.0 — Quick Wins: Anti-Evasion & Zero-Latency Ransomware Defense (May 2026)
+
+### New: Ransomware Canary Monitor
+- Introduced `CanaryFileMonitor`, which deploys hidden `.docx` and `.xlsx` canary files to the user's `Documents` and `Desktop`.
+- Instantly triggers a Tier 1 high-confidence kill if any process tampers with these files, providing a zero-latency defense before mass I/O ransomware rules even trigger.
+
+### New: Network & Account Tampering Detection
+- Added `FirewallTamperingRule` to detect `netsh` and PowerShell commands that disable firewalls or alter routing, utilizing highly specific argument combinations to defeat executable renaming.
+- Added `AccountManipulationRule` to detect lateral movement attempts via `net user /add` or `New-LocalUser`.
+
+### New: Data Exfiltration Detection
+- Added `DataExfiltrationRule` to detect known data-hoarding tools like `rclone` and `azcopy` configured for bulk transfer, relying on unique parameter combinations to catch renamed binaries.
+
+### Enhancements: Execution & Response
+- **Suspicious Parent-Child Process Trees:** `MemoryExecutionRule` now instantly flags any shell spawned by an Office application (`winword.exe`, `excel.exe`, etc.), even if the command is not obfuscated.
+- **Forensic Process Suspension:** `AdvancedResponseEngine` now uses `NtSuspendProcess` to freeze malicious processes in memory *before* calling `Process.Kill()`. This neutralizes threats instantly while preserving memory state for forensic analysis.
+
+### Fix: Event Logger Resilience
+- `JsonlEventLogger` constructor no longer crashes the entire service if the log file cannot be opened at startup. Falls back to degraded mode (detections still processed, just not persisted to disk) and logs a warning.
+- `OpenWriter()` now uses explicit `FileStream` with `FileShare.ReadWrite`, allowing concurrent log readers (SIEMs, forensic tools) without sharing violations.
+- **Self-healing writer:** If the log file was inaccessible at startup, subsequent write attempts automatically retry opening it. The service recovers as soon as the file becomes accessible.
+- **Stale file handling:** If the log file is locked or has hostile ACLs, `OpenWriter()` renames it to `.stale.<timestamp>` and creates a fresh log file, preventing permanent startup failures.
+- Log rotation catch block now safely wraps the fallback `OpenWriter()` call to prevent cascading failures.
+
+### Fix: Installer Upgrade Hardening
+- Service teardown now runs in `[Code] CurStepChanged(ssInstall)` — **before** file extraction — so the service binary is not locked during overwrite.
+- `TearDownExistingService` resets tamper-protection ACLs, kills processes, stops and deletes the service, then polls SCM for up to 15 seconds until the entry is fully purged.
+- Added `events.jsonl` cleanup: during upgrade, the installer renames the old log file to `.upgrade-backup` to prevent `UnauthorizedAccessException` crashes from stale file locks or inherited ACLs.
+
+### Infrastructure
+- All version references bumped to 2.8.0.
+- Released May 20, 2026.
+
+---
+
 ## 2.7.0 — Tamper Protection & Pipeline Resilience (May 2026)
 
 ### Security: Service ACL Tamper Protection
@@ -674,4 +709,5 @@ All new anti-APT monitors (DNS, PPID spoof, token integrity, credential canary, 
 ### Architecture
 - All detection and hardening logic built into C# binary (no external PowerShell scripts required).
 - ConsultantSignalIngestor retained for optional external integration.
+
 

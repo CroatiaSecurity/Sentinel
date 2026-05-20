@@ -19,3 +19,4 @@ public sealed record DetectionEvent
     public Dictionary<string, string> Metadata { get; init; } = new();
 }
 
+

@@ -307,6 +307,9 @@ public sealed class MemoryExecutionRule : IDetectionRule
         if (!isSuspiciousParent || !isScriptProcess)
             return null;
 
+        string parentLower = proc.ParentProcessName.ToLowerInvariant();
+        bool isOfficeApp = parentLower == "winword.exe" || parentLower == "excel.exe" || parentLower == "powerpnt.exe";
+
         // Check for encoded/obfuscated command in script
         string cmdLine = (proc.CommandLine ?? "").ToLowerInvariant();
         bool isEncoded = cmdLine.Contains("-enc") ||
@@ -315,18 +318,18 @@ public sealed class MemoryExecutionRule : IDetectionRule
                          cmdLine.Contains("bypass") ||
                          cmdLine.Contains("windowstyle hidden");
 
-        if (isEncoded)
+        // If it's an Office app spawning a shell, it's inherently malicious (macro/exploit)
+        // For other suspicious parents (like explorer), it must be encoded to avoid FP.
+        if (isEncoded || isOfficeApp)
         {
             return new DetectionEvent
             {
                 RuleName = Name,
-                Evidence = $"Suspicious parent '{proc.ParentProcessName}' spawning encoded script " +
-                    $"'{proc.ProcessName}' (PID {proc.ProcessId}) with obfuscation indicators.",
-                Reasoning = "Office documents, browsers, or other applications spawning encoded or " +
-                    "obfuscated PowerShell/cmd commands is a common malware delivery technique. " +
+                Evidence = $"Suspicious parent '{proc.ParentProcessName}' spawned script " +
+                    $"'{proc.ProcessName}' (PID {proc.ProcessId}). Encoded: {isEncoded}",
+                Reasoning = "Office documents, browsers, or other applications spawning PowerShell/cmd commands is a common malware delivery technique. " +
                     "The parent process (often exploited via macro or vulnerability) launches a " +
-                    "script child with encoded commands to hide the malicious payload from inspection. " +
-                    "This is a high-confidence indicator of exploitation or malicious document activity.",
+                    "script child to execute a payload. This is a high-confidence indicator of exploitation or malicious document activity.",
                 Confidence = 0.93,
                 Tier = Tier,
                 ProcessName = proc.ProcessName,
@@ -346,4 +349,5 @@ public sealed class MemoryExecutionRule : IDetectionRule
         return null;
     }
 }
+
 

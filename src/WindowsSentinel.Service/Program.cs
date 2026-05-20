@@ -8,7 +8,7 @@ using WindowsSentinel.Core.SelfProtection;
 //  Windows Sentinel — Windows Service (SYSTEM)
 //  Runs as LocalSystem and launches Agent into user session.
 //  Logs to Windows Event Log and the JSONL file.
-//  Author : Gorstak | github.com/tandrlemandrle/Sentinel
+//  Author : Gorstak | gorstak.eu | github.com/CroatiaSecurity/Sentinel
 //
 //  RESPONSE MODES:
 //    ActiveResponse: false  → Monitor-only. All detections are logged; nothing is killed.
@@ -118,4 +118,5 @@ catch (Exception ex)
     catch { /* Last resort - can't do anything */ }
     throw;
 }
+
 

@@ -479,3 +479,4 @@ public sealed class HeaderAnalysisResult
         : $"{DetectedType} - {(IsValidStructure ? "Valid" : "Invalid")} structure";
 }
 
+

@@ -1,6 +1,6 @@
 # Windows Sentinel — Design Document
 
-**Version: 2.7.0**
+**Version: 2.8.0**
 
 ---
 
@@ -149,12 +149,17 @@ Composite detections are emitted as Tier1 `DetectionEvent`s directly into the de
 
 ### Logging
 
-`JsonlEventLogger` writes newline-delimited JSON to `%LOCALAPPDATA%\WindowsSentinel\events.jsonl`.
+`JsonlEventLogger` writes newline-delimited JSON to `%ProgramData%\WindowsSentinel\events.jsonl`.
 
 - Thread-safe via `SemaphoreSlim`
 - No string-built JSON — `System.Text.Json` only
 - Size-based rotation at 50 MB, up to 5 rotated files (`events.jsonl.1` … `.5`)
 - Each line: `{"type":"detection"|"response","timestamp":"...","data":{...}}`
+- Rate-limited: max 100 entries/second, burst of 200 — prevents log flooding attacks
+- `FileShare.ReadWrite` — concurrent readers (SIEMs, forensic tools) never blocked
+- **Graceful degradation:** If the log file cannot be opened at startup, the service starts in degraded mode (detections processed but not persisted) and logs a warning
+- **Self-healing:** On each write, if the writer is null, it retries opening the file — auto-recovers when the file becomes accessible
+- **Stale file handling:** If the file is locked or inaccessible, renames it to `.stale.<timestamp>` and creates fresh
 
 ---
 
@@ -246,7 +251,7 @@ Composite detections are emitted as Tier1 `DetectionEvent`s directly into the de
 | `HoneypotWeaponizer` | Deploys weaponized fake credentials, zip bombs, wallet seeds, VPN configs |
 | `NetworkHoneypotDeployer` | Spins up fake SMB/RDP/HTTP/SSH listeners as lateral movement traps (30min lifetime) |
 
-## Added in 2.7.0
+## Added in 2.8.0
 
 | Component | Purpose |
 |-----------|---------|
@@ -275,4 +280,5 @@ Composite detections are emitted as Tier1 `DetectionEvent`s directly into the de
 | Process ancestry resolution | ✅ | ✅ |
 | Behavioral correlation | ✅ | ✅ |
 | Statistical beaconing detection | ✅ | ✅ |
+
 

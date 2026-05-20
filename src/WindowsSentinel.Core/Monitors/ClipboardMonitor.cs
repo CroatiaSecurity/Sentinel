@@ -530,3 +530,4 @@ public sealed class ClipboardMonitor : BackgroundService
     }
 }
 
+

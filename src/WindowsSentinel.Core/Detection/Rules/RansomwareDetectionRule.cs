@@ -319,3 +319,4 @@ public sealed class RansomwareDetectionRule : IDetectionRule
     }
 }
 
+

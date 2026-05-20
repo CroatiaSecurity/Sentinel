@@ -241,3 +241,4 @@ public sealed class BeaconingTelemetry
     public required DateTimeOffset Timestamp       { get; init; }
 }
 
+

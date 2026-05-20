@@ -4,7 +4,7 @@
 
 param(
     [string]$Configuration = "Release",
-    [string]$Version = "2.7.0"
+    [string]$Version = "2.8.0"
 )
 
 $ErrorActionPreference = "Stop"
@@ -133,4 +133,5 @@ $finalExeName = "SentinelSetup_$Version.exe"
 
 Write-Host "`n=== Done ===" -ForegroundColor Green
 Write-Host "Installer: $($output.FullName)" -ForegroundColor Green
+
 

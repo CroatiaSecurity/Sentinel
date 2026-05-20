@@ -682,3 +682,4 @@ public sealed class YaraMatch
     public List<string> Matches { get; set; } = new();
 }
 
+

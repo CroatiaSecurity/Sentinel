@@ -127,3 +127,4 @@ public sealed class RansomwareActivityRule : IDetectionRule
     }
 }
 
+

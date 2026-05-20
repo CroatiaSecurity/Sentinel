@@ -1491,3 +1491,4 @@ public sealed class SignalBuffer
     }
 }
 
+
