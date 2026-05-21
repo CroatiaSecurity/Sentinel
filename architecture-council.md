@@ -3,7 +3,7 @@
 **Status:** Architecture spec. Extends, does not replace, `requirements.md`,
 `design.md`, `constraints.md` (all v0.9.0).
 
-**Last updated:** v2.8.0 (May 2026) — Deception Refinements & Ransomware Fast-Path.
+**Last updated:** v2.8.1 (May 2026) — Architecture Hardening & Bug Fixes.
 
 ---
 

@@ -23,7 +23,7 @@ public sealed class ClamAVEngine : IAsyncDisposable
     /// <summary>
     /// Initialize the engine and verify ClamAV is available
     /// </summary>
-    public Task<bool> InitializeAsync(CancellationToken cancellationToken = default)
+    public async Task<bool> InitializeAsync(CancellationToken cancellationToken = default)
     {
         try
         {
@@ -31,29 +31,29 @@ public sealed class ClamAVEngine : IAsyncDisposable
             {
                 _logger.LogWarning("ClamAV: clamscan.exe not found. Install ClamAV to enable scanning.");
                 _isInitialized = false;
-                return Task.FromResult(false);
+                return false;
             }
 
             // Test ClamAV by running version check
-            var result = RunClamScan("--version", cancellationToken);
+            var result = await RunClamScanAsync("--version", cancellationToken);
             if (result.ExitCode == 0)
             {
                 _logger.LogInformation("ClamAV initialized: {Version}", result.Output.Trim());
                 _isInitialized = true;
-                return Task.FromResult(true);
+                return true;
             }
             else
             {
                 _logger.LogWarning("ClamAV: Version check failed");
                 _isInitialized = false;
-                return Task.FromResult(false);
+                return false;
             }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "ClamAV initialization failed");
             _isInitialized = false;
-            return Task.FromResult(false);
+            return false;
         }
     }
 
@@ -86,7 +86,7 @@ public sealed class ClamAVEngine : IAsyncDisposable
         {
             // Use --infected to only show infected files, --no-summary to reduce output
             var args = $"--infected --no-summary --stdout \"{filePath}\"";
-            var result = await Task.Run(() => RunClamScan(args, cancellationToken), cancellationToken);
+            var result = await RunClamScanAsync(args, cancellationToken);
 
             return ParseScanResult(filePath, result);
         }
@@ -130,7 +130,7 @@ public sealed class ClamAVEngine : IAsyncDisposable
             var recursiveFlag = recursive ? "-r" : "";
             var args = $"--infected --no-summary --stdout {recursiveFlag} \"{directoryPath}\"";
             
-            var result = await Task.Run(() => RunClamScan(args, cancellationToken), cancellationToken);
+            var result = await RunClamScanAsync(args, cancellationToken);
 
             // Parse multi-file results
             var lines = result.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries);
@@ -242,7 +242,7 @@ public sealed class ClamAVEngine : IAsyncDisposable
         }
     }
 
-    private ClamScanResult RunClamScan(string arguments, CancellationToken cancellationToken)
+    private async Task<ClamScanResult> RunClamScanAsync(string arguments, CancellationToken cancellationToken)
     {
         var psi = new ProcessStartInfo
         {
@@ -264,8 +264,8 @@ public sealed class ClamAVEngine : IAsyncDisposable
         var outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
         var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
 
-        Task.WhenAll(outputTask, errorTask).Wait(cancellationToken);
-        process.WaitForExit();
+        await Task.WhenAll(outputTask, errorTask);
+        await process.WaitForExitAsync(cancellationToken);
 
         return new ClamScanResult
         {

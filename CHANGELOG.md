@@ -1,5 +1,28 @@
 # Changelog
 
+## 2.8.1 — Architecture Hardening & Bug Fixes (May 2026)
+
+### Fixes: Installer Upgrade Race Condition
+- **File-lock race (DeleteFile code 5):** The previous teardown issued `taskkill /f` and waited a fixed 3 seconds, which was insufficient when the OS deferred handle closure. A new `WaitForFileLockRelease` helper now actively probes `SentinelService.exe` with a rename-probe loop (up to 30 s), ensuring Inno Setup never attempts to overwrite a still-locked binary. Fixes *"An error occurred while trying to replace the existing file: DeleteFile failed; code 5. Access is denied."* on upgrades.
+- **Double taskkill pass:** Added a second `taskkill /f /im SentinelService.exe` after a 1 s sleep to catch deferred process exits before the file-lock poll begins.
+
+### Fixes: Concurrency & Resource Leak Hardening
+- **Process Handle Leaks:** Fixed a process handle leak in `HardeningModule.cs` where process querying handles were not closed/disposed, causing system handle exhaustion over time.
+- **Implant Destabilizer GC Lifetimes:** Moving EventWaitHandle and TcpListener instances to long-lived `IDisposable` container classes to prevent premature Garbage Collection during asynchronous execution.
+- **Sync-over-Async Mitigation:** Converted several thread-blocking calls in `ClamAVEngine.cs` and `HardeningModule.cs` to use proper asynchronous await patterns, preventing thread pool starvation under high load.
+- **Telemetry Process Name Resolution:** Modified `NetworkMonitor.cs` to inject `ProcessAncestryCache` directly, providing accurate process names in outbound telemetry reports instead of raw PIDs.
+- **Honeypot Listener Lifetimes:** Modified `DeceptionEngine.cs` to ensure background tactical listeners (BeaconFlooder, NetworkHoneypotDeployer) run as long-lived tasks bound to the application lifetime, rather than being cancelled early by tactical tokens.
+
+### Fixes: Storage & Cryptography
+- **NTP-Resistant Boot-Bound Nonce:** Updated `SecureCacheStore.cs` to extract boot session timestamps directly from the System process (PID 4) start time via `Process.GetProcessById(4).StartTime`, eliminating NTP time-drift validation issues.
+- **Robust Quarantine Metadata Parsing:** Upgraded `QuarantineManager.cs` to use split boundary guards, preventing parsing crashes on complex path strings or metadata delimiters.
+
+### Infrastructure
+- All version references bumped to 2.8.1.
+- Released May 21, 2026.
+
+---
+
 ## 2.8.0 — Quick Wins: Anti-Evasion & Zero-Latency Ransomware Defense (May 2026)
 
 ### New: Ransomware Canary Monitor

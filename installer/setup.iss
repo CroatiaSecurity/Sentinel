@@ -14,7 +14,7 @@
 ; Output: installer\output\WindowsSentinelSetup.exe
 
 #define AppName      "Windows Sentinel"
-#define AppVersion   "2.8.0"
+#define AppVersion   "2.8.1"
 #define AppPublisher "Gorstak"
 #define AppURL       "https://github.com/CroatiaSecurity/Sentinel"
 #define ServiceName  "Windows Sentinel"
@@ -50,7 +50,7 @@ ArchitecturesInstallIn64BitMode=x64compatible
 ArchitecturesAllowed=x64compatible
 UninstallDisplayIcon={app}\{#ServiceExe}
 UninstallDisplayName={#AppName}
-CloseApplications=yes
+CloseApplications=no
 RestartApplications=no
 
 [Languages]
@@ -58,9 +58,9 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Files]
 ; Service binary
-Source: "publish\service\{#ServiceExe}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "publish\service\{#ServiceExe}"; DestDir: "{app}"; Flags: ignoreversion restartreplace uninsrestartdelete
 ; Agent binary (launched into user session by the service)
-Source: "publish\agent\{#AgentExe}";    DestDir: "{app}"; Flags: ignoreversion
+Source: "publish\agent\{#AgentExe}";    DestDir: "{app}"; Flags: ignoreversion restartreplace uninsrestartdelete
 ; Configuration
 ; v0.6.0: drop "onlyifdoesntexist" so upgrades pick up the new ActiveResponse=true default.
 ; If a user customized LogPath/WatchPath they will need to re-apply (logged in release notes).
@@ -92,8 +92,11 @@ Filename: "{sys}\sc.exe"; Parameters: "description ""{#ServiceName}"" ""Windows 
 Filename: "{sys}\sc.exe"; Parameters: "start ""{#ServiceName}"""; Flags: runhidden waituntilterminated; StatusMsg: "Starting service..."
 
 ; ── Tamper Protection (Service ACLs) — applied AFTER start
-; SY: All access. BA/IU/SU: Read/Query only (no stop, no delete, no start).
-Filename: "{sys}\sc.exe"; Parameters: "sdset ""{#ServiceName}"" D:(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCLCSWLOCRRC;;;BA)(A;;CCLCSWLOCRRC;;;IU)(A;;CCLCSWLOCRRC;;;SU)"; Flags: runhidden waituntilterminated; StatusMsg: "Applying Tamper Protection..."
+; SY: All access.
+; BA: Read/Query + WRITE_DAC only. Stop/start/delete blocked, but WD is kept
+;     so the installer can reset this DACL on future upgrades via sc sdset.
+; IU/SU: Read/Query only.
+Filename: "{sys}\sc.exe"; Parameters: "sdset ""{#ServiceName}"" D:(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCLCSWLOCRRCWD;;;BA)(A;;CCLCSWLOCRRC;;;IU)(A;;CCLCSWLOCRRC;;;SU)"; Flags: runhidden waituntilterminated; StatusMsg: "Applying Tamper Protection..."
 
 [UninstallRun]
 ; Reset DACL to allow uninstallation (admins back to full control)
@@ -194,53 +197,169 @@ begin
   Result := (ResultCode = 0);
 end;
 
+// Check whether a process is still running by asking tasklist and piping
+// through findstr. findstr exit code: 0 = found, 1 = not found.
+function IsProcessRunning(ExeName: String): Boolean;
+var
+  ResultCode: Integer;
+begin
+  Exec(ExpandConstant('{cmd}'),
+       '/c tasklist /fi "IMAGENAME eq ' + ExeName + '" 2>nul | findstr /i "' + ExeName + '" >nul 2>&1',
+       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Result := (ResultCode = 0);
+end;
+
+// Polls until the named process disappears from the process list.
+// Returns true once it is gone, false on timeout.
+function WaitForProcessExit(ExeName: String; MaxSeconds: Integer): Boolean;
+var
+  Retries: Integer;
+begin
+  Retries := 0;
+  while IsProcessRunning(ExeName) and (Retries < MaxSeconds) do
+  begin
+    Log('  ' + ExeName + ' still running (' + IntToStr(Retries + 1) + '/' + IntToStr(MaxSeconds) + 's)...');
+    Sleep(1000);
+    Retries := Retries + 1;
+  end;
+  Result := not IsProcessRunning(ExeName);
+end;
+
 // Tear down the previous Sentinel installation BEFORE files are extracted.
 // This must run in [Code] because [Run] fires AFTER file extraction,
 // and the service EXE cannot be overwritten while the process is running.
+//
+// STRATEGY: Kill the agent first. Empirically, when the agent dies the service
+// shuts itself down. Then force-kill anything remaining via multiple methods.
+// We use PowerShell Stop-Process as fallback because taskkill /f from an admin
+// installer sometimes cannot terminate SYSTEM processes, while Stop-Process
+// with -Force can (it uses TerminateProcess with PROCESS_TERMINATE access).
 procedure TearDownExistingService();
 var
-  ResultCode: Integer;
-  Retries   : Integer;
-  DataDir   : String;
+  ResultCode : Integer;
+  Retries    : Integer;
+  DataDir    : String;
 begin
   if not ServiceExists() then
+  begin
+    // Service doesn't exist but processes might be orphaned — kill them anyway
+    Exec(ExpandConstant('{sys}\taskkill.exe'),
+         '/f /im {#AgentExe}', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec(ExpandConstant('{sys}\taskkill.exe'),
+         '/f /im {#ServiceExe}', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    WaitForProcessExit('{#ServiceExe}', 5);
+    WaitForProcessExit('{#AgentExe}', 5);
     Exit;
+  end;
 
   Log('Upgrade: tearing down existing service...');
 
-  // 1. Reset tamper-protected ACLs so we can interact with the service via SCM.
-  //    (The hardened DACL strips BA's stop/delete rights.)
+  // 1. Reset tamper-protected ACLs so we can issue sc stop/delete.
   Exec(ExpandConstant('{sys}\sc.exe'),
        'sdset "' + '{#ServiceName}' + '" D:(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)(A;;CCLCSWLOCRRC;;;IU)(A;;CCLCSWLOCRRC;;;SU)',
        '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Log('  ACL reset result: ' + IntToStr(ResultCode));
 
-  // 2. Kill agent first — this typically crashes the service as well.
+  // 2. Kill agent — this is the primary kill mechanism.
+  //    When the agent dies, the service detects it and shuts down.
   Exec(ExpandConstant('{sys}\taskkill.exe'),
        '/f /im {#AgentExe}',
        '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Log('  taskkill agent result: ' + IntToStr(ResultCode));
 
-  // 3. Try sc stop (may work now that ACLs are reset).
-  Exec(ExpandConstant('{sys}\sc.exe'),
-       'stop "' + '{#ServiceName}' + '"',
+  // Also try PowerShell Stop-Process (works when taskkill doesn't)
+  Exec('powershell.exe',
+       '-NonInteractive -WindowStyle Hidden -Command "Stop-Process -Name SentinelAgent -Force -ErrorAction SilentlyContinue"',
        '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
-  // 4. Force-kill service process (belt and suspenders).
+  // 3. Wait for service to self-terminate after agent death (up to 10s).
+  //    This matches the observed behavior: kill agent → service stops.
+  Log('  Waiting for service to self-terminate after agent kill...');
+  if WaitForProcessExit('{#ServiceExe}', 10) then
+  begin
+    Log('  Service self-terminated after agent kill.');
+  end
+  else
+  begin
+    // 4. Service didn't self-terminate — force stop via SCM + kill.
+    Log('  Service still running — forcing stop...');
+
+    Exec(ExpandConstant('{sys}\sc.exe'),
+         'stop "' + '{#ServiceName}' + '"',
+         '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Log('  sc stop result: ' + IntToStr(ResultCode));
+
+    // Wait a bit for graceful stop
+    WaitForProcessExit('{#ServiceExe}', 5);
+
+    // Force kill via taskkill
+    Exec(ExpandConstant('{sys}\taskkill.exe'),
+         '/f /im {#ServiceExe}',
+         '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Log('  taskkill service result: ' + IntToStr(ResultCode));
+
+    // Nuclear option: PowerShell Stop-Process -Force (uses TerminateProcess API)
+    Exec('powershell.exe',
+         '-NonInteractive -WindowStyle Hidden -Command "Stop-Process -Name SentinelService -Force -ErrorAction SilentlyContinue"',
+         '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Log('  PowerShell Stop-Process result: ' + IntToStr(ResultCode));
+
+    // Last resort: wmic (deprecated but still works on most Windows 10/11)
+    Exec(ExpandConstant('{cmd}'),
+         '/c wmic process where "name=''SentinelService.exe''" call terminate >nul 2>&1',
+         '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  end;
+
+  // 5. Mop-up: kill any respawned agent
   Exec(ExpandConstant('{sys}\taskkill.exe'),
-       '/f /im {#ServiceExe}',
+       '/f /im {#AgentExe}',
+       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec('powershell.exe',
+       '-NonInteractive -WindowStyle Hidden -Command "Stop-Process -Name SentinelAgent -Force -ErrorAction SilentlyContinue"',
        '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
-  // 5. Wait for processes to fully exit and release file handles.
-  Sleep(3000);
+  // 6. Final wait — MUST confirm both processes are gone before proceeding.
+  Log('  Final wait for processes to fully exit...');
+  if WaitForProcessExit('{#ServiceExe}', 30) then
+    Log('  {#ServiceExe} exited.')
+  else
+    Log('  WARNING: {#ServiceExe} still running after 30 s — extraction WILL fail.');
 
-  // 6. Delete the service from SCM.
+  if WaitForProcessExit('{#AgentExe}', 10) then
+    Log('  {#AgentExe} exited.')
+  else
+    Log('  WARNING: {#AgentExe} still running after 10 s.');
+
+  // 7. Extra delay: even after process exit, Windows may hold file handles
+  //    briefly (kernel object teardown, antivirus scanning, etc.).
+  Sleep(2000);
+
+  // 7b. Verify we can actually access the file before proceeding.
+  //     If we can't rename it, the handle is still held.
+  if FileExists(ExpandConstant('{app}\{#ServiceExe}')) then
+  begin
+    Retries := 0;
+    while (Retries < 10) do
+    begin
+      if RenameFile(ExpandConstant('{app}\{#ServiceExe}'), ExpandConstant('{app}\{#ServiceExe}.old')) then
+      begin
+        Log('  File rename succeeded — handle released. Cleaning up.');
+        DeleteFile(ExpandConstant('{app}\{#ServiceExe}.old'));
+        Break;
+      end;
+      Log('  File still locked (attempt ' + IntToStr(Retries + 1) + '/10)...');
+      Sleep(1000);
+      Retries := Retries + 1;
+    end;
+  end;
+
+  // 8. Delete the service from SCM.
   Exec(ExpandConstant('{sys}\sc.exe'),
        'delete "' + '{#ServiceName}' + '"',
        '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Log('  sc delete result: ' + IntToStr(ResultCode));
 
-  // 7. Poll until SCM fully purges the service entry (max ~15 seconds).
-  //    sc delete only marks for deletion; the entry lingers until all handles close.
+  // 8. Poll until SCM fully purges the service entry.
   Retries := 0;
   while ServiceExists() and (Retries < 15) do
   begin
@@ -250,17 +369,15 @@ begin
   end;
 
   if ServiceExists() then
-    Log('  WARNING: Service entry still present after 15 seconds (SCM ghost) — will attempt sc create anyway')
+    Log('  WARNING: Service entry still present after 15 seconds (SCM ghost)')
   else
     Log('  Service entry fully purged from SCM.');
 
-  // 8. Clean up stale log files that might be locked or have bad ACLs.
-  //    This prevents the new service from crashing on startup due to
-  //    UnauthorizedAccessException on events.jsonl left by previous installs.
+  // 9. Clean up stale log files.
   DataDir := ExpandConstant('{commonappdata}\WindowsSentinel');
   if FileExists(DataDir + '\events.jsonl') then
   begin
-    Log('  Renaming stale events.jsonl to prevent startup failures...');
+    Log('  Renaming stale events.jsonl...');
     if not RenameFile(DataDir + '\events.jsonl', DataDir + '\events.jsonl.upgrade-backup') then
     begin
       Log('  Rename failed — attempting delete...');
@@ -269,15 +386,23 @@ begin
   end;
 end;
 
-// CurStepChanged fires at well-defined points in the install lifecycle.
-// ssInstall fires just before files are extracted — exactly what we need.
+// PrepareToInstall fires BEFORE Inno Setup checks file locks.
+// This is critical: if we wait until ssInstall, Inno Setup's file-lock
+// detection shows a "retry" dialog before our teardown code runs.
+// By tearing down here, the processes are already dead when Inno checks locks.
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  Result := '';  // Empty string = no error, proceed with install
+  NeedsRestart := False;
+  TearDownExistingService();
+  AddDefenderExclusions();
+end;
+
+// CurStepChanged kept for any future post-teardown logic.
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
-  if CurStep = ssInstall then
-  begin
-    TearDownExistingService();
-    AddDefenderExclusions();
-  end;
+  // Teardown moved to PrepareToInstall (runs before file-lock checks).
+  // This hook is kept for extensibility.
 end;
 
 // CurUninstallStepChanged fires during uninstall.

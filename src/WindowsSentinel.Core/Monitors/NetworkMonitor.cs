@@ -32,6 +32,7 @@ public sealed class NetworkMonitor : INetworkMonitor
     private readonly ConcurrentDictionary<string, NetworkConnection> _knownConnections = new();
     private BeaconingDetector? _beaconingDetector;
     private readonly TelemetryFusionEngine? _fusionEngine;
+    private readonly ProcessAncestryCache? _ancestryCache;
 
     // Deduplication: track which (pid, remote) pairs we've already alerted on.
     private readonly ConcurrentDictionary<string, DateTimeOffset> _alertedConnections = new();
@@ -56,12 +57,14 @@ public sealed class NetworkMonitor : INetworkMonitor
         IDetectionEngine detectionEngine,
         ILogger<NetworkMonitor> logger,
         BeaconingDetector? beaconingDetector = null,
-        TelemetryFusionEngine? fusionEngine = null)
+        TelemetryFusionEngine? fusionEngine = null,
+        ProcessAncestryCache? ancestryCache = null)
     {
         _detectionEngine   = detectionEngine;
         _logger            = logger;
         _beaconingDetector = beaconingDetector;
         _fusionEngine      = fusionEngine;
+        _ancestryCache     = ancestryCache;
     }
 
     public IReadOnlyList<NetworkConnection> GetCurrentConnections() =>
@@ -100,15 +103,17 @@ public sealed class NetworkMonitor : INetworkMonitor
                     var key = $"{conn.Protocol}:{conn.ProcessId}:{conn.LocalPort}->{conn.RemoteAddress}:{conn.RemotePort}";
                     _knownConnections[key] = conn;
 
+                    var procName = _ancestryCache?.GetProcessName(conn.ProcessId) ?? conn.ProcessId.ToString();
+
                     if (!SuspiciousPorts.Contains(conn.RemotePort))
                     {
                         // Still feed to beaconing detector even for non-suspicious ports
                         // — beaconing can happen on any port
-                        _beaconingDetector?.RecordConnection(conn, conn.ProcessId.ToString());
+                        _beaconingDetector?.RecordConnection(conn, procName);
                         continue;
                     }
 
-                    _beaconingDetector?.RecordConnection(conn, conn.ProcessId.ToString());
+                    _beaconingDetector?.RecordConnection(conn, procName);
 
                     // Deduplicate — don't re-alert on the same connection every 5 s
                     var alertKey = $"{conn.ProcessId}:{conn.RemoteAddress}:{conn.RemotePort}";
@@ -116,7 +121,7 @@ public sealed class NetworkMonitor : INetworkMonitor
                     _alertedConnections[alertKey] = DateTimeOffset.UtcNow;
 
                     // Feed telemetry fusion engine (enriches event graph)
-                    _fusionEngine?.IngestNetwork(conn.ProcessId, conn.ProcessId.ToString(),
+                    _fusionEngine?.IngestNetwork(conn.ProcessId, procName,
                         conn.RemoteAddress, conn.RemotePort, DateTimeOffset.UtcNow);
 
                     var telemetry = new NetworkTelemetry

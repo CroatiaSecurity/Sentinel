@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Security.AccessControl;
@@ -266,9 +267,18 @@ public sealed class SecureCacheStore
     {
         try
         {
-            // Environment.TickCount64 gives ms since boot — but we want boot TIME, not uptime.
-            // Use: current time - uptime = boot time (rounded to minute to avoid clock drift issues)
-            var bootTime = DateTimeOffset.UtcNow - TimeSpan.FromMilliseconds(Environment.TickCount64);
+            DateTime bootTime;
+            try
+            {
+                using var sysProc = Process.GetProcessById(4);
+                bootTime = sysProc.StartTime.ToUniversalTime();
+            }
+            catch
+            {
+                // Fallback to UTC - TickCount64 if PID 4 is inaccessible or query throws
+                bootTime = DateTime.UtcNow - TimeSpan.FromMilliseconds(Environment.TickCount64);
+            }
+
             // Round to nearest minute to avoid sub-second drift between reads
             var rounded = new DateTimeOffset(
                 bootTime.Year, bootTime.Month, bootTime.Day,

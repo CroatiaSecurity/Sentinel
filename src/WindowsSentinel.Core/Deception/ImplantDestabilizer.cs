@@ -24,9 +24,11 @@ namespace WindowsSentinel.Core.Deception;
 ///   - Only targets the specific malicious PID, never system processes
 ///   - Failure is non-fatal; kill proceeds regardless
 /// </summary>
-public sealed class ImplantDestabilizer : IDeceptionTactic
+public sealed class ImplantDestabilizer : IDeceptionTactic, IDisposable
 {
     private readonly ILogger<ImplantDestabilizer> _logger;
+    private readonly List<EventWaitHandle> _activeDecoys = new();
+    private readonly object _decoysLock = new();
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern IntPtr OpenProcess(uint dwDesiredAccess, bool bInheritHandle, int dwProcessId);
@@ -348,25 +350,40 @@ public sealed class ImplantDestabilizer : IDeceptionTactic
         int created = 0;
         var decoyNames = GenerateDecoyObjectNames();
 
-        foreach (var name in decoyNames)
+        lock (_decoysLock)
         {
-            try
+            foreach (var name in decoyNames)
             {
-                // Create named events with misleading names that suggest other malware
-                // This pollutes any handle enumeration the attacker does
-                var evt = new EventWaitHandle(false, EventResetMode.ManualReset, name);
-                created++;
-                // Don't dispose — let them persist until process dies
-            }
-            catch
-            {
-                // Non-fatal
+                try
+                {
+                    // Create named events with misleading names that suggest other malware
+                    // This pollutes any handle enumeration the attacker does
+                    var evt = new EventWaitHandle(false, EventResetMode.ManualReset, name);
+                    _activeDecoys.Add(evt);
+                    created++;
+                }
+                catch
+                {
+                    // Non-fatal
+                }
             }
         }
 
         return created > 0
             ? $"Created {created} decoy named objects to pollute handle forensics"
             : null;
+    }
+
+    public void Dispose()
+    {
+        lock (_decoysLock)
+        {
+            foreach (var decoy in _activeDecoys)
+            {
+                try { decoy.Dispose(); } catch { }
+            }
+            _activeDecoys.Clear();
+        }
     }
 
     private static bool IsSystemModule(string path)

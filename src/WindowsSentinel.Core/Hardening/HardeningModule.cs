@@ -218,7 +218,11 @@ public sealed class HardeningModule : BackgroundService
                 // Cleanup PIDs for processes that no longer exist
                 var deadPids = knownHookPids.Where(pid =>
                 {
-                    try { Process.GetProcessById(pid); return false; }
+                    try 
+                    { 
+                        using var proc = Process.GetProcessById(pid); 
+                        return false; 
+                    }
                     catch { return true; }
                 }).ToList();
                 foreach (var pid in deadPids)
@@ -522,7 +526,7 @@ public sealed class HardeningModule : BackgroundService
             {
                 await Task.Delay(TimeSpan.FromMinutes(1), cancellationToken);
 
-                CheckSecurityRegistryChanges(cancellationToken);
+                await CheckSecurityRegistryChangesAsync(cancellationToken);
             }
             catch (OperationCanceledException)
             {
@@ -553,7 +557,7 @@ public sealed class HardeningModule : BackgroundService
         _logger.LogInformation("Registry Security Monitor: Baselines established for {Count} settings", _securityBaselines.Count);
     }
 
-    private void CheckSecurityRegistryChanges(CancellationToken ct)
+    private async Task CheckSecurityRegistryChangesAsync(CancellationToken ct)
     {
         var checks = new Dictionary<string, (string path, string name, object expected)>
         {
@@ -576,7 +580,7 @@ public sealed class HardeningModule : BackgroundService
                 _securityBaselines[check.Key] = current;
 
                 // Emit detection
-                _detectionEngine.EmitAsync(new DetectionEvent
+                await _detectionEngine.EmitAsync(new DetectionEvent
                 {
                     RuleName = $"CRITICAL: Security Setting Changed - {check.Key}",
                     Evidence = $"Registry value {check.Value.name} changed from {check.Value.expected} to {current}",
@@ -594,8 +598,8 @@ public sealed class HardeningModule : BackgroundService
                         ["old_value"] = check.Value.expected?.ToString() ?? "null",
                         ["new_value"] = current?.ToString() ?? "null",
                         ["severity"] = "CRITICAL"
-                    }
-                }, ct).Wait(ct);
+                     }
+                }, ct);
             }
         }
     }
@@ -632,7 +636,7 @@ public sealed class HardeningModule : BackgroundService
             {
                 await Task.Delay(TimeSpan.FromSeconds(10), cancellationToken);
 
-                CheckForNewUSBDevices(cancellationToken);
+                await CheckForNewUSBDevicesAsync(cancellationToken);
             }
             catch (OperationCanceledException)
             {
@@ -667,7 +671,7 @@ public sealed class HardeningModule : BackgroundService
         }
     }
 
-    private void CheckForNewUSBDevices(CancellationToken ct)
+    private async Task CheckForNewUSBDevicesAsync(CancellationToken ct)
     {
         try
         {
@@ -689,7 +693,7 @@ public sealed class HardeningModule : BackgroundService
                     var volumeLabel = driveInfo.VolumeLabel ?? "Unknown";
                     var driveFormat = driveInfo.DriveFormat ?? "Unknown";
 
-                    _detectionEngine.EmitAsync(new DetectionEvent
+                    await _detectionEngine.EmitAsync(new DetectionEvent
                     {
                         RuleName = "USB Device Connected",
                         Evidence = $"New removable storage device connected: {drive} (Label: {volumeLabel}, Format: {driveFormat})",
@@ -707,7 +711,7 @@ public sealed class HardeningModule : BackgroundService
                             ["drive_format"] = driveFormat,
                             ["drive_type"] = "Removable"
                         }
-                    }, ct).Wait(ct);
+                    }, ct);
                 }
             }
 

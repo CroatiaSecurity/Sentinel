@@ -1,6 +1,6 @@
 # Windows Sentinel — Threat Model
 
-**Version: 2.8.0**
+**Version: 2.8.1**
 
 This document assumes the attacker has read the source code.
 
@@ -270,5 +270,22 @@ The attacker could theoretically:
 **Attack:** Network-based deception tactics (e.g., BeaconFlooder, NetworkHoneypotDeployer) wait on sockets or remote connections, which easily exhausts the 2-second pre-kill budget and delays target process termination.
 **Mitigation:** All network-based and lateral movement deception tactics are executed asynchronously in the background. They run as fire-and-forget background tasks (`Task.Run`), allowing the pre-kill pipeline to immediately proceed with process termination without blocking.
 **Residual risk:** LOW. Network latency cannot affect containment times.
+
+## Threat Analysis Updates (v2.8.1 Hardening & Bug Fixes)
+
+### B14: Quarantine filename parsing vulnerability
+**Attack:** An attacker could craft a file path containing multiple dashes or special characters, causing the four-part split parsing schema in `QuarantineManager` to crash or map metadata incorrectly, potentially leading to directory traversal or signature bypasses.
+**Mitigation:** Refactored the parsing routine in `QuarantineManager.cs` to leverage regex-like split boundaries, verifying array length matches expectations, and falling back gracefully without throwing exceptions.
+**Residual risk:** LOW. Files are safely encrypted prior to parsing.
+
+### B15: File handle leak in process and hook monitoring
+**Attack:** Querying active processes inside a high-frequency polling loop can exhaust system handle limits if process handles are not closed, resulting in service denial of service or instability.
+**Mitigation:** Wrapped process queries in `using` statements, and ensured that all obtained native process handles are closed/disposed properly in `HardeningModule.cs`.
+**Residual risk:** LOW. Memory and handle usage remain flat.
+
+### B16: NTP time-drift or clock manipulation bypasses cache validity
+**Attack:** An attacker who poisons the reputation cache might trigger NTP synchronization or local clock manipulation to trick `SecureCacheStore` into accepting older caches or validating compromised reputation lists.
+**Mitigation:** Replaced the subtractive boot time extraction (using TickCount64) with direct querying of the System process (PID 4) start time via `Process.GetProcessById(4).StartTime`, establishing a tamper-resistant boot session anchor.
+**Residual risk:** LOW. Safe fallback to local clock remains in place.
 
 

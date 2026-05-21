@@ -34,24 +34,24 @@ namespace WindowsSentinel.Core;
 public static class SentinelVersion
 {
     /// <summary>
-    /// Current version - 2.8.0 Deception Refinements + Ransomware Fast-Path
+    /// Current version - 2.8.1 Architecture Hardening & Bug Fixes
     /// </summary>
-    public const string Version = "2.8.0";
+    public const string Version = "2.8.1";
 
     /// <summary>
     /// Release date
     /// </summary>
-    public static readonly DateTime ReleaseDate = new(2026, 5, 20);
+    public static readonly DateTime ReleaseDate = new(2026, 5, 21);
 
     /// <summary>
     /// Version description
     /// </summary>
     public const string Description =
-        "2.8.0 — Deception Refinements & Ransomware Fast-Path. " +
-        "Ransomware fast-path: immediately kills process chains without running deception. " +
-        "Stack corruption bug fix: corrected context layout for x64 thread stacks with thread suspension. " +
-        "Asynchronous deception: runs off-host/network deception (BeaconFlooder, NetworkHoneypotDeployer) asynchronously without blocking the pre-kill window. " +
-        "Includes all v2.5.0 features.";
+        "2.8.1 — Architecture Hardening & Bug Fixes. " +
+        "Fixes quarantine metadata parsing, hook monitor process handle leaks, " +
+        "implant destabilizer wait handle GC cleanup, sync-over-async blocking, " +
+        "network telemetry process name resolution, honeypot lifetime truncation, " +
+        "and stable boot-bound nonce calculation.";
 }
 
 public static class ServiceCollectionExtensions
@@ -303,7 +303,8 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<IDetectionEngine>(),
             sp.GetRequiredService<ILogger<NetworkMonitor>>(),
             sp.GetRequiredService<BeaconingDetector>(),
-            sp.GetRequiredService<TelemetryFusionEngine>()));
+            sp.GetRequiredService<TelemetryFusionEngine>(),
+            sp.GetRequiredService<ProcessAncestryCache>()));
         services.AddSingleton<IMonitor>(sp => sp.GetRequiredService<INetworkMonitor>());
 
         // ── 0.4.0 — Ports from GIDR (security-hardened) ──────────────────────

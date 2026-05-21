@@ -1,6 +1,6 @@
 # Windows Sentinel — Design Document
 
-**Version: 2.8.0**
+**Version: 2.8.1**
 
 ---
 
@@ -258,6 +258,12 @@ Composite detections are emitted as Tier1 `DetectionEvent`s directly into the de
 | `Ransomware Fast-Path` | Instantly bypasses the deception engine execution window if "ransomware" is detected in rule or reasoning, terminating processes immediately to minimize encryption speed damage. |
 | `x64 Context Aligned Stack Corruption` | Suspends thread and queries thread context using a native 16-byte packed CONTEXT struct, safely targeting stack pointer (Rsp) on x64 processes. |
 | `Asynchronous Deception` | Refactors execution of off-host/network deception tactics (BeaconFlooder, NetworkHoneypotDeployer) into fire-and-forget background tasks. |
+
+## Added in 2.8.1
+
+| Component | Purpose |
+|-----------|---------|
+| `Architecture Hardening & Bug Fixes` | Fixes filename parsing metadata collision in `QuarantineManager`, process handle leaks in `HardeningModule`, named kernel object premature GC in `ImplantDestabilizer`, sync-over-async blocking, process name resolution in network telemetry, honeypot lifetime truncation, and NTP-resistant boot-bound nonce generation. |
 
 ---
 

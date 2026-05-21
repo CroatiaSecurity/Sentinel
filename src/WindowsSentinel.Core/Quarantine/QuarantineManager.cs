@@ -386,21 +386,21 @@ public sealed class QuarantineManager
             return null;
         }
 
-        // Format: {timestamp}_{pid}_{filename}.{ext}.quarantined
-        var parts = filename.Split('_', 3);
+        // Format: {yyyyMMdd}_{HHmmss}_{pid}_{filename}.quarantined
+        var parts = filename.Split('_', 4);
 
-        if (parts.Length < 3)
+        if (parts.Length < 4)
             return null;
 
         // SECURITY FIX: Strict validation of timestamp format
-        if (!DateTime.TryParseExact(parts[0], "yyyyMMdd", null, System.Globalization.DateTimeStyles.None, out _))
+        if (!DateTime.TryParseExact(parts[0] + "_" + parts[1], "yyyyMMdd_HHmmss", null, System.Globalization.DateTimeStyles.None, out var timestamp))
             return null;
 
         // SECURITY FIX: Strict validation of PID (must be positive integer in valid range)
-        if (!int.TryParse(parts[1], out var pid) || pid <= 0 || pid > 999999)
+        if (!int.TryParse(parts[2], out var pid) || pid <= 0 || pid > 999999)
             return null;
 
-        var originalName = parts[2].Replace(".quarantined", "");
+        var originalName = parts[3].Replace(".quarantined", "");
         
         // SECURITY FIX: Validate original filename doesn't contain path traversal
         if (originalName.Contains("..") || originalName.Contains("/") || originalName.Contains("\\"))
@@ -408,9 +408,6 @@ public sealed class QuarantineManager
             _logger.LogWarning("QuarantineManager: Rejected filename with path traversal: {Filename}", originalName);
             return null;
         }
-
-        // Parse timestamp from first part
-        var timestamp = DateTime.ParseExact(parts[0] + "_" + parts[1].Substring(0, 4), "yyyyMMdd_HHmm", null);
 
         return new QuarantinedFile
         {

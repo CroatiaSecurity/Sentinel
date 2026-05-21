@@ -118,14 +118,10 @@ public sealed class DeceptionEngine : IDeceptionEngine
                 // Fire and forget using Task.Run
                 _ = Task.Run(async () =>
                 {
-                    // Create a 10-second timeout for the background task to prevent thread exhaustion
-                    using var bgCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                    bgCts.CancelAfter(TimeSpan.FromSeconds(10));
-
                     try
                     {
                         var tacticSw = Stopwatch.StartNew();
-                        var result = await tactic.ExecuteAsync(context, bgCts.Token);
+                        var result = await tactic.ExecuteAsync(context, cancellationToken);
                         tacticSw.Stop();
                         
                         if (result.Success)
@@ -143,7 +139,7 @@ public sealed class DeceptionEngine : IDeceptionEngine
                     }
                     catch (OperationCanceledException)
                     {
-                        _logger.LogWarning("[DECEPTION] [ASYNC] Tactic {Tactic} timed out after 10 seconds", tactic.GetType().Name);
+                        _logger.LogWarning("[DECEPTION] [ASYNC] Tactic {Tactic} cancelled", tactic.GetType().Name);
                     }
                     catch (Exception ex)
                     {
