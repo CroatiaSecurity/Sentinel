@@ -80,8 +80,8 @@ Name: "{commonappdata}\WindowsSentinel\Quarantine"; Permissions: system-full adm
 Name: "{commonappdata}\WindowsSentinel\Logs";       Permissions: system-full admins-full users-readexec
 
 [Run]
-; ── Service teardown is now handled in [Code] CurStepChanged(ssInstall)
-; ── so it runs BEFORE file extraction. Only post-install steps remain here.
+; ── Service teardown is handled in [Code] PrepareToInstall()
+; ── which runs BEFORE file-lock checks and extraction. Only post-install steps remain here.
 
 ; ── Install and start the new service
 Filename: "{sys}\sc.exe"; Parameters: "create ""{#ServiceName}"" binPath= ""{app}\{#ServiceExe}"" start= auto DisplayName= ""{#AppName}"""; Flags: runhidden waituntilterminated; StatusMsg: "Installing service..."

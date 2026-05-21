@@ -327,7 +327,7 @@ The installer:
 3. Creates Windows Service (runs as SYSTEM, full telemetry)
 4. Launches Agent into user session (watchdog-only)
 
-**Upgrades:** The installer automatically tears down the previous installation before extracting new files — resets tamper-protection ACLs, kills processes, deletes the service, polls SCM until the entry is fully purged, and renames stale `events.jsonl` to prevent startup failures from inherited file locks.
+**Upgrades:** The installer automatically tears down the previous installation in `PrepareToInstall` (before file extraction begins). It kills the agent first (which causes the service to self-terminate), then escalates through `sc stop`, `taskkill /f`, PowerShell `Stop-Process -Force`, and `wmic terminate` as fallbacks. A file-lock probe loop verifies the EXE is unlocked before Inno Setup attempts to overwrite it. If all else fails, `restartreplace` schedules the file swap on next reboot.
 
 ---
 

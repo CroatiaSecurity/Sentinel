@@ -3,8 +3,13 @@
 ## 2.8.1 — Architecture Hardening & Bug Fixes (May 2026)
 
 ### Fixes: Installer Upgrade Race Condition
-- **File-lock race (DeleteFile code 5):** The previous teardown issued `taskkill /f` and waited a fixed 3 seconds, which was insufficient when the OS deferred handle closure. A new `WaitForFileLockRelease` helper now actively probes `SentinelService.exe` with a rename-probe loop (up to 30 s), ensuring Inno Setup never attempts to overwrite a still-locked binary. Fixes *"An error occurred while trying to replace the existing file: DeleteFile failed; code 5. Access is denied."* on upgrades.
-- **Double taskkill pass:** Added a second `taskkill /f /im SentinelService.exe` after a 1 s sleep to catch deferred process exits before the file-lock poll begins.
+- **Root cause: Inno Setup lifecycle ordering.** The previous teardown ran in `CurStepChanged(ssInstall)`, but Inno Setup's `CloseApplications=yes` (Windows Restart Manager) triggered a "retry" dialog *before* the teardown code executed. The Restart Manager cannot close SYSTEM services from user-mode, so it showed "DeleteFile failed; code 5. Access is denied" while the service EXE was still locked.
+- **Fix: Moved teardown to `PrepareToInstall`.** This function runs earlier in the Inno Setup lifecycle — before file-lock checks and before file extraction. By the time Inno tries to overwrite `SentinelService.exe`, the processes are already dead.
+- **Disabled `CloseApplications`.** Set to `no` since the Windows Restart Manager cannot handle SYSTEM services and was only producing a useless retry dialog. Teardown is handled entirely in `[Code]`.
+- **Multi-method process kill.** Added PowerShell `Stop-Process -Force` and `wmic process call terminate` as fallbacks when `taskkill /f` fails to terminate SYSTEM processes from an admin-elevated installer.
+- **File-lock verification loop.** After process exit, a rename-probe loop (up to 10 attempts, 1s apart) actively verifies the file handle is released before proceeding. Windows can hold file handles briefly after process termination (kernel object teardown, antivirus scanning).
+- **`restartreplace` flag.** Added as ultimate fallback on `[Files]` entries — if the file is still locked despite all teardown efforts, Inno Setup schedules replacement on next reboot instead of failing.
+- **Kill-agent-first strategy.** Empirically, killing the agent causes the service to self-terminate. The teardown now waits up to 10s for this natural shutdown before escalating to forced stop/kill.
 
 ### Fixes: Concurrency & Resource Leak Hardening
 - **Process Handle Leaks:** Fixed a process handle leak in `HardeningModule.cs` where process querying handles were not closed/disposed, causing system handle exhaustion over time.
@@ -48,9 +53,11 @@
 - Log rotation catch block now safely wraps the fallback `OpenWriter()` call to prevent cascading failures.
 
 ### Fix: Installer Upgrade Hardening
-- Service teardown now runs in `[Code] CurStepChanged(ssInstall)` — **before** file extraction — so the service binary is not locked during overwrite.
-- `TearDownExistingService` resets tamper-protection ACLs, kills processes, stops and deletes the service, then polls SCM for up to 15 seconds until the entry is fully purged.
+- Service teardown now runs in `[Code] PrepareToInstall()` — **before** file-lock checks and extraction — so the service binary is never locked during overwrite.
+- `CloseApplications` disabled (Windows Restart Manager cannot close SYSTEM services).
+- `TearDownExistingService` resets tamper-protection ACLs, kills agent (triggers service self-shutdown), escalates through multiple kill methods, verifies file-lock release via rename-probe loop, then deletes the service and polls SCM for up to 15 seconds until the entry is fully purged.
 - Added `events.jsonl` cleanup: during upgrade, the installer renames the old log file to `.upgrade-backup` to prevent `UnauthorizedAccessException` crashes from stale file locks or inherited ACLs.
+- Added `restartreplace` flag on service/agent binaries as ultimate fallback.
 
 ### Infrastructure
 - All version references bumped to 2.8.0.
