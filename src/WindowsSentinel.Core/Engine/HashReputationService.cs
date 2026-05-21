@@ -47,7 +47,7 @@ public sealed class HashReputationService : IDisposable
         {
             Timeout = TimeSpan.FromSeconds(5)
         };
-        _httpClient.DefaultRequestHeaders.Add("User-Agent", "WindowsSentinel-EDR/2.8.1");
+        _httpClient.DefaultRequestHeaders.Add("User-Agent", "WindowsSentinel-EDR/3.0.0");
         _cacheStore = new SecureCacheStore(logger, "hash_reputation");
         _rateLimiter = new SemaphoreSlim(1, 1);
         
@@ -373,10 +373,25 @@ public sealed class HashReputationService : IDisposable
 
     #region Caching
 
+    // In-memory LRU cache for hot-path lookups (avoids SecureCacheStore I/O on every call)
+    private readonly ConcurrentDictionary<string, ReputationResult> _memoryCache = new();
+    private const int MaxMemoryCacheSize = 5000;
+
     private ReputationResult? GetFromCache(string hash)
     {
-        // Check in-memory cache first (would be implemented with IMemoryCache in full version)
-        // For now, rely on SecureCacheStore
+        // Check in-memory cache first (fast path)
+        if (_memoryCache.TryGetValue(hash, out var cached))
+            return cached;
+
+        // Fall through to disk cache (SecureCacheStore)
+        var diskCache = _cacheStore.TryLoad<Dictionary<string, ReputationResult>>();
+        if (diskCache is not null && diskCache.TryGetValue(hash, out var diskResult))
+        {
+            // Promote to memory cache
+            _memoryCache[hash] = diskResult;
+            return diskResult;
+        }
+
         return null;
     }
 
@@ -396,13 +411,64 @@ public sealed class HashReputationService : IDisposable
 
     private void SaveToCache(ReputationResult result)
     {
-        // Persist to SecureCacheStore
-        // Implementation would use _cacheStore.TrySave()
+        // Save to memory cache
+        _memoryCache[result.Hash] = result;
+
+        // Evict oldest entries if memory cache is too large
+        if (_memoryCache.Count > MaxMemoryCacheSize)
+        {
+            var oldest = _memoryCache
+                .OrderBy(kvp => kvp.Value.CheckedAt)
+                .Take(_memoryCache.Count - MaxMemoryCacheSize + 100)
+                .Select(kvp => kvp.Key)
+                .ToList();
+            foreach (var key in oldest)
+                _memoryCache.TryRemove(key, out _);
+        }
+
+        // Persist to disk periodically (every 50 new entries to avoid I/O thrashing)
+        if (_memoryCache.Count % 50 == 0)
+        {
+            PersistCacheToDisk();
+        }
     }
 
     private void LoadCacheFromDisk()
     {
-        // Load persisted cache
+        try
+        {
+            var diskCache = _cacheStore.TryLoad<Dictionary<string, ReputationResult>>();
+            if (diskCache is null) return;
+
+            var now = DateTimeOffset.UtcNow;
+            foreach (var kvp in diskCache)
+            {
+                // Only load non-expired entries
+                if (!IsCacheExpired(kvp.Value))
+                {
+                    _memoryCache[kvp.Key] = kvp.Value;
+                }
+            }
+
+            _logger.LogInformation("HashReputation: Loaded {Count} cached entries from disk", _memoryCache.Count);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "HashReputation: Failed to load disk cache (starting fresh)");
+        }
+    }
+
+    private void PersistCacheToDisk()
+    {
+        try
+        {
+            var snapshot = new Dictionary<string, ReputationResult>(_memoryCache);
+            _cacheStore.TrySave(snapshot);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "HashReputation: Failed to persist cache to disk");
+        }
     }
 
     #endregion

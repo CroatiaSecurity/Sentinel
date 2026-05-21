@@ -2,7 +2,7 @@
 
 **Userland EDR for Windows — Behavioral Detection, Automated Response & Aggressive Deception**
 
-> Version: 2.8.1 (Architecture Hardening & Bug Fixes)  
+> Version: 3.1.0 (Observability, Blind Spots & Resilience)  
 > Author: [Gorstak](https://gorstak.eu) | [GitHub](https://github.com/CroatiaSecurity/Sentinel)  
 > License: MIT
 
@@ -272,7 +272,7 @@ All tactics:
 | AMSI/ETW integrity | Monitors syscall stubs, auto-repair |
 | Self-kill prevention | All kill paths refuse to target own PID |
 | Config tampering | Hash-based integrity, allowlist freeze on modification |
-| Cross-process watchdog | Service heartbeat → Agent restart on stale |
+| Cross-process watchdog | Service heartbeat → Agent restart on stale (HMAC-signed, DPAPI-derived key) |
 | Quarantine security | DPAPI encryption + restrictive ACL |
 | Cache integrity | Boot-nonce-bound HMAC (v1.1.0) — previous-session caches rejected |
 | Credential canary | Honeypot credential detects credential harvesting |
@@ -311,6 +311,8 @@ All tactics:
 | DLL Analysis | DllLoadFailureMonitor | Event Log ID 7 + SideBySide errors | 1.9.0 |
 | DLL Analysis | UacBypassSurfaceMonitor | COM AutoElevation + manifest autoElevate | 1.9.0 |
 | NeuroBehavior | NeuroBehaviorVisualMonitor | Screen capture + foreground window + cursor analysis | 2.5.0 |
+| Lateral Movement | NamedPipeMonitor | Named pipe enumeration + C2 pattern matching | 3.1.0 |
+| Persistence | WmiPersistenceMonitor | WMI namespace scan (__EventFilter/__EventConsumer) | 3.1.0 |
 
 ---
 
@@ -318,7 +320,7 @@ All tactics:
 
 ```powershell
 # Run installer as Administrator
-.\WindowsSentinelSetup-2.8.1.exe
+.\WindowsSentinelSetup-3.0.0.exe
 ```
 
 The installer:
@@ -397,7 +399,7 @@ cd installer
 .\build.ps1
 ```
 
-Output: `installer\output\WindowsSentinelSetup-2.8.1.exe`
+Output: `installer\output\WindowsSentinelSetup-3.0.0.exe`
 
 ---
 
@@ -476,6 +478,8 @@ installer/
 | 2.5.0 | NeuroBehavior Visual + AudioHijack Enhancement | NeuroBehaviorVisualMonitor: ported from Antivirus.ps1, detects focus abuse (>8 focus steals in 10s), flash stimulus (rapid brightness oscillation), topmost abuse (non-allowlisted WS_EX_TOPMOST), cursor jitter (>6 large jumps in 10s), color distortion/inversion. All signals emit as Tier2 advisory — never kill independently, safe for games/browsers. 4 new composite rules: Neuro+MicSession (0.93), Neuro+AudioHijack (0.94), Neuro+Injection (0.92), MultipleNeuroSignals (0.90). AudioHijackMonitor enhanced: no longer requires command-line tokens — detects output-to-mic routing by module analysis alone (background process with audio-out + mic-in modules and no visible window). Total composites: 34. |
 | 2.8.0 | Anti-Evasion & Zero-Latency Ransomware Defense | CanaryFileMonitor (zero-latency ransomware canaries). FirewallTamperingRule, AccountManipulationRule, DataExfiltrationRule. Suspicious parent-child detection (Office→shell). Forensic process suspension (NtSuspendProcess before kill). JsonlEventLogger resilience: graceful degradation on file access failure, FileShare.ReadWrite for concurrent access, self-healing writer, stale file rename. Installer upgrade hardening: pre-extraction service teardown with SCM purge polling, events.jsonl cleanup on upgrade. |
 | 2.8.1 | Architecture Hardening & Bug Fixes | Fix quarantine metadata parsing split collision, hook monitor process handle leaks, implant destabilizer wait handle GC cleanup, sync-over-async blocking in monitors and engines, network telemetry process name resolution, honeypot listener lifetime truncation, and NTP-resistant boot-bound nonce generation. |
+| 3.0.0 | Security Hardening, Observability & Resilience | Centralized SecurityValidation utility, RateLimiter with burst capability, SafeExecution patterns (retry/timeout/circuit breaker), ConfigurationValidation framework, ConfigIntegrityMonitor (detects config/exe tampering), SentinelHealthCheck (memory/handles/threads/log/quarantine monitoring), SentinelMetrics (counters/histograms/gauges for detection rate, FP rate, response latency), SecureHttpClientFactory (TLS 1.2+, domain allowlisting, certificate validation), atomic quarantine operations, DllUnloadEngine improvements (IDisposable, validation, safe unload), StructuredLoggingExtensions, comprehensive fuzz tests and integration tests. |
+| 3.1.0 | Observability, Blind Spots & Resilience | SentinelMetrics wired into DetectionEngine and AdvancedResponseEngine (live detection rate, response latency, FP tracking). HashReputationService cache implemented (in-memory + DPAPI-encrypted disk persistence via SecureCacheStore, cuts API calls 90%+). Named Pipe Monitor (Cobalt Strike, PsExec, Impacket, Metasploit C2 detection). WMI Event Subscription Persistence Monitor (T1546.003 — detects planted __EventFilter/__EventConsumer bindings). Startup Self-Test (ETW, DPAPI, quarantine, log file, rule count verification on boot). Watchdog heartbeat HMAC signing (DPAPI-derived key, unforgeable without SYSTEM access). ProcessAncestryCache WMI/CIM fallback for Server Core/IoT. SentinelService.StartAsync properly overrides BackgroundService. |
 
 ---
 

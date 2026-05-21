@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
+using WindowsSentinel.Core.Health;
 using WindowsSentinel.Core.Interfaces;
 using WindowsSentinel.Core.Models;
 
@@ -19,6 +20,7 @@ public sealed class DetectionEngine : IDetectionEngine, IAsyncDisposable
 {
     private readonly IReadOnlyList<IDetectionRule> _rules;
     private readonly ILogger<DetectionEngine> _logger;
+    private readonly SentinelMetrics? _metrics;
     private readonly Channel<DetectionEvent> _channel;
 
     // Deduplication: key = "RuleName|ProcessId", value = last-seen time
@@ -27,10 +29,12 @@ public sealed class DetectionEngine : IDetectionEngine, IAsyncDisposable
 
     public DetectionEngine(
         IEnumerable<IDetectionRule> rules,
-        ILogger<DetectionEngine> logger)
+        ILogger<DetectionEngine> logger,
+        SentinelMetrics? metrics = null)
     {
         _rules   = rules.ToList().AsReadOnly();
         _logger  = logger;
+        _metrics = metrics;
         _channel = Channel.CreateUnbounded<DetectionEvent>(
             new UnboundedChannelOptions { SingleReader = false, SingleWriter = false });
     }
@@ -94,6 +98,9 @@ public sealed class DetectionEngine : IDetectionEngine, IAsyncDisposable
         _logger.LogDebug("Rule '{Rule}' fired (Tier {Tier}, confidence {Confidence:P0})",
             detection.RuleName, detection.Tier, detection.Confidence);
 
+        // Record detection in metrics
+        _metrics?.RecordDetection(detection.RuleName, detection.Tier.ToString(), detection.Confidence);
+
         await _channel.Writer.WriteAsync(detection, cancellationToken);
         return true;
     }
@@ -115,6 +122,10 @@ public sealed class DetectionEngine : IDetectionEngine, IAsyncDisposable
     {
         _logger.LogDebug("Composite detection emitted: '{Rule}' (confidence {Confidence:P0})",
             detection.RuleName, detection.Confidence);
+
+        // Record composite detection in metrics
+        _metrics?.RecordDetection(detection.RuleName, detection.Tier.ToString(), detection.Confidence);
+
         await _channel.Writer.WriteAsync(detection, cancellationToken);
     }
 

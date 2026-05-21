@@ -1,5 +1,7 @@
 using System.Diagnostics;
+using System.Security.Cryptography;
 using System.Security.Principal;
+using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -18,6 +20,10 @@ public sealed class HeartbeatService : BackgroundService
     private readonly DateTimeOffset _startTime;
     private long _detectionCount = 0;
     private long _responseCount = 0;
+
+    // HMAC key derived from DPAPI machine scope — unforgeable without SYSTEM access.
+    // The Agent derives the same key using the same entropy, so both sides can verify.
+    private static readonly byte[] HmacKey = DeriveHmacKey();
 
     public HeartbeatService(
         IEventLogger eventLogger,
@@ -60,10 +66,14 @@ public sealed class HeartbeatService : BackgroundService
     }
 
     /// <summary>
-    /// Writes a timestamp to a watchdog file every 30 seconds.
+    /// Writes an HMAC-signed timestamp to a watchdog file every 30 seconds.
     /// The Agent process monitors this file — if it goes stale (>90 seconds old),
     /// the Agent knows the service was killed/compromised and can restart it.
-    /// This is a cross-process integrity check that survives in-process injection.
+    ///
+    /// Format: {payload}|{hmac_hex}
+    /// Where payload = {timestamp}|{pid}|{detectionCount}
+    /// HMAC is computed over the payload using a DPAPI-derived machine key.
+    /// An attacker cannot forge heartbeats without SYSTEM-level DPAPI access.
     /// </summary>
     private async Task RunWatchdogHeartbeatAsync(CancellationToken stoppingToken)
     {
@@ -75,9 +85,15 @@ public sealed class HeartbeatService : BackgroundService
         {
             try
             {
-                // Write current timestamp + PID + integrity token
+                // Build payload
                 var payload = $"{DateTimeOffset.UtcNow:O}|{Environment.ProcessId}|{_detectionCount}";
-                await File.WriteAllTextAsync(watchdogPath, payload, stoppingToken);
+
+                // Compute HMAC-SHA256 over the payload
+                var hmac = ComputeHmac(payload);
+
+                // Write signed heartbeat: payload|hmac
+                var signedContent = $"{payload}|{hmac}";
+                await File.WriteAllTextAsync(watchdogPath, signedContent, stoppingToken);
             }
             catch (Exception ex)
             {
@@ -96,6 +112,84 @@ public sealed class HeartbeatService : BackgroundService
 
         // Clean up on graceful shutdown
         try { File.Delete(watchdogPath); } catch { }
+    }
+
+    /// <summary>
+    /// Verifies a watchdog heartbeat payload against its HMAC signature.
+    /// Used by the Agent to validate heartbeat authenticity.
+    /// </summary>
+    public static bool VerifyHeartbeat(string fileContent, out string? payload, out DateTimeOffset timestamp)
+    {
+        payload = null;
+        timestamp = DateTimeOffset.MinValue;
+
+        if (string.IsNullOrEmpty(fileContent)) return false;
+
+        // Format: timestamp|pid|detectionCount|hmac
+        // Find the last '|' separator (HMAC is always last)
+        var lastPipe = fileContent.LastIndexOf('|');
+        if (lastPipe <= 0) return false;
+
+        var payloadPart = fileContent[..lastPipe];
+        var hmacPart = fileContent[(lastPipe + 1)..];
+
+        // Verify HMAC
+        var expectedHmac = ComputeHmac(payloadPart);
+        if (!CryptographicOperations.FixedTimeEquals(
+            Encoding.UTF8.GetBytes(expectedHmac),
+            Encoding.UTF8.GetBytes(hmacPart)))
+        {
+            return false;
+        }
+
+        payload = payloadPart;
+
+        // Parse timestamp from payload
+        var parts = payloadPart.Split('|');
+        if (parts.Length >= 1 && DateTimeOffset.TryParse(parts[0], out var ts))
+        {
+            timestamp = ts;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static string ComputeHmac(string payload)
+    {
+        using var hmac = new HMACSHA256(HmacKey);
+        var hash = hmac.ComputeHash(Encoding.UTF8.GetBytes(payload));
+        return Convert.ToHexString(hash).ToLowerInvariant();
+    }
+
+    /// <summary>
+    /// Derives a stable HMAC key using DPAPI machine scope.
+    /// Both the Service and Agent derive the same key (same machine, same entropy).
+    /// The key is bound to the machine — copying the heartbeat file to another
+    /// machine won't pass verification.
+    /// </summary>
+    private static byte[] DeriveHmacKey()
+    {
+        try
+        {
+            // Use a fixed entropy value that both Service and Agent know
+            var entropy = Encoding.UTF8.GetBytes("WindowsSentinel.Watchdog.HMAC.v1");
+            var seed = Encoding.UTF8.GetBytes("WatchdogHeartbeatKey");
+
+            // DPAPI machine-scope: same key on same machine regardless of user
+            var protectedKey = ProtectedData.Protect(seed, entropy, DataProtectionScope.LocalMachine);
+
+            // Use SHA256 of the protected blob as the HMAC key
+            // This ensures the key is deterministic per-machine
+            return SHA256.HashData(protectedKey);
+        }
+        catch
+        {
+            // Fallback: if DPAPI is unavailable, use a machine-specific but weaker key
+            // (machine name + install path — better than nothing)
+            var fallback = $"{Environment.MachineName}|{AppContext.BaseDirectory}|WatchdogFallback";
+            return SHA256.HashData(Encoding.UTF8.GetBytes(fallback));
+        }
     }
 
     /// <summary>

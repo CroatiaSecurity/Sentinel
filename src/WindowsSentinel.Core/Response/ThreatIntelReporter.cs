@@ -69,7 +69,7 @@ public sealed class ThreatIntelReporter : BackgroundService
         {
             Timeout = TimeSpan.FromSeconds(15)
         };
-        _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("WindowsSentinel-EDR/2.8.1");
+        _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("WindowsSentinel-EDR/3.0.0");
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -402,6 +402,12 @@ public sealed class ThreatReportingConfig
 
     /// <summary>Whether to report C2 URLs to URLhaus.</summary>
     public bool ReportToUrlhaus { get; set; } = true;
+
+    /// <summary>Maximum reports per hour (rate limiting). Default: 10.</summary>
+    public int MaxReportsPerHour { get; set; } = 10;
+
+    /// <summary>Deduplication window — same IP/hash won't be reported twice within this window.</summary>
+    public TimeSpan DeduplicationWindow { get; set; } = TimeSpan.FromHours(24);
 }
 
 

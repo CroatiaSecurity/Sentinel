@@ -103,10 +103,26 @@ public sealed class ProcessAncestryCache : IAsyncDisposable
     {
         var dict = new Dictionary<int, ProcessEntry>();
 
+        // Primary method: CreateToolhelp32Snapshot (fast, no admin required)
+        if (!TryToolhelp32Snapshot(dict))
+        {
+            // Fallback: WMI/CIM query (works on Server Core/IoT where Toolhelp32 may fail)
+            TryWmiSnapshot(dict);
+        }
+
+        if (dict.Count > 0)
+        {
+            // Atomic swap — readers always see a consistent snapshot
+            _snapshot = dict;
+        }
+    }
+
+    private bool TryToolhelp32Snapshot(Dictionary<int, ProcessEntry> dict)
+    {
         nint hSnapshot = NativeMethods.CreateToolhelp32Snapshot(
             NativeMethods.TH32CS_SNAPPROCESS, 0);
 
-        if (hSnapshot == NativeMethods.INVALID_HANDLE_VALUE) return;
+        if (hSnapshot == NativeMethods.INVALID_HANDLE_VALUE) return false;
 
         try
         {
@@ -115,7 +131,7 @@ public sealed class ProcessAncestryCache : IAsyncDisposable
                 dwSize = (uint)Marshal.SizeOf<NativeMethods.PROCESSENTRY32>()
             };
 
-            if (!NativeMethods.Process32First(hSnapshot, ref entry)) return;
+            if (!NativeMethods.Process32First(hSnapshot, ref entry)) return false;
 
             do
             {
@@ -125,14 +141,48 @@ public sealed class ProcessAncestryCache : IAsyncDisposable
                     entry.szExeFile);
             }
             while (NativeMethods.Process32Next(hSnapshot, ref entry));
+
+            return dict.Count > 0;
         }
         finally
         {
             NativeMethods.CloseHandle(hSnapshot);
         }
+    }
 
-        // Atomic swap — readers always see a consistent snapshot
-        _snapshot = dict;
+    /// <summary>
+    /// WMI/CIM fallback for Server Core, IoT, and minimal Windows installations
+    /// where CreateToolhelp32Snapshot may return incomplete results.
+    /// Uses Win32_Process to get (ProcessId, ParentProcessId, Name).
+    /// </summary>
+    private void TryWmiSnapshot(Dictionary<int, ProcessEntry> dict)
+    {
+        try
+        {
+            using var searcher = new System.Management.ManagementObjectSearcher(
+                "SELECT ProcessId, ParentProcessId, Name FROM Win32_Process");
+
+            using var results = searcher.Get();
+            foreach (System.Management.ManagementObject obj in results)
+            {
+                var pid = Convert.ToInt32(obj["ProcessId"]);
+                var ppid = Convert.ToInt32(obj["ParentProcessId"]);
+                var name = obj["Name"]?.ToString() ?? string.Empty;
+
+                dict[pid] = new ProcessEntry(pid, ppid, name);
+            }
+
+            if (dict.Count > 0)
+            {
+                _logger.LogDebug(
+                    "[ProcessAncestryCache] WMI fallback populated {Count} processes.", dict.Count);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex,
+                "[ProcessAncestryCache] WMI fallback failed (CIM may be unavailable).");
+        }
     }
 
     public async ValueTask DisposeAsync()

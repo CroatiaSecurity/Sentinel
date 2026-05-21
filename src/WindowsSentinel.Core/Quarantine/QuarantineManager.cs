@@ -4,6 +4,8 @@ using System.Security.Cryptography;
 using System.Security.Principal;
 using System.Text;
 using Microsoft.Extensions.Logging;
+using WindowsSentinel.Core.Security;
+using WindowsSentinel.Core.Utilities;
 
 namespace WindowsSentinel.Core.Quarantine;
 
@@ -363,26 +365,19 @@ public sealed class QuarantineManager
 
     private QuarantinedFile? ParseQuarantineFilename(string fullPath)
     {
-        // SECURITY FIX: Validate the full path is within quarantine directory
-        // This prevents path traversal attacks using filenames like "../../../etc/passwd"
-        var expectedDir = Path.GetFullPath(_quarantinePath);
-        var fullPathResolved = Path.GetFullPath(fullPath);
-        
-        if (!fullPathResolved.StartsWith(expectedDir, StringComparison.OrdinalIgnoreCase))
+        // Use centralized security validation
+        if (!SecurityValidation.IsPathWithinDirectory(fullPath, _quarantinePath))
         {
             _logger.LogWarning("QuarantineManager: Rejected file outside quarantine directory: {Path}", fullPath);
             return null;
         }
 
-        // SECURITY FIX: Get just the filename and validate it
         var filename = Path.GetFileName(fullPath);
         
-        // Reject filenames with path traversal attempts or dangerous characters
-        if (filename.Contains("..") || filename.Contains("/") || filename.Contains("\\") || 
-            filename.Contains(":") || filename.Contains("<") || filename.Contains(">") ||
-            filename.Contains("|") || filename.Contains("*") || filename.Contains("?"))
+        // Use centralized filename validation
+        if (!SecurityValidation.IsSafeFilename(filename))
         {
-            _logger.LogWarning("QuarantineManager: Rejected filename with dangerous characters: {Filename}", filename);
+            _logger.LogWarning("QuarantineManager: Rejected unsafe filename: {Filename}", filename);
             return null;
         }
 
@@ -396,16 +391,23 @@ public sealed class QuarantineManager
         if (!DateTime.TryParseExact(parts[0] + "_" + parts[1], "yyyyMMdd_HHmmss", null, System.Globalization.DateTimeStyles.None, out var timestamp))
             return null;
 
+        // SECURITY FIX: Validate timestamp is reasonable
+        if (!SecurityValidation.IsValidTimestamp(timestamp))
+        {
+            _logger.LogWarning("QuarantineManager: Rejected invalid timestamp: {Timestamp}", timestamp);
+            return null;
+        }
+
         // SECURITY FIX: Strict validation of PID (must be positive integer in valid range)
-        if (!int.TryParse(parts[2], out var pid) || pid <= 0 || pid > 999999)
+        if (!int.TryParse(parts[2], out var pid) || !SecurityValidation.IsValidProcessId(pid))
             return null;
 
         var originalName = parts[3].Replace(".quarantined", "");
         
-        // SECURITY FIX: Validate original filename doesn't contain path traversal
-        if (originalName.Contains("..") || originalName.Contains("/") || originalName.Contains("\\"))
+        // SECURITY FIX: Validate original filename is safe
+        if (!SecurityValidation.IsSafeFilename(originalName))
         {
-            _logger.LogWarning("QuarantineManager: Rejected filename with path traversal: {Filename}", originalName);
+            _logger.LogWarning("QuarantineManager: Rejected unsafe original filename: {Filename}", originalName);
             return null;
         }
 
@@ -549,6 +551,101 @@ public sealed class QuarantineManager
 
         return indicators.Distinct().ToList();
     }
+
+    /// <summary>
+    /// Atomically quarantines a file with comprehensive error handling and security validation.
+    /// </summary>
+    /// <param name="sourcePath">The path to the file to quarantine.</param>
+    /// <param name="processId">The process ID that created the file.</param>
+    /// <param name="reason">The reason for quarantine.</param>
+    /// <returns>The quarantine result.</returns>
+    public async Task<QuarantineResult> QuarantineFileAtomicAsync(string sourcePath, int processId, string reason)
+    {
+        if (!File.Exists(sourcePath))
+            return new QuarantineResult { Success = false, Message = $"Source file does not exist: {sourcePath}" };
+
+        if (!SecurityValidation.IsValidProcessId(processId))
+            return new QuarantineResult { Success = false, Message = $"Invalid process ID: {processId}" };
+
+        if (string.IsNullOrWhiteSpace(reason))
+            return new QuarantineResult { Success = false, Message = "Quarantine reason cannot be empty" };
+
+        try
+        {
+            var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+            var originalName = Path.GetFileName(sourcePath);
+            var quarantineFilename = $"{timestamp}_{processId}_{originalName}.quarantined";
+            var quarantinePath = Path.Combine(_quarantinePath, quarantineFilename);
+
+            var tempPath = Path.GetTempFileName();
+            try
+            {
+                var fileBytes = await File.ReadAllBytesAsync(sourcePath);
+                var encryptedBytes = ProtectedData.Protect(fileBytes, QuarantineEntropy, DataProtectionScope.LocalMachine);
+                await File.WriteAllBytesAsync(tempPath, encryptedBytes);
+
+                File.Move(tempPath, quarantinePath, overwrite: true);
+
+                if (!File.Exists(quarantinePath))
+                    return new QuarantineResult { Success = false, Message = "Quarantined file was not created" };
+
+                SecureDelete(sourcePath);
+
+                _logger.LogInformation(
+                    "QuarantineManager: Successfully quarantined '{File}' from PID {Pid}. Reason: {Reason}",
+                    originalName, processId, reason);
+
+                return new QuarantineResult { Success = true, Message = $"Quarantined {originalName}" };
+            }
+            finally
+            {
+                if (File.Exists(tempPath))
+                    try { File.Delete(tempPath); } catch { }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "QuarantineManager: Failed to quarantine file '{Path}'", sourcePath);
+            return new QuarantineResult { Success = false, Message = $"Quarantine failed: {ex.Message}" };
+        }
+    }
+
+    /// <summary>
+    /// Validates the integrity of the quarantine directory and files.
+    /// </summary>
+    public QuarantineValidationResult ValidateQuarantineIntegrity()
+    {
+        var issues = new List<string>();
+        var files = ListQuarantinedFiles();
+
+        foreach (var file in files)
+        {
+            try
+            {
+                if (!File.Exists(file.CurrentPath))
+                {
+                    issues.Add($"Quarantined file missing: {file.FileName}");
+                    continue;
+                }
+
+                var encryptedBytes = File.ReadAllBytes(file.CurrentPath);
+                try { ProtectedData.Unprotect(encryptedBytes, QuarantineEntropy, DataProtectionScope.LocalMachine); }
+                catch (CryptographicException) { issues.Add($"Quarantined file corrupted or tampered: {file.FileName}"); }
+            }
+            catch (Exception ex)
+            {
+                issues.Add($"Error checking file {file.FileName}: {ex.Message}");
+            }
+        }
+
+        return new QuarantineValidationResult
+        {
+            IsValid = issues.Count == 0,
+            Issues = issues,
+            TotalFilesChecked = files.Count,
+            Timestamp = DateTime.UtcNow
+        };
+    }
 }
 
 /// <summary>
@@ -628,3 +725,20 @@ public sealed class QuarantineAnalysis
 }
 
 
+/// <summary>
+/// Quarantine validation result.
+/// </summary>
+public sealed class QuarantineValidationResult
+{
+    /// <summary>Whether the quarantine is valid.</summary>
+    public bool IsValid { get; set; }
+
+    /// <summary>List of validation issues found.</summary>
+    public List<string> Issues { get; set; } = new();
+
+    /// <summary>Total number of files checked.</summary>
+    public int TotalFilesChecked { get; set; }
+
+    /// <summary>Validation timestamp.</summary>
+    public DateTime Timestamp { get; set; }
+}

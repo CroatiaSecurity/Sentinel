@@ -3,13 +3,15 @@
 # Requires: .NET 8 SDK, Inno Setup 6 (iscc.exe in PATH or default install location)
 
 param(
-    [string]$Configuration = "Release",
-    [string]$Version = "2.8.1"
+    [string]$Configuration = "Release"
 )
 
 $ErrorActionPreference = "Stop"
 $RepoRoot  = Split-Path $PSScriptRoot -Parent
 $Installer = $PSScriptRoot
+
+# Read version from version.txt for consistency
+$Version = Get-Content "$RepoRoot\version.txt" -Raw | ForEach-Object { $_.Trim() }
 
 Write-Host "=== Windows Sentinel Installer Build ===" -ForegroundColor Cyan
 Write-Host "Repo   : $RepoRoot"

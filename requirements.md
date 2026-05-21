@@ -1,6 +1,6 @@
 # Windows Sentinel — Requirements
 
-**Version: 2.8.1**
+**Version: 3.0.0**
 
 ---
 

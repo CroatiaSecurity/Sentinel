@@ -1,5 +1,7 @@
+using System.Net;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using WindowsSentinel.Core.Engine;
 using WindowsSentinel.Core.Interfaces;
 using WindowsSentinel.Core.Models;
@@ -20,6 +22,10 @@ public sealed class SentinelService : BackgroundService
     private readonly BehavioralCorrelationEngine _correlationEngine;
     private readonly BeaconingDetector _beaconingDetector;
     private readonly ILogger<SentinelService> _logger;
+    private readonly IOptionsMonitor<HealthCheckOptions>? _healthOptions;
+    private readonly Health.StartupSelfTest? _selfTest;
+    private System.Net.HttpListener? _healthListener;
+    private CancellationTokenSource? _healthCts;
 
     public SentinelService(
         IEnumerable<IMonitor> monitors,
@@ -29,7 +35,9 @@ public sealed class SentinelService : BackgroundService
         ProcessAncestryCache ancestryCache,
         BehavioralCorrelationEngine correlationEngine,
         BeaconingDetector beaconingDetector,
-        ILogger<SentinelService> logger)
+        ILogger<SentinelService> logger,
+        Health.StartupSelfTest? selfTest = null,
+        IOptionsMonitor<HealthCheckOptions> healthOptions = null!)
     {
         _monitors           = monitors;
         _detectionEngine    = detectionEngine;
@@ -39,12 +47,92 @@ public sealed class SentinelService : BackgroundService
         _correlationEngine  = correlationEngine;
         _beaconingDetector  = beaconingDetector;
         _logger             = logger;
+        _selfTest           = selfTest;
+        _healthOptions      = healthOptions;
+    }
+
+    public override async Task StartAsync(CancellationToken cancellationToken)
+    {
+        // Start health check endpoint if enabled (before main loop)
+        if (_healthOptions?.CurrentValue?.Enabled == true)
+        {
+            await StartHealthEndpointAsync(cancellationToken);
+        }
+
+        // Let BackgroundService call ExecuteAsync on a background thread
+        await base.StartAsync(cancellationToken);
+    }
+
+    private Task StartHealthEndpointAsync(CancellationToken ct)
+    {
+        _healthCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var port = _healthOptions?.CurrentValue?.Port ?? 5000;
+        var prefix = $"http://localhost:{port}/";
+
+        try
+        {
+            _healthListener = new System.Net.HttpListener();
+            _healthListener.Prefixes.Add(prefix);
+            _healthListener.Start();
+
+            _logger.LogInformation("Health check endpoint listening on {Prefix}", prefix);
+
+            _ = Task.Run(async () =>
+            {
+                while (!_healthCts.IsCancellationRequested)
+                {
+                    try
+                    {
+                        var context = await _healthListener.GetContextAsync();
+                        _ = Task.Run(() => HandleHealthRequest(context), ct);
+                    }
+                    catch (HttpListenerException) when (ct.IsCancellationRequested)
+                    {
+                        break;
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    {
+                        _logger.LogDebug(ex, "Health endpoint error");
+                    }
+                }
+            }, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to start health endpoint on port {Port}", port);
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private void HandleHealthRequest(System.Net.HttpListenerContext context)
+    {
+        var response = context.Response;
+        response.ContentType = "application/json";
+        response.StatusCode = 200;
+
+        var health = new
+        {
+            status = "healthy",
+            version = SentinelVersion.Version,
+            timestamp = DateTime.UtcNow.ToString("o"),
+            uptime = Environment.TickCount64 / 1000
+        };
+
+        var json = System.Text.Json.JsonSerializer.Serialize(health);
+        var buffer = System.Text.Encoding.UTF8.GetBytes(json);
+        response.ContentLength64 = buffer.Length;
+        response.OutputStream.Write(buffer, 0, buffer.Length);
+        response.OutputStream.Close();
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _logger.LogInformation("=== Windows Sentinel v{Version} starting ===", SentinelVersion.Version);
         _logger.LogInformation("Author: Gorstak | gorstak.eu | github.com/CroatiaSecurity/Sentinel");
+
+        // ── Startup Self-Test ────────────────────────────────────────────────
+        _selfTest?.RunAll();
 
         // Start advanced analysis components
         _ancestryCache.Start(stoppingToken);
@@ -104,6 +192,11 @@ public sealed class SentinelService : BackgroundService
     {
         _logger.LogInformation("=== Windows Sentinel stopping ===");
 
+        // Stop health endpoint
+        _healthCts?.Cancel();
+        _healthListener?.Stop();
+        _healthListener?.Close();
+
         foreach (var monitor in _monitors)
         {
             try
@@ -126,6 +219,22 @@ public sealed class SentinelService : BackgroundService
 
         _logger.LogInformation("=== Windows Sentinel stopped ===");
     }
+}
+
+/// <summary>
+/// Health check endpoint configuration options
+/// </summary>
+public class HealthCheckOptions
+{
+    /// <summary>
+    /// Enable/disable the health check endpoint (default: false)
+    /// </summary>
+    public bool Enabled { get; set; } = false;
+
+    /// <summary>
+    /// Port for the health check endpoint (default: 5000)
+    /// </summary>
+    public int Port { get; set; } = 5000;
 }
 
 

@@ -2,6 +2,8 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Microsoft.Extensions.Logging;
+using WindowsSentinel.Core.Security;
+using WindowsSentinel.Core.Utilities;
 
 namespace WindowsSentinel.Core.Response;
 
@@ -22,13 +24,13 @@ namespace WindowsSentinel.Core.Response;
 ///
 /// MITRE ATT&CK: T1055 (Process Injection) — this is the RESPONSE to injection.
 /// </summary>
-public sealed class DllUnloadEngine
+public sealed class DllUnloadEngine : IDisposable
 {
     private readonly ILogger<DllUnloadEngine> _logger;
     private readonly ConcurrentDictionary<string, DateTimeOffset> _unloadHistory = new();
-    private int _unloadsThisMinute;
-    private DateTimeOffset _minuteStart = DateTimeOffset.UtcNow;
-    private const int MaxUnloadsPerMinute = 10;
+    private readonly RateLimiter _rateLimiter;
+    private readonly BurstRateLimiter _burstLimiter;
+    private bool _disposed;
 
     // P/Invoke declarations
     [DllImport("kernel32.dll", SetLastError = true)]
@@ -88,13 +90,19 @@ public sealed class DllUnloadEngine
     public DllUnloadEngine(ILogger<DllUnloadEngine> logger)
     {
         _logger = logger;
+        _rateLimiter = new RateLimiter(maxRequests: 10, timeWindow: TimeSpan.FromMinutes(1));
+        _burstLimiter = new BurstRateLimiter(
+            sustainedRate: 5,
+            sustainedWindow: TimeSpan.FromMinutes(1),
+            burstCapacity: 20,
+            burstRechargeTime: TimeSpan.FromMinutes(5));
     }
 
     /// <summary>
     /// Attempts to unload a DLL from a specific process.
     /// Returns true if the DLL was successfully unloaded.
     /// </summary>
-    public DllUnloadResult UnloadDll(int processId, string dllPath, string reason)
+    public async Task<DllUnloadResult> UnloadDllAsync(int processId, string dllPath, string reason, CancellationToken cancellationToken = default)
     {
         var moduleName = Path.GetFileName(dllPath);
         var result = new DllUnloadResult
@@ -105,14 +113,34 @@ public sealed class DllUnloadEngine
             Timestamp = DateTimeOffset.UtcNow
         };
 
-        // Safety check: rate limiting
-        if (!CheckRateLimit())
+        // Safety check: input validation
+        if (!SecurityValidation.IsValidProcessId(processId))
         {
             result.Success = false;
-            result.ErrorMessage = "Rate limit exceeded (max 10 unloads/minute)";
-            _logger.LogWarning("DllUnloadEngine: Rate limit hit — skipping unload of {Dll} from PID {Pid}",
-                moduleName, processId);
+            result.ErrorMessage = $"Invalid process ID: {processId}";
+            _logger.LogWarning("DllUnloadEngine: Invalid process ID {Pid}", processId);
             return result;
+        }
+
+        if (string.IsNullOrWhiteSpace(dllPath))
+        {
+            result.Success = false;
+            result.ErrorMessage = "DLL path cannot be empty";
+            return result;
+        }
+
+        // Safety check: rate limiting with burst capability
+        if (!_rateLimiter.TryAcquire())
+        {
+            // Try burst limiter as fallback
+            if (!await _burstLimiter.TryAcquireAsync())
+            {
+                result.Success = false;
+                result.ErrorMessage = "Rate limit exceeded (max 10 unloads/minute)";
+                _logger.LogWarning("DllUnloadEngine: Rate limit hit — skipping unload of {Dll} from PID {Pid}",
+                    moduleName, processId);
+                return result;
+            }
         }
 
         // Safety check: protected process
@@ -175,7 +203,6 @@ public sealed class DllUnloadEngine
                 _logger.LogCritical(
                     "DllUnloadEngine: UNLOADED '{Dll}' from process '{Process}' (PID {Pid}). Reason: {Reason}",
                     moduleName, processName, processId, reason);
-                Interlocked.Increment(ref _unloadsThisMinute);
             }
             else
             {
@@ -363,17 +390,6 @@ public sealed class DllUnloadEngine
         return IntPtr.Zero;
     }
 
-    private bool CheckRateLimit()
-    {
-        var now = DateTimeOffset.UtcNow;
-        if ((now - _minuteStart).TotalMinutes >= 1)
-        {
-            _minuteStart = now;
-            Interlocked.Exchange(ref _unloadsThisMinute, 0);
-        }
-        return _unloadsThisMinute < MaxUnloadsPerMinute;
-    }
-
     /// <summary>
     /// Prunes old unload history entries (older than 1 hour).
     /// </summary>
@@ -386,6 +402,193 @@ public sealed class DllUnloadEngine
                 _unloadHistory.TryRemove(key, out _);
         }
     }
+
+    /// <summary>
+    /// Gets the current rate limit status.
+    /// </summary>
+    public (RateLimiterStatus Sustained, BurstRateLimiterStatus Burst) GetRateLimitStatus()
+    {
+        var sustainedStatus = _rateLimiter.GetStatus();
+        var burstStatus = _burstLimiter.GetStatus();
+        
+        return (
+            new RateLimiterStatus 
+            { 
+                Current = sustainedStatus.Current, 
+                Max = sustainedStatus.Max, 
+                Remaining = sustainedStatus.Remaining 
+            },
+            new BurstRateLimiterStatus
+            {
+                AvailableBurst = burstStatus.AvailableBurst,
+                BurstCapacity = burstStatus.BurstCapacity,
+                SustainedCurrent = burstStatus.Sustained.Current,
+                SustainedMax = burstStatus.Sustained.Max,
+                SustainedRemaining = burstStatus.Sustained.Remaining
+            }
+        );
+    }
+
+    /// <summary>
+    /// Disposes the DLL unload engine resources.
+    /// </summary>
+    public void Dispose()
+    {
+        if (!_disposed)
+        {
+            _rateLimiter.Dispose();
+            _burstLimiter.Dispose();
+            _disposed = true;
+            GC.SuppressFinalize(this);
+        }
+    }
+
+    /// <summary>
+    /// Attempts to unload a DLL from a specific process (synchronous version).
+    /// Returns true if the DLL was successfully unloaded.
+    /// </summary>
+    public DllUnloadResult UnloadDll(int processId, string dllPath, string reason)
+    {
+        return UnloadDllAsync(processId, dllPath, reason).GetAwaiter().GetResult();
+    }
+
+    /// <summary>
+    /// Safely attempts to unload a DLL with comprehensive error handling.
+    /// </summary>
+    public async Task<DllUnloadResult> SafeUnloadDllAsync(int processId, string dllPath, string reason, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            return await UnloadDllAsync(processId, dllPath, reason, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "DLL Unload failed safely (PID: {Pid}, DLL: {Dll})", processId, Path.GetFileName(dllPath));
+            return new DllUnloadResult
+            {
+                ProcessId = processId,
+                DllPath = dllPath,
+                Reason = reason,
+                Success = false,
+                ErrorMessage = $"Safe execution failed: {ex.Message}",
+                Timestamp = DateTimeOffset.UtcNow
+            };
+        }
+    }
+
+    /// <summary>
+    /// Validates if a DLL can be safely unloaded from a process.
+    /// </summary>
+    public DllUnloadValidationResult ValidateUnload(int processId, string dllPath)
+    {
+        var result = new DllUnloadValidationResult
+        {
+            ProcessId = processId,
+            DllPath = dllPath,
+            Timestamp = DateTimeOffset.UtcNow
+        };
+
+        try
+        {
+            // Check process exists
+            using var process = Process.GetProcessById(processId);
+            result.ProcessName = process.ProcessName;
+            result.ProcessExists = true;
+
+            // Check if process is protected
+            result.IsProtectedProcess = ProtectedProcesses.Contains(process.ProcessName);
+
+            // Check if DLL is protected
+            var dllName = Path.GetFileName(dllPath).ToLowerInvariant();
+            result.IsProtectedDll = ProtectedDlls.Contains(dllName);
+
+            // Check rate limit status
+            var rateLimitStatus = GetRateLimitStatus();
+            result.RateLimitAvailable = rateLimitStatus.Sustained.Current < rateLimitStatus.Sustained.Max;
+            result.BurstTokensAvailable = rateLimitStatus.Burst.AvailableBurst > 0;
+
+            // Check if already unloaded recently
+            var key = $"{processId}:{dllPath.ToLowerInvariant()}";
+            if (_unloadHistory.TryGetValue(key, out var lastUnload))
+            {
+                result.LastUnloadTime = lastUnload;
+                result.CanUnloadAgain = (DateTimeOffset.UtcNow - lastUnload) > TimeSpan.FromHours(1);
+            }
+            else
+            {
+                result.CanUnloadAgain = true;
+            }
+
+            result.IsValid = result.ProcessExists && 
+                           !result.IsProtectedProcess && 
+                           !result.IsProtectedDll && 
+                           (result.RateLimitAvailable || result.BurstTokensAvailable) && 
+                           result.CanUnloadAgain;
+        }
+        catch (ArgumentException)
+        {
+            result.ProcessExists = false;
+            result.Error = "Process does not exist";
+        }
+        catch (Exception ex)
+        {
+            result.Error = ex.Message;
+        }
+
+        return result;
+    }
+}
+
+/// <summary>
+/// Rate limiter status.
+/// </summary>
+public sealed class RateLimiterStatus
+{
+    /// <summary>
+    /// Gets the current number of requests in the window.
+    /// </summary>
+    public int Current { get; set; }
+
+    /// <summary>
+    /// Gets the maximum number of requests allowed.
+    /// </summary>
+    public int Max { get; set; }
+
+    /// <summary>
+    /// Gets the time remaining in the current window.
+    /// </summary>
+    public TimeSpan Remaining { get; set; }
+}
+
+/// <summary>
+/// Burst rate limiter status.
+/// </summary>
+public sealed class BurstRateLimiterStatus
+{
+    /// <summary>
+    /// Gets the available burst tokens.
+    /// </summary>
+    public int AvailableBurst { get; set; }
+
+    /// <summary>
+    /// Gets the total burst capacity.
+    /// </summary>
+    public int BurstCapacity { get; set; }
+
+    /// <summary>
+    /// Gets the current sustained rate usage.
+    /// </summary>
+    public int SustainedCurrent { get; set; }
+
+    /// <summary>
+    /// Gets the maximum sustained rate.
+    /// </summary>
+    public int SustainedMax { get; set; }
+
+    /// <summary>
+    /// Gets the time remaining in the sustained window.
+    /// </summary>
+    public TimeSpan SustainedRemaining { get; set; }
 }
 
 /// <summary>
@@ -401,4 +604,73 @@ public sealed class DllUnloadResult
     public DateTimeOffset Timestamp { get; set; }
 }
 
+/// <summary>
+/// DLL unload validation result.
+/// </summary>
+public sealed class DllUnloadValidationResult
+{
+    /// <summary>
+    /// Gets the process ID.
+    /// </summary>
+    public int ProcessId { get; set; }
 
+    /// <summary>
+    /// Gets the DLL path.
+    /// </summary>
+    public string DllPath { get; set; } = "";
+
+    /// <summary>
+    /// Gets the process name if available.
+    /// </summary>
+    public string? ProcessName { get; set; }
+
+    /// <summary>
+    /// Gets a value indicating whether the process exists.
+    /// </summary>
+    public bool ProcessExists { get; set; }
+
+    /// <summary>
+    /// Gets a value indicating whether the process is protected.
+    /// </summary>
+    public bool IsProtectedProcess { get; set; }
+
+    /// <summary>
+    /// Gets a value indicating whether the DLL is protected.
+    /// </summary>
+    public bool IsProtectedDll { get; set; }
+
+    /// <summary>
+    /// Gets a value indicating whether rate limit is available.
+    /// </summary>
+    public bool RateLimitAvailable { get; set; }
+
+    /// <summary>
+    /// Gets a value indicating whether burst tokens are available.
+    /// </summary>
+    public bool BurstTokensAvailable { get; set; }
+
+    /// <summary>
+    /// Gets the last unload time if applicable.
+    /// </summary>
+    public DateTimeOffset? LastUnloadTime { get; set; }
+
+    /// <summary>
+    /// Gets a value indicating whether the DLL can be unloaded again.
+    /// </summary>
+    public bool CanUnloadAgain { get; set; }
+
+    /// <summary>
+    /// Gets a value indicating whether the unload is valid.
+    /// </summary>
+    public bool IsValid { get; set; }
+
+    /// <summary>
+    /// Gets any error that occurred during validation.
+    /// </summary>
+    public string? Error { get; set; }
+
+    /// <summary>
+    /// Gets the validation timestamp.
+    /// </summary>
+    public DateTimeOffset Timestamp { get; set; }
+}

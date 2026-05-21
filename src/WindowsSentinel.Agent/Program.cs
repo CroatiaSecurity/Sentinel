@@ -80,7 +80,7 @@ class Program
         var host = builder.Build();
 
         var logger = host.Services.GetRequiredService<ILogger<Program>>();
-        logger.LogInformation("Windows Sentinel Agent v2.8.1 starting in user session (with user-context monitors)");
+        logger.LogInformation("Windows Sentinel Agent v3.0.0 starting in user session (with user-context monitors)");
 
         await host.RunAsync();
 
@@ -147,27 +147,33 @@ class Program
             try
             {
                 var content = await File.ReadAllTextAsync(_heartbeatPath, ct);
-                var parts = content.Split('|');
-                if (parts.Length < 1) return;
 
-                if (DateTimeOffset.TryParse(parts[0], out var lastHeartbeat))
+                // Verify HMAC signature (prevents heartbeat forgery)
+                if (!WindowsSentinel.Core.Health.HeartbeatService.VerifyHeartbeat(
+                    content, out var payload, out var lastHeartbeat))
                 {
-                    var age = DateTimeOffset.UtcNow - lastHeartbeat;
+                    _logger.LogCritical(
+                        "Service Watchdog: HEARTBEAT SIGNATURE INVALID. " +
+                        "File may have been tampered with by an attacker to prevent restart.");
+                    await AttemptServiceRestartAsync(ct);
+                    return;
+                }
 
-                    if (age.TotalSeconds > StaleThresholdSeconds)
-                    {
-                        _logger.LogCritical(
-                            "Service Watchdog: HEARTBEAT STALE ({Age:F0}s old). " +
-                            "Service may have been killed or compromised. Attempting restart.",
-                            age.TotalSeconds);
+                var age = DateTimeOffset.UtcNow - lastHeartbeat;
 
-                        await AttemptServiceRestartAsync(ct);
-                    }
-                    else
-                    {
-                        // Heartbeat is fresh — reset restart counter
-                        _restartAttempts = 0;
-                    }
+                if (age.TotalSeconds > StaleThresholdSeconds)
+                {
+                    _logger.LogCritical(
+                        "Service Watchdog: HEARTBEAT STALE ({Age:F0}s old). " +
+                        "Service may have been killed or compromised. Attempting restart.",
+                        age.TotalSeconds);
+
+                    await AttemptServiceRestartAsync(ct);
+                }
+                else
+                {
+                    // Heartbeat is fresh and authentic — reset restart counter
+                    _restartAttempts = 0;
                 }
             }
             catch (IOException)

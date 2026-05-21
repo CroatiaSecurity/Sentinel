@@ -23,6 +23,7 @@ public sealed class AdvancedResponseEngine : IResponseEngine
     private readonly IEventLogger _eventLogger;
     private readonly ILogger<AdvancedResponseEngine> _logger;
     private readonly ScoringEngine _scoringEngine;
+    private readonly SentinelMetrics? _metrics;
     private readonly ChainTracer? _chainTracer;
     private readonly IncidentResponseService? _incidentResponse;
     private readonly HeartbeatService? _heartbeat;
@@ -41,6 +42,7 @@ public sealed class AdvancedResponseEngine : IResponseEngine
         IEventLogger eventLogger,
         ILogger<AdvancedResponseEngine> logger,
         ScoringEngine scoringEngine,
+        SentinelMetrics? metrics = null,
         ChainTracer? chainTracer = null,
         IncidentResponseService? incidentResponse = null,
         HeartbeatService? heartbeat = null,
@@ -58,6 +60,7 @@ public sealed class AdvancedResponseEngine : IResponseEngine
         _eventLogger = eventLogger;
         _logger = logger;
         _scoringEngine = scoringEngine;
+        _metrics = metrics;
         _chainTracer = chainTracer;
         _incidentResponse = incidentResponse;
         _heartbeat = heartbeat;
@@ -75,6 +78,8 @@ public sealed class AdvancedResponseEngine : IResponseEngine
 
     public async Task HandleAsync(DetectionEvent detection, CancellationToken cancellationToken)
     {
+        var responseTimer = Stopwatch.StartNew();
+
         // Enforce a strict 2000ms global timeout for the entire evaluation and response pipeline
         using var pipelineCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         pipelineCts.CancelAfter(TimeSpan.FromMilliseconds(2000));
@@ -97,19 +102,27 @@ public sealed class AdvancedResponseEngine : IResponseEngine
             if (detection.Tier == DetectionTier.Tier2Indicator)
             {
                 await HandleTier2Async(detection, token);
+                responseTimer.Stop();
+                _metrics?.RecordResponse("log_only", responseTimer.Elapsed, success: true);
                 return;
             }
 
             // Tier1 behavioral — calculate score and determine response
             await HandleTier1Async(detection, token);
+            responseTimer.Stop();
+            _metrics?.RecordResponse("tier1_response", responseTimer.Elapsed, success: true);
         }
         catch (OperationCanceledException)
         {
+            responseTimer.Stop();
+            _metrics?.RecordResponse("timeout", responseTimer.Elapsed, success: false);
             _logger.LogError("[TIMEOUT] AdvancedResponseEngine pipeline timed out after 2000ms for PID {Pid} / Rule: {Rule}",
                 detection.ProcessId, detection.RuleName);
         }
         catch (Exception ex)
         {
+            responseTimer.Stop();
+            _metrics?.RecordResponse("error", responseTimer.Elapsed, success: false);
             _logger.LogError(ex, "[ERROR] AdvancedResponseEngine failed processing detection for PID {Pid}", detection.ProcessId);
         }
     }

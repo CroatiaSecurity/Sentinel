@@ -1,5 +1,169 @@
 # Changelog
 
+## 3.1.0 — Observability, Blind Spots & Resilience (May 2026)
+
+### New: SentinelMetrics Wired into Detection & Response Pipeline
+- `DetectionEngine` now records every detection (rule name, tier, confidence) via `SentinelMetrics.RecordDetection()`.
+- `AdvancedResponseEngine` records response latency, action type, and success/failure via `SentinelMetrics.RecordResponse()`.
+- Provides live observability: detection rate per minute, response latency percentiles (P50/P90/P95/P99), and per-rule hit counts.
+- Zero overhead when metrics are not consumed — all operations are lock-free `Interlocked` increments.
+
+### New: HashReputationService Cache Implementation
+- Replaced empty `GetFromCache()` / `SaveToCache()` stubs with a two-tier caching strategy.
+- **In-memory**: `ConcurrentDictionary` with LRU eviction at 5,000 entries (fast path, no I/O).
+- **Disk**: DPAPI-encrypted persistence via `SecureCacheStore` (survives service restarts).
+- TTL-based expiry: 1 hour for malicious results, 24 hours for known-good.
+- Cuts API calls to CIRCL/Cymru/MalwareBazaar by 90%+ for repeated process-start evaluations.
+
+### New: Named Pipe Monitor (`Monitors/NamedPipeMonitor.cs`)
+- Polls `\\.\pipe\` namespace every 15 seconds for pipes matching known C2 patterns.
+- Covers: Cobalt Strike SMB beacon (`msagent_`, `MSSE-`, `postex_`), PsExec (`psexesvc`, `remcom_`), Metasploit (`msf_`, `meterpreter_`), Impacket, Covenant, CrackMapExec.
+- Excludes known-safe system/browser pipes (Chrome IPC, Windows services, Docker, SSH agent).
+- Uses `GetNamedPipeServerProcessId` to identify owning process.
+- Confidence scoring based on pattern specificity and owner process reputation.
+- Registered as `IMonitor` — participates in standard monitor lifecycle.
+
+### New: WMI Event Subscription Persistence Monitor (`Monitors/WmiPersistenceMonitor.cs`)
+- Periodic scan (every 5 minutes) of `root\subscription` WMI namespace.
+- Detects existing `__EventFilter`, `__EventConsumer`, and `__FilterToConsumerBinding` objects.
+- Filters out known-legitimate Windows subscriptions (SCM, BVT, TSLogon).
+- Higher confidence (0.92) for `ActiveScriptEventConsumer` and `CommandLineEventConsumer` (the dangerous ones).
+- Complements `PersistenceRule` which only catches WMI persistence *creation* via command-line patterns.
+- MITRE ATT&CK: T1546.003 (Event Triggered Execution: WMI Event Subscription).
+
+### New: Startup Self-Test (`Health/StartupSelfTest.cs`)
+- Runs 5 checks on service start before monitors are activated:
+  1. ETW session creation (verifies elevation and provider access)
+  2. DPAPI round-trip (encrypt → decrypt, verifies machine key store)
+  3. Quarantine directory writable (verifies ACL and disk access)
+  4. Log file writable (verifies event log persistence)
+  5. Detection rules loaded (verifies DI registration)
+- Each check is independent — failures don't cascade.
+- Logs clear, actionable error messages explaining what's wrong and how to fix it.
+- Service continues in degraded mode rather than crashing.
+
+### New: Watchdog Heartbeat HMAC Signing
+- Heartbeat format changed from `timestamp|pid|count` to `timestamp|pid|count|hmac_hex`.
+- HMAC key derived from DPAPI machine scope — both Service and Agent derive the same key.
+- An attacker cannot forge heartbeats without SYSTEM-level DPAPI access.
+- Agent's `CheckHeartbeatAsync` now verifies HMAC before trusting the timestamp.
+- Invalid signatures trigger immediate restart attempt (treats as active tampering).
+- Fallback key derivation if DPAPI is unavailable (machine name + install path hash).
+
+### Improved: ProcessAncestryCache WMI/CIM Fallback
+- `TakeSnapshot()` now tries `CreateToolhelp32Snapshot` first (fast path).
+- If Toolhelp32 returns no results (Server Core/IoT/minimal Windows), falls back to WMI `Win32_Process` query.
+- Ensures process ancestry resolution works on all Windows SKUs.
+
+### Fixed: SentinelService.StartAsync Warning (CS0114)
+- Changed `StartAsync` from implicit hiding to proper `override` of `BackgroundService.StartAsync`.
+- Removed redundant `IHostedService` interface declaration (already inherited from `BackgroundService`).
+- Health endpoint now starts before `base.StartAsync()` (which calls `ExecuteAsync` on background thread).
+
+### Fixed: Test Compilation Errors
+- Fixed `DetectionResponseFlowTests` to pass `IEnumerable<IDetectionRule>` to `DetectionEngine` constructor.
+- Fixed `BehavioralCorrelationEngine` constructor argument order in tests.
+- Replaced invalid `DetectionTier.Tier2Advisory` references with correct `DetectionTier.Tier2Indicator`.
+
+---
+
+## 3.0.0 — Security Hardening, Observability & Resilience (May 2026)
+
+### New: Centralized Security Validation (`Security/SecurityValidation.cs`)
+- Unified input validation for filenames, paths, IP addresses, process IDs, ports, and timestamps.
+- Path traversal protection with `IsPathWithinDirectory`.
+- Windows reserved filename detection (CON, PRN, AUX, NUL, COM1-9, LPT1-9).
+- Constant-time byte array comparison via `CryptographicOperations.FixedTimeEquals`.
+- File hash computation for integrity verification.
+
+### New: Rate Limiter with Burst Capability (`Utilities/RateLimiter.cs`)
+- Thread-safe `RateLimiter` with configurable max requests and time window.
+- `BurstRateLimiter` for sustained rate + burst token recharge pattern.
+- Used by DllUnloadEngine and available for all response actions.
+
+### New: Safe Execution Patterns (`Utilities/SafeExecution.cs`)
+- `ExecuteSafely` / `ExecuteSafelyAsync` — comprehensive error handling with logging.
+- `ExecuteWithTimeout` / `ExecuteWithTimeoutAsync` — timeout-bounded execution.
+- `ExecuteWithRetry` / `ExecuteWithRetryAsync` — configurable retry with backoff.
+- `ExecuteWithCircuitBreaker` / `ExecuteWithCircuitBreakerAsync` — circuit breaker integration.
+- `MeasureExecutionTime` / `MeasureExecutionTimeAsync` — performance measurement with threshold warnings.
+
+### New: Configuration Validation Framework (`Configuration/ConfigurationValidation.cs`)
+- `SentinelConfigurationValidator` — validates Sentinel, ThreatReporting, and Logging sections at startup.
+- `ThreatReportingConfigValidator` — validates API keys, rate limits, and deduplication windows.
+- `ConfigurationValidationService` — orchestrates all validators with structured error/warning reporting.
+
+### New: Configuration Integrity Monitor (`SelfProtection/ConfigIntegrityMonitor.cs`)
+- Computes SHA-256 baseline of `appsettings.json` and service executable at startup.
+- Checks integrity every 5 minutes.
+- Emits Tier1 detection event (T1562.001 — Impair Defenses) on tampering.
+- Escalates after 3+ tamper events (configuration frozen to startup values).
+- Detects both modification and deletion of config files.
+
+### New: Structured Health Checks (`Health/SentinelHealthCheck.cs`)
+- Process health (CPU time, working set, thread count).
+- Memory health (managed memory, GC generation counts, 500MB warning threshold).
+- Handle health (count tracking, 5000/10000 warning/critical thresholds).
+- Log file accessibility verification.
+- Quarantine directory health (file count, total size).
+- Thread pool utilization monitoring.
+- Public API for other services to report their health status.
+
+### New: Performance Metrics (`Health/SentinelMetrics.cs`)
+- Counter metrics (detection rate, response rate, FP rate, deception success).
+- Histogram metrics with percentile calculation (P50/P90/P95/P99) for latency tracking.
+- Gauge metrics for point-in-time values.
+- Convenience methods: `RecordDetection`, `RecordResponse`, `RecordDeception`, `RecordFalsePositive`, `RecordThreatReport`, `RecordMonitorEvent`.
+- Full metrics report generation with uptime tracking.
+
+### New: Secure HTTP Client Factory (`Security/SecureHttpClientFactory.cs`)
+- TLS 1.2+ enforcement (no SSL3, TLS 1.0, TLS 1.1).
+- Domain allowlisting — only contacts known threat intel API domains.
+- Custom certificate validation (expiry, chain, not-yet-valid checks).
+- Automatic redirect disabled (prevents SSRF).
+- `SendSecureAsync` — validates URL before sending.
+
+### New: Structured Logging Extensions (`Logging/StructuredLoggingExtensions.cs`)
+- `BeginDetectionScope`, `BeginResponseScope`, `BeginDeceptionScope`, `BeginMonitorScope`.
+- `BeginQuarantineScope`, `BeginThreatReportScope`, `BeginSelfProtectionScope`.
+- `BeginDllUnloadScope`, `BeginHealthCheckScope`.
+- All scopes add structured context (Operation, ProcessId, RuleName, etc.) to log entries.
+
+### Improved: Quarantine Manager
+- Uses centralized `SecurityValidation` for all input validation.
+- New `QuarantineFileAtomicAsync` — encrypt→move→delete pattern prevents race conditions.
+- New `ValidateQuarantineIntegrity` — verifies directory ACLs and file encryption integrity.
+- Timestamp validation rejects unreasonable dates.
+
+### Improved: DLL Unload Engine
+- Now implements `IDisposable` for proper resource cleanup.
+- Uses `RateLimiter` + `BurstRateLimiter` instead of manual counter.
+- New `UnloadDllAsync` with CancellationToken support.
+- New `SafeUnloadDllAsync` — never throws, always returns a result.
+- New `ValidateUnload` — pre-flight check before attempting unload.
+- Input validation via `SecurityValidation.IsValidProcessId`.
+
+### Improved: Threat Intel Reporter
+- Added `MaxReportsPerHour` configuration property (default: 10).
+- Added `DeduplicationWindow` configuration property (default: 24 hours).
+
+### New: Test Coverage
+- `SecurityValidationTests` — fuzz-style tests for dangerous filenames, path traversal, reserved names, IP validation, PID/port validation, timestamp validation, secure comparison.
+- `DetectionResponseFlowTests` — integration tests for detection emission, deduplication, behavioral correlation, rate limiting, tier enforcement, and self-protection.
+
+### Infrastructure
+- Added `.gitattributes` for consistent line endings across platforms.
+- Added build/CI marker files (`qc`, `qfailure`, `query`, `installer/stop`) to `.gitignore`.
+- All version references bumped to 3.0.0.
+- Released May 2026.
+
+### Fixes: Pre-existing Bugs Found During Audit
+- **Duplicate DI registration**: `ThreatIntelReporter` and `ThreatReportingConfig` were registered twice in `ServiceCollectionExtensions.cs`, causing the reporter to run two background loops. Removed duplicate.
+- **Invalid `builder.Configuration` reference**: `ServiceCollectionExtensions.cs` referenced `builder.Configuration` which doesn't exist in the extension method scope. Removed invalid calls; configuration binding happens in the Service host.
+- **Dead code cleanup**: Removed registration of `SecurityValidation` as a DI singleton (it's a static class). Documented dead `RansomwareActivityRule.cs` / `RansomwareBehaviorRule.cs` files (merged into `RansomwareDetectionRule` but old files still exist).
+
+---
+
 ## 2.8.1 — Architecture Hardening & Bug Fixes (May 2026)
 
 ### Fixes: Installer Upgrade Race Condition

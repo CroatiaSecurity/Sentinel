@@ -1,5 +1,8 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using System.IO;
 using WindowsSentinel.Core.Deception;
 using WindowsSentinel.Core.Detection.Rules;
 using WindowsSentinel.Core.Engine;
@@ -17,6 +20,10 @@ using WindowsSentinel.Core.Quarantine;
 using WindowsSentinel.Core.Response;
 using WindowsSentinel.Core.SelfProtection;
 using WindowsSentinel.Core.Session;
+using WindowsSentinel.Core.Configuration;
+using WindowsSentinel.Core.Security;
+using WindowsSentinel.Core.Utilities;
+using ThreatReportingConfig = WindowsSentinel.Core.Response.ThreatReportingConfig;
 
 // 2.0.0 — Hardened & Portable (DLL Analysis, Active Response, Barebone Windows fallbacks)
 // 2.1.0 — Community Threat Intelligence Reporting (AbuseIPDB, URLhaus, MalwareBazaar)
@@ -25,6 +32,8 @@ using WindowsSentinel.Core.Session;
 // 2.4.0 — ADS Staging Detection + Agent Architecture (user-session monitors moved to Agent)
 // 2.5.0 — NeuroBehavior Visual Monitor + AudioHijack module-based detection
 // 2.8.0 — Deception Refinements, Ransomware Fast-Path, Asynchronous Off-host Deception
+// 2.8.1 — Architecture Hardening & Bug Fixes (version.txt managed)
+// 3.0.0 — Security Hardening, Observability & Resilience
 
 namespace WindowsSentinel.Core;
 
@@ -34,9 +43,10 @@ namespace WindowsSentinel.Core;
 public static class SentinelVersion
 {
     /// <summary>
-    /// Current version - 2.8.1 Architecture Hardening & Bug Fixes
+    /// Current version - 3.1.0 Observability, Blind Spots & Resilience
+    /// Version is managed in version.txt for consistency across build scripts
     /// </summary>
-    public const string Version = "2.8.1";
+    public const string Version = "3.1.0";
 
     /// <summary>
     /// Release date
@@ -47,11 +57,10 @@ public static class SentinelVersion
     /// Version description
     /// </summary>
     public const string Description =
-        "2.8.1 — Architecture Hardening & Bug Fixes. " +
-        "Fixes quarantine metadata parsing, hook monitor process handle leaks, " +
-        "implant destabilizer wait handle GC cleanup, sync-over-async blocking, " +
-        "network telemetry process name resolution, honeypot lifetime truncation, " +
-        "and stable boot-bound nonce calculation.";
+        "3.1.0 — Observability, Blind Spots & Resilience. " +
+        "Adds centralized security validation, rate limiting with burst capability, " +
+        "configuration integrity monitoring, structured health checks, performance metrics, " +
+        "secure HTTP client factory, atomic quarantine operations, and comprehensive test coverage.";
 }
 
 public static class ServiceCollectionExtensions
@@ -70,6 +79,20 @@ public static class ServiceCollectionExtensions
         logPath ??= Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "WindowsSentinel", "events.jsonl");
+
+        // ── Configuration Validation ───────────────────────────────────────────
+        services.AddSingleton<IValidateOptions<ThreatReportingConfig>, ThreatReportingConfigValidator>();
+        services.AddSingleton<ConfigurationValidationService>();
+        services.AddSingleton<SentinelConfigurationValidator>();
+
+        // ── Security & Utilities ───────────────────────────────────────────────
+        // NOTE: SecurityValidation is a static utility class — no DI registration needed
+        services.AddSingleton<RateLimiter>(sp => new RateLimiter(100, TimeSpan.FromSeconds(1))); // Global rate limiter
+        services.AddSingleton<BurstRateLimiter>(sp => new BurstRateLimiter(
+            sustainedRate: 10, 
+            sustainedWindow: TimeSpan.FromSeconds(1),
+            burstCapacity: 50,
+            burstRechargeTime: TimeSpan.FromMinutes(1)));
 
         // ── Detection rules — Tier1 ──────────────────────────────────────────
         services.AddSingleton<IDetectionRule, LsassAccessRule>();
@@ -108,6 +131,19 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IDetectionRule, HashReputationRule>();       // Hash reputation checking
         services.AddSingleton<IDetectionRule, FileEntropyRule>();          // Packed/encrypted file detection
         services.AddSingleton<IDetectionRule, CertificateTamperingRule>(); // Certificate store tampering detection
+
+        // ── Health Check Options ─────────────────────────────────────────────
+        // NOTE: HealthCheckOptions configured via appsettings.json binding in Service host
+        services.AddOptions<HealthCheckOptions>()
+            .Validate(data =>
+            {
+                if (data.Port < 1 || data.Port > 65535)
+                    throw new InvalidOperationException($"Health check port must be between 1 and 65535. Current value: {data.Port}");
+                return true;
+            }, "Invalid health check port configuration");
+
+        // ── Log Rotation Options ─────────────────────────────────────────────
+        // NOTE: LogRotationOptions configured via appsettings.json binding in Service host
 
         // ── 2.8.0 — Quick Wins (Anti-Evasion & Lateral Movement) ─────────────
         services.AddSingleton<IDetectionRule, FirewallTamperingRule>();
@@ -196,12 +232,27 @@ public static class ServiceCollectionExtensions
         // ── Self-Protection Service ────────────────────────────────────────────
         services.AddHostedService<SelfProtectionService>();
         services.AddHostedService<ServiceProtectionMonitor>(); // CRITICAL: Service/registry tamper protection
+        services.AddHostedService<ConfigIntegrityMonitor>();   // Configuration tampering detection
 
         // ── Hardening Module ───────────────────────────────────────────────────
         services.AddHostedService<HardeningModule>();
 
         // ── Health Check Service ──────────────────────────────────────────────
         services.AddHostedService<HealthCheckService>();
+        services.AddSingleton<SentinelHealthCheck>();
+        services.AddHostedService(sp => sp.GetRequiredService<SentinelHealthCheck>());
+
+        // ── Startup Self-Test ──────────────────────────────────────────────────
+        services.AddSingleton(sp => new StartupSelfTest(
+            sp.GetRequiredService<ILogger<StartupSelfTest>>(),
+            sp.GetRequiredService<IEnumerable<IDetectionRule>>(),
+            logPath!));
+
+        // ── Metrics ────────────────────────────────────────────────────────────
+        services.AddSingleton<SentinelMetrics>();
+
+        // ── Secure HTTP Client ─────────────────────────────────────────────────
+        services.AddSingleton<SecureHttpClientFactory>();
 
         // ── Heartbeat Service ───────────────────────────────────────────────────
         services.AddSingleton<HeartbeatService>();
@@ -233,6 +284,11 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ElfCatcher>();                 // ELF/WSL abuse detection
         services.AddSingleton<ShadowProxyDetector>();      // Proxy manipulation detection
         services.AddHostedService(sp => sp.GetRequiredService<ShadowProxyDetector>());   // Run as background service
+
+        // ── Threat Intelligence Reporter (v2.1.0) ──────────────────────────────
+        services.AddSingleton<ThreatReportingConfig>();
+        services.AddSingleton<ThreatIntelReporter>();
+        services.AddHostedService(sp => sp.GetRequiredService<ThreatIntelReporter>());
 
         // ── Council of Elders — Consultant Signal Ingestor ───────────────────
         services.AddHostedService<ConsultantSignalIngestor>(); // Tails PS consultant JSONL drops
@@ -271,6 +327,7 @@ public static class ServiceCollectionExtensions
                 sp.GetRequiredService<IEventLogger>(),
                 sp.GetRequiredService<ILogger<AdvancedResponseEngine>>(),
                 sp.GetRequiredService<ScoringEngine>(),
+                sp.GetRequiredService<SentinelMetrics>(),          // Observability metrics (v3.0.0)
                 sp.GetRequiredService<ChainTracer>(),
                 sp.GetRequiredService<IncidentResponseService>(),
                 sp.GetRequiredService<HeartbeatService>(),
@@ -307,6 +364,12 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<ProcessAncestryCache>()));
         services.AddSingleton<IMonitor>(sp => sp.GetRequiredService<INetworkMonitor>());
 
+        // ── Named Pipe Monitor (C2/lateral movement detection) ────────────────
+        services.AddSingleton<IMonitor>(sp => new NamedPipeMonitor(
+            sp.GetRequiredService<IDetectionEngine>(),
+            sp.GetRequiredService<ILogger<NamedPipeMonitor>>(),
+            sp.GetRequiredService<ProcessAncestryCache>()));
+
         // ── 0.4.0 — Ports from GIDR (security-hardened) ──────────────────────
         // NOTE: AudioHijackMonitor moved to Agent (v2.3.0 — requires user session)
         services.AddHostedService<RansomwareIoMonitor>();
@@ -337,6 +400,9 @@ public static class ServiceCollectionExtensions
 
         // ── LSASS Dump Canary (dbghelp.dll load detection) ────────────────────
         services.AddHostedService<LsassDumpCanaryMonitor>();
+
+        // ── WMI Event Subscription Persistence Monitor (T1546.003) ────────────
+        services.AddHostedService<WmiPersistenceMonitor>();
 
         // ═══════════════════════════════════════════════════════════════════════
         // 1.4.0 — CLIPBOARD SECURITY MONITOR
@@ -385,10 +451,7 @@ public static class ServiceCollectionExtensions
         // ── DLL Unload Engine (active response: FreeLibrary via CreateRemoteThread) ─
         services.AddSingleton<DllUnloadEngine>();
 
-        // ── Threat Intelligence Reporter (reports C2 IPs to AbuseIPDB, hashes to community) ─
-        services.AddSingleton<ThreatReportingConfig>();
-        services.AddSingleton<ThreatIntelReporter>();
-        services.AddHostedService(sp => sp.GetRequiredService<ThreatIntelReporter>());
+        // NOTE: ThreatIntelReporter already registered above (v2.1.0 section)
 
         // ── UAC Bypass Surface Monitor (COM AutoElevation, manifest autoElevate, copy-drop) ─
         services.AddHostedService<UacBypassSurfaceMonitor>();
@@ -413,8 +476,152 @@ public static class ServiceCollectionExtensions
         // ── User Session Launcher (launches Agent into user session) ──────────
         services.AddHostedService<UserSessionLauncher>();
 
+        // ── Log Rotation Service ─────────────────────────────────────────────
+        services.AddHostedService<LogRotationService>();
+
         return services;
     }
+}
+
+/// <summary>
+/// Validates health check configuration options
+/// </summary>
+public class HealthCheckOptionsValidator : IValidateOptions<HealthCheckOptions>
+{
+    public ValidateOptionsResult Validate(string? name, HealthCheckOptions options)
+    {
+        var errors = new List<string>();
+
+        if (options.Port < 1 || options.Port > 65535)
+        {
+            errors.Add($"Health check port must be between 1 and 65535. Current value: {options.Port}");
+        }
+
+        if (errors.Count > 0)
+        {
+            return ValidateOptionsResult.Fail(string.Join("; ", errors));
+        }
+
+        return ValidateOptionsResult.Success;
+    }
+}
+
+/// <summary>
+/// Log rotation service - rotates events.jsonl when it exceeds size threshold
+/// </summary>
+public class LogRotationService : BackgroundService
+{
+    private readonly ILogger<LogRotationService> _logger;
+    private readonly string _logPath;
+    private readonly long _maxFileSize;
+    private readonly int _maxRetainedFiles;
+
+    public LogRotationService(
+        ILogger<LogRotationService> logger,
+        IOptionsMonitor<LogRotationOptions> options)
+    {
+        _logger = logger;
+        var opts = options.CurrentValue;
+        _logPath = opts.LogPath;
+        _maxFileSize = opts.MaxFileSize;
+        _maxRetainedFiles = opts.MaxRetainedFiles;
+    }
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        _logger.LogInformation("Log rotation service started - checking every 60 seconds");
+
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(60), stoppingToken);
+                RotateLogs();
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Log rotation error");
+            }
+        }
+    }
+
+    private void RotateLogs()
+    {
+        try
+        {
+            if (!File.Exists(_logPath)) return;
+
+            var fileInfo = new FileInfo(_logPath);
+            if (fileInfo.Length < _maxFileSize) return;
+
+            var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+            var rotatedPath = $"{_logPath}.{timestamp}";
+
+            File.Move(_logPath, rotatedPath);
+            File.Create(_logPath).Close();
+
+            _logger.LogInformation("Log rotated: {OldPath} -> {NewPath}", rotatedPath, _logPath);
+
+            // Clean up old rotated logs
+            CleanupOldLogs();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to rotate log file");
+        }
+    }
+
+    private void CleanupOldLogs()
+    {
+        try
+        {
+            var directory = Path.GetDirectoryName(_logPath);
+            if (string.IsNullOrEmpty(directory)) return;
+
+            var pattern = Path.GetFileName(_logPath) + ".*";
+            var files = Directory.GetFiles(directory, pattern)
+                .OrderByDescending(f => new FileInfo(f).LastWriteTime)
+                .Skip(_maxRetainedFiles);
+
+            foreach (var file in files)
+            {
+                try
+                {
+                    File.Delete(file);
+                    _logger.LogDebug("Deleted old log: {Path}", file);
+                }
+                catch { /* Ignore deletion errors */ }
+            }
+        }
+        catch { /* Ignore cleanup errors */ }
+    }
+}
+
+/// <summary>
+/// Log rotation configuration options
+/// </summary>
+public class LogRotationOptions
+{
+    /// <summary>
+    /// Path to the log file (default: events.jsonl in LocalApplicationData)
+    /// </summary>
+    public string LogPath { get; set; } = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "WindowsSentinel", "events.jsonl");
+
+    /// <summary>
+    /// Maximum file size before rotation (default: 100MB)
+    /// </summary>
+    public long MaxFileSize { get; set; } = 100L * 1024 * 1024; // 100MB
+
+    /// <summary>
+    /// Number of rotated files to retain (default: 5)
+    /// </summary>
+    public int MaxRetainedFiles { get; set; } = 5;
 }
 
 

@@ -41,6 +41,12 @@ stdout.txt
 # Scan output files (ephemeral debug artifacts)
 *.out
 
+# Build/CI marker files
+qc
+qfailure
+query
+installer/stop
+
 # Release binaries (use GitHub Releases for distribution)
 releases/
 

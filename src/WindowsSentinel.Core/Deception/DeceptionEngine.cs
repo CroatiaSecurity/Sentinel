@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Microsoft.Extensions.Logging;
 using WindowsSentinel.Core.Models;
+using WindowsSentinel.Core.Utilities;
 
 namespace WindowsSentinel.Core.Deception;
 

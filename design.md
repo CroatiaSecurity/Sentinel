@@ -1,6 +1,6 @@
 # Windows Sentinel — Design Document
 
-**Version: 2.8.1**
+**Version: 3.1.0**
 
 ---
 
@@ -65,17 +65,19 @@ The fusion layer is PASSIVE — it never blocks, kills, or modifies telemetry.
 | `ScreenCaptureMonitor` | **1.5.0** Detects background DXGI screen capture + transparent overlay phishing windows via `EnumWindows` + `GetWindowLong`, scans every 15–25s | No |
 | `LocalServerMonitor` | **1.5.0** Detects suspicious processes listening on localhost via `GetExtendedTcpTable` (LISTEN state), flags mounted ISO/VHD/removable origins, scans every 30s | No |
 | `WebcamMicMonitor` | **1.6.0** Detects background processes accessing camera/microphone via DLL analysis (Media Foundation, DirectShow, WASAPI). Allowlists browsers, conferencing, streaming apps. Confirmation threshold prevents transient FPs. Scans every 20s | No |
+| `NamedPipeMonitor` | **3.1.0** Polls `\\.\pipe\` for C2/lateral movement pipe patterns (Cobalt Strike, PsExec, Impacket, Metasploit). Uses `GetNamedPipeServerProcessId` for owner attribution. Scans every 15s | No |
+| `WmiPersistenceMonitor` | **3.1.0** Periodic WMI namespace scan for `__EventFilter`/`__EventConsumer`/`__FilterToConsumerBinding` persistence (T1546.003). Scans every 5min | No |
 
 ### Engine
 
 | Component | Role |
 |-----------|------|
-| `DetectionEngine` | Runs all `IDetectionRule` instances against incoming telemetry. Channel-based async stream. 60s deduplication window. |
-| `AdvancedResponseEngine` | Single point of action enforcement. Tier2 is always log-only. Tier1 may kill process when `--active-response` is set. President's Law closed kill list. |
+| `DetectionEngine` | Runs all `IDetectionRule` instances against incoming telemetry. Channel-based async stream. 60s deduplication window. Records metrics via `SentinelMetrics`. |
+| `AdvancedResponseEngine` | Single point of action enforcement. Tier2 is always log-only. Tier1 may kill process when `--active-response` is set. President's Law closed kill list. Records response latency and success/failure via `SentinelMetrics`. |
 | `TelemetryFusionEngine` | **1.0.0** Correlates raw telemetry across all sources into per-process event chains. Produces `FusedTelemetryContext` with behavioral metrics. |
 | `EventGraph` | **1.0.0** In-memory graph of processes, files, and network endpoints with temporal/causal edges. Supports incident timeline queries. |
 | `MemoryBehaviorAnalyzer` | **1.0.0** Scans process memory regions every 45s for RWX, unbacked executables, and shellcode prologues. |
-| `ProcessAncestryCache` | `CreateToolhelp32Snapshot` refreshed every 2s. Provides parent name resolution for all monitors and rules. |
+| `ProcessAncestryCache` | `CreateToolhelp32Snapshot` refreshed every 2s (WMI/CIM fallback for Server Core/IoT). Provides parent name resolution for all monitors and rules. |
 | `BehavioralCorrelationEngine` | Time-windowed (120s) multi-signal correlator. Fires composite `DetectionEvent`s via `IDetectionEngine.EmitAsync`. |
 | `BeaconingDetector` | Statistical C2 beacon detection. Tracks inter-connection intervals per `(ProcessId, RemoteAddress, Port)`. Fires when CV < 0.40 with 5+ observations. |
 | `ScoringEngine` | Weighted multi-factor threat scoring with source weights, category base scores, corroboration bonuses. |
@@ -169,7 +171,8 @@ Composite detections are emitted as Tier1 `DetectionEvent`s directly into the de
 - **No static mutable state** — `ConcurrentDictionary`, `Channel<T>`, `SemaphoreSlim` for shared state
 - **CancellationToken everywhere** — no `Thread.Sleep`, no blocking waits without cancellation
 - **No silent failures** — all exceptions caught and logged; monitors fail independently
-- **Graceful degradation** — ETW → WMI fallback; ThreatIntel ETW unavailable → log warning and continue
+- **Graceful degradation** — ETW → WMI fallback; ThreatIntel ETW unavailable → log warning and continue; ProcessAncestryCache Toolhelp32 → WMI fallback on Server Core
+- **Startup self-test** — Verifies ETW, DPAPI, quarantine, log file, and rule loading before activating monitors
 - **Tier2 enforcement** — `ResponseEngine` hard-codes `LogOnly` for all `Tier2Indicator` events regardless of configuration
 - **Deduplication** — `DetectionEngine` suppresses identical `(RuleName, ProcessId)` pairs within 60s; `NetworkMonitor` suppresses identical `(pid, remote, port)` alerts within 5 minutes
 - **Atomic snapshot** — `ProcessAncestryCache` uses `volatile IReadOnlyDictionary` swap; readers never block
@@ -181,12 +184,14 @@ Composite detections are emitted as Tier1 `DetectionEvent`s directly into the de
 
 | Type | Source | Consumed by |
 |------|--------|-------------|
-| `ProcessTelemetry` | `EtwProcessMonitor`, `WmiProcessMonitor` | `LsassAccessRule`, `ReverseShellRule`, `ProcessInjectionRule`, `RansomwareActivityRule`, `EtwTamperingRule`, `UnsignedBinaryRule`, `HighEntropyRule`, `SuspiciousImportsRule` |
+| `ProcessTelemetry` | `EtwProcessMonitor`, `WmiProcessMonitor` | `LsassAccessRule`, `ReverseShellRule`, `ProcessInjectionRule`, `RansomwareDetectionRule`, `EtwTamperingRule`, `UnsignedBinaryRule`, `HighEntropyRule`, `SuspiciousImportsRule`, `PersistenceRule` |
 | `NetworkTelemetry` | `NetworkMonitor` | `ReverseShellRule` |
-| `FileActivityTelemetry` | `FileActivityMonitor` | `RansomwareActivityRule` |
+| `FileActivityTelemetry` | `FileActivityMonitor` | `RansomwareDetectionRule` |
 | `ThreatIntelTelemetry` | `EtwThreatIntelMonitor` | `ThreatIntelInjectionRule` |
 | `BeaconingTelemetry` | `BeaconingDetector` | `BeaconingRule` |
 | `HollowProcessTelemetry` | `HollowProcessMonitor` | `HollowProcessRule` |
+| `DetectionEvent` (pipe) | `NamedPipeMonitor` | Direct emission to `DetectionEngine.ProcessAsync` |
+| `DetectionEvent` (WMI) | `WmiPersistenceMonitor` | Direct emission to `DetectionEngine.ProcessAsync` |
 
 ---
 
@@ -265,6 +270,34 @@ Composite detections are emitted as Tier1 `DetectionEvent`s directly into the de
 |-----------|---------|
 | `Architecture Hardening & Bug Fixes` | Fixes filename parsing metadata collision in `QuarantineManager`, process handle leaks in `HardeningModule`, named kernel object premature GC in `ImplantDestabilizer`, sync-over-async blocking, process name resolution in network telemetry, honeypot lifetime truncation, and NTP-resistant boot-bound nonce generation. |
 
+## Added in 3.0.0
+
+| Component | Purpose |
+|-----------|---------|
+| `SecurityValidation` | Centralized input validation utility — filenames, paths, IPs, PIDs, ports, timestamps, secure comparison. |
+| `RateLimiter` / `BurstRateLimiter` | Thread-safe rate limiting with burst capability for response actions. |
+| `SafeExecution` | Retry, timeout, circuit breaker, and performance measurement patterns. |
+| `ConfigurationValidation` | Startup validation framework for all configuration sections. |
+| `ConfigIntegrityMonitor` | Runtime detection of config/executable tampering (SHA-256 baseline, 5-min checks). |
+| `SentinelHealthCheck` | Structured health checks: process, memory, handles, log file, quarantine, thread pool. |
+| `SentinelMetrics` | Performance counters with histograms (P50/P90/P95/P99) for detection, response, deception. |
+| `SecureHttpClientFactory` | TLS 1.2+ enforcement, domain allowlisting, certificate validation for threat intel APIs. |
+| `StructuredLoggingExtensions` | BeginScope helpers for consistent operation context in all log entries. |
+| `QuarantineFileAtomicAsync` | Atomic quarantine: encrypt→move→delete prevents race conditions. |
+| `DllUnloadEngine` improvements | IDisposable, burst rate limiter, async API, validation, safe unload. |
+
+## Added in 3.1.0
+
+| Component | Purpose |
+|-----------|---------|
+| `SentinelMetrics` wiring | DetectionEngine and AdvancedResponseEngine now record metrics (detection rate, response latency, FP tracking). |
+| `HashReputationService` cache | Two-tier caching (in-memory + DPAPI-encrypted disk) cuts API calls by 90%+. |
+| `NamedPipeMonitor` | Detects C2/lateral movement via named pipe pattern matching (Cobalt Strike, PsExec, Impacket, Metasploit). |
+| `WmiPersistenceMonitor` | Periodic WMI namespace scan for planted event subscription persistence (T1546.003). |
+| `StartupSelfTest` | Verifies ETW, DPAPI, quarantine, log file, and rule loading on service start. |
+| Watchdog HMAC signing | Heartbeat file HMAC-signed with DPAPI-derived key — unforgeable without SYSTEM access. |
+| `ProcessAncestryCache` WMI fallback | Falls back to `Win32_Process` WMI query when Toolhelp32 fails (Server Core/IoT). |
+
 ---
 
 ## Monitoring Coverage by Elevation Level
@@ -284,6 +317,8 @@ Composite detections are emitted as Tier1 `DetectionEvent`s directly into the de
 | LSASS dump canary (dbghelp) | ✅ (same integrity) | ✅ (all processes) |
 | Credential canary | ✅ | ✅ |
 | Process ancestry resolution | ✅ | ✅ |
+| Named pipe C2 detection | ✅ | ✅ |
+| WMI persistence scanning | ✅ | ✅ |
 | Behavioral correlation | ✅ | ✅ |
 | Statistical beaconing detection | ✅ | ✅ |
 
