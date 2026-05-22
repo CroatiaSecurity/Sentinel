@@ -9,11 +9,11 @@
     <Authors>Gorstak</Authors>
     <Company>github.com/CroatiaSecurity/Sentinel</Company>
     <Product>Windows Sentinel</Product>
-    <Description>Windows Sentinel Service - v3.0.0 Security Hardening, Observability &amp; Resilience</Description>
-    <Version>3.0.0</Version>
-    <AssemblyVersion>3.0.0.0</AssemblyVersion>
-    <FileVersion>3.0.0.0</FileVersion>
-    <InformationalVersion>3.0.0</InformationalVersion>
+    <Description>Windows Sentinel Service - v3.2.0 Browser Credential Protection</Description>
+    <Version>3.2.0</Version>
+    <AssemblyVersion>3.2.0.0</AssemblyVersion>
+    <FileVersion>3.2.0.0</FileVersion>
+    <InformationalVersion>3.2.0</InformationalVersion>
     <!-- ApplicationIcon: add sentinel.ico to installer\assets\ to enable -->
     <ApplicationIcon Condition="Exists('..\..\installer\assets\sentinel.ico')">..\..\installer\assets\sentinel.ico</ApplicationIcon>
     <OutputType>WinExe</OutputType>

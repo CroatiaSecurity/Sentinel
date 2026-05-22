@@ -2,7 +2,7 @@
 
 **Userland EDR for Windows — Behavioral Detection, Automated Response & Aggressive Deception**
 
-> Version: 3.1.0 (Observability, Blind Spots & Resilience)  
+> Version: 3.2.0 (Browser & Account Credential Protection)  
 > Author: [Gorstak](https://gorstak.eu) | [GitHub](https://github.com/CroatiaSecurity/Sentinel)  
 > License: MIT
 
@@ -320,7 +320,7 @@ All tactics:
 
 ```powershell
 # Run installer as Administrator
-.\WindowsSentinelSetup-3.0.0.exe
+.\WindowsSentinelSetup-3.2.0.exe
 ```
 
 The installer:
@@ -399,7 +399,7 @@ cd installer
 .\build.ps1
 ```
 
-Output: `installer\output\WindowsSentinelSetup-3.0.0.exe`
+Output: `installer\output\WindowsSentinelSetup-3.2.0.exe`
 
 ---
 
@@ -480,6 +480,9 @@ installer/
 | 2.8.1 | Architecture Hardening & Bug Fixes | Fix quarantine metadata parsing split collision, hook monitor process handle leaks, implant destabilizer wait handle GC cleanup, sync-over-async blocking in monitors and engines, network telemetry process name resolution, honeypot listener lifetime truncation, and NTP-resistant boot-bound nonce generation. |
 | 3.0.0 | Security Hardening, Observability & Resilience | Centralized SecurityValidation utility, RateLimiter with burst capability, SafeExecution patterns (retry/timeout/circuit breaker), ConfigurationValidation framework, ConfigIntegrityMonitor (detects config/exe tampering), SentinelHealthCheck (memory/handles/threads/log/quarantine monitoring), SentinelMetrics (counters/histograms/gauges for detection rate, FP rate, response latency), SecureHttpClientFactory (TLS 1.2+, domain allowlisting, certificate validation), atomic quarantine operations, DllUnloadEngine improvements (IDisposable, validation, safe unload), StructuredLoggingExtensions, comprehensive fuzz tests and integration tests. |
 | 3.1.0 | Observability, Blind Spots & Resilience | SentinelMetrics wired into DetectionEngine and AdvancedResponseEngine (live detection rate, response latency, FP tracking). HashReputationService cache implemented (in-memory + DPAPI-encrypted disk persistence via SecureCacheStore, cuts API calls 90%+). Named Pipe Monitor (Cobalt Strike, PsExec, Impacket, Metasploit C2 detection). WMI Event Subscription Persistence Monitor (T1546.003 — detects planted __EventFilter/__EventConsumer bindings). Startup Self-Test (ETW, DPAPI, quarantine, log file, rule count verification on boot). Watchdog heartbeat HMAC signing (DPAPI-derived key, unforgeable without SYSTEM access). ProcessAncestryCache WMI/CIM fallback for Server Core/IoT. SentinelService.StartAsync properly overrides BackgroundService. |
+| 3.2.0 | Browser & Account Credential Protection | ChromeCredentialGuardMonitor (Login Data, Cookies, Local State file access monitoring for all Chromium browsers). FirefoxCredentialGuardMonitor (key4.db, logins.json, cookies.sqlite monitoring for Firefox/Waterfox/Thunderbird). MicrosoftAccountGuardMonitor (WAM TokenBroker cache, PRT extraction, BrowserCore abuse, Azure AD token theft tools). BrowserExtensionMonitor (malicious extension installation, registry force-install, dangerous permission detection). ChromeSessionGuardMonitor (remote debugging, CDP hijack, App-Bound Encryption bypass). PowerShellThreatMonitor (ETW script-block logging, AMSI/ETW bypass detection, download cradles, offensive frameworks, credential theft commands, encoded command detection). BrowserCredentialTheftRule (process-start detection for stealer tools targeting all browsers + Microsoft tokens). President's Law updated: "browser credential theft" kill-authorized. |
+
+---
 
 ---
 

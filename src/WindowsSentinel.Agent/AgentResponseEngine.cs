@@ -34,6 +34,7 @@ internal sealed class AgentResponseEngine : IResponseEngine
         "credential phishing",
         "surveillance suite",
         "camera/mic exfiltration",
+        "browser credential theft",
     };
 
     private const double KillConfidenceThreshold = 0.85;

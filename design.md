@@ -1,6 +1,6 @@
 # Windows Sentinel — Design Document
 
-**Version: 3.1.0**
+**Version: 3.2.0**
 
 ---
 
@@ -67,6 +67,12 @@ The fusion layer is PASSIVE — it never blocks, kills, or modifies telemetry.
 | `WebcamMicMonitor` | **1.6.0** Detects background processes accessing camera/microphone via DLL analysis (Media Foundation, DirectShow, WASAPI). Allowlists browsers, conferencing, streaming apps. Confirmation threshold prevents transient FPs. Scans every 20s | No |
 | `NamedPipeMonitor` | **3.1.0** Polls `\\.\pipe\` for C2/lateral movement pipe patterns (Cobalt Strike, PsExec, Impacket, Metasploit). Uses `GetNamedPipeServerProcessId` for owner attribution. Scans every 15s | No |
 | `WmiPersistenceMonitor` | **3.1.0** Periodic WMI namespace scan for `__EventFilter`/`__EventConsumer`/`__FilterToConsumerBinding` persistence (T1546.003). Scans every 5min | No |
+| `ChromeCredentialGuardMonitor` | **3.2.0** Monitors Chromium browser credential files (Login Data, Cookies, Local State, Web Data) via FileSystemWatcher + process scanning. Detects copy-then-read patterns. Covers Chrome, Edge, Brave, Opera, Vivaldi, Arc. Scans every 10s | No |
+| `FirefoxCredentialGuardMonitor` | **3.2.0** Monitors Firefox/Gecko credential files (key4.db, logins.json, cookies.sqlite, cert9.db) via FileSystemWatcher. Covers Firefox, Waterfox, Pale Moon, Thunderbird. Scans every 10s | No |
+| `MicrosoftAccountGuardMonitor` | **3.2.0** Monitors TokenBroker cache (.tbres), detects PRT extraction (BrowserCore abuse), Azure AD token theft tools (ROADtools, AADInternals). Scans every 12s | No |
+| `BrowserExtensionMonitor` | **3.2.0** Baselines installed extensions, detects new extensions with dangerous permissions, registry force-install. Scans every 30s | No |
+| `ChromeSessionGuardMonitor` | **3.2.0** Detects remote debugging port abuse, CDP connections from scripting processes, App-Bound Encryption bypass (elevation_service.exe). Scans every 15s | No |
+| `PowerShellThreatMonitor` | **3.2.0** ETW script-block logging (Event ID 4104). Detects AMSI/ETW bypass, download cradles, reflective loading, offensive frameworks, credential theft commands. Falls back to cmdline scanning. | Yes (ETW preferred) |
 
 ### Engine
 
@@ -297,6 +303,19 @@ Composite detections are emitted as Tier1 `DetectionEvent`s directly into the de
 | `StartupSelfTest` | Verifies ETW, DPAPI, quarantine, log file, and rule loading on service start. |
 | Watchdog HMAC signing | Heartbeat file HMAC-signed with DPAPI-derived key — unforgeable without SYSTEM access. |
 | `ProcessAncestryCache` WMI fallback | Falls back to `Win32_Process` WMI query when Toolhelp32 fails (Server Core/IoT). |
+
+## Added in 3.2.0
+
+| Component | Purpose |
+|-----------|---------|
+| `ChromeCredentialGuardMonitor` | Monitors Chromium browser credential files (Login Data, Cookies, Local State) for unauthorized access. Detects copy-then-read infostealer patterns. Covers Chrome, Edge, Brave, Opera, Vivaldi, Arc. |
+| `FirefoxCredentialGuardMonitor` | Monitors Firefox/Gecko credential files (key4.db, logins.json, cookies.sqlite). Firefox cookies are UNENCRYPTED — trivial to steal. Covers Firefox, Waterfox, Pale Moon, Thunderbird. |
+| `MicrosoftAccountGuardMonitor` | Protects Microsoft account tokens: TokenBroker cache (.tbres), PRT extraction via BrowserCore, Azure AD token theft tools (ROADtools, AADInternals, TokenTacticsV2). |
+| `BrowserExtensionMonitor` | Baselines installed extensions, detects new extensions with dangerous permission combinations, registry-based force-install (enterprise policy abuse). |
+| `ChromeSessionGuardMonitor` | Detects Chrome remote debugging abuse, CDP connections from scripting processes, App-Bound Encryption bypass (elevation_service.exe spawned by non-browser). |
+| `PowerShellThreatMonitor` | ETW script-block logging (Event ID 4104). Detects AMSI/ETW bypass, download cradles, reflective loading, offensive frameworks (Mimikatz, BloodHound, PowerSploit), credential theft commands, encoded commands. Falls back to cmdline scanning when ETW unavailable. |
+| `BrowserCredentialTheftRule` | Process-start detection rule for browser credential theft tools. Covers Chromium paths, Firefox paths, Microsoft token paths, DPAPI patterns, known stealer tools. |
+| President's Law update | `"browser credential theft"` fragment added to kill list in both AdvancedResponseEngine and AgentResponseEngine. |
 
 ---
 

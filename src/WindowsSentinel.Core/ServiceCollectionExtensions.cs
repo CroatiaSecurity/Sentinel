@@ -34,6 +34,7 @@ using ThreatReportingConfig = WindowsSentinel.Core.Response.ThreatReportingConfi
 // 2.8.0 — Deception Refinements, Ransomware Fast-Path, Asynchronous Off-host Deception
 // 2.8.1 — Architecture Hardening & Bug Fixes (version.txt managed)
 // 3.0.0 — Security Hardening, Observability & Resilience
+// 3.2.0 — Browser Credential Protection (Chrome/Google account theft prevention)
 
 namespace WindowsSentinel.Core;
 
@@ -43,24 +44,27 @@ namespace WindowsSentinel.Core;
 public static class SentinelVersion
 {
     /// <summary>
-    /// Current version - 3.1.0 Observability, Blind Spots & Resilience
+    /// Current version - 3.2.0 Browser &amp; Account Credential Protection
     /// Version is managed in version.txt for consistency across build scripts
     /// </summary>
-    public const string Version = "3.1.0";
+    public const string Version = "3.2.0";
 
     /// <summary>
     /// Release date
     /// </summary>
-    public static readonly DateTime ReleaseDate = new(2026, 5, 21);
+    public static readonly DateTime ReleaseDate = new(2026, 5, 22);
 
     /// <summary>
     /// Version description
     /// </summary>
     public const string Description =
-        "3.1.0 — Observability, Blind Spots & Resilience. " +
-        "Adds centralized security validation, rate limiting with burst capability, " +
-        "configuration integrity monitoring, structured health checks, performance metrics, " +
-        "secure HTTP client factory, atomic quarantine operations, and comprehensive test coverage.";
+        "3.2.0 — Browser & Account Credential Protection. " +
+        "Adds Chrome/Chromium credential guard, Firefox credential guard, Microsoft account " +
+        "token protection (WAM/PRT/Azure AD), browser extension manipulation detection, " +
+        "Chrome session hijack prevention (remote debugging, CDP, App-Bound Encryption bypass), " +
+        "PowerShell threat monitoring (ETW script-block logging, AMSI bypass, download cradles), " +
+        "and browser credential theft detection rule. Protects Google and Microsoft accounts " +
+        "from infostealer malware and living-off-the-land attacks.";
 }
 
 public static class ServiceCollectionExtensions
@@ -149,6 +153,9 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IDetectionRule, FirewallTamperingRule>();
         services.AddSingleton<IDetectionRule, AccountManipulationRule>();
         services.AddSingleton<IDetectionRule, DataExfiltrationRule>();
+
+        // ── 3.2.0 — Browser Credential Protection ───────────────────────────
+        services.AddSingleton<IDetectionRule, BrowserCredentialTheftRule>();
 
         // ── Detection engine ─────────────────────────────────────────────────
         services.AddSingleton<IDetectionEngine, DetectionEngine>();
@@ -464,6 +471,28 @@ public static class ServiceCollectionExtensions
 
         // ── Browser DLL Monitor / ELF Catcher (browser-specific injection detection + unload) ─
         services.AddHostedService<BrowserDllMonitor>();
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // 3.2.0 — BROWSER & ACCOUNT CREDENTIAL PROTECTION
+        // ═══════════════════════════════════════════════════════════════════════
+
+        // ── Chrome/Chromium Credential Guard (Login Data, Cookies, Local State file access monitoring) ─
+        services.AddHostedService<ChromeCredentialGuardMonitor>();
+
+        // ── Firefox/Gecko Credential Guard (key4.db, logins.json, cookies.sqlite monitoring) ─
+        services.AddHostedService<FirefoxCredentialGuardMonitor>();
+
+        // ── Microsoft Account Guard (WAM tokens, PRT, TokenBroker cache, Azure AD) ─
+        services.AddHostedService<MicrosoftAccountGuardMonitor>();
+
+        // ── Browser Extension Monitor (malicious extension installation detection) ─
+        services.AddHostedService<BrowserExtensionMonitor>();
+
+        // ── Chrome Session Guard (remote debugging, CDP hijack, App-Bound Encryption bypass) ─
+        services.AddHostedService<ChromeSessionGuardMonitor>();
+
+        // ── PowerShell Threat Monitor (script-block logging, encoded commands, AMSI bypass) ─
+        services.AddHostedService<PowerShellThreatMonitor>();
 
         // ── Disk-Wide DLL Scanner (all drives, unsigned DLL detection, IoC matching + unload) ─
         services.AddHostedService<DiskWideDllScanner>();

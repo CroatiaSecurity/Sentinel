@@ -218,6 +218,8 @@ public sealed class AdvancedResponseEngine : IResponseEngine
         "exfiltration: credential theft + network",
         "exfiltration: usb media + network",
         "exfiltration: staging + upload service",
+        // Browser credential theft (v3.2.0)
+        "browser credential theft",
         // Honeypot trip
         "honeypot: decoy",
         // NeuroBehavior anomaly
