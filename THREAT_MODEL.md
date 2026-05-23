@@ -1,6 +1,6 @@
 # Windows Sentinel — Threat Model
 
-**Version: 3.3.0**
+**Version: 3.5.0**
 
 This document assumes the attacker has read the source code.
 

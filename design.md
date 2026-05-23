@@ -1,6 +1,6 @@
 # Windows Sentinel — Design Document
 
-**Version: 3.3.0**
+**Version: 3.5.0**
 
 ---
 
@@ -325,6 +325,26 @@ Composite detections are emitted as Tier1 `DetectionEvent`s directly into the de
 | Electron/JIT allowlist (BehavioralCorrelationEngine) | 40+ Electron apps excluded from composite correlation. Eliminates false "In-Memory Implant + Network Beacon" and "DGA + C2 Beaconing" composites for Kiro, VS Code, Discord, Slack, Steam, etc. |
 | Electron/JIT allowlist (MemoryBehaviorAnalyzer) | Expanded JIT process exclusion list with all common Electron apps. Prevents false RWX memory alerts. |
 | `WorkFoldersExfilMonitor` | Detects unauthorized Work Folders activation: service state monitoring, registry config detection, Group Policy injection detection. Active response: kills service, removes config, deletes injected policies. Kill-authorized. |
+
+## Added in 3.4.0
+
+| Component | Purpose |
+|-----------|---------|
+| President's Law expansion (AdvancedResponseEngine) | Kill list expanded with: `confirmed lsass dump`, `lsass dump`, `campaign:`, `rat activity`, `remote access trojan`, `confirmed rat`, `apt:`, `uac bypass: exploited`, `uac bypass: active exploitation`, `process hollowing`, `process injection: confirmed`, `hollow process`, `keylogger`, `keystroke capture`, `input capture`, `reverse shell`, `interactive shell: outbound`. |
+| Campaign confidence threshold | New `CampaignCorroboratedThreshold = 0.75` for campaign IOCs (vs 0.85 default). Campaign rules already correlate multiple signals internally. |
+| Host-level composite resolution | `HandleHostLevelCompositeAsync` resolves PID 0 composites by extracting offending PIDs from evidence text, then dispatches kill actions against resolved processes. |
+| `ExtractPidsFromEvidence` | Regex-based PID extraction from composite evidence strings (matches "PID XXXX" patterns). |
+| Agent kill list sync | `AgentResponseEngine.KillFragments` expanded to include RAT campaigns, keyloggers, reverse shells, credential dumps, data exfiltration. |
+
+## Added in 3.5.0
+
+| Component | Purpose |
+|-----------|---------|
+| `EvaluateCovertRatBehavioral` (BehavioralCorrelationEngine) | Novel RAT composite: unsigned binary from staging path + sustained network/beaconing. Kills RATs without campaign IOCs. Confidence 0.88-0.92. |
+| `EvaluateConfirmedBeaconingFromUnsigned` (BehavioralCorrelationEngine) | Unsigned binary + periodic beaconing pattern = confirmed C2. Confidence 0.88-0.93. |
+| `EvaluateUnsignedWithSustainedC2` (BehavioralCorrelationEngine) | Unsigned binary + 60s+ sustained outbound connection. Catches PlugX-style persistent HTTPS C2. Confidence 0.90. |
+| C2 composite kill promotion | Existing composites promoted to kill-authorized: Injected C2 Beacon (0.98), DGA + C2 Beaconing (0.94), Spoofed Process Phoning Home (0.92), Dropped Payload Phoning Home (0.93), Staged Payload + Non-Standard Port (0.92). |
+| Kill fragments (service + agent) | Added: `covert rat:`, `covert c2:`, `confirmed c2 beacon:`, `injected c2 beacon`, `dga + c2 beaconing`, `spoofed process phoning home`, `dropped payload phoning home`, `staged payload + non-standard port`. |
 
 ---
 

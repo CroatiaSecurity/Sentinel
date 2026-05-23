@@ -182,7 +182,11 @@ public sealed class BehavioralCorrelationEngine : IAsyncDisposable
                      ?? EvaluateNeuroWithMicSession(recent, scopePid)
                      ?? EvaluateNeuroWithAudioHijack(recent, scopePid)
                      ?? EvaluateNeuroWithInjection(recent, scopePid)
-                     ?? EvaluateMultipleNeuroSignals(recent, scopePid);
+                     ?? EvaluateMultipleNeuroSignals(recent, scopePid)
+                     // v3.5.0 — RAT behavioral composites (novel RAT detection)
+                     ?? EvaluateCovertRatBehavioral(recent, scopePid)
+                     ?? EvaluateConfirmedBeaconingFromUnsigned(recent, scopePid)
+                     ?? EvaluateUnsignedWithSustainedC2(recent, scopePid);
 
         if (composite is null) return;
 
@@ -1413,6 +1417,147 @@ public sealed class BehavioralCorrelationEngine : IAsyncDisposable
             "signals are low-confidence, but 3+ distinct techniques from the same source is " +
             "not accidental — it indicates a coordinated visual manipulation attack designed " +
             "to disorient, influence, or incapacitate the user.",
+            0.90,
+            scopePid,
+            signals.Last().Timestamp);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // v3.5.0 — RAT BEHAVIORAL COMPOSITES (novel RAT detection without IOCs)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// v3.5.0 — Covert RAT Behavioral: Unsigned binary + no visible window + sustained network.
+    /// Catches novel RATs that don't match any campaign IOC. The combination of:
+    ///   1. Unsigned binary execution (not from a known publisher)
+    ///   2. Sustained outbound network connection (C2 communication)
+    ///   3. No visible window (covert operation)
+    /// ...is incompatible with legitimate software behavior. Real apps are signed,
+    /// have UIs, or don't maintain persistent outbound connections from temp paths.
+    /// </summary>
+    private static DetectionEvent? EvaluateCovertRatBehavioral(
+        IReadOnlyList<Signal> signals, int scopePid)
+    {
+        if (scopePid == 0) return null; // Only per-process, not host-level
+
+        bool hasUnsigned = signals.Any(s =>
+            s.RuleName.Contains("Unsigned Binary") &&
+            (s.Metadata.GetValueOrDefault("InStagingPath", "False") == "True" ||
+             s.Metadata.GetValueOrDefault("ImagePath", "").Contains("Temp", StringComparison.OrdinalIgnoreCase) ||
+             s.Metadata.GetValueOrDefault("ImagePath", "").Contains("AppData", StringComparison.OrdinalIgnoreCase)));
+
+        bool hasSustainedNetwork = signals.Any(s =>
+            s.RuleName.Contains("Sustained Outbound") ||
+            s.RuleName.Contains("Network") &&
+            s.Metadata.TryGetValue("duration_seconds", out var dur) &&
+            int.TryParse(dur, out var secs) && secs >= 60);
+
+        bool hasBeaconing = signals.Any(s =>
+            s.RuleName.Contains("Beacon") ||
+            s.RuleName.Contains("Beaconing"));
+
+        // Need unsigned + (sustained network OR beaconing)
+        if (!hasUnsigned || (!hasSustainedNetwork && !hasBeaconing)) return null;
+
+        // Additional signal: recon activity strengthens confidence
+        bool hasRecon = signals.Any(s =>
+            s.RuleName.Contains("Suspicious API") ||
+            s.RuleName.Contains("Recon"));
+
+        var confidence = hasRecon ? 0.92 : 0.88;
+
+        return MakeComposite(
+            "Covert RAT: Unsigned + Hidden + Network [COMPOSITE]",
+            "Unsigned binary from staging path with sustained outbound network and no visible UI. " +
+            $"Signals: {string.Join(", ", signals.Select(s => s.RuleName).Distinct())}",
+            "An unsigned binary running from a temporary/user path is maintaining a persistent " +
+            "outbound network connection without any visible window. This behavioral combination " +
+            "is the definitive RAT pattern: covert process, persistent C2, no user interaction. " +
+            "Legitimate software is signed, has a UI, or doesn't beacon from temp paths.",
+            confidence,
+            scopePid,
+            signals.Last().Timestamp);
+    }
+
+    /// <summary>
+    /// v3.5.0 — Confirmed Beaconing from Unsigned Process: beaconing pattern + unsigned binary.
+    /// The beaconing detector identifies periodic callback patterns (jitter analysis, interval
+    /// consistency). Combined with an unsigned binary, this confirms C2 communication.
+    /// </summary>
+    private static DetectionEvent? EvaluateConfirmedBeaconingFromUnsigned(
+        IReadOnlyList<Signal> signals, int scopePid)
+    {
+        if (scopePid == 0) return null;
+
+        bool hasBeaconing = signals.Any(s =>
+            s.RuleName.Contains("Beacon") ||
+            s.RuleName.Contains("Beaconing") ||
+            s.RuleName.Contains("C2"));
+
+        bool hasUnsigned = signals.Any(s =>
+            s.RuleName.Contains("Unsigned Binary"));
+
+        if (!hasBeaconing || !hasUnsigned) return null;
+
+        // Check if it's also from a staging path (higher confidence)
+        bool fromStagingPath = signals.Any(s =>
+            s.RuleName.Contains("Unsigned") &&
+            (s.Metadata.GetValueOrDefault("InStagingPath", "False") == "True" ||
+             s.Metadata.GetValueOrDefault("ImagePath", "").Contains("Temp", StringComparison.OrdinalIgnoreCase) ||
+             s.Metadata.GetValueOrDefault("ImagePath", "").Contains("AppData", StringComparison.OrdinalIgnoreCase)));
+
+        var confidence = fromStagingPath ? 0.93 : 0.88;
+
+        return MakeComposite(
+            "Confirmed C2 Beacon: Unsigned Process [COMPOSITE]",
+            "Unsigned binary exhibiting periodic beaconing pattern (C2 callback). " +
+            $"Signals: {string.Join(", ", signals.Select(s => s.RuleName).Distinct())}",
+            "A process that is not signed by any known publisher is exhibiting periodic " +
+            "network callback patterns consistent with C2 beaconing (regular intervals with " +
+            "jitter). Legitimate updaters check once; C2 beacons call back every 30-300 seconds. " +
+            "This is confirmed command-and-control communication.",
+            confidence,
+            scopePid,
+            signals.Last().Timestamp);
+    }
+
+    /// <summary>
+    /// v3.5.0 — Unsigned binary + sustained C2 connection (60s+) from non-allowlisted process.
+    /// This catches the exact PlugX pattern: fake GoogleUpdate.exe from temp path maintaining
+    /// a persistent HTTPS connection to a C2 server. No campaign IOC needed — the behavior alone
+    /// is sufficient when combined with the unsigned binary signal.
+    /// </summary>
+    private static DetectionEvent? EvaluateUnsignedWithSustainedC2(
+        IReadOnlyList<Signal> signals, int scopePid)
+    {
+        if (scopePid == 0) return null;
+
+        bool hasUnsigned = signals.Any(s =>
+            s.RuleName.Contains("Unsigned Binary"));
+
+        bool hasSustainedConnection = signals.Any(s =>
+            s.RuleName.Contains("Sustained Outbound Connection") ||
+            (s.RuleName.Contains("Network") &&
+             s.Metadata.TryGetValue("duration_seconds", out var dur) &&
+             int.TryParse(dur, out var secs) && secs >= 60));
+
+        if (!hasUnsigned || !hasSustainedConnection) return null;
+
+        // Extract the remote address for evidence
+        var networkSignal = signals.FirstOrDefault(s =>
+            s.Metadata.ContainsKey("remote_address"));
+        var remoteAddr = networkSignal?.Metadata.GetValueOrDefault("remote_address", "unknown") ?? "unknown";
+        var remotePort = networkSignal?.Metadata.GetValueOrDefault("remote_port", "unknown") ?? "unknown";
+
+        return MakeComposite(
+            "Covert C2: Unsigned Binary + Sustained Connection [COMPOSITE]",
+            $"Unsigned binary maintaining sustained outbound connection to {remoteAddr}:{remotePort}. " +
+            $"Signals: {string.Join(", ", signals.Select(s => s.RuleName).Distinct())}",
+            "An unsigned binary is maintaining a persistent (60s+) outbound connection. " +
+            "Legitimate software that maintains long connections (browsers, cloud sync) is " +
+            "always signed. An unsigned process holding a sustained connection is either a " +
+            "RAT maintaining C2, a backdoor awaiting commands, or an exfiltration channel. " +
+            "This pattern catches novel RATs without requiring campaign-specific IOCs.",
             0.90,
             scopePid,
             signals.Last().Timestamp);

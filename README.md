@@ -2,7 +2,7 @@
 
 **Userland EDR for Windows — Behavioral Detection, Automated Response & Aggressive Deception**
 
-> Version: 3.3.0 (Electron Allowlist & Work Folders Protection)  
+> Version: 3.5.0 (Behavioral RAT Kill)  
 > Author: [Gorstak](https://gorstak.eu) | [GitHub](https://github.com/CroatiaSecurity/Sentinel)  
 > License: MIT
 
@@ -320,7 +320,7 @@ All tactics:
 
 ```powershell
 # Run installer as Administrator
-.\WindowsSentinelSetup-3.2.0.exe
+.\WindowsSentinelSetup-3.5.0.exe
 ```
 
 The installer:
@@ -399,7 +399,7 @@ cd installer
 .\build.ps1
 ```
 
-Output: `installer\output\WindowsSentinelSetup-3.2.0.exe`
+Output: `installer\output\WindowsSentinelSetup-3.5.0.exe`
 
 ---
 
@@ -482,6 +482,8 @@ installer/
 | 3.1.0 | Observability, Blind Spots & Resilience | SentinelMetrics wired into DetectionEngine and AdvancedResponseEngine (live detection rate, response latency, FP tracking). HashReputationService cache implemented (in-memory + DPAPI-encrypted disk persistence via SecureCacheStore, cuts API calls 90%+). Named Pipe Monitor (Cobalt Strike, PsExec, Impacket, Metasploit C2 detection). WMI Event Subscription Persistence Monitor (T1546.003 — detects planted __EventFilter/__EventConsumer bindings). Startup Self-Test (ETW, DPAPI, quarantine, log file, rule count verification on boot). Watchdog heartbeat HMAC signing (DPAPI-derived key, unforgeable without SYSTEM access). ProcessAncestryCache WMI/CIM fallback for Server Core/IoT. SentinelService.StartAsync properly overrides BackgroundService. |
 | 3.2.0 | Browser & Account Credential Protection | ChromeCredentialGuardMonitor (Login Data, Cookies, Local State file access monitoring for all Chromium browsers). FirefoxCredentialGuardMonitor (key4.db, logins.json, cookies.sqlite monitoring for Firefox/Waterfox/Thunderbird). MicrosoftAccountGuardMonitor (WAM TokenBroker cache, PRT extraction, BrowserCore abuse, Azure AD token theft tools). BrowserExtensionMonitor (malicious extension installation, registry force-install, dangerous permission detection). ChromeSessionGuardMonitor (remote debugging, CDP hijack, App-Bound Encryption bypass). PowerShellThreatMonitor (ETW script-block logging, AMSI/ETW bypass detection, download cradles, offensive frameworks, credential theft commands, encoded command detection). BrowserCredentialTheftRule (process-start detection for stealer tools targeting all browsers + Microsoft tokens). President's Law updated: "browser credential theft" kill-authorized. |
 | 3.3.0 | Electron Allowlist & Work Folders Protection | Comprehensive Electron/JIT app allowlist in BehavioralCorrelationEngine and MemoryBehaviorAnalyzer — eliminates false composite detections for Kiro, VS Code, Discord, Slack, Teams, Steam, Spotify, Notion, Obsidian, Figma, Postman, Bitwarden, and 20+ other apps. WorkFoldersExfilMonitor: detects unauthorized Work Folders configuration (registry, Group Policy injection), kills the service if running, removes injected policies, blocks silent data exfiltration via enterprise sync on personal machines. Kill-authorized. |
+| 3.4.0 | Active Response Expansion | President's Law kill list expanded: RAT/APT campaigns (PlugX, Cobalt Strike), confirmed LSASS dumps, reverse shells, process injection/hollowing, keyloggers, UAC bypass exploitation now kill-authorized. Host-level composite resolution extracts offending PIDs from evidence for targeted kill. Campaign IOC confidence threshold lowered to 0.75 (multi-signal correlation). Agent kill list synchronized with service engine. |
+| 3.5.0 | Behavioral RAT Kill | Three new composite correlation rules detect novel RATs without campaign IOCs: Covert RAT (unsigned + staging path + sustained network), Confirmed C2 Beacon (unsigned + periodic beaconing), Unsigned + Sustained C2 (unsigned + 60s+ connection). Existing C2 composites promoted to kill-authorized: Injected C2 Beacon, DGA + C2 Beaconing, Spoofed Process Phoning Home, Dropped Payload Phoning Home, Staged Payload + Non-Standard Port. |
 
 ---
 

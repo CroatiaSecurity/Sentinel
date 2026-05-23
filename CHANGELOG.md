@@ -2,6 +2,95 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [3.5.0] - 2026-05-23
+
+### Added — Behavioral RAT Kill (Novel RAT Detection Without IOCs)
+
+#### New Composite Correlation Rules (BehavioralCorrelationEngine)
+
+- **Covert RAT: Unsigned + Hidden + Network [COMPOSITE]** — Detects novel RATs by behavioral pattern alone: unsigned binary from staging path (Temp/AppData) + sustained outbound network connection or beaconing. Confidence 0.88 (0.92 with recon activity). No campaign IOC required.
+- **Confirmed C2 Beacon: Unsigned Process [COMPOSITE]** — Unsigned binary exhibiting periodic beaconing pattern (regular intervals with jitter). Confidence 0.88 (0.93 from staging path). Catches any C2 beacon regardless of framework.
+- **Covert C2: Unsigned Binary + Sustained Connection [COMPOSITE]** — Unsigned binary maintaining a 60s+ outbound connection. Confidence 0.90. Catches the exact PlugX/RAT pattern: fake updater from temp path holding persistent HTTPS to C2.
+
+#### President's Law Kill List — Existing Composites Promoted
+
+The following composites were previously log-only despite high confidence. They are now kill-authorized:
+
+| Composite | Confidence | Previous | New |
+|-----------|-----------|----------|-----|
+| Injected C2 Beacon | 0.98 | LogOnly | **Kill** |
+| DGA + C2 Beaconing | 0.94 | LogOnly | **Kill** |
+| Spoofed Process Phoning Home | 0.92 | LogOnly | **Kill** |
+| Dropped Payload Phoning Home | 0.93 | LogOnly | **Kill** |
+| Staged Payload + Non-Standard Port | 0.92 | LogOnly | **Kill** |
+
+#### Kill Fragments Added
+
+Service (`AdvancedResponseEngine`):
+- `"covert rat:"`, `"covert c2:"`, `"confirmed c2 beacon:"`
+- `"injected c2 beacon"`, `"dga + c2 beaconing"`, `"spoofed process phoning home"`, `"dropped payload phoning home"`, `"staged payload + non-standard port"`
+
+Agent (`AgentResponseEngine`):
+- `"covert rat:"`, `"covert c2:"`, `"confirmed c2 beacon:"`
+- `"injected c2 beacon"`, `"dga + c2 beaconing"`, `"spoofed process phoning home"`, `"dropped payload phoning home"`
+
+### Changed
+
+- Version bumped to 3.5.0 across all projects (Core, Service, Agent, Installer)
+
+### Security Impact
+
+With these composites, a novel RAT (no known campaign IOC) will now be killed if it exhibits ANY of:
+- Unsigned binary from temp/AppData + sustained network connection (60s+)
+- Unsigned binary + periodic beaconing pattern
+- Unsigned binary from staging path + any network + no visible window
+
+This closes the gap where PlugX survived because its confidence (0.78) was below the campaign threshold. The new behavioral composites don't need campaign recognition — the behavior alone is sufficient.
+
+---
+
+## [3.4.0] - 2026-05-23
+
+### Added — Active Response Expansion (President's Law Kill List)
+
+#### President's Law Kill List Expansion
+
+The response engine now actively kills processes for threat categories that were previously log-only:
+
+- **RAT / APT Campaign Composites**: `"campaign:"`, `"rat activity"`, `"remote access trojan"`, `"confirmed rat"`, `"apt:"` — confirmed campaign IOC matches (PlugX, Cobalt Strike, etc.) are now kill-authorized with a lowered confidence threshold of 0.75 (campaign rules already correlate multiple signals internally).
+- **Confirmed LSASS Dumps**: `"confirmed lsass dump"`, `"lsass dump"` — composite detections confirming credential dumping via dbghelp.dll + LSASS targeting are now killed immediately.
+- **Reverse Shells**: `"reverse shell"`, `"interactive shell: outbound"` — confirmed interactive outbound shells are kill-authorized.
+- **Process Injection / Hollowing**: `"process hollowing"`, `"process injection: confirmed"`, `"hollow process"` — runtime-confirmed injection is kill-authorized.
+- **Keylogging / Input Capture**: `"keylogger"`, `"keystroke capture"`, `"input capture"` — spyware behavior is kill-authorized.
+- **UAC Bypass Exploitation**: `"uac bypass: exploited"`, `"uac bypass: active exploitation"` — active exploitation of elevation vectors is kill-authorized.
+
+#### Host-Level Composite Resolution
+
+- **HandleHostLevelCompositeAsync**: Composite detections that fire with PID 0 / "Host-Level" (e.g., "Data Exfiltration: Credential Theft + Network") now extract actual offending PIDs from the evidence text using regex PID extraction, then re-dispatch kill actions against those specific processes.
+- **ExtractPidsFromEvidence**: New utility method that parses "PID XXXX" patterns from composite evidence strings.
+
+#### Agent Kill List Synchronization
+
+- **AgentResponseEngine**: Kill fragments expanded to match the service engine — now includes RAT campaigns, keyloggers, reverse shells, credential dumps, and data exfiltration composites.
+
+### Changed
+
+- **EvaluateMustKill**: Now uses per-fragment confidence thresholds. Campaign IOCs use 0.75 (vs 0.85 default) because campaign rules already perform multi-signal correlation internally.
+- **CampaignCorroboratedThreshold**: New constant (0.75) for campaign IOC confidence gating.
+- Version bumped to 3.4.0 across all projects (Core, Service, Agent, Installer)
+
+### Security Impact
+
+With these changes, the following threats from the events.jsonl would now be actively killed:
+
+| Threat | Rule | PID | Previous Response | New Response |
+|--------|------|-----|-------------------|--------------|
+| PlugX RAT | Campaign: PlugX | 7264, 7644 | LogOnly | **Kill** (conf 0.78 ≥ 0.75 campaign threshold) |
+| LSASS Dump | Confirmed LSASS Dump [COMPOSITE] | 7120 | LogOnly | **Kill** (conf 0.97 ≥ 0.85) |
+| Data Exfiltration | Data Exfiltration: Credential Theft + Network | Host-Level→resolved PIDs | LogOnly | **Kill** (PID resolution from evidence) |
+
+---
+
 ## [3.3.0] - 2026-05-23
 
 ### Added — Electron Allowlist & Work Folders Protection

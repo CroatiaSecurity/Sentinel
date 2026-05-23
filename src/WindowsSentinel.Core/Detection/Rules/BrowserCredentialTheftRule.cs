@@ -158,7 +158,7 @@ public sealed class BrowserCredentialTheftRule : IDetectionRule
                 Metadata = new()
                 {
                     ["tool_name"] = proc.ProcessName,
-                    ["command_line"] = proc.CommandLine,
+                    ["command_line"] = proc.CommandLine ?? "",
                     ["technique"] = "T1555.003 - Credentials from Web Browsers"
                 }
             };
@@ -202,7 +202,7 @@ public sealed class BrowserCredentialTheftRule : IDetectionRule
                 {
                     ["matched_pattern"] = matchedPattern ?? "",
                     ["is_script_engine"] = isScriptEngine.ToString(),
-                    ["command_line"] = proc.CommandLine,
+                    ["command_line"] = proc.CommandLine ?? "",
                     ["technique"] = "T1555.003 - Credentials from Web Browsers"
                 }
             };

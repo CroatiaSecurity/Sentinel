@@ -3,7 +3,7 @@
 **Status:** Architecture spec. Extends, does not replace, `requirements.md`,
 `design.md`, `constraints.md` (all v0.9.0).
 
-**Last updated:** v3.3.0 (May 2026) — Electron Allowlist & Work Folders Protection.
+**Last updated:** v3.5.0 (May 2026) — Behavioral RAT Kill.
 
 ---
 

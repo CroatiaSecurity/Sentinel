@@ -15,7 +15,7 @@
 
 #define AppName      "Windows Sentinel"
 #ifndef AppVersion
-  #define AppVersion   "3.3.0"
+  #define AppVersion   "3.5.0"
 #endif
 #define AppPublisher "Gorstak"
 #define AppURL       "https://github.com/CroatiaSecurity/Sentinel"

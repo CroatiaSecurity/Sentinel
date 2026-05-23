@@ -25,6 +25,7 @@ internal sealed class AgentResponseEngine : IResponseEngine
     // President's Law fragments that authorize a kill from the Agent
     private static readonly string[] KillFragments =
     {
+        // User-session spyware / surveillance
         "audio injection",
         "audio hijack",
         "audio routed to microphone",
@@ -35,6 +36,34 @@ internal sealed class AgentResponseEngine : IResponseEngine
         "surveillance suite",
         "camera/mic exfiltration",
         "browser credential theft",
+        // RAT / APT campaign (v3.3.0)
+        "campaign:",
+        "rat activity",
+        "remote access trojan",
+        "confirmed rat",
+        // v3.5.0 — Behavioral RAT composites (novel RAT detection)
+        "covert rat:",
+        "covert c2:",
+        "confirmed c2 beacon:",
+        // v3.5.0 — Existing composites now kill-authorized
+        "injected c2 beacon",
+        "dga + c2 beaconing",
+        "spoofed process phoning home",
+        "dropped payload phoning home",
+        // Keylogging / input capture (v3.3.0)
+        "keylogger",
+        "keystroke capture",
+        "input capture",
+        // Reverse shell (v3.3.0)
+        "reverse shell",
+        "interactive shell: outbound",
+        // Credential theft (v3.3.0)
+        "confirmed lsass dump",
+        "lsass dump",
+        "credential dump",
+        // Data exfiltration (v3.3.0)
+        "data exfiltration",
+        "exfiltration: credential theft + network",
     };
 
     private const double KillConfidenceThreshold = 0.85;

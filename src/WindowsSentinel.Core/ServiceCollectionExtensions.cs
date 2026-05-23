@@ -36,6 +36,8 @@ using ThreatReportingConfig = WindowsSentinel.Core.Response.ThreatReportingConfi
 // 3.0.0 — Security Hardening, Observability & Resilience
 // 3.2.0 — Browser Credential Protection (Chrome/Google account theft prevention)
 // 3.3.0 — Electron Allowlist & Work Folders Protection
+// 3.4.0 — Active Response Expansion (RAT/Campaign kill, LSASS dump kill, host-level composite resolution)
+// 3.5.0 — Behavioral RAT Kill (novel RAT composites, beaconing kill-authorized)
 
 namespace WindowsSentinel.Core;
 
@@ -45,10 +47,10 @@ namespace WindowsSentinel.Core;
 public static class SentinelVersion
 {
     /// <summary>
-    /// Current version - 3.3.0 Electron Allowlist &amp; Work Folders Protection
+    /// Current version - 3.5.0 Behavioral RAT Kill
     /// Version is managed in version.txt for consistency across build scripts
     /// </summary>
-    public const string Version = "3.3.0";
+    public const string Version = "3.5.0";
 
     /// <summary>
     /// Release date
@@ -59,12 +61,13 @@ public static class SentinelVersion
     /// Version description
     /// </summary>
     public const string Description =
-        "3.3.0 — Electron Allowlist & Work Folders Protection. " +
-        "Adds comprehensive Electron/JIT app allowlist to eliminate false positive composite " +
-        "detections (Kiro, VS Code, Discord, Slack, Steam, etc.). Adds Work Folders " +
-        "exfiltration monitor that detects unauthorized sync configuration, kills the service, " +
-        "and removes injected policies. Protects against silent data exfiltration via " +
-        "enterprise sync features on personal machines.";
+        "3.5.0 — Behavioral RAT Kill. " +
+        "Three new composite correlation rules detect novel RATs without campaign IOCs: " +
+        "Covert RAT (unsigned + staging path + sustained network), Confirmed C2 Beacon " +
+        "(unsigned + periodic beaconing pattern), Unsigned + Sustained C2 (unsigned + 60s+ " +
+        "outbound connection). Existing C2/beaconing composites (Injected C2 Beacon, DGA + " +
+        "C2 Beaconing, Spoofed Process Phoning Home, Dropped Payload, Staged Payload) " +
+        "promoted from log-only to kill-authorized.";
 }
 
 public static class ServiceCollectionExtensions

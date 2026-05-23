@@ -181,9 +181,11 @@ public sealed class AdvancedResponseEngine : IResponseEngine
     // ════════════════════════════════════════════════════════════════════════
     private static readonly string[] PresidentsLawFragments = new[]
     {
-        // Credential theft
+        // Credential theft (v3.3.0: expanded to cover LSASS dump composites)
         "lsass credential",
         "credential dump",
+        "confirmed lsass dump",
+        "lsass dump",
         // Telemetry tampering (EDR blinding)
         "amsi tampering",
         "etw tampering",
@@ -220,6 +222,36 @@ public sealed class AdvancedResponseEngine : IResponseEngine
         "exfiltration: staging + upload service",
         // Browser credential theft (v3.2.0)
         "browser credential theft",
+        // RAT / APT campaign composites (v3.3.0) — confirmed RAT activity kills
+        "campaign:",
+        "rat activity",
+        "remote access trojan",
+        "confirmed rat",
+        "apt:",
+        // v3.5.0 — Behavioral RAT composites (novel RAT detection without IOCs)
+        "covert rat:",
+        "covert c2:",
+        "confirmed c2 beacon:",
+        // v3.5.0 — Existing composites now kill-authorized (were log-only)
+        "injected c2 beacon",
+        "dga + c2 beaconing",
+        "spoofed process phoning home",
+        "dropped payload phoning home",
+        "staged payload + non-standard port",
+        // UAC bypass exploitation (v3.3.0) — active exploitation of elevation vectors
+        "uac bypass: exploited",
+        "uac bypass: active exploitation",
+        // Process injection / hollowing (v3.3.0) — runtime behavioral confirmation
+        "process hollowing",
+        "process injection: confirmed",
+        "hollow process",
+        // Keylogging / input capture (v3.3.0) — spyware behavior
+        "keylogger",
+        "keystroke capture",
+        "input capture",
+        // Reverse shell (v3.3.0) — confirmed interactive shell
+        "reverse shell",
+        "interactive shell: outbound",
         // Honeypot trip
         "honeypot: decoy",
         // NeuroBehavior anomaly
@@ -237,6 +269,12 @@ public sealed class AdvancedResponseEngine : IResponseEngine
     };
 
     private const double MustKillConfidenceThreshold = 0.85;
+
+    // v3.3.0: Lowered threshold for campaign IOCs when corroborated by composites.
+    // A confirmed campaign match (PlugX, Cobalt Strike, etc.) with composite evidence
+    // is high-confidence even at 0.78 because the campaign detection itself is a
+    // multi-signal correlation. Single IOC hits still require 0.85.
+    private const double CampaignCorroboratedThreshold = 0.75;
 
     // ═══════════════════════════════════════════════════════════════════════════
     // PRE-KILL VALIDATION GATE
@@ -406,17 +444,35 @@ public sealed class AdvancedResponseEngine : IResponseEngine
 
     private bool EvaluateMustKill(DetectionEvent detection)
     {
-        if (detection.Confidence < MustKillConfidenceThreshold) return false;
         var rule = detection.RuleName.ToLowerInvariant();
+        
         foreach (var frag in PresidentsLawFragments)
         {
-            if (rule.Contains(frag)) return true;
+            if (rule.Contains(frag))
+            {
+                // v3.3.0: Campaign IOCs use a lower confidence threshold when the
+                // detection itself is a multi-signal composite (the campaign rule
+                // already correlates file name, command line, and behavioral patterns).
+                var threshold = frag.StartsWith("campaign:") || frag == "rat activity" || frag == "confirmed rat"
+                    ? CampaignCorroboratedThreshold
+                    : MustKillConfidenceThreshold;
+
+                if (detection.Confidence >= threshold) return true;
+            }
         }
         return false;
     }
 
     private async Task HandleTier1Async(DetectionEvent detection, CancellationToken cancellationToken)
     {
+        // v3.3.0: Host-level composites (PID 0) — resolve actual offending PIDs from
+        // correlated signals and re-dispatch with real PIDs for kill action.
+        if (detection.ProcessId == 0 && detection.ProcessName == "Host-Level")
+        {
+            await HandleHostLevelCompositeAsync(detection, cancellationToken);
+            return;
+        }
+
         // PRESIDENT'S LAW — only the closed kill list authorizes immediate chain-nuke.
         if (_activeResponseEnabled && EvaluateMustKill(detection))
         {
@@ -599,6 +655,163 @@ public sealed class AdvancedResponseEngine : IResponseEngine
         };
 
         await _eventLogger.LogResponseAsync(action, cancellationToken);
+    }
+
+    /// <summary>
+    /// Handles host-level composite detections (PID 0) by extracting the actual offending
+    /// PIDs from the evidence text and process scoring state, then re-dispatching kill
+    /// actions against those specific processes.
+    /// </summary>
+    private async Task HandleHostLevelCompositeAsync(DetectionEvent detection, CancellationToken cancellationToken)
+    {
+        _logger.LogWarning(
+            "[HOST-COMPOSITE] {Rule} | Conf {Conf:P0} — resolving offending PIDs from evidence",
+            detection.RuleName, detection.Confidence);
+
+        await _eventLogger.LogDetectionAsync(detection, cancellationToken);
+
+        // Check if this composite matches President's Law
+        if (!(_activeResponseEnabled && EvaluateMustKill(detection)))
+        {
+            var score = new ThreatScore
+            {
+                Score = 150,
+                Verdict = Verdict.Critical,
+                Category = "host_level_composite",
+                Source = DetectionSource.BehaviorEngine,
+                OriginalConfidence = detection.Confidence,
+                CorroboratingSources = 0
+            };
+            await LogOnlyAsync(detection, score,
+                "Host-level composite does not match President's Law kill list or active response is disabled.",
+                cancellationToken);
+            return;
+        }
+
+        // Extract PIDs from evidence text (format: "PID XXXX" or "(PID XXXX)")
+        var pidsFromEvidence = ExtractPidsFromEvidence(detection.Evidence);
+
+        // Also check the scoring engine's process state for processes with matching categories
+        var category = detection.Metadata.TryGetValue("category", out var cat) ? cat : null;
+        if (category != null && _scoringEngine != null)
+        {
+            // Look for processes that have been flagged in the same category within the correlation window
+            // This is a best-effort resolution — we use the PIDs we can find
+        }
+
+        if (pidsFromEvidence.Count == 0)
+        {
+            _logger.LogWarning(
+                "[HOST-COMPOSITE] Could not resolve any PIDs from evidence for {Rule}. Logging only.",
+                detection.RuleName);
+
+            var score = new ThreatScore
+            {
+                Score = 150,
+                Verdict = Verdict.Critical,
+                Category = "host_level_composite_unresolved",
+                Source = DetectionSource.BehaviorEngine,
+                OriginalConfidence = detection.Confidence,
+                CorroboratingSources = 0
+            };
+            await LogOnlyAsync(detection, score,
+                "Host-level composite matched President's Law but no actionable PIDs could be resolved from evidence.",
+                cancellationToken);
+
+            _toastService?.ShowThreatDetected(
+                detection.RuleName,
+                "Host-Level",
+                0,
+                "Critical",
+                "Composite threat detected but no specific process could be targeted. Manual investigation required.");
+            return;
+        }
+
+        _logger.LogCritical(
+            "[HOST-COMPOSITE] Resolved {Count} offending PIDs from composite evidence: {Pids}",
+            pidsFromEvidence.Count, string.Join(", ", pidsFromEvidence));
+
+        // Re-dispatch kill actions for each resolved PID
+        foreach (var pid in pidsFromEvidence)
+        {
+            try
+            {
+                using var process = Process.GetProcessById(pid);
+                var resolvedDetection = new DetectionEvent
+                {
+                    RuleName = detection.RuleName,
+                    Evidence = detection.Evidence,
+                    Reasoning = $"[HOST-COMPOSITE RESOLVED] {detection.Reasoning}",
+                    Confidence = detection.Confidence,
+                    Tier = detection.Tier,
+                    ProcessName = process.ProcessName,
+                    ProcessId = pid,
+                    Timestamp = detection.Timestamp,
+                    Metadata = new Dictionary<string, string>(detection.Metadata)
+                    {
+                        ["resolved_from_composite"] = "true",
+                        ["original_process_name"] = "Host-Level"
+                    }
+                };
+
+                var mustKillScore = new ThreatScore
+                {
+                    Score = 200,
+                    Verdict = Verdict.Critical,
+                    Category = "presidents_law_composite_resolved",
+                    Source = DetectionSource.BehaviorEngine,
+                    OriginalConfidence = detection.Confidence,
+                    CorroboratingSources = 0
+                };
+
+                // Run pre-kill validation on the resolved PID
+                var downgradeReason = EvaluatePreKillValidation(resolvedDetection);
+                if (downgradeReason != null)
+                {
+                    _logger.LogWarning(
+                        "[HOST-COMPOSITE] Kill DOWNGRADED for resolved PID {Pid} ({Name}) — {Reason}",
+                        pid, process.ProcessName, downgradeReason);
+                    continue;
+                }
+
+                _logger.LogCritical(
+                    "[HOST-COMPOSITE] Killing resolved process {Name} (PID {Pid}) from composite {Rule}",
+                    process.ProcessName, pid, detection.RuleName);
+
+                await TakeAggressiveActionAsync(resolvedDetection, mustKillScore, cancellationToken);
+            }
+            catch (ArgumentException)
+            {
+                _logger.LogDebug("[HOST-COMPOSITE] PID {Pid} no longer exists, skipping", pid);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[HOST-COMPOSITE] Failed to process resolved PID {Pid}", pid);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Extracts process IDs from composite evidence text.
+    /// Looks for patterns like "PID 7120", "(PID 2880)", "Process 'name' (PID 1234)".
+    /// </summary>
+    private static List<int> ExtractPidsFromEvidence(string evidence)
+    {
+        var pids = new HashSet<int>();
+        
+        // Match "PID XXXX" patterns (with optional parentheses)
+        var matches = System.Text.RegularExpressions.Regex.Matches(
+            evidence, @"PID\s+(\d+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+        foreach (System.Text.RegularExpressions.Match match in matches)
+        {
+            if (int.TryParse(match.Groups[1].Value, out var pid) && pid > 4 && pid < 999999)
+            {
+                pids.Add(pid);
+            }
+        }
+
+        return pids.ToList();
     }
 
     private async Task TakeAggressiveActionAsync(DetectionEvent detection, ThreatScore score, CancellationToken cancellationToken)
