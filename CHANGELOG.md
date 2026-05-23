@@ -2,6 +2,41 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [3.3.0] - 2026-05-23
+
+### Added — Electron Allowlist & Work Folders Protection
+
+#### Electron/JIT App Allowlist (False Positive Elimination)
+
+- **BehavioralCorrelationEngine**: Added comprehensive allowlist of 40+ Electron/JIT apps that are now excluded from composite correlation. Eliminates false "In-Memory Implant + Network Beacon" and "DGA + C2 Beaconing" composites for:
+  - IDEs: Kiro, VS Code, Rider, IntelliJ, PyCharm, WebStorm, GoLand
+  - Communication: Discord, Slack, Teams, Signal, WhatsApp, Telegram
+  - Productivity: Notion, Obsidian, Figma, Postman, Todoist, ClickUp, Linear
+  - Security: Bitwarden, 1Password
+  - Media: Spotify, Loom
+  - Gaming: Steam, steamwebhelper
+  - Dev tools: GitKraken, Insomnia
+  - Windows system: dwm, TextInputHost, SearchHost, ShellExperienceHost
+  
+- **MemoryBehaviorAnalyzer**: Expanded JIT process exclusion list with all the above Electron apps. These processes legitimately use RWX memory for V8/SpiderMonkey JIT compilation.
+
+#### Work Folders Exfiltration Monitor (Kill-Authorized)
+
+- **WorkFoldersExfilMonitor** — Detects and blocks unauthorized Work Folders activation:
+  - Monitors Work Folders service state (kills if running on personal machine)
+  - Detects new sync server URLs appearing in registry (removes them)
+  - Detects Group Policy injection for auto-provisioning (deletes policy keys)
+  - Detects Work Folders process execution (kills immediately)
+  - Takes baseline at startup — alerts if already configured
+  - Active response: stops service, kills process, removes registry config
+  - MITRE T1567, T1048, T1484.001
+
+### Changed
+
+- Version bumped to 3.3.0 across all projects
+
+---
+
 ## [3.2.0] - 2026-05-22
 
 ### Added — Browser & Account Credential Protection + PowerShell Threat Monitoring

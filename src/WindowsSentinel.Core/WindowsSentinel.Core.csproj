@@ -10,11 +10,11 @@
     <Authors>Gorstak</Authors>
     <Company>github.com/CroatiaSecurity/Sentinel</Company>
     <Product>Windows Sentinel</Product>
-    <Description>Userland EDR for Windows — Behavioral detection and response (v3.2.0 Browser Credential Protection)</Description>
-    <Version>3.2.0</Version>
-    <AssemblyVersion>3.2.0.0</AssemblyVersion>
-    <FileVersion>3.2.0.0</FileVersion>
-    <InformationalVersion>3.2.0</InformationalVersion>
+    <Description>Userland EDR for Windows — Behavioral detection and response (v3.3.0 Electron Allowlist &amp; Work Folders Protection)</Description>
+    <Version>3.3.0</Version>
+    <AssemblyVersion>3.3.0.0</AssemblyVersion>
+    <FileVersion>3.3.0.0</FileVersion>
+    <InformationalVersion>3.3.0</InformationalVersion>
   </PropertyGroup>
 
   <ItemGroup>

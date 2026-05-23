@@ -44,48 +44,42 @@ dotnet clean "$RepoRoot\src\WindowsSentinel.Service\WindowsSentinel.Service.cspr
 dotnet clean "$RepoRoot\src\WindowsSentinel.Agent\WindowsSentinel.Agent.csproj" -c $Configuration --nologo -v q 2>$null
 Write-Host "[OK] Build cache cleared" -ForegroundColor Green
 
-# ── Check Windows Defender Exclusions ─────────────────────────────────────────
-Write-Host "`n[Pre-build] Checking Windows Defender configuration..." -ForegroundColor Yellow
+# ── Windows Defender Exclusions (ALWAYS add — status check is unreliable) ─────
+Write-Host "`n[Pre-build] Adding Windows Defender exclusions..." -ForegroundColor Yellow
 
 try {
-    $defenderStatus = Get-MpComputerStatus -ErrorAction SilentlyContinue
-    if ($defenderStatus.RealTimeProtectionEnabled) {
-        $exclusions = Get-MpPreference -ErrorAction SilentlyContinue | Select-Object -ExpandProperty ExclusionPath
-        $repoExcluded = $exclusions | Where-Object { $_ -and $RepoRoot.StartsWith($_) }
-        
-        if (-not $repoExcluded) {
-            # AUTOMATIC: Try to add exclusion without prompting
-            try {
-                Add-MpPreference -ExclusionPath $RepoRoot -ErrorAction Stop
-                Write-Host "[AUTO] Added Defender exclusion for $RepoRoot" -ForegroundColor Green
-                
-                # Also exclude build outputs
-                $publishPath = Join-Path $Installer "publish"
-                if (Test-Path $publishPath) {
-                    Add-MpPreference -ExclusionPath $publishPath -ErrorAction SilentlyContinue | Out-Null
-                }
-                
-                # Exclude the releases folder
-                $releasesPath = Join-Path $RepoRoot "releases"
-                Add-MpPreference -ExclusionPath $releasesPath -ErrorAction SilentlyContinue | Out-Null
-            }
-            catch {
-                Write-Host "[WARN] Could not auto-add Defender exclusion (needs Admin): $_" -ForegroundColor Yellow
-                Write-Host "       Build may fail with 'virus detected' errors." -ForegroundColor Yellow
-                Write-Host "       To fix: Run as Administrator or run: Add-MpPreference -ExclusionPath '$RepoRoot'" -ForegroundColor Cyan
-                Start-Sleep -Seconds 2
-            }
+    # Always add exclusions regardless of reported Defender status.
+    # Get-MpComputerStatus can report RealTimeProtection=disabled while
+    # Defender still scans files during build (cloud protection, on-access hooks).
+    $exclusionsNeeded = @(
+        $RepoRoot,
+        (Join-Path $Installer "publish"),
+        (Join-Path $Installer "output"),
+        (Join-Path $RepoRoot "releases")
+    )
+
+    foreach ($path in $exclusionsNeeded) {
+        try {
+            Add-MpPreference -ExclusionPath $path -ErrorAction Stop
         }
-        else {
-            Write-Host "[OK] Windows Defender exclusion already configured" -ForegroundColor Green
+        catch {
+            # Silently continue — may already exist or need admin
         }
     }
-    else {
-        Write-Host "[OK] Windows Defender Real-time Protection is disabled" -ForegroundColor Yellow
+
+    # Also exclude the dotnet build output patterns
+    try {
+        Add-MpPreference -ExclusionProcess "dotnet.exe" -ErrorAction SilentlyContinue
+        Add-MpPreference -ExclusionExtension ".dll" -ErrorAction SilentlyContinue
     }
+    catch { }
+
+    Write-Host "[OK] Defender exclusions applied (repo + publish + output)" -ForegroundColor Green
 }
 catch {
-    Write-Host "[WARN] Could not check Defender status: $_" -ForegroundColor Yellow
+    Write-Host "[WARN] Could not add Defender exclusions (run as Admin if build fails): $_" -ForegroundColor Yellow
+    Write-Host "       Manual fix: Add-MpPreference -ExclusionPath '$RepoRoot'" -ForegroundColor Cyan
+    Start-Sleep -Seconds 2
 }
 
 # ── 1. Publish Service ────────────────────────────────────────────────────────

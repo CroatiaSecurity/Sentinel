@@ -35,6 +35,7 @@ using ThreatReportingConfig = WindowsSentinel.Core.Response.ThreatReportingConfi
 // 2.8.1 — Architecture Hardening & Bug Fixes (version.txt managed)
 // 3.0.0 — Security Hardening, Observability & Resilience
 // 3.2.0 — Browser Credential Protection (Chrome/Google account theft prevention)
+// 3.3.0 — Electron Allowlist & Work Folders Protection
 
 namespace WindowsSentinel.Core;
 
@@ -44,27 +45,26 @@ namespace WindowsSentinel.Core;
 public static class SentinelVersion
 {
     /// <summary>
-    /// Current version - 3.2.0 Browser &amp; Account Credential Protection
+    /// Current version - 3.3.0 Electron Allowlist &amp; Work Folders Protection
     /// Version is managed in version.txt for consistency across build scripts
     /// </summary>
-    public const string Version = "3.2.0";
+    public const string Version = "3.3.0";
 
     /// <summary>
     /// Release date
     /// </summary>
-    public static readonly DateTime ReleaseDate = new(2026, 5, 22);
+    public static readonly DateTime ReleaseDate = new(2026, 5, 23);
 
     /// <summary>
     /// Version description
     /// </summary>
     public const string Description =
-        "3.2.0 — Browser & Account Credential Protection. " +
-        "Adds Chrome/Chromium credential guard, Firefox credential guard, Microsoft account " +
-        "token protection (WAM/PRT/Azure AD), browser extension manipulation detection, " +
-        "Chrome session hijack prevention (remote debugging, CDP, App-Bound Encryption bypass), " +
-        "PowerShell threat monitoring (ETW script-block logging, AMSI bypass, download cradles), " +
-        "and browser credential theft detection rule. Protects Google and Microsoft accounts " +
-        "from infostealer malware and living-off-the-land attacks.";
+        "3.3.0 — Electron Allowlist & Work Folders Protection. " +
+        "Adds comprehensive Electron/JIT app allowlist to eliminate false positive composite " +
+        "detections (Kiro, VS Code, Discord, Slack, Steam, etc.). Adds Work Folders " +
+        "exfiltration monitor that detects unauthorized sync configuration, kills the service, " +
+        "and removes injected policies. Protects against silent data exfiltration via " +
+        "enterprise sync features on personal machines.";
 }
 
 public static class ServiceCollectionExtensions
@@ -493,6 +493,9 @@ public static class ServiceCollectionExtensions
 
         // ── PowerShell Threat Monitor (script-block logging, encoded commands, AMSI bypass) ─
         services.AddHostedService<PowerShellThreatMonitor>();
+
+        // ── Work Folders Exfiltration Monitor (unauthorized sync/exfil detection + kill) ─
+        services.AddHostedService<WorkFoldersExfilMonitor>();
 
         // ── Disk-Wide DLL Scanner (all drives, unsigned DLL detection, IoC matching + unload) ─
         services.AddHostedService<DiskWideDllScanner>();

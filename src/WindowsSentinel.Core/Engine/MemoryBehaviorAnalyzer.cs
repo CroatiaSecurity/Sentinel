@@ -52,10 +52,38 @@ public sealed class MemoryBehaviorAnalyzer : BackgroundService
     // Processes that legitimately use RWX (JIT compilers, etc.)
     private static readonly HashSet<string> JitProcesses = new(StringComparer.OrdinalIgnoreCase)
     {
+        // Language runtimes with JIT
         "java.exe", "javaw.exe", "node.exe", "python.exe", "python3.exe",
         "ruby.exe", "dotnet.exe", "pwsh.exe", "powershell.exe",
+        // Browsers (V8/SpiderMonkey JIT)
         "chrome.exe", "firefox.exe", "msedge.exe", "opera.exe", "brave.exe",
+        "vivaldi.exe", "arc.exe",
+        // IDEs and dev tools
         "devenv.exe", "code.exe", "rider64.exe", "idea64.exe",
+        "pycharm64.exe", "webstorm64.exe", "goland64.exe", "clion64.exe",
+        // Electron apps (Chromium V8 JIT — always have RWX)
+        "Kiro.exe", "discord.exe", "Discord.exe",
+        "slack.exe", "Slack.exe",
+        "teams.exe", "Teams.exe", "ms-teams.exe",
+        "signal.exe", "Signal.exe",
+        "notion.exe", "Notion.exe",
+        "obsidian.exe", "Obsidian.exe",
+        "figma.exe", "Figma.exe",
+        "postman.exe", "Postman.exe",
+        "bitwarden.exe", "Bitwarden.exe",
+        "1password.exe", "1Password.exe",
+        "spotify.exe", "Spotify.exe",
+        "whatsapp.exe", "WhatsApp.exe",
+        "telegram.exe", "Telegram.exe",
+        "gitkraken.exe", "GitKraken.exe",
+        "insomnia.exe", "Insomnia.exe",
+        "loom.exe", "Loom.exe",
+        "linear.exe", "Linear.exe",
+        "todoist.exe", "Todoist.exe",
+        "clickup.exe", "ClickUp.exe",
+        // Steam (CEF/Chromium embedded)
+        "steam.exe", "steamwebhelper.exe",
+        // Other JIT engines
         "v8_shell.exe", "deno.exe", "bun.exe"
     };
 

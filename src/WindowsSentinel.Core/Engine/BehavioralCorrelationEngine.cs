@@ -39,6 +39,42 @@ public sealed class BehavioralCorrelationEngine : IAsyncDisposable
     // Correlation window — signals older than this are ignored
     private static readonly TimeSpan CorrelationWindow = TimeSpan.FromSeconds(120);
 
+    // v3.3.0: Electron/JIT apps that legitimately have RWX memory + network connections.
+    // These are excluded from composite correlation to prevent false "In-Memory Implant" alerts.
+    private static readonly HashSet<string> ElectronAndJitApps = new(StringComparer.OrdinalIgnoreCase)
+    {
+        // Electron apps (Chromium V8 JIT + constant network)
+        "Kiro", "code", "Code",
+        "discord", "Discord",
+        "slack", "Slack",
+        "teams", "Teams", "ms-teams",
+        "signal", "Signal",
+        "notion", "Notion",
+        "obsidian", "Obsidian",
+        "figma", "Figma",
+        "postman", "Postman",
+        "bitwarden", "Bitwarden",
+        "1password", "1Password",
+        "spotify", "Spotify",
+        "whatsapp", "WhatsApp",
+        "telegram", "Telegram",
+        "gitkraken", "GitKraken",
+        "insomnia", "Insomnia",
+        "loom", "Loom",
+        "linear", "Linear",
+        "todoist", "Todoist",
+        "clickup", "ClickUp",
+        // Steam (CEF embedded browser)
+        "steam", "steamwebhelper",
+        // Browsers (V8/SpiderMonkey JIT + network is their entire purpose)
+        "chrome", "msedge", "firefox", "brave", "opera", "vivaldi", "arc",
+        // IDEs with JIT
+        "devenv", "rider64", "idea64", "pycharm64", "webstorm64", "goland64",
+        // Windows system processes with legitimate unbacked executable memory
+        "dwm", "TextInputHost", "SearchHost", "ShellExperienceHost",
+        "StartMenuExperienceHost", "RuntimeBroker",
+    };
+
     // Pruning interval
     private Task? _pruneTask;
 
@@ -61,6 +97,14 @@ public sealed class BehavioralCorrelationEngine : IAsyncDisposable
     /// </summary>
     public async Task OnDetectionAsync(DetectionEvent detection, CancellationToken cancellationToken)
     {
+        // v3.3.0: Skip correlation for known Electron/JIT apps whose normal behavior
+        // (RWX memory + sustained network) triggers false composite detections.
+        if (IsElectronOrJitApp(detection.ProcessName))
+        {
+            // Still log the individual signal but don't feed it into composite correlation
+            return;
+        }
+
         var signal = new Signal(
             detection.RuleName,
             detection.ProcessId,
@@ -1375,6 +1419,20 @@ public sealed class BehavioralCorrelationEngine : IAsyncDisposable
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// v3.3.0: Returns true if the process is a known Electron/JIT app that should be
+    /// excluded from composite correlation (RWX + network is their normal behavior).
+    /// </summary>
+    private static bool IsElectronOrJitApp(string processName)
+    {
+        if (string.IsNullOrEmpty(processName)) return false;
+        // Match with or without .exe suffix
+        var name = processName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
+            ? processName[..^4]
+            : processName;
+        return ElectronAndJitApps.Contains(name) || ElectronAndJitApps.Contains(processName);
+    }
 
     private static DetectionEvent MakeComposite(
         string ruleName, string evidence, string reasoning,

@@ -1,6 +1,6 @@
 # Windows Sentinel — Design Document
 
-**Version: 3.2.0**
+**Version: 3.3.0**
 
 ---
 
@@ -73,6 +73,7 @@ The fusion layer is PASSIVE — it never blocks, kills, or modifies telemetry.
 | `BrowserExtensionMonitor` | **3.2.0** Baselines installed extensions, detects new extensions with dangerous permissions, registry force-install. Scans every 30s | No |
 | `ChromeSessionGuardMonitor` | **3.2.0** Detects remote debugging port abuse, CDP connections from scripting processes, App-Bound Encryption bypass (elevation_service.exe). Scans every 15s | No |
 | `PowerShellThreatMonitor` | **3.2.0** ETW script-block logging (Event ID 4104). Detects AMSI/ETW bypass, download cradles, reflective loading, offensive frameworks, credential theft commands. Falls back to cmdline scanning. | Yes (ETW preferred) |
+| `WorkFoldersExfilMonitor` | **3.3.0** Detects unauthorized Work Folders activation (service running, registry config, Group Policy injection). Active response: kills service, removes config, deletes policy keys. Kill-authorized. Scans every 15s | No |
 
 ### Engine
 
@@ -316,6 +317,14 @@ Composite detections are emitted as Tier1 `DetectionEvent`s directly into the de
 | `PowerShellThreatMonitor` | ETW script-block logging (Event ID 4104). Detects AMSI/ETW bypass, download cradles, reflective loading, offensive frameworks (Mimikatz, BloodHound, PowerSploit), credential theft commands, encoded commands. Falls back to cmdline scanning when ETW unavailable. |
 | `BrowserCredentialTheftRule` | Process-start detection rule for browser credential theft tools. Covers Chromium paths, Firefox paths, Microsoft token paths, DPAPI patterns, known stealer tools. |
 | President's Law update | `"browser credential theft"` fragment added to kill list in both AdvancedResponseEngine and AgentResponseEngine. |
+
+## Added in 3.3.0
+
+| Component | Purpose |
+|-----------|---------|
+| Electron/JIT allowlist (BehavioralCorrelationEngine) | 40+ Electron apps excluded from composite correlation. Eliminates false "In-Memory Implant + Network Beacon" and "DGA + C2 Beaconing" composites for Kiro, VS Code, Discord, Slack, Steam, etc. |
+| Electron/JIT allowlist (MemoryBehaviorAnalyzer) | Expanded JIT process exclusion list with all common Electron apps. Prevents false RWX memory alerts. |
+| `WorkFoldersExfilMonitor` | Detects unauthorized Work Folders activation: service state monitoring, registry config detection, Group Policy injection detection. Active response: kills service, removes config, deletes injected policies. Kill-authorized. |
 
 ---
 
