@@ -1,6 +1,6 @@
 # Windows Sentinel — Threat Model
 
-**Version: 3.5.0**
+**Version: 3.6.0**
 
 This document assumes the attacker has read the source code.
 
@@ -153,13 +153,15 @@ This document assumes the attacker has read the source code.
 These are fundamental limitations, not bugs:
 
 1. **Kernel-level attacks** — No visibility below ring 3
-2. **Hardware implants** — No visibility into firmware/UEFI
-3. **Pre-boot attacks** — Sentinel starts after Windows boots
+2. **Hardware implants** — No visibility into firmware/UEFI (but detects Secure Boot disabled)
+3. **Pre-boot attacks** — Sentinel starts after Windows boots (but detects boot config tampering)
 4. **Attacker with physical access** — Can boot from USB, modify disk offline
 5. **Attacker who already has SYSTEM** — Can kill Sentinel (watchdog adds delay only)
 6. **Nation-state tooling** — Custom kernel implants, 0-days, hardware backdoors
-7. **Encrypted C2 over legitimate ports** — Looks like normal HTTPS traffic
+7. **Encrypted C2 over legitimate ports** — Looks like normal HTTPS traffic (but TLS cert monitor detects MITM)
 8. **Direct syscalls from custom code** — Bypasses ntdll hooks (but SyscallStubMonitor detects unhooking attempts)
+9. **Upstream BGP hijacking** — Detectable via public IP shift but not preventable
+10. **Physical-layer Wi-Fi attacks** — Cannot see deauth frames directly (detects the symptom: rapid disconnects)
 
 ## What Sentinel CAN Detect Even Against Skilled Attackers
 

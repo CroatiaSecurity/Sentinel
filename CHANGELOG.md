@@ -2,6 +2,66 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [3.6.0] - 2026-05-24
+
+### Added — Full-Spectrum Protection (Beyond IDS/EDR)
+
+Sentinel expands from a pure IDS/EDR into comprehensive system protection. 13 new monitors cover network integrity, wireless security, and system hardening — attack surfaces that were previously outside Sentinel's scope.
+
+#### Network Hijack Protection (6 monitors)
+
+- **ArpSpoofMonitor** — Polls ARP table via `GetIpNetTable` P/Invoke every 5s. Captures gateway IP→MAC baseline at startup. Detects: gateway MAC change (classic ARP spoof, confidence 0.92), multiple IPs sharing gateway MAC (ARP poisoning, 0.88), virtual OUI on gateway (VM-based MITM, Tier2 0.55). MITRE T1557.002.
+
+- **GatewayFingerprintMonitor** — Captures comprehensive network fingerprint (gateway IP, DNS servers, DHCP server, subnet mask) at startup. Detects: gateway IP change (evil twin/rogue DHCP, 0.80), DNS server change (DNS hijack, 0.82), DHCP server change (rogue DHCP, 0.78), subnet change (network swap, Tier2 0.70). MITRE T1557, T1584.002.
+
+- **PublicIpMonitor** — Checks public IP every 2 minutes via Cloudflare trace + ipify + icanhazip (HTTPS only, no system data sent). Detects: country change (VPN hijack/BGP manipulation, 0.90), ASN change (traffic rerouted through different provider, 0.82), IP change within same ASN (Tier2 0.70), sustained inability to reach check services (network isolation, Tier2 0.50). MITRE T1090.
+
+- **RouteTableMonitor** — Polls routing table via `GetIpForwardTable` P/Invoke every 10s. Captures baseline at startup. Detects: new host routes /32 (selective traffic redirection, 0.85), default route changed (all traffic hijacked, 0.90), route next-hop modified (targeted interception, 0.85), new subnet routes (Tier2 0.72). Filters VPN/Docker/Hyper-V virtual adapter routes. MITRE T1565.002.
+
+- **DnsResponseValidationMonitor** — Periodically resolves canary domains (Google, Microsoft, Cloudflare, GitHub) and validates responses against hardcoded CIDR ranges. Detects: resolution to unexpected IP range (DNS poisoning, 0.88), all domains resolving to same IP (captive portal, Tier2 0.75). Cross-validates via trusted DNS. MITRE T1584.002.
+
+- **TlsCertificateMonitor** — Connects to well-known HTTPS endpoints every 3 minutes and inspects TLS certificates. Detects: self-signed certificate on major domain (0.95), unexpected CA/issuer (MITM proxy, 0.90), known enterprise TLS inspection CA (Tier2 0.65), certificate issuer change from baseline (Tier2 0.60), suspicious validity period (Tier2 0.55). Distinguishes enterprise proxies (Zscaler, BlueCoat) from attacker MITM. MITRE T1557.
+
+#### Wireless Security (2 monitors)
+
+- **WifiSecurityMonitor** — Polls Wi-Fi state via `netsh wlan show interfaces` every 10s. Detects: deauthentication flood (4+ disconnects in 2 minutes, 0.85), connection to open/unencrypted network (0.75), encryption downgrade WPA2→WEP/Open on same SSID (evil twin, 0.88), BSSID change on same SSID (Tier2 0.55). MITRE T1557, T1040.
+
+- **BluetoothMonitor** — Monitors Bluetooth device registry and service state every 15s. Detects: new HID device pairing (BadBT keyboard injection, 0.80), new non-HID device pairing (Tier2 0.55), Bluetooth service activated when previously stopped (Tier2 0.50). MITRE T1200, T1011.
+
+#### System Integrity (5 monitors)
+
+- **SecureBootIntegrityMonitor** — Checks boot configuration every 5 minutes via registry + bcdedit. Detects: Secure Boot disabled (bootkit vector, 0.70-0.92 depending on baseline), test signing mode enabled (rootkit vector, 0.90 if changed from disabled), kernel debugging enabled (kernel manipulation, 0.60-0.90). MITRE T1542, T1014.
+
+- **FirewallIntegrityMonitor** — Polls firewall state via `netsh advfirewall` every 30s. Detects: firewall profile disabled (0.88), bulk inbound allow rules added (5+ rules, 0.82), Windows Firewall service stopped (0.90). MITRE T1562.004.
+
+- **ScheduledTaskMonitor** — Polls scheduled tasks via `schtasks` every 30s. Captures baseline at startup. Detects: new tasks with suspicious properties (temp paths, encoded PowerShell, SYSTEM from user paths, script execution, random names). Multi-indicator scoring: 1 indicator = Tier2, 2+ = Tier1 (0.60-0.92). MITRE T1053.005.
+
+- **WindowsUpdateIntegrityMonitor** — Monitors update services every 2 minutes. Detects: Windows Update service stopped (0.78), BITS service stopped (Tier2 0.65), automatic updates disabled via registry/GPO (0.80), Defender definitions stale >7 days (Tier2 0.70). MITRE T1562.001.
+
+### Changed
+
+- Version bumped to 3.6.0 across all projects (Core, Service, Agent, Installer, version.txt)
+- `ServiceCollectionExtensions.cs` updated with new monitor registrations
+- All documentation updated (README, CHANGELOG, THREAT_MODEL, design, requirements, constraints, architecture-council)
+
+### Security Impact
+
+Sentinel now detects attacks that were previously completely invisible:
+- **ARP spoofing** on local network (coffee shop, hotel, office)
+- **Evil twin** Wi-Fi access points
+- **DNS poisoning** (rogue DHCP pushing attacker DNS)
+- **TLS MITM** (mitmproxy, Burp Suite, rogue proxy)
+- **Route injection** (selective traffic redirection)
+- **VPN hijacking** (traffic silently rerouted)
+- **Deauth attacks** (forcing reconnection to rogue AP)
+- **BadBT** (Bluetooth keyboard injection)
+- **Bootkit preparation** (Secure Boot/test signing tampering)
+- **Firewall disabling** (opening the system for C2/lateral movement)
+- **Scheduled task persistence** (most common malware persistence mechanism)
+- **Update suppression** (preventing security patches)
+
+---
+
 ## [3.5.0] - 2026-05-23
 
 ### Added — Behavioral RAT Kill (Novel RAT Detection Without IOCs)

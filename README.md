@@ -2,7 +2,7 @@
 
 **Userland EDR for Windows — Behavioral Detection, Automated Response & Aggressive Deception**
 
-> Version: 3.5.0 (Behavioral RAT Kill)  
+> Version: 3.6.0 (Full-Spectrum Protection)  
 > Author: [Gorstak](https://gorstak.eu) | [GitHub](https://github.com/CroatiaSecurity/Sentinel)  
 > License: MIT
 
@@ -10,7 +10,7 @@
 
 ## What it is
 
-Windows Sentinel is a userland endpoint detection and response (EDR) tool for Windows. It detects malicious behavior at runtime and responds by killing threat chains, quarantining binaries, removing persistence, and — as of v1.7.0 — actively punishing the attacker before the kill. Designed for:
+Windows Sentinel is a userland endpoint detection and response (EDR) tool for Windows. It detects malicious behavior at runtime and responds by killing threat chains, quarantining binaries, removing persistence, and — as of v1.7.0 — actively punishing the attacker before the kill. As of v3.6.0, Sentinel expands beyond traditional IDS/EDR into full-spectrum protection covering network integrity, wireless security, and system hardening. Designed for:
 
 - Personal endpoint protection (layered defense alongside Defender)
 - Blue-team education and security research
@@ -313,6 +313,18 @@ All tactics:
 | NeuroBehavior | NeuroBehaviorVisualMonitor | Screen capture + foreground window + cursor analysis | 2.5.0 |
 | Lateral Movement | NamedPipeMonitor | Named pipe enumeration + C2 pattern matching | 3.1.0 |
 | Persistence | WmiPersistenceMonitor | WMI namespace scan (__EventFilter/__EventConsumer) | 3.1.0 |
+| Network Integrity | ArpSpoofMonitor | ARP table polling via GetIpNetTable (gateway MAC change, poisoning) | 3.6.0 |
+| Network Integrity | GatewayFingerprintMonitor | Gateway/DNS/DHCP/subnet baseline + change detection | 3.6.0 |
+| Network Integrity | PublicIpMonitor | Public IP baseline via Cloudflare/ipify (geo/ASN shift) | 3.6.0 |
+| Network Integrity | RouteTableMonitor | GetIpForwardTable polling (route injection, default route hijack) | 3.6.0 |
+| Network Integrity | DnsResponseValidationMonitor | CIDR validation of canary domain resolutions + captive portal | 3.6.0 |
+| Network Integrity | TlsCertificateMonitor | TLS cert inspection (self-signed, unexpected CA, MITM proxy) | 3.6.0 |
+| Wireless Security | WifiSecurityMonitor | netsh wlan state polling (deauth flood, evil twin, downgrade) | 3.6.0 |
+| Wireless Security | BluetoothMonitor | BT registry + service monitoring (BadBT HID, unauthorized pairing) | 3.6.0 |
+| System Integrity | SecureBootIntegrityMonitor | Registry + bcdedit (Secure Boot, test signing, kernel debug) | 3.6.0 |
+| System Integrity | FirewallIntegrityMonitor | netsh advfirewall polling (profile disabled, bulk rules, service) | 3.6.0 |
+| System Integrity | ScheduledTaskMonitor | schtasks polling (malicious task creation, suspicious commands) | 3.6.0 |
+| System Integrity | WindowsUpdateIntegrityMonitor | Service + registry monitoring (WU/BITS stopped, Defender stale) | 3.6.0 |
 
 ---
 
@@ -320,7 +332,7 @@ All tactics:
 
 ```powershell
 # Run installer as Administrator
-.\WindowsSentinelSetup-3.5.0.exe
+.\WindowsSentinelSetup-3.6.0.exe
 ```
 
 The installer:
@@ -399,7 +411,7 @@ cd installer
 .\build.ps1
 ```
 
-Output: `installer\output\WindowsSentinelSetup-3.5.0.exe`
+Output: `installer\output\WindowsSentinelSetup-3.6.0.exe`
 
 ---
 
@@ -483,6 +495,8 @@ installer/
 | 3.2.0 | Browser & Account Credential Protection | ChromeCredentialGuardMonitor (Login Data, Cookies, Local State file access monitoring for all Chromium browsers). FirefoxCredentialGuardMonitor (key4.db, logins.json, cookies.sqlite monitoring for Firefox/Waterfox/Thunderbird). MicrosoftAccountGuardMonitor (WAM TokenBroker cache, PRT extraction, BrowserCore abuse, Azure AD token theft tools). BrowserExtensionMonitor (malicious extension installation, registry force-install, dangerous permission detection). ChromeSessionGuardMonitor (remote debugging, CDP hijack, App-Bound Encryption bypass). PowerShellThreatMonitor (ETW script-block logging, AMSI/ETW bypass detection, download cradles, offensive frameworks, credential theft commands, encoded command detection). BrowserCredentialTheftRule (process-start detection for stealer tools targeting all browsers + Microsoft tokens). President's Law updated: "browser credential theft" kill-authorized. |
 | 3.3.0 | Electron Allowlist & Work Folders Protection | Comprehensive Electron/JIT app allowlist in BehavioralCorrelationEngine and MemoryBehaviorAnalyzer — eliminates false composite detections for Kiro, VS Code, Discord, Slack, Teams, Steam, Spotify, Notion, Obsidian, Figma, Postman, Bitwarden, and 20+ other apps. WorkFoldersExfilMonitor: detects unauthorized Work Folders configuration (registry, Group Policy injection), kills the service if running, removes injected policies, blocks silent data exfiltration via enterprise sync on personal machines. Kill-authorized. |
 | 3.4.0 | Active Response Expansion | President's Law kill list expanded: RAT/APT campaigns (PlugX, Cobalt Strike), confirmed LSASS dumps, reverse shells, process injection/hollowing, keyloggers, UAC bypass exploitation now kill-authorized. Host-level composite resolution extracts offending PIDs from evidence for targeted kill. Campaign IOC confidence threshold lowered to 0.75 (multi-signal correlation). Agent kill list synchronized with service engine. |
+| 3.5.0 | Behavioral RAT Kill | Novel RAT composites (Covert RAT, Confirmed C2 Beacon, Unsigned+Sustained C2) detect RATs without campaign IOCs. Existing C2 composites (Injected C2 Beacon, DGA+Beaconing, Spoofed Process, Dropped Payload, Staged Payload) promoted to kill-authorized. |
+| 3.6.0 | Full-Spectrum Protection | Expands beyond IDS/EDR. Network hijack: ARP spoof, gateway fingerprint, public IP geo/ASN shift, route table injection, DNS response validation, TLS certificate MITM detection. Wireless: Wi-Fi deauth/evil twin/downgrade, Bluetooth BadBT/unauthorized pairing. System integrity: Secure Boot/test signing/kernel debug, firewall tampering, scheduled task persistence, Windows Update/Defender staleness. 13 new monitors. |
 | 3.5.0 | Behavioral RAT Kill | Three new composite correlation rules detect novel RATs without campaign IOCs: Covert RAT (unsigned + staging path + sustained network), Confirmed C2 Beacon (unsigned + periodic beaconing), Unsigned + Sustained C2 (unsigned + 60s+ connection). Existing C2 composites promoted to kill-authorized: Injected C2 Beacon, DGA + C2 Beaconing, Spoofed Process Phoning Home, Dropped Payload Phoning Home, Staged Payload + Non-Standard Port. |
 
 ---

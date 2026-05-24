@@ -1,6 +1,6 @@
 # Windows Sentinel — Design Document
 
-**Version: 3.5.0**
+**Version: 3.6.0**
 
 ---
 
@@ -74,6 +74,18 @@ The fusion layer is PASSIVE — it never blocks, kills, or modifies telemetry.
 | `ChromeSessionGuardMonitor` | **3.2.0** Detects remote debugging port abuse, CDP connections from scripting processes, App-Bound Encryption bypass (elevation_service.exe). Scans every 15s | No |
 | `PowerShellThreatMonitor` | **3.2.0** ETW script-block logging (Event ID 4104). Detects AMSI/ETW bypass, download cradles, reflective loading, offensive frameworks, credential theft commands. Falls back to cmdline scanning. | Yes (ETW preferred) |
 | `WorkFoldersExfilMonitor` | **3.3.0** Detects unauthorized Work Folders activation (service running, registry config, Group Policy injection). Active response: kills service, removes config, deletes policy keys. Kill-authorized. Scans every 15s | No |
+| `ArpSpoofMonitor` | **3.6.0** Polls ARP table via GetIpNetTable. Detects gateway MAC change, ARP table poisoning, virtual OUI on gateway. Scans every 5s | No |
+| `GatewayFingerprintMonitor` | **3.6.0** Monitors gateway IP, DNS servers, DHCP server, subnet mask. Detects evil twin, rogue DHCP, DNS hijack. Scans every 15s | No |
+| `PublicIpMonitor` | **3.6.0** Checks public IP via Cloudflare/ipify/icanhazip. Detects geo/ASN shift, VPN hijack, network isolation. Checks every 2min | No |
+| `RouteTableMonitor` | **3.6.0** Polls routing table via GetIpForwardTable. Detects route injection, default route hijack, next-hop modification. Scans every 10s | No |
+| `DnsResponseValidationMonitor` | **3.6.0** Resolves canary domains and validates against expected CIDR ranges. Detects DNS poisoning, captive portal. Checks every 1min | No |
+| `TlsCertificateMonitor` | **3.6.0** Inspects TLS certificates on well-known endpoints. Detects self-signed certs, unexpected CA, MITM proxy. Checks every 3min | No |
+| `WifiSecurityMonitor` | **3.6.0** Polls Wi-Fi state via netsh. Detects deauth flood, open network, encryption downgrade, BSSID change. Scans every 10s | No |
+| `BluetoothMonitor` | **3.6.0** Monitors BT device registry and service state. Detects BadBT HID pairing, unauthorized devices, BT activation. Scans every 15s | No |
+| `SecureBootIntegrityMonitor` | **3.6.0** Checks Secure Boot, test signing, kernel debug via registry+bcdedit. Scans every 5min | Yes (bcdedit) |
+| `FirewallIntegrityMonitor` | **3.6.0** Polls firewall profiles via netsh advfirewall. Detects profile disabled, bulk rules, service stopped. Scans every 30s | No |
+| `ScheduledTaskMonitor` | **3.6.0** Polls scheduled tasks via schtasks. Detects malicious task creation with suspicious command/path analysis. Scans every 30s | No |
+| `WindowsUpdateIntegrityMonitor` | **3.6.0** Monitors WU/BITS services and auto-update registry. Detects update suppression, Defender staleness. Checks every 2min | No |
 
 ### Engine
 
@@ -345,6 +357,23 @@ Composite detections are emitted as Tier1 `DetectionEvent`s directly into the de
 | `EvaluateUnsignedWithSustainedC2` (BehavioralCorrelationEngine) | Unsigned binary + 60s+ sustained outbound connection. Catches PlugX-style persistent HTTPS C2. Confidence 0.90. |
 | C2 composite kill promotion | Existing composites promoted to kill-authorized: Injected C2 Beacon (0.98), DGA + C2 Beaconing (0.94), Spoofed Process Phoning Home (0.92), Dropped Payload Phoning Home (0.93), Staged Payload + Non-Standard Port (0.92). |
 | Kill fragments (service + agent) | Added: `covert rat:`, `covert c2:`, `confirmed c2 beacon:`, `injected c2 beacon`, `dga + c2 beaconing`, `spoofed process phoning home`, `dropped payload phoning home`, `staged payload + non-standard port`. |
+
+## Added in 3.6.0
+
+| Component | Purpose |
+|-----------|---------|
+| `ArpSpoofMonitor` | ARP table integrity monitoring via GetIpNetTable P/Invoke. Detects gateway MAC change (ARP spoof), MAC duplication (ARP poisoning), virtual OUI on gateway (VM-based MITM). |
+| `GatewayFingerprintMonitor` | Comprehensive network fingerprint baseline (gateway, DNS, DHCP, subnet). Detects evil twin AP, rogue DHCP, DNS server hijack, subnet change. |
+| `PublicIpMonitor` | Public IP baseline via Cloudflare/ipify/icanhazip. Detects VPN hijack, BGP manipulation, geo/ASN shift, network isolation. |
+| `RouteTableMonitor` | Routing table integrity via GetIpForwardTable P/Invoke. Detects static route injection, selective traffic redirection, default route hijack. Filters VPN/Docker/Hyper-V routes. |
+| `DnsResponseValidationMonitor` | DNS response validation against hardcoded CIDR ranges for canary domains. Detects DNS poisoning, captive portal (all domains → same IP). |
+| `TlsCertificateMonitor` | TLS certificate inspection on well-known endpoints. Detects self-signed certs, unexpected CA (MITM), enterprise TLS inspection, cert pinning violations. |
+| `WifiSecurityMonitor` | Wi-Fi state monitoring via netsh. Detects deauthentication flood (rapid disconnect pattern), open network connection, encryption downgrade (evil twin), BSSID change. |
+| `BluetoothMonitor` | Bluetooth attack surface monitoring via registry + service state. Detects BadBT HID device pairing, unauthorized device pairing, unexpected BT activation. |
+| `SecureBootIntegrityMonitor` | Boot integrity via registry + bcdedit. Detects Secure Boot disabled, test signing mode (rootkit vector), kernel debugging enabled. |
+| `FirewallIntegrityMonitor` | Windows Firewall integrity via netsh advfirewall. Detects profile disabled, bulk inbound rule additions, firewall service stopped. |
+| `ScheduledTaskMonitor` | Scheduled task persistence detection via schtasks. Detects malicious task creation with multi-indicator analysis (suspicious paths, encoded commands, SYSTEM from user paths, script execution). |
+| `WindowsUpdateIntegrityMonitor` | Update service integrity monitoring. Detects WU/BITS service stopped, automatic updates disabled via registry/GPO, Defender definitions stale (>7 days). |
 
 ---
 

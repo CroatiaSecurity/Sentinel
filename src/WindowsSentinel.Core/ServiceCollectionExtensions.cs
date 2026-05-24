@@ -47,27 +47,31 @@ namespace WindowsSentinel.Core;
 public static class SentinelVersion
 {
     /// <summary>
-    /// Current version - 3.5.0 Behavioral RAT Kill
+    /// Current version - 3.6.0 Network Hijack Protection
     /// Version is managed in version.txt for consistency across build scripts
     /// </summary>
-    public const string Version = "3.5.0";
+    public const string Version = "3.6.0";
 
     /// <summary>
     /// Release date
     /// </summary>
-    public static readonly DateTime ReleaseDate = new(2026, 5, 23);
+    public static readonly DateTime ReleaseDate = new(2026, 5, 24);
 
     /// <summary>
     /// Version description
     /// </summary>
     public const string Description =
-        "3.5.0 — Behavioral RAT Kill. " +
-        "Three new composite correlation rules detect novel RATs without campaign IOCs: " +
-        "Covert RAT (unsigned + staging path + sustained network), Confirmed C2 Beacon " +
-        "(unsigned + periodic beaconing pattern), Unsigned + Sustained C2 (unsigned + 60s+ " +
-        "outbound connection). Existing C2/beaconing composites (Injected C2 Beacon, DGA + " +
-        "C2 Beaconing, Spoofed Process Phoning Home, Dropped Payload, Staged Payload) " +
-        "promoted from log-only to kill-authorized.";
+        "3.6.0 — Full-Spectrum Protection. " +
+        "Sentinel expands beyond IDS/EDR into comprehensive system protection. " +
+        "Network Hijack Protection: ARP Spoof Monitor, Gateway Fingerprint Monitor, " +
+        "Public IP Monitor (geo/ASN shift), Route Table Monitor, DNS Response Validation, " +
+        "TLS Certificate Monitor (MITM detection). " +
+        "Wireless Security: Wi-Fi Security Monitor (deauth flood, evil twin, encryption downgrade), " +
+        "Bluetooth Monitor (BadBT HID injection, unauthorized pairing). " +
+        "System Integrity: Secure Boot & Boot Integrity (firmware tampering, test signing, kernel debug), " +
+        "Firewall Integrity Monitor (profile disabled, bulk rules, service stopped), " +
+        "Scheduled Task Persistence Monitor (malicious task creation), " +
+        "Windows Update Integrity (WU/BITS tampering, Defender definition staleness).";
 }
 
 public static class ServiceCollectionExtensions
@@ -502,6 +506,46 @@ public static class ServiceCollectionExtensions
 
         // ── Disk-Wide DLL Scanner (all drives, unsigned DLL detection, IoC matching + unload) ─
         services.AddHostedService<DiskWideDllScanner>();
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // 3.6.0 — NETWORK HIJACK PROTECTION
+        // ═══════════════════════════════════════════════════════════════════════
+
+        // ── ARP Spoof Monitor (gateway MAC change, ARP table poisoning) ──────
+        services.AddHostedService<ArpSpoofMonitor>();
+
+        // ── Gateway Fingerprint Monitor (evil twin, rogue DHCP, DNS hijack) ──
+        services.AddHostedService<GatewayFingerprintMonitor>();
+
+        // ── Public IP Monitor (VPN hijack, BGP manipulation, geo shift) ──────
+        services.AddHostedService<PublicIpMonitor>();
+
+        // ── Route Table Monitor (static route injection, selective redirect) ──
+        services.AddHostedService<RouteTableMonitor>();
+
+        // ── DNS Response Validation (DNS poisoning, captive portal detection) ─
+        services.AddHostedService<DnsResponseValidationMonitor>();
+
+        // ── TLS Certificate Monitor (MITM proxy, self-signed certs, CA change) ─
+        services.AddHostedService<TlsCertificateMonitor>();
+
+        // ── Bluetooth Attack Surface Monitor (BadBT, unauthorized pairing) ───
+        services.AddHostedService<BluetoothMonitor>();
+
+        // ── Wi-Fi Security Monitor (deauth, evil twin, open network, downgrade) ─
+        services.AddHostedService<WifiSecurityMonitor>();
+
+        // ── Secure Boot & Boot Integrity (firmware tampering, test signing) ───
+        services.AddHostedService<SecureBootIntegrityMonitor>();
+
+        // ── Windows Firewall Integrity (profile disabled, bulk rules, service) ─
+        services.AddHostedService<FirewallIntegrityMonitor>();
+
+        // ── Scheduled Task Persistence (malicious task creation detection) ────
+        services.AddHostedService<ScheduledTaskMonitor>();
+
+        // ── Windows Update Integrity (WU/BITS stopped, Defender stale) ────────
+        services.AddHostedService<WindowsUpdateIntegrityMonitor>();
 
         // ═══════════════════════════════════════════════════════════════════════
 
