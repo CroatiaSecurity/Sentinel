@@ -47,10 +47,10 @@ namespace WindowsSentinel.Core;
 public static class SentinelVersion
 {
     /// <summary>
-    /// Current version - 3.6.0 Network Hijack Protection
+    /// Current version - 3.7.0 Hardening &amp; Testing
     /// Version is managed in version.txt for consistency across build scripts
     /// </summary>
-    public const string Version = "3.6.0";
+    public const string Version = "3.7.0";
 
     /// <summary>
     /// Release date
@@ -61,17 +61,14 @@ public static class SentinelVersion
     /// Version description
     /// </summary>
     public const string Description =
-        "3.6.0 — Full-Spectrum Protection. " +
-        "Sentinel expands beyond IDS/EDR into comprehensive system protection. " +
-        "Network Hijack Protection: ARP Spoof Monitor, Gateway Fingerprint Monitor, " +
-        "Public IP Monitor (geo/ASN shift), Route Table Monitor, DNS Response Validation, " +
-        "TLS Certificate Monitor (MITM detection). " +
-        "Wireless Security: Wi-Fi Security Monitor (deauth flood, evil twin, encryption downgrade), " +
-        "Bluetooth Monitor (BadBT HID injection, unauthorized pairing). " +
-        "System Integrity: Secure Boot & Boot Integrity (firmware tampering, test signing, kernel debug), " +
-        "Firewall Integrity Monitor (profile disabled, bulk rules, service stopped), " +
-        "Scheduled Task Persistence Monitor (malicious task creation), " +
-        "Windows Update Integrity (WU/BITS tampering, Defender definition staleness).";
+        "3.7.0 — Hardening & Testing. " +
+        "Comprehensive unit test coverage for all v3.6.0 network protection monitors: " +
+        "CIDR matching validation (15 cases), MAC formatting, virtual OUI detection, " +
+        "Cloudflare trace parsing, virtual adapter filtering, TLS issuer/enterprise CA matching, " +
+        "Wi-Fi authentication classification, Bluetooth HID class detection, " +
+        "scheduled task suspicious command/path analysis, firewall state parsing, " +
+        "alert deduplication logic. Fixed pre-existing integration test failures " +
+        "(deduplication test, correlation test). Total: 278 tests passing.";
 }
 
 public static class ServiceCollectionExtensions

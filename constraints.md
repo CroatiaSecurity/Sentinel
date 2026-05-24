@@ -1,6 +1,6 @@
 # Windows Sentinel — Constraints
 
-**Version: 3.6.0**
+**Version: 3.7.0**
 
 ---
 

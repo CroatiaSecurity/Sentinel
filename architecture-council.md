@@ -3,7 +3,7 @@
 **Status:** Architecture spec. Extends, does not replace, `requirements.md`,
 `design.md`, `constraints.md` (all v0.9.0).
 
-**Last updated:** v3.6.0 (May 2026) — Full-Spectrum Protection.
+**Last updated:** v3.7.0 (May 2026) — Hardening & Testing.
 
 ---
 
