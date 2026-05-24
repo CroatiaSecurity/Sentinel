@@ -497,9 +497,6 @@ installer/
 | 3.4.0 | Active Response Expansion | President's Law kill list expanded: RAT/APT campaigns (PlugX, Cobalt Strike), confirmed LSASS dumps, reverse shells, process injection/hollowing, keyloggers, UAC bypass exploitation now kill-authorized. Host-level composite resolution extracts offending PIDs from evidence for targeted kill. Campaign IOC confidence threshold lowered to 0.75 (multi-signal correlation). Agent kill list synchronized with service engine. |
 | 3.5.0 | Behavioral RAT Kill | Novel RAT composites (Covert RAT, Confirmed C2 Beacon, Unsigned+Sustained C2) detect RATs without campaign IOCs. Existing C2 composites (Injected C2 Beacon, DGA+Beaconing, Spoofed Process, Dropped Payload, Staged Payload) promoted to kill-authorized. |
 | 3.6.0 | Full-Spectrum Protection | Expands beyond IDS/EDR. Network hijack: ARP spoof, gateway fingerprint, public IP geo/ASN shift, route table injection, DNS response validation, TLS certificate MITM detection. Wireless: Wi-Fi deauth/evil twin/downgrade, Bluetooth BadBT/unauthorized pairing. System integrity: Secure Boot/test signing/kernel debug, firewall tampering, scheduled task persistence, Windows Update/Defender staleness. 13 new monitors. |
-| 3.5.0 | Behavioral RAT Kill | Three new composite correlation rules detect novel RATs without campaign IOCs: Covert RAT (unsigned + staging path + sustained network), Confirmed C2 Beacon (unsigned + periodic beaconing), Unsigned + Sustained C2 (unsigned + 60s+ connection). Existing C2 composites promoted to kill-authorized: Injected C2 Beacon, DGA + C2 Beaconing, Spoofed Process Phoning Home, Dropped Payload Phoning Home, Staged Payload + Non-Standard Port. |
-
----
 
 ---
 
