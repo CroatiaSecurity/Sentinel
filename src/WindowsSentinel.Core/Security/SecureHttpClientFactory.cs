@@ -74,7 +74,7 @@ public sealed class SecureHttpClientFactory : IDisposable
         };
 
         // Set default headers
-        _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("WindowsSentinel-EDR/3.8.0");
+        _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("WindowsSentinel-EDR/3.9.0");
         _httpClient.DefaultRequestHeaders.Accept.ParseAdd("application/json");
     }
 

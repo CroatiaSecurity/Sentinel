@@ -1,4 +1,5 @@
 using System.IO;
+using System.Linq;
 using Microsoft.Extensions.Logging;
 
 namespace WindowsSentinel.Core.Deception;
@@ -39,6 +40,25 @@ public sealed class FileTrapTactic : IDeceptionTactic
 
     /// <summary>Number of sparse bomb files to create.</summary>
     private const int SparseBombCount = 5;
+
+    /// <summary>
+    /// v3.9.0: Known sparse bomb file names — used for both deployment and cleanup.
+    /// </summary>
+    private static readonly string[] SparseBombFileNames =
+    {
+        "credentials_backup.db",
+        "wallet_keys.dat",
+        "passwords_export.csv",
+        "private_keys.pem",
+        "financial_records.xlsx"
+    };
+
+    /// <summary>
+    /// v3.9.0: The directory where sparse file bombs are deployed.
+    /// </summary>
+    private static readonly string SparseBombDirectory = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+        "Documents", ".cache", "sync");
 
     public FileTrapTactic(ILogger<FileTrapTactic> logger)
     {
@@ -93,29 +113,17 @@ public sealed class FileTrapTactic : IDeceptionTactic
     /// </summary>
     private async Task<string?> DeploySparseFileBombsAsync(CancellationToken cancellationToken)
     {
-        var trapDir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            "Documents", ".cache", "sync");
-
         try
         {
-            Directory.CreateDirectory(trapDir);
+            Directory.CreateDirectory(SparseBombDirectory);
 
             int created = 0;
-            var convincingNames = new[]
-            {
-                "credentials_backup.db",
-                "wallet_keys.dat",
-                "passwords_export.csv",
-                "private_keys.pem",
-                "financial_records.xlsx"
-            };
 
-            foreach (var name in convincingNames.Take(SparseBombCount))
+            foreach (var name in SparseBombFileNames.Take(SparseBombCount))
             {
                 if (cancellationToken.IsCancellationRequested) break;
 
-                var filePath = Path.Combine(trapDir, name);
+                var filePath = Path.Combine(SparseBombDirectory, name);
                 if (File.Exists(filePath)) continue;
 
                 await using var fs = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None);
@@ -125,7 +133,7 @@ public sealed class FileTrapTactic : IDeceptionTactic
             }
 
             return created > 0
-                ? $"Deployed {created} sparse file bombs (reported size: {SparseFileReportedSize / (1024 * 1024 * 1024)}GB each, actual: 0 bytes) in {trapDir}"
+                ? $"Deployed {created} sparse file bombs (reported size: {SparseFileReportedSize / (1024 * 1024 * 1024)}GB each, actual: 0 bytes) in {SparseBombDirectory}"
                 : null;
         }
         catch (Exception ex)
@@ -517,6 +525,60 @@ public sealed class FileTrapTactic : IDeceptionTactic
         var fakeDate = DateTime.Now.AddMonths(-Random.Shared.Next(2, 14));
         File.SetCreationTime(path, fakeDate);
         File.SetLastWriteTime(path, fakeDate);
+    }
+
+    /// <summary>
+    /// v3.9.0: Removes all deployed sparse file bombs and their directory.
+    /// Called after the 2-second deception window completes (the bombs have served their
+    /// purpose of wasting the attacker's exfil bandwidth) and on service startup to clean
+    /// up leftovers from previous runs or upgrades from older versions.
+    /// </summary>
+    public static void CleanupSparseFileBombs(ILogger? logger = null)
+    {
+        try
+        {
+            if (!Directory.Exists(SparseBombDirectory)) return;
+
+            int deleted = 0;
+            foreach (var name in SparseBombFileNames)
+            {
+                var filePath = Path.Combine(SparseBombDirectory, name);
+                try
+                {
+                    if (File.Exists(filePath))
+                    {
+                        File.Delete(filePath);
+                        deleted++;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    logger?.LogDebug(ex, "Failed to delete sparse bomb: {Path}", filePath);
+                }
+            }
+
+            // Remove the directory if empty
+            try
+            {
+                if (Directory.Exists(SparseBombDirectory) &&
+                    !Directory.EnumerateFileSystemEntries(SparseBombDirectory).Any())
+                {
+                    Directory.Delete(SparseBombDirectory, recursive: false);
+                }
+            }
+            catch { /* Non-fatal */ }
+
+            if (deleted > 0)
+            {
+                logger?.LogInformation(
+                    "[DECEPTION] v3.9.0: Cleaned up {Count} sparse file bombs from {Dir}",
+                    deleted, SparseBombDirectory);
+            }
+        }
+        catch (Exception ex)
+        {
+            logger?.LogDebug(ex, "Failed to cleanup sparse file bombs");
+        }
     }
 }
 

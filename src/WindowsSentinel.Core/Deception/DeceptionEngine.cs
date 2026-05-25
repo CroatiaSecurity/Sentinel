@@ -197,6 +197,11 @@ public sealed class DeceptionEngine : IDeceptionEngine
 
         sw.Stop();
 
+        // v3.9.0: Clean up sparse file bombs after deception window completes.
+        // The bombs served their purpose (wasting attacker bandwidth during the 2s window).
+        // Leaving them on disk wastes user's reported disk space in Explorer.
+        _ = Task.Run(() => FileTrapTactic.CleanupSparseFileBombs(_logger), CancellationToken.None);
+
         _logger.LogWarning(
             "[DECEPTION] Complete: {Succeeded}/{Total} tactics in {Duration}ms — proceeding to kill",
             results.Count(r => r.Success), results.Count, sw.ElapsedMilliseconds);

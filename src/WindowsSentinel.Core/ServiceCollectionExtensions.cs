@@ -39,6 +39,7 @@ using ThreatReportingConfig = WindowsSentinel.Core.Response.ThreatReportingConfi
 // 3.4.0 — Active Response Expansion (RAT/Campaign kill, LSASS dump kill, host-level composite resolution)
 // 3.5.0 — Behavioral RAT Kill (novel RAT composites, beaconing kill-authorized)
 // 3.8.0 — Campaign Detection False-Positive Fix (exact filename matching, removed generic IOCs)
+// 3.9.0 — Deception Cleanup & Auto-Reporting (sparse bomb cleanup, threat reporting enabled by default)
 
 namespace WindowsSentinel.Core;
 
@@ -48,10 +49,10 @@ namespace WindowsSentinel.Core;
 public static class SentinelVersion
 {
     /// <summary>
-    /// Current version - 3.8.0 Campaign Detection False-Positive Fix
+    /// Current version - 3.9.0 Deception Cleanup & Auto-Reporting
     /// Version is managed in version.txt for consistency across build scripts
     /// </summary>
-    public const string Version = "3.8.0";
+    public const string Version = "3.9.0";
 
     /// <summary>
     /// Release date
@@ -62,15 +63,13 @@ public static class SentinelVersion
     /// Version description
     /// </summary>
     public const string Description =
-        "3.8.0 — Campaign Detection False-Positive Fix. " +
-        "Fixed CampaignDetectionRule EndsWith matching causing false positives on legitimate " +
-        "software updaters (GoogleUpdate.exe, BraveUpdate.exe, MicrosoftEdgeUpdate.exe) by " +
-        "switching to exact filename comparison. Removed overly generic IOC filenames: " +
-        "'update.exe' from PlugX/Emotet, 'rundll32.exe'/'dllhost.exe' from CobaltStrike, " +
-        "'services.exe'/'regsvr32.exe' from QBot, 'services.exe'/'client.exe' from TrickBot. " +
-        "Removed 'update.exe'/'install.exe'/'download.exe' from CampaignIocRule URL patterns " +
-        "that matched legitimate installer command lines. These legitimate binaries are now " +
-        "correctly handled by behavioral composites and path-based heuristics instead.";
+        "3.9.0 — Deception Cleanup & Auto-Reporting. " +
+        "Sparse file bombs (500GB deception files) are now deleted after the 2-second " +
+        "pre-kill deception window completes. Existing sparse bombs from older versions " +
+        "are cleaned up on service startup. Threat intelligence reporting is now enabled " +
+        "by default — MalwareBazaar hash logging works without API keys; AbuseIPDB and " +
+        "URLhaus reporting activates automatically when users provide their own keys in " +
+        "appsettings.json (no hardcoded keys shipped).";
 }
 
 public static class ServiceCollectionExtensions

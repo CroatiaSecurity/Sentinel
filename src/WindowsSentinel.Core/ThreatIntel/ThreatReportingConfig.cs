@@ -1,17 +1,18 @@
 namespace WindowsSentinel.Core.ThreatIntel;
 
 /// <summary>
-/// Configuration for threat intelligence reporting
+/// Configuration for threat intelligence reporting.
+/// v3.9.0: Enabled by default. No API keys required for basic hash logging.
 /// </summary>
 public class ThreatReportingConfig
 {
     /// <summary>
-    /// Enable/disable threat intelligence reporting (default: true)
+    /// Enable/disable threat intelligence reporting (default: true since v3.9.0)
     /// </summary>
     public bool Enabled { get; set; } = true;
 
     /// <summary>
-    /// API key for AbuseIPDB (optional)
+    /// API key for AbuseIPDB (optional — reporting skipped if empty)
     /// </summary>
     public string? AbuseIPDBApiKey { get; set; }
 
@@ -21,22 +22,22 @@ public class ThreatReportingConfig
     public string? MalwareBazaarApiKey { get; set; }
 
     /// <summary>
-    /// API key for URLhaus (optional)
+    /// API key for URLhaus (optional — reporting skipped if empty)
     /// </summary>
     public string? URLhausApiKey { get; set; }
 
     /// <summary>
-    /// Report C2 IPs to AbuseIPDB (default: true)
+    /// Report C2 IPs to AbuseIPDB (default: true, requires AbuseIPDBApiKey)
     /// </summary>
     public bool ReportC2ToAbuseIPDB { get; set; } = true;
 
     /// <summary>
-    /// Report file hashes to MalwareBazaar (default: true)
+    /// Report file hashes to MalwareBazaar (default: true, no key needed for hash logging)
     /// </summary>
     public bool ReportHashesToMalwareBazaar { get; set; } = true;
 
     /// <summary>
-    /// Report URLs to URLhaus (default: true)
+    /// Report URLs to URLhaus (default: true, requires URLhausApiKey)
     /// </summary>
     public bool ReportUrlsToURLhaus { get; set; } = true;
 

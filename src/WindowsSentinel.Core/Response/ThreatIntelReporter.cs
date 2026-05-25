@@ -28,7 +28,8 @@ namespace WindowsSentinel.Core.Response;
 ///   - Never reports internal/private IPs (RFC1918, link-local, loopback)
 ///   - Never uploads file contents — only hashes and metadata
 ///   - Rate-limited: max 10 reports per hour to prevent abuse
-///   - All reporting is opt-in via appsettings.json configuration
+///   - v3.9.0: Enabled by default — no API keys required for basic hash logging
+///   - AbuseIPDB/URLhaus reporting activates only when user provides their own API keys
 ///   - API keys stored in DPAPI-protected config (not plaintext)
 ///   - Reports are queued and sent asynchronously (never blocks kill response)
 ///
@@ -69,7 +70,7 @@ public sealed class ThreatIntelReporter : BackgroundService
         {
             Timeout = TimeSpan.FromSeconds(15)
         };
-        _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("WindowsSentinel-EDR/3.8.0");
+        _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("WindowsSentinel-EDR/3.9.0");
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -77,16 +78,17 @@ public sealed class ThreatIntelReporter : BackgroundService
         if (!_config.Enabled)
         {
             _logger.LogInformation(
-                "ThreatIntelReporter: DISABLED (opt-in via appsettings.json ThreatReporting.Enabled=true)");
+                "ThreatIntelReporter: DISABLED (set ThreatReporting.Enabled=true in appsettings.json to enable)");
             return;
         }
 
         _logger.LogInformation(
             "ThreatIntelReporter: ENABLED — confirmed threats will be reported to community platforms. " +
-            "AbuseIPDB={AbuseIPDB}, URLhaus={URLhaus}, MalwareBazaar={MalwareBazaar}",
-            !string.IsNullOrEmpty(_config.AbuseIpDbApiKey),
-            _config.ReportToUrlhaus,
-            _config.ReportToMalwareBazaar);
+            "AbuseIPDB={AbuseIPDB}, URLhaus={URLhaus}, MalwareBazaar={MalwareBazaar}. " +
+            "Provide API keys in appsettings.json to enable AbuseIPDB/URLhaus reporting.",
+            !string.IsNullOrEmpty(_config.AbuseIpDbApiKey) ? "configured" : "no key (skipped)",
+            !string.IsNullOrEmpty(_config.UrlhausAuthToken) ? "configured" : "no token (skipped)",
+            _config.ReportToMalwareBazaar ? "enabled" : "disabled");
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -384,23 +386,25 @@ public sealed class ThreatReport
 
 /// <summary>
 /// Configuration for threat intelligence reporting.
-/// All reporting is opt-in — disabled by default.
+/// v3.9.0: Enabled by default. Reports are sent to platforms that don't require API keys
+/// (MalwareBazaar hash logging). AbuseIPDB and URLhaus reporting activates automatically
+/// when the user provides their own API keys in appsettings.json.
 /// </summary>
 public sealed class ThreatReportingConfig
 {
-    /// <summary>Master switch — must be true for any reporting to occur.</summary>
-    public bool Enabled { get; set; } = false;
+    /// <summary>Master switch — must be true for any reporting to occur. Default: true (v3.9.0).</summary>
+    public bool Enabled { get; set; } = true;
 
-    /// <summary>AbuseIPDB API key (free: https://www.abuseipdb.com/account/api).</summary>
+    /// <summary>AbuseIPDB API key (free: https://www.abuseipdb.com/account/api). Optional — reporting skipped if empty.</summary>
     public string? AbuseIpDbApiKey { get; set; }
 
-    /// <summary>URLhaus auth token (free: https://urlhaus.abuse.ch/api/#account).</summary>
+    /// <summary>URLhaus auth token (free: https://urlhaus.abuse.ch/api/#account). Optional — reporting skipped if empty.</summary>
     public string? UrlhausAuthToken { get; set; }
 
-    /// <summary>Whether to report malicious hashes to MalwareBazaar.</summary>
+    /// <summary>Whether to report malicious hashes to MalwareBazaar (local logging, no key needed). Default: true.</summary>
     public bool ReportToMalwareBazaar { get; set; } = true;
 
-    /// <summary>Whether to report C2 URLs to URLhaus.</summary>
+    /// <summary>Whether to report C2 URLs to URLhaus (requires UrlhausAuthToken). Default: true.</summary>
     public bool ReportToUrlhaus { get; set; } = true;
 
     /// <summary>Maximum reports per hour (rate limiting). Default: 10.</summary>

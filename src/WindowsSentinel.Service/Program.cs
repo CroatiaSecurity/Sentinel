@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using WindowsSentinel.Core;
+using WindowsSentinel.Core.Deception;
 using WindowsSentinel.Core.SelfProtection;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -103,6 +104,14 @@ try
     var startupLogger = host.Services.GetRequiredService<ILoggerFactory>()
         .CreateLogger("WindowsSentinel.ProcessHardening");
     ProcessHardening.ApplyOrFail(startupLogger, refuseUnsafeInstallDir: false);
+
+    // v3.9.0: Clean up any leftover sparse file bombs from previous runs or older versions.
+    // These 500GB sparse files were deployed during pre-kill deception but never cleaned up
+    // in versions prior to 3.9.0. They consume zero actual disk space but confuse users
+    // when they see "500GB" files in Explorer.
+    var cleanupLogger = host.Services.GetRequiredService<ILoggerFactory>()
+        .CreateLogger("WindowsSentinel.DeceptionCleanup");
+    FileTrapTactic.CleanupSparseFileBombs(cleanupLogger);
 
     await host.RunAsync();
 }

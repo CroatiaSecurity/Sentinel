@@ -68,7 +68,7 @@ public sealed class PublicIpMonitor : BackgroundService
         {
             Timeout = HttpTimeout
         };
-        _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("WindowsSentinel/3.8.0");
+        _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("WindowsSentinel/3.9.0");
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
