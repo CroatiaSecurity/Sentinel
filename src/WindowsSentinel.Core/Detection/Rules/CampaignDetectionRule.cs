@@ -45,7 +45,11 @@ public sealed class CampaignDetectionRule : IDetectionRule
         {
             Name = "PlugX",
             Description = "PlugX RAT commonly used by Chinese APT groups",
-            FileNames = new[] { "bin.exe", "boot.exe", "temp.exe", "update.exe" },
+            // v3.8.0: Removed generic "update.exe" — caused false positives on legitimate
+            // updaters (GoogleUpdate.exe, BraveUpdate.exe, MicrosoftEdgeUpdate.exe).
+            // PlugX uses a standalone "update.exe" dropped into ProgramData/Public folders;
+            // the FilePathPatterns below already catch that specific scenario.
+            FileNames = new[] { "bin.exe", "boot.exe", "temp.exe" },
             ProcessPatterns = new[] { "bin.exe", "boot.exe" },
             CommandLinePatterns = new[] { @"-s", @"-d", @"-p\s+\d+" },
             NetworkIndicators = new[] { "verify-jre.com", "adobe-update.org" },
@@ -57,7 +61,10 @@ public sealed class CampaignDetectionRule : IDetectionRule
         {
             Name = "Cobalt Strike Beacon",
             Description = "Cobalt Strike Malleable C2 Beacon",
-            FileNames = new[] { "beacon.exe", "rundll32.exe", "dllhost.exe" },
+            // v3.8.0: Removed "rundll32.exe" and "dllhost.exe" — these are legitimate
+            // Windows system binaries. CS detection relies on command-line patterns and
+            // named pipe patterns which are far more specific.
+            FileNames = new[] { "beacon.exe" },
             ProcessPatterns = Array.Empty<string>(),
             CommandLinePatterns = new[] { @"rundll32.*[a-f0-9]{8}", @"powershell.*-enc.*AAAAAAAAAA" },
             NetworkIndicators = Array.Empty<string>(), // C2 is highly variable in CS
@@ -69,7 +76,10 @@ public sealed class CampaignDetectionRule : IDetectionRule
         {
             Name = "QBot/QakBot",
             Description = "QBot banking trojan",
-            FileNames = new[] { "chkdsks.exe", "disk.exe", "taskhost.exe", "regsvr32.exe" },
+            // v3.8.0: Removed "regsvr32.exe" and "services.exe" — legitimate Windows
+            // system binaries. QBot detection relies on the specific command-line pattern
+            // (regsvr32 loading a random .dat file) which is sufficient.
+            FileNames = new[] { "chkdsks.exe", "disk.exe", "taskhost.exe" },
             ProcessPatterns = new[] { "chkdsks", "disk.exe" },
             CommandLinePatterns = new[] { @"regsvr32.*-s.*[a-z0-9]{8}\.dat" },
             RegistryKeys = new[] { @"Software\\Microsoft\\Windows\\CurrentVersion\\Run\\[a-z]{8}" },
@@ -81,7 +91,10 @@ public sealed class CampaignDetectionRule : IDetectionRule
         {
             Name = "Emotet",
             Description = "Emotet malware",
-            FileNames = new[] { "sys.exe", "win.exe", "update.exe", "syswow.exe" },
+            // v3.8.0: Removed generic "update.exe" — same false-positive issue as PlugX.
+            // Emotet's use of "update.exe" is caught by FilePathPatterns or command-line
+            // patterns in combination with other signals.
+            FileNames = new[] { "sys.exe", "win.exe", "syswow.exe" },
             ProcessPatterns = new[] { "sys.exe", "syswow" },
             CommandLinePatterns = new[] { @"-E\d+" },
             NetworkIndicators = Array.Empty<string>(), // C2 varies
@@ -93,7 +106,10 @@ public sealed class CampaignDetectionRule : IDetectionRule
         {
             Name = "TrickBot",
             Description = "TrickBot banking trojan",
-            FileNames = new[] { "tab.exe", "client.exe", "services.exe", "inject.exe" },
+            // v3.8.0: Removed "services.exe" (legitimate Windows SCM) and "client.exe"
+            // (too generic — used by many legitimate apps). TrickBot detection relies on
+            // the specific "tab.exe" patterns and module patterns.
+            FileNames = new[] { "tab.exe", "inject.exe" },
             ProcessPatterns = new[] { "tab.exe", "inject.exe" },
             CommandLinePatterns = new[] { @"tab.exe.*-s", @"tab.exe.*-i" },
             NetworkIndicators = Array.Empty<string>(),
@@ -121,10 +137,16 @@ public sealed class CampaignDetectionRule : IDetectionRule
             var confidence = 0.0;
             var matches = new List<string>();
 
-            // Check file name
+            // Check file name — v3.8.0: Use exact filename match (Path.GetFileName)
+            // instead of EndsWith to prevent false positives on legitimate software
+            // whose names happen to end with a campaign indicator (e.g., GoogleUpdate.exe
+            // matching "update.exe", BraveUpdate.exe, MicrosoftEdgeUpdate.exe).
+            var imageFileName = !string.IsNullOrEmpty(proc.ImagePath) 
+                ? System.IO.Path.GetFileName(proc.ImagePath) 
+                : null;
             if (indicators.FileNames.Any(f => 
                 proc.ProcessName.Equals(f, StringComparison.OrdinalIgnoreCase) ||
-                proc.ImagePath?.EndsWith(f, StringComparison.OrdinalIgnoreCase) == true))
+                (imageFileName != null && imageFileName.Equals(f, StringComparison.OrdinalIgnoreCase))))
             {
                 confidence += 0.4;
                 matches.Add($"File name matches {campaign.Key}");

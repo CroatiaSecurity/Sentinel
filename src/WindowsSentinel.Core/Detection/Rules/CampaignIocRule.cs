@@ -146,12 +146,16 @@ public sealed class CampaignIocRule : IDetectionRule
     };
 
     // ── Malicious URL patterns ────────────────────────────────────────────────
+    // v3.8.0: Removed "update.exe", "install.exe", and "download.exe" — these are
+    // far too generic and match legitimate software updaters/installers (GoogleUpdate.exe,
+    // BraveUpdate.exe, ChromeInstall.exe, etc.). Malicious use of these names is caught
+    // by the CampaignDetectionRule's FilePathPatterns (e.g., random-named ProgramData dirs)
+    // and by behavioral composites (unsigned + temp path + C2 beaconing).
     private static readonly string[] SuspiciousUrlPatterns =
     {
         "pastebin.com/raw",
         "raw.githubusercontent.com",
         "hxxp://", "hxxps://",  // Obfuscated URLs
-        "download.exe", "update.exe", "install.exe",
         "/payload", "/beacon", "/shell", "/cmd",
     };
 

@@ -38,6 +38,7 @@ using ThreatReportingConfig = WindowsSentinel.Core.Response.ThreatReportingConfi
 // 3.3.0 — Electron Allowlist & Work Folders Protection
 // 3.4.0 — Active Response Expansion (RAT/Campaign kill, LSASS dump kill, host-level composite resolution)
 // 3.5.0 — Behavioral RAT Kill (novel RAT composites, beaconing kill-authorized)
+// 3.8.0 — Campaign Detection False-Positive Fix (exact filename matching, removed generic IOCs)
 
 namespace WindowsSentinel.Core;
 
@@ -47,28 +48,29 @@ namespace WindowsSentinel.Core;
 public static class SentinelVersion
 {
     /// <summary>
-    /// Current version - 3.7.0 Hardening &amp; Testing
+    /// Current version - 3.8.0 Campaign Detection False-Positive Fix
     /// Version is managed in version.txt for consistency across build scripts
     /// </summary>
-    public const string Version = "3.7.0";
+    public const string Version = "3.8.0";
 
     /// <summary>
     /// Release date
     /// </summary>
-    public static readonly DateTime ReleaseDate = new(2026, 5, 24);
+    public static readonly DateTime ReleaseDate = new(2026, 5, 25);
 
     /// <summary>
     /// Version description
     /// </summary>
     public const string Description =
-        "3.7.0 — Hardening & Testing. " +
-        "Comprehensive unit test coverage for all v3.6.0 network protection monitors: " +
-        "CIDR matching validation (15 cases), MAC formatting, virtual OUI detection, " +
-        "Cloudflare trace parsing, virtual adapter filtering, TLS issuer/enterprise CA matching, " +
-        "Wi-Fi authentication classification, Bluetooth HID class detection, " +
-        "scheduled task suspicious command/path analysis, firewall state parsing, " +
-        "alert deduplication logic. Fixed pre-existing integration test failures " +
-        "(deduplication test, correlation test). Total: 278 tests passing.";
+        "3.8.0 — Campaign Detection False-Positive Fix. " +
+        "Fixed CampaignDetectionRule EndsWith matching causing false positives on legitimate " +
+        "software updaters (GoogleUpdate.exe, BraveUpdate.exe, MicrosoftEdgeUpdate.exe) by " +
+        "switching to exact filename comparison. Removed overly generic IOC filenames: " +
+        "'update.exe' from PlugX/Emotet, 'rundll32.exe'/'dllhost.exe' from CobaltStrike, " +
+        "'services.exe'/'regsvr32.exe' from QBot, 'services.exe'/'client.exe' from TrickBot. " +
+        "Removed 'update.exe'/'install.exe'/'download.exe' from CampaignIocRule URL patterns " +
+        "that matched legitimate installer command lines. These legitimate binaries are now " +
+        "correctly handled by behavioral composites and path-based heuristics instead.";
 }
 
 public static class ServiceCollectionExtensions
