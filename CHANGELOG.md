@@ -2,6 +2,50 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [3.9.0] - 2026-05-25
+
+### Added — Deception Cleanup & Auto-Reporting
+
+#### Sparse File Bomb Cleanup
+- Sparse file bombs (500GB deception files) are now deleted immediately after the 2-second pre-kill deception window completes. The bombs serve their purpose during the window (wasting attacker exfil bandwidth) and no longer persist on disk.
+- On service startup, any leftover sparse bombs from previous runs or older versions are automatically cleaned up. This handles upgrades from pre-3.9.0 versions that never cleaned them up.
+- Added static `FileTrapTactic.CleanupSparseFileBombs()` method for both post-deception and startup cleanup.
+
+#### Threat Intelligence Reporting Enabled by Default
+- `ThreatReportingConfig.Enabled` now defaults to `true` (was `false`).
+- MalwareBazaar hash logging works out of the box — no API key required.
+- AbuseIPDB and URLhaus reporting gracefully skip when no API key is configured. Users who want full reporting just add their free API keys to `appsettings.json`.
+- Updated `appsettings.json` to include the `ThreatReporting` section with sensible defaults.
+- No hardcoded API keys shipped — users provide their own if they want IP/URL reporting.
+
+### Changed
+- Version bumped to 3.9.0 across all projects (Core, Service, Agent, Installer, version.txt)
+- All UserAgent strings updated to 3.9.0
+- All documentation updated (README, CHANGELOG, THREAT_MODEL)
+
+---
+
+## [3.8.0] - 2026-05-25
+
+### Fixed — Campaign Detection False-Positive Fix
+
+#### Root Cause
+The `CampaignDetectionRule` used `EndsWith` matching on image paths, causing legitimate software updaters (GoogleUpdate.exe, BraveUpdate.exe, MicrosoftEdgeUpdate.exe) to match the PlugX campaign IOC `"update.exe"`. This fed into composite rules and triggered false-positive kills.
+
+#### Changes
+- **CampaignDetectionRule**: Switched from `EndsWith` to exact filename comparison using `Path.GetFileName()`. Only files named exactly `update.exe` (not `GoogleUpdate.exe`) will match.
+- **PlugX campaign**: Removed `"update.exe"` from FileNames (too generic). PlugX detection relies on FilePathPatterns (random-named ProgramData/Public dirs) which are far more specific.
+- **Emotet campaign**: Removed `"update.exe"` from FileNames (same issue).
+- **CobaltStrike campaign**: Removed `"rundll32.exe"` and `"dllhost.exe"` (legitimate Windows system binaries). CS detection relies on command-line patterns and named pipe patterns.
+- **QBot campaign**: Removed `"regsvr32.exe"` and `"services.exe"` (legitimate Windows binaries). QBot detection relies on the specific `regsvr32.*-s.*[a-z0-9]{8}\.dat` command-line pattern.
+- **TrickBot campaign**: Removed `"services.exe"` (Windows SCM) and `"client.exe"` (too generic). TrickBot detection relies on `tab.exe` patterns and module patterns.
+- **CampaignIocRule**: Removed `"download.exe"`, `"update.exe"`, and `"install.exe"` from `SuspiciousUrlPatterns`. These substring matches triggered on any command line containing those words.
+
+### Changed
+- Version bumped to 3.8.0 across all projects
+
+---
+
 ## [3.7.0] - 2026-05-24
 
 ### Added — Hardening & Testing

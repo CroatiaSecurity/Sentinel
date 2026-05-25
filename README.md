@@ -2,7 +2,7 @@
 
 **Userland EDR for Windows — Behavioral Detection, Automated Response & Aggressive Deception**
 
-> Version: 3.7.0 (Hardening & Testing)  
+> Version: 3.9.0 (Deception Cleanup & Auto-Reporting)  
 > Author: [Gorstak](https://gorstak.eu) | [GitHub](https://github.com/CroatiaSecurity/Sentinel)  
 > License: MIT
 
@@ -247,6 +247,7 @@ All tactics:
 - Never target own PID or system-critical processes
 - Are logged for forensic review
 - Operate entirely on our own system (legally defensive)
+- Sparse file bombs are cleaned up after the deception window (v3.9.0) — no persistent disk clutter
 
 ---
 
@@ -332,7 +333,7 @@ All tactics:
 
 ```powershell
 # Run installer as Administrator
-.\WindowsSentinelSetup-3.7.0.exe
+.\WindowsSentinelSetup-3.9.0.exe
 ```
 
 The installer:
@@ -357,7 +358,7 @@ The installer:
     "WatchPath": null
   },
   "ThreatReporting": {
-    "Enabled": false,
+    "Enabled": true,
     "AbuseIpDbApiKey": null,
     "UrlhausAuthToken": null,
     "ReportToMalwareBazaar": true,
@@ -368,29 +369,30 @@ The installer:
 
 - `ActiveResponse: true` (default) — Kills on President's Law detections (with pre-kill deception)
 - `ActiveResponse: false` — Monitor-only, all detections logged
-- `ThreatReporting.Enabled: true` — Reports confirmed C2 IPs/hashes to community platforms after kills
-- `AbuseIpDbApiKey` — Free API key from https://www.abuseipdb.com/account/api
-- `UrlhausAuthToken` — Free token from https://urlhaus.abuse.ch/api/#account
+- `ThreatReporting.Enabled: true` (default since v3.9.0) — Reports confirmed threat hashes to community platforms after kills. AbuseIPDB/URLhaus reporting activates only when API keys are provided.
+- `AbuseIpDbApiKey` — Free API key from https://www.abuseipdb.com/account/api (optional)
+- `UrlhausAuthToken` — Free token from https://urlhaus.abuse.ch/api/#account (optional)
 
 ---
 
 ## Threat Intelligence Reporting (v2.1.0)
 
-After a confirmed kill (President's Law, confidence ≥ 0.85), Sentinel can report the attacker's infrastructure to community threat intelligence platforms:
+After a confirmed kill (President's Law, confidence ≥ 0.85), Sentinel reports the attacker's infrastructure to community threat intelligence platforms:
 
-| Platform | What's Reported | Effect |
-|----------|----------------|--------|
-| AbuseIPDB | C2 IP address + attack category + evidence summary | IP gets flagged in global abuse database; ISPs/hosting providers receive abuse reports |
-| URLhaus (abuse.ch) | C2 URL/IP:port | URL added to community blocklist used by firewalls, DNS filters, and other EDRs worldwide |
-| MalwareBazaar (abuse.ch) | Malicious file SHA-256 hash + tags | Hash added to community malware database for signature generation |
+| Platform | What's Reported | Requires API Key? | Effect |
+|----------|----------------|-------------------|--------|
+| MalwareBazaar (abuse.ch) | Malicious file SHA-256 hash + tags | No | Hash logged for community sharing and signature generation |
+| AbuseIPDB | C2 IP address + attack category + evidence summary | Yes (free) | IP gets flagged in global abuse database; ISPs receive abuse reports |
+| URLhaus (abuse.ch) | C2 URL/IP:port | Yes (free) | URL added to community blocklist used by firewalls, DNS filters, and other EDRs worldwide |
 
 **Safety guarantees:**
-- All reporting is **opt-in** (disabled by default)
+- **Enabled by default** since v3.9.0 — no API keys needed for basic hash logging
+- AbuseIPDB/URLhaus reporting activates only when user provides their own free API keys
 - Only reports **confirmed threats** (post-kill, confidence ≥ 0.85)
 - **Never reports private/internal IPs** (RFC1918, link-local, loopback)
 - **Never uploads file contents** — only hashes and metadata
 - **Rate-limited**: max 10 reports per hour
-- **Deduplication**: same IP/hash never reported twice
+- **Deduplication**: same IP/hash never reported twice within 24 hours
 - Reports are queued and sent asynchronously (never blocks kill response)
 
 ---
@@ -411,7 +413,7 @@ cd installer
 .\build.ps1
 ```
 
-Output: `installer\output\WindowsSentinelSetup-3.7.0.exe`
+Output: `installer\output\WindowsSentinelSetup-3.9.0.exe`
 
 ---
 
@@ -498,6 +500,8 @@ installer/
 | 3.5.0 | Behavioral RAT Kill | Novel RAT composites (Covert RAT, Confirmed C2 Beacon, Unsigned+Sustained C2) detect RATs without campaign IOCs. Existing C2 composites (Injected C2 Beacon, DGA+Beaconing, Spoofed Process, Dropped Payload, Staged Payload) promoted to kill-authorized. |
 | 3.6.0 | Full-Spectrum Protection | Expands beyond IDS/EDR. Network hijack: ARP spoof, gateway fingerprint, public IP geo/ASN shift, route table injection, DNS response validation, TLS certificate MITM detection. Wireless: Wi-Fi deauth/evil twin/downgrade, Bluetooth BadBT/unauthorized pairing. System integrity: Secure Boot/test signing/kernel debug, firewall tampering, scheduled task persistence, Windows Update/Defender staleness. 13 new monitors. |
 | 3.7.0 | Hardening & Testing | Comprehensive unit tests for all v3.6.0 monitors (CIDR matching, MAC parsing, OUI detection, Cloudflare trace parsing, Wi-Fi auth classification, BT HID detection, task/firewall analysis, deduplication). Fixed pre-existing integration test failures. 278 tests passing, 0 failures. |
+| 3.8.0 | Campaign Detection False-Positive Fix | Fixed CampaignDetectionRule `EndsWith` matching causing false positives on legitimate updaters (GoogleUpdate.exe, BraveUpdate.exe, MicrosoftEdgeUpdate.exe) — switched to exact filename comparison. Removed overly generic IOC filenames: "update.exe" from PlugX/Emotet, "rundll32.exe"/"dllhost.exe" from CobaltStrike, "services.exe"/"regsvr32.exe" from QBot, "services.exe"/"client.exe" from TrickBot. Removed "update.exe"/"install.exe"/"download.exe" from CampaignIocRule URL patterns. |
+| 3.9.0 | Deception Cleanup & Auto-Reporting | Sparse file bombs (500GB deception files) now deleted after the 2-second pre-kill window completes. Existing sparse bombs from older versions cleaned up on service startup (handles upgrades). Threat intelligence reporting enabled by default — MalwareBazaar hash logging works without API keys; AbuseIPDB/URLhaus activate when users provide their own free keys (no hardcoded keys). |
 
 ---
 

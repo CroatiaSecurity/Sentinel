@@ -1,6 +1,6 @@
 # Windows Sentinel — Design Document
 
-**Version: 3.7.0**
+**Version: 3.9.0**
 
 ---
 
