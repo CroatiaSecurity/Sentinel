@@ -55,6 +55,12 @@ public sealed class RouteTableMonitor : BackgroundService
     [DllImport("iphlpapi.dll", SetLastError = true)]
     private static extern int GetIpForwardTable(IntPtr pIpForwardTable, ref int pdwSize, bool bOrder);
 
+    [DllImport("iphlpapi.dll", SetLastError = true)]
+    private static extern int DeleteIpForwardEntry(ref MIB_IPFORWARDROW pRoute);
+
+    [DllImport("iphlpapi.dll", SetLastError = true)]
+    private static extern int CreateIpForwardEntry(ref MIB_IPFORWARDROW pRoute);
+
     [StructLayout(LayoutKind.Sequential)]
     private struct MIB_IPFORWARDROW
     {
@@ -143,6 +149,12 @@ public sealed class RouteTableMonitor : BackgroundService
 
             var isHostRoute = route.Mask == "255.255.255.255"; // /32 — targeting specific IP
             var isDefaultRoute = route.Destination == "0.0.0.0" && route.Mask == "0.0.0.0";
+
+            // v4.0.0: Immediately remediate malicious host routes
+            if (isHostRoute && route.Protocol == "netmgmt")
+            {
+                RemediateMaliciousRoutes(new List<RouteEntry> { route });
+            }
 
             var confidence = isDefaultRoute ? 0.90 : isHostRoute ? 0.85 : 0.72;
             var tier = isDefaultRoute || isHostRoute ? DetectionTier.Tier1Behavioral : DetectionTier.Tier2Indicator;
@@ -339,6 +351,112 @@ public sealed class RouteTableMonitor : BackgroundService
         }
         catch { }
         return false;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // v4.0.0: ROUTE REMEDIATION — Actively delete malicious persistent routes
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// v4.0.0: Deletes suspicious persistent /32 host routes that were not in the baseline.
+    /// These are the routes used in the 2026-05-25 attack to redirect traffic to specific
+    /// IPs through a local MITM interceptor.
+    ///
+    /// Only deletes routes that are:
+    ///   - Host routes (/32, mask 255.255.255.255)
+    ///   - Not from virtual adapters (VPN, Docker, etc.)
+    ///   - Not in the startup baseline
+    ///   - Added via "netmgmt" protocol (manually added, not by routing protocols)
+    /// </summary>
+    private int RemediateMaliciousRoutes(List<RouteEntry> suspiciousRoutes)
+    {
+        int removed = 0;
+
+        foreach (var route in suspiciousRoutes)
+        {
+            // Only remediate /32 host routes added via netmgmt (manual/persistent)
+            if (route.Mask != "255.255.255.255") continue;
+            if (route.Protocol != "netmgmt") continue;
+            if (IsVirtualAdapterRoute(route.InterfaceIndex)) continue;
+
+            try
+            {
+                var row = new MIB_IPFORWARDROW
+                {
+                    dwForwardDest = BitConverter.ToUInt32(IPAddress.Parse(route.Destination).GetAddressBytes(), 0),
+                    dwForwardMask = BitConverter.ToUInt32(IPAddress.Parse(route.Mask).GetAddressBytes(), 0),
+                    dwForwardNextHop = BitConverter.ToUInt32(IPAddress.Parse(route.NextHop).GetAddressBytes(), 0),
+                    dwForwardIfIndex = route.InterfaceIndex,
+                    dwForwardType = route.Type,
+                    dwForwardProto = 3, // netmgmt
+                    dwForwardMetric1 = route.Metric
+                };
+
+                int result = DeleteIpForwardEntry(ref row);
+                if (result == 0)
+                {
+                    removed++;
+                    _logger.LogCritical(
+                        "[RouteTableMonitor] REMEDIATED: Deleted malicious route {Dest} → {NextHop}",
+                        route.Destination, route.NextHop);
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "[RouteTableMonitor] Failed to delete route {Dest} (error {Err})",
+                        route.Destination, result);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "[RouteTableMonitor] Route deletion error for {Dest}", route.Destination);
+            }
+        }
+
+        return removed;
+    }
+
+    /// <summary>
+    /// v4.0.0: Called on startup to clean up any pre-existing malicious persistent routes.
+    /// Addresses the scenario where routes were planted before Sentinel started.
+    /// </summary>
+    public int CleanupExistingMaliciousRoutes()
+    {
+        var routes = GetRouteTable();
+
+        // Find suspicious /32 host routes that are persistent (netmgmt protocol)
+        // and not from virtual adapters
+        var suspicious = routes.Where(r =>
+            r.Mask == "255.255.255.255" &&
+            r.Protocol == "netmgmt" &&
+            !IsVirtualAdapterRoute(r.InterfaceIndex) &&
+            r.Destination != "255.255.255.255" && // broadcast
+            !r.Destination.StartsWith("224.") &&   // multicast
+            !r.Destination.StartsWith("169.254.") && // link-local
+            !r.Destination.StartsWith("127.") // loopback
+        ).ToList();
+
+        if (suspicious.Count == 0) return 0;
+
+        // Heuristic: If there are more than 10 suspicious /32 routes, this is almost
+        // certainly an attack (legitimate use rarely has more than a handful).
+        if (suspicious.Count > 10)
+        {
+            _logger.LogCritical(
+                "[RouteTableMonitor] v4.0.0: Found {Count} suspicious persistent /32 host routes on startup. " +
+                "This matches the traffic interception pattern. Remediating ALL.",
+                suspicious.Count);
+
+            return RemediateMaliciousRoutes(suspicious);
+        }
+
+        // For smaller counts, log but don't auto-remediate (could be legitimate)
+        _logger.LogWarning(
+            "[RouteTableMonitor] Found {Count} persistent /32 host routes on startup. " +
+            "Count is below auto-remediation threshold (10). Monitoring only.",
+            suspicious.Count);
+
+        return 0;
     }
 
     private void PruneAlertCache()

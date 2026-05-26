@@ -2,6 +2,43 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [4.0.0] - 2026-05-26
+
+### Added — Anti-Tamper & Route Remediation
+
+Addresses the 2026-05-25 attack where an attacker silently removed Sentinel overnight after it detected their traffic interception infrastructure (hundreds of persistent /32 host routes + TLS MITM).
+
+#### AntiTamperGuard (new BackgroundService)
+- **Service Self-Reinstall**: If the service registry key is deleted while running, immediately re-registers the service via native SCM APIs (CreateService). No sc.exe LOLBin dependency.
+- **Last-Gasp Logging**: Registers console control handler and ProcessExit event. Writes death events to `last_gasp.jsonl` (separate from main log) when the process is being terminated ungracefully.
+- **Anti-Suspend Detection**: Monitors execution timing every 2 seconds. If a gap exceeds 10 seconds, emits a Tier1 detection — indicates NtSuspendProcess was used to freeze Sentinel while the attacker operated.
+
+#### Route Table Remediation (RouteTableMonitor enhanced)
+- **Active deletion of malicious routes**: When a suspicious /32 host route is detected (netmgmt protocol, non-virtual adapter), it is now immediately deleted via DeleteIpForwardEntry.
+- **Startup cleanup**: On service start, scans for pre-existing malicious persistent /32 routes. If more than 10 are found (attack pattern threshold), all are automatically deleted.
+- Addresses the exact attack pattern observed: hundreds of /32 routes redirecting traffic to Google, Cloudflare, Facebook, GitHub, AWS etc. through a local MITM interceptor.
+
+#### RemoteAccessMonitor (new BackgroundService)
+- **Unauthorized tool detection**: Scans every 30 seconds for 35+ known remote access tools (VNC, TeamViewer, AnyDesk, ScreenConnect, RustDesk, ngrok, chisel, frp, NetSupport, Ammyy, Radmin, Action1, Atera, and more).
+- **RDP state monitoring**: Captures RDP enabled/disabled state at startup. Alerts if RDP is enabled after Sentinel starts (attacker enabling remote access).
+- **Active RDP session detection**: Identifies established RDP connections and reports remote IP addresses.
+- **Remote access port scanning**: Flags listening ports commonly used by remote access tools (3389, 5900-5902, 5938, 7070, 4899, 6129, 8200).
+- Addresses the "fake desktop" scenario where an attacker could relay or present a cloned desktop via remote access tools.
+
+### Changed
+- RouteTableMonitor registered as singleton (accessible for startup cleanup)
+- Version bumped to 4.0.0 across all projects
+- All documentation updated
+
+### Fixed — Installer Reboot Race Condition
+- **Root cause**: `restartreplace` flag in Inno Setup schedules a file swap on reboot when the service EXE is locked. But `PrepareToInstall` already deleted the service registration via `sc delete`. After reboot, the file is replaced but no service exists — Sentinel is gone.
+- **Fix**: Added boot guard scheduled tasks (`WindowsSentinelBootGuard` + `WindowsSentinelBootStart`) created in `[Code] CurStepChanged(ssPostInstall)`. These ONSTART tasks re-register and start the service on every boot, ensuring it survives the reboot regardless of install order.
+- Added `sc failure` recovery options (auto-restart on crash: 1s, 5s, 30s delays).
+- Tasks are cleaned up on uninstall.
+- Added `fix-service.ps1` script for manual recovery.
+
+---
+
 ## [3.9.0] - 2026-05-25
 
 ### Added — Deception Cleanup & Auto-Reporting

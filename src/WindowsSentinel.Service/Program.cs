@@ -3,6 +3,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using WindowsSentinel.Core;
 using WindowsSentinel.Core.Deception;
+using WindowsSentinel.Core.Monitors;
 using WindowsSentinel.Core.SelfProtection;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -112,6 +113,27 @@ try
     var cleanupLogger = host.Services.GetRequiredService<ILoggerFactory>()
         .CreateLogger("WindowsSentinel.DeceptionCleanup");
     FileTrapTactic.CleanupSparseFileBombs(cleanupLogger);
+
+    // v4.0.0: Clean up pre-existing malicious persistent routes on startup.
+    // Addresses the attack pattern where hundreds of /32 host routes are planted
+    // to redirect traffic through a local MITM interceptor.
+    var routeLogger = host.Services.GetRequiredService<ILoggerFactory>()
+        .CreateLogger("WindowsSentinel.RouteCleanup");
+    try
+    {
+        var routeMonitor = host.Services.GetRequiredService<WindowsSentinel.Core.Monitors.RouteTableMonitor>();
+        var removedRoutes = routeMonitor.CleanupExistingMaliciousRoutes();
+        if (removedRoutes > 0)
+        {
+            routeLogger.LogCritical(
+                "[STARTUP] v4.0.0: Removed {Count} malicious persistent /32 host routes " +
+                "that were planted for traffic interception.", removedRoutes);
+        }
+    }
+    catch (Exception ex)
+    {
+        routeLogger.LogWarning(ex, "[STARTUP] Route cleanup failed (non-fatal)");
+    }
 
     await host.RunAsync();
 }

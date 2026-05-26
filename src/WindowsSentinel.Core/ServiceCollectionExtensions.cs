@@ -40,6 +40,7 @@ using ThreatReportingConfig = WindowsSentinel.Core.Response.ThreatReportingConfi
 // 3.5.0 — Behavioral RAT Kill (novel RAT composites, beaconing kill-authorized)
 // 3.8.0 — Campaign Detection False-Positive Fix (exact filename matching, removed generic IOCs)
 // 3.9.0 — Deception Cleanup & Auto-Reporting (sparse bomb cleanup, threat reporting enabled by default)
+// 4.0.0 — Anti-Tamper & Route Remediation (self-reinstall, last-gasp, anti-suspend, route cleanup)
 
 namespace WindowsSentinel.Core;
 
@@ -49,27 +50,31 @@ namespace WindowsSentinel.Core;
 public static class SentinelVersion
 {
     /// <summary>
-    /// Current version - 3.9.0 Deception Cleanup & Auto-Reporting
+    /// Current version - 4.0.0 Anti-Tamper and Route Remediation
     /// Version is managed in version.txt for consistency across build scripts
     /// </summary>
-    public const string Version = "3.9.0";
+    public const string Version = "4.0.0";
 
     /// <summary>
     /// Release date
     /// </summary>
-    public static readonly DateTime ReleaseDate = new(2026, 5, 25);
+    public static readonly DateTime ReleaseDate = new(2026, 5, 26);
 
     /// <summary>
     /// Version description
     /// </summary>
     public const string Description =
-        "3.9.0 — Deception Cleanup & Auto-Reporting. " +
-        "Sparse file bombs (500GB deception files) are now deleted after the 2-second " +
-        "pre-kill deception window completes. Existing sparse bombs from older versions " +
-        "are cleaned up on service startup. Threat intelligence reporting is now enabled " +
-        "by default — MalwareBazaar hash logging works without API keys; AbuseIPDB and " +
-        "URLhaus reporting activates automatically when users provide their own keys in " +
-        "appsettings.json (no hardcoded keys shipped).";
+        "4.0.0 — Anti-Tamper and Route Remediation. " +
+        "Prevents silent service removal: AntiTamperGuard self-reinstalls the service " +
+        "via native SCM APIs if the registry key is deleted. Last-gasp logging writes " +
+        "death events to a separate tamper-proof file on process termination. Anti-suspend " +
+        "detection identifies NtSuspendProcess attacks via execution gap monitoring. " +
+        "Route table remediation: automatically deletes malicious persistent /32 host routes " +
+        "on detection AND on startup (cleans up pre-existing attack infrastructure). " +
+        "RemoteAccessMonitor: detects unauthorized remote access tools (VNC, TeamViewer, " +
+        "AnyDesk, ScreenConnect, RustDesk, ngrok, chisel, 30+ tools), RDP state changes, " +
+        "active RDP sessions, and remote access listening ports. " +
+        "Addresses the 2026-05-25 attack where Sentinel was silently removed overnight.";
 }
 
 public static class ServiceCollectionExtensions
@@ -245,6 +250,7 @@ public static class ServiceCollectionExtensions
         services.AddHostedService<SelfProtectionService>();
         services.AddHostedService<ServiceProtectionMonitor>(); // CRITICAL: Service/registry tamper protection
         services.AddHostedService<ConfigIntegrityMonitor>();   // Configuration tampering detection
+        services.AddHostedService<AntiTamperGuard>();          // v4.0.0: Self-reinstall + last-gasp + anti-suspend
 
         // ── Hardening Module ───────────────────────────────────────────────────
         services.AddHostedService<HardeningModule>();
@@ -519,7 +525,12 @@ public static class ServiceCollectionExtensions
         services.AddHostedService<PublicIpMonitor>();
 
         // ── Route Table Monitor (static route injection, selective redirect) ──
-        services.AddHostedService<RouteTableMonitor>();
+        // v4.0.0: Registered as singleton for startup route cleanup access
+        services.AddSingleton<RouteTableMonitor>();
+        services.AddHostedService(sp => sp.GetRequiredService<RouteTableMonitor>());
+
+        // ── Remote Access Monitor (v4.0.0: unauthorized RDP/VNC/TeamViewer detection) ──
+        services.AddHostedService<RemoteAccessMonitor>();
 
         // ── DNS Response Validation (DNS poisoning, captive portal detection) ─
         services.AddHostedService<DnsResponseValidationMonitor>();

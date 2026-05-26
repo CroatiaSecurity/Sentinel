@@ -2,7 +2,7 @@
 
 **Userland EDR for Windows — Behavioral Detection, Automated Response & Aggressive Deception**
 
-> Version: 3.9.0 (Deception Cleanup & Auto-Reporting)  
+> Version: 4.0.0 (Anti-Tamper & Route Remediation)  
 > Author: [Gorstak](https://gorstak.eu) | [GitHub](https://github.com/CroatiaSecurity/Sentinel)  
 > License: MIT
 
@@ -101,6 +101,9 @@ These rules can trigger immediate process termination + quarantine:
 | Transparent Overlay Phishing | WS_EX_LAYERED + WS_EX_TRANSPARENT + WS_EX_TOPMOST from non-allowlisted processes | Behavioral (window enumeration) |
 | Browser DLL Injection (ELF) | ELF-pattern DLLs in browser processes → active unload | Behavioral (module analysis + response) |
 | Malicious DLL on Disk (IoC) | Disk-scanned DLL matches threat intel hash → active unload from all processes | Behavioral (hash reputation + response) |
+| Unauthorized Remote Access Tool | VNC/TeamViewer/AnyDesk/ScreenConnect/RustDesk/ngrok/chisel detected running | Behavioral (process scanning) |
+| RDP Enabled Without Authorization | RDP enabled after Sentinel started (was disabled at baseline) | Behavioral (registry monitoring) |
+| Active RDP Session | Established RDP connections from remote IPs | Behavioral (network state) |
 
 ### Tier 2 — Advisory / Corroborating (Log Only, Feeds Correlation)
 
@@ -143,6 +146,8 @@ These never kill independently. Multiple Tier2 signals on the same PID within 12
 | NeuroBehavior: Cursor Jitter | Rapid programmatic cursor movement (>6 jumps in 10s) |
 | NeuroBehavior: Color Inversion | Screen colors inverted (current ≈ inverse of previous frame) |
 | NeuroBehavior: Screen Distortion | Rapid color channel shifts without inversion |
+| Remote Access Tool Detected | Unauthorized VNC/TeamViewer/AnyDesk/ScreenConnect/RustDesk/ngrok/chisel (35+ tools) |
+| Remote Access Port Listening | Known remote access ports (3389, 5900, 5938, 7070, 4899, etc.) actively listening |
 
 ### Composite Detections (Behavioral Correlation Engine)
 
@@ -277,6 +282,10 @@ All tactics:
 | Quarantine security | DPAPI encryption + restrictive ACL |
 | Cache integrity | Boot-nonce-bound HMAC (v1.1.0) — previous-session caches rejected |
 | Credential canary | Honeypot credential detects credential harvesting |
+| Service self-reinstall | AntiTamperGuard re-registers service via SCM API if registry key deleted (v4.0.0) |
+| Last-gasp logging | Death events written to separate file on ungraceful termination (v4.0.0) |
+| Anti-suspend detection | Execution gap monitoring detects NtSuspendProcess attacks (v4.0.0) |
+| Route remediation | Malicious persistent /32 routes auto-deleted on detection and startup (v4.0.0) |
 
 ---
 
@@ -326,6 +335,7 @@ All tactics:
 | System Integrity | FirewallIntegrityMonitor | netsh advfirewall polling (profile disabled, bulk rules, service) | 3.6.0 |
 | System Integrity | ScheduledTaskMonitor | schtasks polling (malicious task creation, suspicious commands) | 3.6.0 |
 | System Integrity | WindowsUpdateIntegrityMonitor | Service + registry monitoring (WU/BITS stopped, Defender stale) | 3.6.0 |
+| Remote Access | RemoteAccessMonitor | Process scanning (35+ tools), RDP state/session monitoring, port detection | 4.0.0 |
 
 ---
 
@@ -333,7 +343,7 @@ All tactics:
 
 ```powershell
 # Run installer as Administrator
-.\WindowsSentinelSetup-3.9.0.exe
+.\WindowsSentinelSetup-4.0.0.exe
 ```
 
 The installer:
@@ -413,7 +423,7 @@ cd installer
 .\build.ps1
 ```
 
-Output: `installer\output\WindowsSentinelSetup-3.9.0.exe`
+Output: `installer\output\WindowsSentinelSetup-4.0.0.exe`
 
 ---
 
@@ -502,6 +512,7 @@ installer/
 | 3.7.0 | Hardening & Testing | Comprehensive unit tests for all v3.6.0 monitors (CIDR matching, MAC parsing, OUI detection, Cloudflare trace parsing, Wi-Fi auth classification, BT HID detection, task/firewall analysis, deduplication). Fixed pre-existing integration test failures. 278 tests passing, 0 failures. |
 | 3.8.0 | Campaign Detection False-Positive Fix | Fixed CampaignDetectionRule `EndsWith` matching causing false positives on legitimate updaters (GoogleUpdate.exe, BraveUpdate.exe, MicrosoftEdgeUpdate.exe) — switched to exact filename comparison. Removed overly generic IOC filenames: "update.exe" from PlugX/Emotet, "rundll32.exe"/"dllhost.exe" from CobaltStrike, "services.exe"/"regsvr32.exe" from QBot, "services.exe"/"client.exe" from TrickBot. Removed "update.exe"/"install.exe"/"download.exe" from CampaignIocRule URL patterns. |
 | 3.9.0 | Deception Cleanup & Auto-Reporting | Sparse file bombs (500GB deception files) now deleted after the 2-second pre-kill window completes. Existing sparse bombs from older versions cleaned up on service startup (handles upgrades). Threat intelligence reporting enabled by default — MalwareBazaar hash logging works without API keys; AbuseIPDB/URLhaus activate when users provide their own free keys (no hardcoded keys). |
+| 4.0.0 | Anti-Tamper & Route Remediation | Prevents silent service removal: AntiTamperGuard self-reinstalls the service via native SCM APIs if the registry key is deleted. Last-gasp logging writes death events to a separate tamper-proof file on process termination. Anti-suspend detection identifies NtSuspendProcess attacks via execution gap monitoring. Route table remediation: automatically deletes malicious persistent /32 host routes on detection AND on startup. RemoteAccessMonitor: detects 35+ unauthorized remote access tools (VNC, TeamViewer, AnyDesk, ScreenConnect, RustDesk, ngrok, chisel, etc.), RDP state changes, active RDP sessions, and remote access listening ports. Addresses the 2026-05-25 attack where Sentinel was silently removed overnight after detecting a traffic interception campaign. |
 
 ---
 

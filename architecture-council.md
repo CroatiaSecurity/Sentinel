@@ -3,7 +3,7 @@
 **Status:** Architecture spec. Extends, does not replace, `requirements.md`,
 `design.md`, `constraints.md` (all v0.9.0).
 
-**Last updated:** v3.9.0 (May 2026) — Deception Cleanup & Auto-Reporting.
+**Last updated:** v4.0.0 (May 2026) — Anti-Tamper & Route Remediation.
 
 ---
 
