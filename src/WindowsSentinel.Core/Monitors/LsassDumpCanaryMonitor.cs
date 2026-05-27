@@ -80,7 +80,23 @@ public sealed class LsassDumpCanaryMonitor : BackgroundService
         "rider64", "rider64.exe",                 // JetBrains Rider
         "idea64", "idea64.exe",                   // JetBrains IntelliJ
         "pycharm64", "pycharm64.exe",             // JetBrains PyCharm
-        "webstorm64", "webstorm64.exe"            // JetBrains WebStorm
+        "webstorm64", "webstorm64.exe",           // JetBrains WebStorm
+        // v4.1.0: Antivirus/security products that legitimately load dbghelp.dll for crash reporting
+        "TmsaInstance64", "TmsaInstance64.exe",   // Trend Micro Security Agent (64-bit)
+        "PtSessionAgent", "PtSessionAgent.exe",   // Trend Micro Platinum Session Agent
+        "uiSeAgnt", "uiSeAgnt.exe",               // Trend Micro UI Security Agent
+        "coreServiceShell", "coreServiceShell.exe", // Trend Micro Core Service
+        "coreFrameworkHost", "coreFrameworkHost.exe", // Trend Micro Core Framework
+        "PtSvcHost", "PtSvcHost.exe",             // Trend Micro Platinum Service Host
+        "AMSPTelemetryService", "AMSPTelemetryService.exe", // Trend Micro AMSP Telemetry
+        "PtWatchDog", "PtWatchDog.exe",           // Trend Micro Platinum Watchdog
+        "NVDisplay.Container", "NVDisplay.Container.exe", // NVIDIA Display Container (crash reporting)
+        "nvcontainer", "nvcontainer.exe",         // NVIDIA Container
+        "WUDFHost", "WUDFHost.exe",               // Windows User-Mode Driver Framework Host
+        "msedgewebview2", "msedgewebview2.exe",   // Edge WebView2 (Chromium crash reporting)
+        // IObit processes
+        "mainProcess", "mainProcess.exe",         // IObit Advanced SystemCare main process
+        "ASCService", "ASCService.exe",           // IObit ASC Service
     };
 
     // Track which PIDs we've already alerted on

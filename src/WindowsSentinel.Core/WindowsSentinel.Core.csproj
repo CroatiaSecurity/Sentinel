@@ -10,11 +10,11 @@
     <Authors>Gorstak</Authors>
     <Company>github.com/CroatiaSecurity/Sentinel</Company>
     <Product>Windows Sentinel</Product>
-    <Description>Userland EDR for Windows — Behavioral detection and response (v4.0.0 Anti-Tamper and Route Remediation)</Description>
-    <Version>4.0.0</Version>
-    <AssemblyVersion>4.0.0.0</AssemblyVersion>
-    <FileVersion>4.0.0.0</FileVersion>
-    <InformationalVersion>4.0.0</InformationalVersion>
+    <Description>Userland EDR for Windows — Behavioral detection and response (v4.1.0 False Positive Reduction and Third-Party AV Coexistence)</Description>
+    <Version>4.1.0</Version>
+    <AssemblyVersion>4.1.0.0</AssemblyVersion>
+    <FileVersion>4.1.0.0</FileVersion>
+    <InformationalVersion>4.1.0</InformationalVersion>
   </PropertyGroup>
 
   <ItemGroup>

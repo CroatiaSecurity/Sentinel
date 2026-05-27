@@ -80,7 +80,7 @@ class Program
         var host = builder.Build();
 
         var logger = host.Services.GetRequiredService<ILogger<Program>>();
-        logger.LogInformation("Windows Sentinel Agent v4.0.0 starting in user session (with user-context monitors)");
+        logger.LogInformation("Windows Sentinel Agent v4.1.0 starting in user session (with user-context monitors)");
 
         await host.RunAsync();
 

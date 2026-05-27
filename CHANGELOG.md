@@ -2,6 +2,95 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [4.1.0] - 2026-05-27
+
+### Fixed — Critical False Positives
+
+#### Trend Micro Conflict (RAN4936T — Sentinel flagged as ransomware)
+- **Root cause**: Trend Micro's AEGIS behavioral engine detected Sentinel's ACL test files (`.sentinel_acl_test_*` in System32), forensic process dumps (300-900MB `.dmp` files), honeypot deception files (`wallet_keys.dat`, `credentials_backup.db`), and `CreateRemoteThread` (DLL unload engine) as ransomware-like behavior.
+- **Fix**: Added all Trend Micro processes (`TmsaInstance64`, `PtSessionAgent`, `uiSeAgnt`, `coreServiceShell`, `coreFrameworkHost`, `PtSvcHost`, `AMSPTelemetryService`) to LSASS dump canary allowlist, memory behavior JIT allowlist, ransomware I/O whitelist, and network allowlist.
+
+#### Cobalt Strike Campaign IOC False Positive
+- **Root cause**: Pattern `x64_` matched Microsoft Store app paths (e.g., `Microsoft.DesktopAppInstaller_1.28.239.0_x64__8wekyb3d8bbwe`), triggering Tier1 "Known Threat Campaign IOC" at 0.88 confidence against `WindowsPackageManagerServer.exe`.
+- **Fix**: Replaced overly broad `x86_`/`x64_` patterns with specific Cobalt Strike indicators (`beacon.dll`, `beacon.exe`, `cobalt_strike`). Architecture detection handled by beaconing/memory/named-pipe monitors instead.
+
+#### Unsigned Binary Execution Noise
+- **Root cause**: ETW's `ImageFileName` field often contains just the filename (e.g., `conhost.exe`) without full path for system processes. The rule couldn't match against `C:\Windows\` prefix, so `conhost.exe`, `netsh.exe`, `cmd.exe`, `reg.exe`, `schtasks.exe`, `smartscreen.exe` were all flagged.
+- **Fix**: Skip binaries where ImagePath contains no path separator (filename-only = ETW didn't provide full path, almost always system binaries).
+
+#### Module Validation False Positive (System32 DLLs)
+- **Root cause**: Legitimate Windows DLLs like `netprofm.dll` and `frameservermonitor.dll` in `C:\WINDOWS\System32\` are not Authenticode-signed but are legitimate system components. The "unsigned module in critical process" check didn't exclude system paths.
+- **Fix**: Added system path check (`System32`, `SysWOW64`, `WinSxS`, `Program Files`) before flagging unsigned modules.
+
+#### TLS Certificate MITM False Positive (Cloudflare DNS)
+- **Root cause**: Cloudflare's `one.one.one.one` DNS service switched to SSL.com as certificate issuer. This CA wasn't in the expected issuers list, triggering "Network Hijack: Unexpected Certificate Issuer (TLS MITM)" at 0.90 confidence.
+- **Fix**: Added `SSL.com` to expected issuers for Cloudflare domains.
+
+#### Discord Sustained Connection False Positive
+- **Root cause**: Discord installs to `%LocalAppData%\Discord\`, not Program Files. The `IsProcessTrusted` path verification failed, so Discord was treated as untrusted despite being in the NetworkAllowlist.
+- **Fix**: Added AppData path recognition for known apps where the folder name matches the process name (prevents impersonation while allowing legitimate AppData installs).
+
+#### Ransomware I/O False Positive on Kiro IDE
+- **Root cause**: Kiro's workspace indexing and AI operations produce 15K+ write ops / 56MB in 1.5 minutes, exceeding the ransomware I/O threshold.
+- **Fix**: Added `Kiro` to ransomware I/O whitelist alongside other IDEs.
+
+#### Composite LSASS Dump False Positive
+- **Root cause**: Multiple individual FPs (Trend Micro loading dbghelp.dll + unsigned binary noise + memory behavior + TLS MITM) combined within the 120-second correlation window to produce a false "Confirmed LSASS Dump" composite at 97% confidence, triggering the kill chain against Trend Micro's `TmsaInstance64`.
+- **Fix**: All contributing FPs fixed individually. With Trend Micro allowlisted for dbghelp.dll, unsigned binary noise eliminated, and TLS MITM FP resolved, the composite can no longer form from legitimate activity.
+
+### Added — DNS Blocklist Engine
+
+#### DnsBlocklistEngine (new BackgroundService)
+- **Auto-fetching threat intelligence feeds** refreshed every 4 hours:
+  - URLhaus (abuse.ch) — actively exploited malware distribution domains
+  - ThreatFox (abuse.ch) — active C2 infrastructure
+  - Feodo Tracker (abuse.ch) — banking trojan C2 (Dridex, Emotet, TrickBot, QakBot)
+  - PhishTank (mitchellkrogza mirror) — confirmed credential-stealing phishing
+  - OpenPhish — machine-verified phishing domains
+  - Botvrij.eu — Dutch National CERT verified botnet/C2/malware domains
+- **Scope**: Only confirmed malware/C2/phishing. NO ads, trackers, piracy, coin miners, or gray-area PUPs.
+- **Storage**: DPAPI-protected via SecureCacheStore (tamper-resistant, survives reboot)
+- **Response**: Tier1 detection + Windows Firewall outbound block on resolved IPs
+- **Integration**: Hooks into existing DnsQueryMonitor ETW feed (no duplicate ETW sessions)
+
+### Changed — Expanded Allowlists
+
+All allowlists expanded with commonly-used applications. Security model preserved:
+- Allowlists only suppress Tier2 indicators and reduce confidence scores
+- President's Law kill rules ALWAYS fire regardless of allowlist status
+- Path verification (`IsProcessTrusted`) prevents name-based impersonation
+- An attacker naming malware `discord.exe` in `%TEMP%` will NOT be allowlisted
+
+#### TrustedPublishers (AllowlistService)
+- Added: Brave, Opera, Vivaldi, Figma, Notion, Obsidian, Realtek, Logitech, Corsair, SteelSeries, Razer, Samsung, WD, Seagate, Ubisoft, CD Projekt, Rockstar, Take-Two, Bethesda, Bandai Namco, Square Enix, Capcom, SEGA, Sublime HQ, Telegram, Signal, WhatsApp, VideoLAN, Plex, WinRAR, Bitwarden, AgileBits, NordVPN, ExpressVPN, Mullvad, ProtonVPN, Malwarebytes, ESET, Kaspersky, Bitdefender, F-Secure, Sophos, Dropbox, Atlassian, Salesforce, Trend Micro, IObit, Ashampoo, Piriform, Gen Digital
+
+#### DevelopmentProcesses (AllowlistService)
+- Added: cursor, Kiro, zed, fleet, sublime_text, notepad++, rustup, turbo, nx, deno, bun, qemu, hg, conda, x64dbg, x32dbg, ollydbg, cmd, bash, wezterm-gui, ssms, mysql, psql, mongod, redis-server, sqlite3, postman, insomnia, curl, wget, fiddler, wireshark, nmap
+
+#### GamingProcesses (AllowlistService)
+- Added: EABackgroundService, UbisoftConnect, Playnite, heroic, EasyAntiCheat_EOS, BEService, vgc/vgtray (Vanguard), PunkBuster, FaceIt, UnityCrashHandler64, CrashReportClient, UnrealCEFSubProcess, GTA5, RDR2, eldenring, cyberpunk2077, Overwatch, Diablo IV, WoW, Fortnite, CS2, Dota2, Minecraft, FFXIV
+
+#### NetworkAllowlist (DataExfiltrationMonitor)
+- Added: telegram, signal, whatsapp, skype, thunderbird, outlook, megasync, pcloud, nextcloud, battle.net, eadesktop, UbisoftConnect, Kiro, cursor, docker, kubectl, ssh, sftp, scp, wireguard, openvpn, nordvpn, ExpressVPN, mullvad-daemon, ProtonVPN, backgroundtaskhost, Trend Micro processes, IObit/Ashampoo processes, plex, plexmediaserver, veeam, acronis, backblaze, crashplan
+
+#### JitProcesses (MemoryBehaviorAnalyzer)
+- Added: deno, bun, thorium, cursor, zed, msedgewebview2, epicgameslauncher, EpicWebHelper, mongodb-compass, hyper, warp, Trend Micro processes, Windows Defender, IObit processes, Ashampoo LiveTuner3, NVIDIA display/container
+
+#### RansomwareIoMonitor Whitelist
+- Added: Trend Micro processes, Kiro, IObit processes, Ashampoo LiveTuner3
+
+#### LsassDumpCanaryMonitor Allowlist
+- Added: Trend Micro processes (TmsaInstance64, PtSessionAgent, uiSeAgnt, coreServiceShell, coreFrameworkHost, PtSvcHost, AMSPTelemetryService, PtWatchDog), NVIDIA (NVDisplay.Container, nvcontainer), WUDFHost, msedgewebview2, IObit (mainProcess, ASCService)
+
+### Version Bumped
+- All `.csproj` files: 4.0.0 → 4.1.0
+- `version.txt`: 4.0.0 → 4.1.0
+- `setup.iss`: 4.0.0 → 4.1.0
+- All User-Agent strings: 4.0.0 → 4.1.0
+- All documentation headers: 4.0.0 → 4.1.0
+
+---
+
 ## [4.0.0] - 2026-05-26
 
 ### Added — Anti-Tamper & Route Remediation

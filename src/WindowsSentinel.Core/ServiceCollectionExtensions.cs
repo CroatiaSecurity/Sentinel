@@ -41,6 +41,7 @@ using ThreatReportingConfig = WindowsSentinel.Core.Response.ThreatReportingConfi
 // 3.8.0 — Campaign Detection False-Positive Fix (exact filename matching, removed generic IOCs)
 // 3.9.0 — Deception Cleanup & Auto-Reporting (sparse bomb cleanup, threat reporting enabled by default)
 // 4.0.0 — Anti-Tamper & Route Remediation (self-reinstall, last-gasp, anti-suspend, route cleanup)
+// 4.1.0 — False Positive Reduction & Third-Party AV Coexistence (Trend Micro, IObit, Ashampoo allowlists, DNS Blocklist Engine)
 
 namespace WindowsSentinel.Core;
 
@@ -50,31 +51,33 @@ namespace WindowsSentinel.Core;
 public static class SentinelVersion
 {
     /// <summary>
-    /// Current version - 4.0.0 Anti-Tamper and Route Remediation
+    /// Current version - 4.1.0 False Positive Reduction & Third-Party AV Coexistence
     /// Version is managed in version.txt for consistency across build scripts
     /// </summary>
-    public const string Version = "4.0.0";
+    public const string Version = "4.1.0";
 
     /// <summary>
     /// Release date
     /// </summary>
-    public static readonly DateTime ReleaseDate = new(2026, 5, 26);
+    public static readonly DateTime ReleaseDate = new(2026, 5, 27);
 
     /// <summary>
     /// Version description
     /// </summary>
     public const string Description =
-        "4.0.0 — Anti-Tamper and Route Remediation. " +
-        "Prevents silent service removal: AntiTamperGuard self-reinstalls the service " +
-        "via native SCM APIs if the registry key is deleted. Last-gasp logging writes " +
-        "death events to a separate tamper-proof file on process termination. Anti-suspend " +
-        "detection identifies NtSuspendProcess attacks via execution gap monitoring. " +
-        "Route table remediation: automatically deletes malicious persistent /32 host routes " +
-        "on detection AND on startup (cleans up pre-existing attack infrastructure). " +
-        "RemoteAccessMonitor: detects unauthorized remote access tools (VNC, TeamViewer, " +
-        "AnyDesk, ScreenConnect, RustDesk, ngrok, chisel, 30+ tools), RDP state changes, " +
-        "active RDP sessions, and remote access listening ports. " +
-        "Addresses the 2026-05-25 attack where Sentinel was silently removed overnight.";
+        "4.1.0 — False Positive Reduction & Third-Party AV Coexistence. " +
+        "Fixes critical false positives that caused Trend Micro to flag Sentinel as malicious " +
+        "(RAN4936T ransomware behavioral detection triggered by ACL test files, process dumps, " +
+        "and honeypot deception files). Adds comprehensive allowlists for Trend Micro, IObit " +
+        "Advanced SystemCare, and Ashampoo WinOptimizer processes across all detection monitors. " +
+        "Fixes Cobalt Strike campaign IOC false positive on Microsoft Store apps (x64_ pattern). " +
+        "Fixes unsigned binary FP for system32 binaries reported without full path by ETW. " +
+        "Fixes module validation FP for legitimate unsigned system DLLs (netprofm.dll, " +
+        "frameservermonitor.dll). Fixes TLS MITM FP for Cloudflare DNS using SSL.com CA. " +
+        "Fixes Discord sustained connection FP (AppData install path). Fixes ransomware I/O " +
+        "FP for Kiro IDE. Adds DNS Blocklist Engine with auto-fetching threat intelligence " +
+        "feeds (URLhaus, ThreatFox, Feodo Tracker, PhishTank, OpenPhish, Botvrij.eu). " +
+        "Only blocks confirmed malware/C2/phishing — no ads, no piracy, no gray areas.";
 }
 
 public static class ServiceCollectionExtensions
@@ -402,6 +405,8 @@ public static class ServiceCollectionExtensions
         // ═══════════════════════════════════════════════════════════════════════
 
         // ── DNS Query Monitor (DGA detection, DNS tunneling) ──────────────────
+        services.AddSingleton<DnsBlocklistEngine>();
+        services.AddHostedService(sp => sp.GetRequiredService<DnsBlocklistEngine>());
         services.AddSingleton<IMonitor, DnsQueryMonitor>();
 
         // ── Parent PID Spoof Detector ─────────────────────────────────────────

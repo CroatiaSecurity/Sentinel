@@ -138,10 +138,13 @@ public sealed class CampaignIocRule : IDetectionRule
         },
 
         // Cobalt Strike patterns
+        // v4.1.0: Removed "x86_" and "x64_" — these are architecture suffixes in
+        // legitimate Microsoft Store app paths (e.g., Microsoft.DesktopAppInstaller_1.28.239.0_x64__8wekyb3d8bbwe).
+        // Cobalt Strike detection is handled by beaconing, named pipes, and memory behavior instead.
         ["Cobalt Strike"] = new[]
         {
-            "beacon", "stager", "malleable",
-            "x86_", "x64_", "cobaltstrike",
+            "beacon.dll", "beacon.exe", "stager", "malleable",
+            "cobaltstrike", "cobalt_strike",
         },
     };
 

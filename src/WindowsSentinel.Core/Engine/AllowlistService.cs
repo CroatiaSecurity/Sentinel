@@ -34,19 +34,39 @@ public sealed class AllowlistService
     // Signed vendor trust (built-in, not persisted)
     private static readonly HashSet<string> TrustedPublishers = new(StringComparer.OrdinalIgnoreCase)
     {
+        // OS vendors
         "Microsoft Corporation",
         "Microsoft Windows",
         "Microsoft Windows Publisher",
+        "Apple Inc.",
+        // Browsers
         "Google LLC",
         "Google Inc",
         "Mozilla Corporation",
-        "Apple Inc.",
+        "Brave Software, Inc.",
+        "Opera Norway AS",
+        "Vivaldi Technologies AS",
+        // Creative / productivity
         "Adobe Inc.",
         "Adobe Systems Incorporated",
+        "Figma, Inc.",
+        "Notion Labs, Inc.",
+        "Obsidian",
+        // Hardware / drivers
         "Intel Corporation",
         "Intel(R) Corporation",
         "NVIDIA Corporation",
         "Advanced Micro Devices, Inc.",
+        "Realtek Semiconductor Corp.",
+        "Logitech",
+        "Corsair Memory, Inc.",
+        "SteelSeries ApS",
+        "Razer Inc.",
+        "HyperX",
+        "Samsung Electronics Co., Ltd.",
+        "Western Digital Technologies, Inc.",
+        "Seagate Technology LLC",
+        // Gaming
         "Valve Corp.",
         "Valve",
         "Epic Games, Inc.",
@@ -54,6 +74,16 @@ public sealed class AllowlistService
         "Electronic Arts, Inc.",
         "Blizzard Entertainment, Inc.",
         "Steam",
+        "Ubisoft Entertainment SA",
+        "CD PROJEKT S.A.",
+        "Rockstar Games, Inc.",
+        "Take-Two Interactive Software, Inc.",
+        "Bethesda Softworks LLC",
+        "BANDAI NAMCO Entertainment Inc.",
+        "Square Enix Co., Ltd.",
+        "Capcom Co., Ltd.",
+        "SEGA Corporation",
+        // Dev tools
         "JetBrains s.r.o.",
         "JetBrains",
         "GitHub, Inc.",
@@ -64,16 +94,59 @@ public sealed class AllowlistService
         "Canonical Ltd.",
         "Node.js Foundation",
         "Python Software Foundation",
+        "The Git Development Community",
+        "Sublime HQ Pty Ltd",
+        "Panic, Inc.",
+        // Communication
         "Zoom Video Communications, Inc.",
         "Slack Technologies, Inc.",
         "Spotify AB",
         "Discord Inc.",
+        "Telegram FZ-LLC",
+        "Signal Messenger, LLC",
+        "WhatsApp LLC",
+        // Media / streaming
         "OBS Project",
+        "VideoLAN",
+        "Plex, Inc.",
+        "Audacity Team",
+        "GIMP",
+        // Utilities
         "Notepad++",
         "WireGuard LLC",
         "OpenVPN Inc.",
         "7-Zip",
         "Igor Pavlov",
+        "WinRAR GmbH",
+        "RARLAB",
+        "PeaZip",
+        "Bitwarden Inc.",
+        "AgileBits Inc.",
+        "NordVPN S.A.",
+        "ExpressVPN",
+        "Mullvad VPN AB",
+        "ProtonVPN AG",
+        "Proton AG",
+        "Malwarebytes Inc.",
+        "Malwarebytes Corporation",
+        // Security / optimization products
+        "Trend Micro Inc.",
+        "Trend Micro, Inc.",
+        "IObit",
+        "IObit Information Technology",
+        "Ashampoo GmbH & Co. KG",
+        "Piriform Software Ltd",  // CCleaner
+        "Gen Digital Inc.",       // Norton/Avast/AVG parent
+        "ESET, spol. s r.o.",
+        "Kaspersky Lab",
+        "Bitdefender SRL",
+        "F-Secure Corporation",
+        "Sophos Ltd",
+        // Cloud / productivity
+        "Dropbox, Inc.",
+        "Box, Inc.",
+        "Atlassian Pty Ltd",
+        "Salesforce, Inc.",
     };
 
     // Development tools — processes that legitimately do "suspicious" things
@@ -82,40 +155,67 @@ public sealed class AllowlistService
         // IDEs
         "devenv", "rider64", "code", "idea64", "webstorm64", "pycharm64",
         "clion64", "goland64", "rubymine64", "phpstorm64", "datagrip64",
-        "android studio", "eclipse", "netbeans",
+        "android studio", "eclipse", "netbeans", "sublime_text", "notepad++",
+        "cursor", "Kiro", "zed", "fleet",
         // Build tools
         "msbuild", "dotnet", "node", "npm", "npx", "yarn", "pnpm",
-        "python", "python3", "pip", "pip3", "cargo", "rustc",
+        "python", "python3", "pip", "pip3", "cargo", "rustc", "rustup",
         "go", "javac", "java", "gradle", "gradlew", "mvn", "maven",
         "cmake", "make", "ninja", "cl", "link", "gcc", "g++", "clang",
-        "tsc", "webpack", "vite", "esbuild", "rollup",
+        "tsc", "webpack", "vite", "esbuild", "rollup", "turbo", "nx",
+        "deno", "bun",
         // Containers & VMs
         "docker", "dockerd", "docker-compose", "podman", "containerd",
         "wsl", "wslhost", "vmware", "vmplayer", "virtualbox", "vboxheadless",
-        "hyper-v", "vmms", "vmwp",
+        "hyper-v", "vmms", "vmwp", "qemu-system-x86_64",
         // Version control
-        "git", "git-remote-https", "gh", "svn",
+        "git", "git-remote-https", "gh", "svn", "hg",
         // Package managers
-        "nuget", "choco", "chocolatey", "winget", "scoop",
+        "nuget", "choco", "chocolatey", "winget", "scoop", "pip", "conda",
         // Debuggers & profilers
         "windbg", "cdb", "ntsd", "procdump", "procmon", "procexp",
         "perfview", "dotnet-trace", "dotnet-dump", "dotnet-counters",
+        "x64dbg", "x32dbg", "ollydbg",
         // Terminals
         "windowsterminal", "wt", "conhost", "mintty", "alacritty",
-        "powershell", "pwsh",
+        "powershell", "pwsh", "cmd", "bash", "wezterm-gui",
+        // Database tools
+        "ssms", "mysql", "psql", "mongod", "redis-server", "sqlite3",
+        // API / network tools
+        "postman", "insomnia", "curl", "wget", "httpie",
+        "fiddler", "wireshark", "nmap",
     };
 
     // Gaming processes — never interfere with games
     private static readonly HashSet<string> GamingProcesses = new(StringComparer.OrdinalIgnoreCase)
     {
+        // Launchers
         "steam", "steamwebhelper", "steamservice",
         "epicgameslauncher", "easyanticheat", "battleye",
-        "origin", "ea app", "eadesktop",
+        "origin", "ea app", "eadesktop", "EABackgroundService",
         "battle.net", "agent",
-        "gog galaxy", "galaxyclient",
-        "ubisoft game launcher", "uplay",
+        "gog galaxy", "galaxyclient", "GalaxyClient",
+        "ubisoft game launcher", "uplay", "UbisoftConnect",
         "riotclientservices", "valorant", "leagueclient",
         "overwolf",
+        "playnite", "Playnite.DesktopApp",
+        "heroic", "lutris",
+        // Anti-cheat (these do kernel-level stuff that looks suspicious)
+        "EasyAntiCheat", "EasyAntiCheat_EOS",
+        "BEService", "BEService_x64",
+        "vgc", "vgtray",                    // Vanguard (Valorant)
+        "PnkBstrA", "PnkBstrB",             // PunkBuster
+        "FaceItService", "faceit",
+        // Common game engines / runtimes
+        "UnityCrashHandler64", "CrashReportClient",
+        "UnrealCEFSubProcess",
+        // Specific popular games (high-IO, network, memory patterns)
+        "GTA5", "RDR2", "eldenring", "cyberpunk2077",
+        "Overwatch", "Diablo IV", "WorldOfWarcraft",
+        "FortniteClient-Win64-Shipping",
+        "csgo", "cs2", "dota2",
+        "Minecraft.Windows", "javaw",
+        "ffxiv_dx11", "FFXIV",
     };
 
     // Paths that are always legitimate (never flag files here)

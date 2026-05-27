@@ -1,3 +1,4 @@
+using System.Net;
 using Microsoft.Diagnostics.Tracing;
 using Microsoft.Diagnostics.Tracing.Session;
 using Microsoft.Extensions.Logging;
@@ -29,6 +30,7 @@ public sealed class DnsQueryMonitor : IMonitor
 
     private readonly IDetectionEngine _detectionEngine;
     private readonly TelemetryFusionEngine? _fusionEngine;
+    private readonly DnsBlocklistEngine? _blocklistEngine;
     private readonly ILogger<DnsQueryMonitor> _logger;
 
     private TraceEventSession? _session;
@@ -96,11 +98,13 @@ public sealed class DnsQueryMonitor : IMonitor
     public DnsQueryMonitor(
         IDetectionEngine detectionEngine,
         ILogger<DnsQueryMonitor> logger,
-        TelemetryFusionEngine? fusionEngine = null)
+        TelemetryFusionEngine? fusionEngine = null,
+        DnsBlocklistEngine? blocklistEngine = null)
     {
         _detectionEngine = detectionEngine;
         _logger = logger;
         _fusionEngine = fusionEngine;
+        _blocklistEngine = blocklistEngine;
     }
 
     public Task StartAsync(CancellationToken cancellationToken)
@@ -169,6 +173,89 @@ public sealed class DnsQueryMonitor : IMonitor
 
         // Skip safe domains
         if (IsSafeDomain(queryName)) return;
+
+        // ═══════════════════════════════════════════════════════════════════
+        // v4.1.0: DNS BLOCKLIST CHECK
+        // Check resolved domain against auto-fetched threat intelligence feeds.
+        // Blocks: malware payload delivery, C2 infrastructure, credential phishing.
+        // Does NOT block: ads, trackers, piracy, coin miners, gray-area PUPs.
+        // Response: Tier1 detection + Windows Firewall block on the resolved IP.
+        // ═══════════════════════════════════════════════════════════════════
+        if (_blocklistEngine != null &&
+            _blocklistEngine.IsBlocked(queryName, out var blockCategory, out var blockReason))
+        {
+            var processName = GetProcessNameSafe(processPid);
+
+            var tier = DetectionTier.Tier1Behavioral; // Kill-authorized for confirmed malicious infra
+            double confidence = blockCategory switch
+            {
+                BlocklistCategory.C2 => 0.92,       // C2 infrastructure — high confidence
+                BlocklistCategory.Malware => 0.90,  // Payload delivery — high confidence
+                BlocklistCategory.Phishing => 0.85, // Credential theft — slightly lower (legit domains get compromised)
+                _ => 0.85
+            };
+
+            string ruleName = blockCategory switch
+            {
+                BlocklistCategory.C2 => "DNS Blocklist: C2 Infrastructure Domain",
+                BlocklistCategory.Malware => "DNS Blocklist: Malware Distribution Domain",
+                BlocklistCategory.Phishing => "DNS Blocklist: Credential Phishing Domain",
+                _ => "DNS Blocklist: Malicious Domain"
+            };
+
+            _ = _detectionEngine.EmitAsync(new DetectionEvent
+            {
+                RuleName = ruleName,
+                Evidence = $"Process '{processName ?? processPid.ToString()}' (PID {processPid}) resolved " +
+                          $"known-malicious domain: {queryName}. Category: {blockCategory}. " +
+                          $"Reason: {blockReason}",
+                Reasoning = blockCategory switch
+                {
+                    BlocklistCategory.C2 =>
+                        "Domain is confirmed C2 infrastructure (botnet controller, RAT server, or " +
+                        "beacon endpoint). Resolution by any process indicates active compromise or " +
+                        "malware attempting to establish command & control communication.",
+                    BlocklistCategory.Malware =>
+                        "Domain is confirmed malware distribution infrastructure (hosting droppers, " +
+                        "exploit kits, or ransomware payloads). Resolution indicates a process is " +
+                        "attempting to download a malicious payload.",
+                    BlocklistCategory.Phishing =>
+                        "Domain is a confirmed credential-stealing phishing page. Resolution indicates " +
+                        "a user or process is being directed to a fake login page designed to harvest credentials.",
+                    _ =>
+                        "Domain is on a confirmed malicious infrastructure blocklist maintained by " +
+                        "community threat intelligence feeds (abuse.ch, PhishTank, OpenPhish)."
+                },
+                Confidence = confidence,
+                Tier = tier,
+                ProcessName = processName ?? processPid.ToString(),
+                ProcessId = processPid,
+                Timestamp = DateTimeOffset.UtcNow,
+                Metadata = new Dictionary<string, string>
+                {
+                    ["domain"] = queryName,
+                    ["category"] = blockCategory.ToString(),
+                    ["reason"] = blockReason,
+                    ["technique"] = blockCategory switch
+                    {
+                        BlocklistCategory.C2 => "T1071.001 - Application Layer Protocol: Web Protocols",
+                        BlocklistCategory.Malware => "T1105 - Ingress Tool Transfer",
+                        BlocklistCategory.Phishing => "T1566.002 - Phishing: Spearphishing Link",
+                        _ => "T1204.001 - User Execution: Malicious Link"
+                    },
+                    ["remote_address"] = queryName,
+                    ["blocklist_hit"] = "true"
+                }
+            }, ct);
+
+            _logger.LogCritical(
+                "[DnsBlocklist] BLOCKED: Process '{Process}' (PID {Pid}) resolved malicious domain " +
+                "'{Domain}' — Category: {Category}",
+                processName ?? "unknown", processPid, queryName, blockCategory);
+
+            // Attempt to block via Windows Firewall (resolve domain to IP and block)
+            BlockDomainViaFirewall(queryName, processPid);
+        }
 
         // Cleanup old stats periodically
         if ((DateTimeOffset.UtcNow - _lastCleanup).TotalMinutes > 2)
@@ -392,6 +479,76 @@ public sealed class DnsQueryMonitor : IMonitor
         _logger.LogInformation("[{Monitor}] Stopping.", Name);
         _session?.Stop();
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Blocks a malicious domain by resolving it to IP(s) and adding outbound
+    /// Windows Firewall block rules. Uses the same COM API pattern as ChainTracer.
+    /// Best-effort: if resolution or firewall fails, the detection still fires.
+    /// </summary>
+    private void BlockDomainViaFirewall(string domain, int triggerPid)
+    {
+        try
+        {
+            // Resolve domain to IP addresses
+            IPAddress[] addresses;
+            try
+            {
+                addresses = Dns.GetHostAddresses(domain);
+            }
+            catch
+            {
+                // Resolution failed (domain may already be sinkholed or DNS is down)
+                // Detection was already emitted — this is just the blocking response
+                return;
+            }
+
+            if (addresses.Length == 0) return;
+
+            var fwPolicyType = Type.GetTypeFromProgID("HNetCfg.FwPolicy2");
+            var fwRuleType = Type.GetTypeFromProgID("HNetCfg.FWRule");
+            if (fwPolicyType == null || fwRuleType == null) return;
+
+            var firewallPolicy = (dynamic)Activator.CreateInstance(fwPolicyType)!;
+
+            foreach (var ip in addresses)
+            {
+                // Skip loopback / link-local
+                if (IPAddress.IsLoopback(ip)) continue;
+                if (ip.IsIPv6LinkLocal) continue;
+
+                var ipStr = ip.ToString();
+                var ruleName = $"Sentinel_DnsBlock_{domain}_{Guid.NewGuid():N}";
+
+                try
+                {
+                    var firewallRule = (dynamic)Activator.CreateInstance(fwRuleType)!;
+                    firewallRule.Name = ruleName;
+                    firewallRule.Description =
+                        $"Sentinel: Blocked malicious domain '{domain}' (resolved to {ipStr}, trigger PID {triggerPid})";
+                    firewallRule.Protocol = 256; // NET_FW_IP_PROTOCOL_ANY
+                    firewallRule.Direction = 2;  // NET_FW_RULE_DIR_OUT
+                    firewallRule.Action = 0;     // NET_FW_ACTION_BLOCK
+                    firewallRule.RemoteAddresses = ipStr;
+                    firewallRule.Enabled = true;
+                    firewallRule.Profiles = 0x7FFFFFFF; // All profiles
+
+                    firewallPolicy.Rules.Add(firewallRule);
+
+                    _logger.LogCritical(
+                        "[DnsBlocklist] FIREWALL BLOCK: {Domain} → {IP} (rule: {Rule})",
+                        domain, ipStr, ruleName);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "[DnsBlocklist] Firewall rule creation failed for {IP}", ipStr);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "[DnsBlocklist] Firewall blocking failed for domain {Domain}", domain);
+        }
     }
 
     public async ValueTask DisposeAsync()

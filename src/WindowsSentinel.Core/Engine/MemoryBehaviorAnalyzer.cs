@@ -55,12 +55,14 @@ public sealed class MemoryBehaviorAnalyzer : BackgroundService
         // Language runtimes with JIT
         "java.exe", "javaw.exe", "node.exe", "python.exe", "python3.exe",
         "ruby.exe", "dotnet.exe", "pwsh.exe", "powershell.exe",
+        "deno.exe", "bun.exe",
         // Browsers (V8/SpiderMonkey JIT)
         "chrome.exe", "firefox.exe", "msedge.exe", "opera.exe", "brave.exe",
-        "vivaldi.exe", "arc.exe",
+        "vivaldi.exe", "arc.exe", "thorium.exe",
         // IDEs and dev tools
         "devenv.exe", "code.exe", "rider64.exe", "idea64.exe",
         "pycharm64.exe", "webstorm64.exe", "goland64.exe", "clion64.exe",
+        "cursor.exe", "Cursor.exe", "zed.exe",
         // Electron apps (Chromium V8 JIT — always have RWX)
         "Kiro.exe", "discord.exe", "Discord.exe",
         "slack.exe", "Slack.exe",
@@ -81,10 +83,37 @@ public sealed class MemoryBehaviorAnalyzer : BackgroundService
         "linear.exe", "Linear.exe",
         "todoist.exe", "Todoist.exe",
         "clickup.exe", "ClickUp.exe",
+        "trello.exe", "Trello.exe",
+        "mongodb-compass.exe",
+        "hyper.exe", "Hyper.exe",
+        "warp.exe",
+        // Edge WebView2 (Chromium-based, used by many apps)
+        "msedgewebview2.exe", "msedgewebview2",
         // Steam (CEF/Chromium embedded)
         "steam.exe", "steamwebhelper.exe",
+        // Epic Games (CEF embedded)
+        "epicgameslauncher.exe", "EpicWebHelper.exe",
         // Other JIT engines
-        "v8_shell.exe", "deno.exe", "bun.exe"
+        "v8_shell.exe",
+        // v4.1.0: Antivirus/security products (use dynamic code generation for scanning engines)
+        "TmsaInstance64.exe", "TmsaInstance64",   // Trend Micro Security Agent
+        "coreServiceShell.exe", "coreServiceShell", // Trend Micro Core Service
+        "coreFrameworkHost.exe", "coreFrameworkHost", // Trend Micro Core Framework
+        "PtSessionAgent.exe", "PtSessionAgent",   // Trend Micro Platinum Session
+        "uiSeAgnt.exe", "uiSeAgnt",               // Trend Micro UI Agent
+        "PtSvcHost.exe", "PtSvcHost",             // Trend Micro Platinum Service
+        "AMSPTelemetryService.exe", "AMSPTelemetryService", // Trend Micro AMSP
+        "msmpeng.exe", "MsMpEng.exe",             // Windows Defender
+        "mssense.exe", "MsSense.exe",             // Defender for Endpoint
+        // IObit (optimization engine uses dynamic code)
+        "mainProcess.exe", "mainProcess",         // IObit Advanced SystemCare
+        "ASCService.exe", "ASCService",           // IObit ASC Service
+        "DriverBooster.exe", "DriverBooster",     // IObit Driver Booster
+        // Ashampoo (optimization engine)
+        "LiveTuner3.exe", "LiveTuner3",           // Ashampoo WinOptimizer Live Tuner
+        // NVIDIA (GPU compute / shader compilation)
+        "NVDisplay.Container.exe", "NVDisplay.Container",
+        "nvcontainer.exe", "nvcontainer",
     };
 
     // Native methods for memory scanning

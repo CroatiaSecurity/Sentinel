@@ -195,16 +195,25 @@ public sealed class ModuleValidationMonitor : BackgroundService
     {
         int score = 0;
         var reasons = new List<string>();
+        var lower = path.ToLowerInvariant();
 
-        if (isCritical && !info.IsSigned)
+        // v4.1.0: Don't flag unsigned DLLs that are in system directories.
+        // Many legitimate Windows DLLs (netprofm.dll, frameservermonitor.dll, etc.)
+        // are not Authenticode-signed but are still legitimate system components.
+        bool isInSystemPath = lower.Contains(@"\windows\system32\") ||
+                              lower.Contains(@"\windows\syswow64\") ||
+                              lower.Contains(@"\windows\winsxs\") ||
+                              lower.Contains(@"\program files\") ||
+                              lower.Contains(@"\program files (x86)\");
+
+        if (isCritical && !info.IsSigned && !isInSystemPath)
         {
             score += 60; reasons.Add("unsigned module in critical process");
         }
-        if (isHighValue && !info.IsSigned)
+        if (isHighValue && !info.IsSigned && !isInSystemPath)
         {
             score += 40; reasons.Add("unsigned module in browser/office app");
         }
-        var lower = path.ToLowerInvariant();
         if (lower.Contains(@"\temp\") || lower.Contains(@"\tmp\") ||
             lower.Contains(@"\appdata\local\temp"))
         {

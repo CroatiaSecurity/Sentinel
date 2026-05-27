@@ -54,9 +54,9 @@ public sealed class TlsCertificateMonitor : BackgroundService
     {
         new("https://www.google.com", new[] { "Google Trust Services", "GTS CA", "GlobalSign" }),
         new("https://www.microsoft.com", new[] { "Microsoft", "DigiCert", "Baltimore CyberTrust", "Akamai" }),
-        new("https://one.one.one.one", new[] { "DigiCert", "Cloudflare", "Google Trust Services", "GTS" }),
+        new("https://one.one.one.one", new[] { "DigiCert", "Cloudflare", "Google Trust Services", "GTS", "SSL.com" }),
         new("https://github.com", new[] { "DigiCert", "Sectigo", "Let's Encrypt" }),
-        new("https://www.cloudflare.com", new[] { "DigiCert", "Cloudflare", "Google Trust Services", "GTS" }),
+        new("https://www.cloudflare.com", new[] { "DigiCert", "Cloudflare", "Google Trust Services", "GTS", "SSL.com" }),
     };
 
     // Known enterprise TLS inspection CAs (Tier2 — legitimate but worth noting)
@@ -370,7 +370,7 @@ public sealed class TlsCertificateMonitor : BackgroundService
         };
 
         using var client = new HttpClient(handler) { Timeout = HttpTimeout };
-        client.DefaultRequestHeaders.UserAgent.ParseAdd("WindowsSentinel/4.0.0");
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("WindowsSentinel/4.1.0");
 
         try
         {

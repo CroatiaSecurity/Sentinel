@@ -115,24 +115,38 @@ public sealed class DataExfiltrationMonitor : BackgroundService
     {
         // Browsers
         "chrome", "firefox", "msedge", "brave", "opera", "vivaldi",
-        // Communication
+        // Communication / social
         "teams", "slack", "discord", "zoom", "webex",
+        "telegram", "signal", "whatsapp", "skype",
+        "thunderbird", "outlook",
         // Cloud sync
         "onedrive", "dropbox", "googledrivesync", "icloud",
+        "megasync", "pcloud", "boxsync", "nextcloud",
         // Games (common launchers — individual games are covered by trusted path check)
         "steam", "steamwebhelper", "epicgameslauncher", "origin", "galaxyclient",
+        "battle.net", "eadesktop", "UbisoftConnect",
         // Dev tools
-        "code", "devenv", "rider",
+        "code", "devenv", "rider64", "Kiro", "cursor",
         "git", "git-remote-https", "gh",
         "node", "dotnet", "python", "java",
+        "docker", "dockerd", "kubectl",
         // FTP/SSH clients
         "putty", "winscp", "filezilla", "kitty", "mobaxterm",
+        "ssh", "sftp", "scp",
+        // VPN / network
+        "wireguard", "openvpn", "nordvpn", "ExpressVPN",
+        "mullvad-daemon", "ProtonVPN",
         // System
-        "svchost", "wuauclt",
+        "svchost", "wuauclt", "backgroundtaskhost",
         "sentinelservice", "sentinelagent",
         "msmpeng", "mpcmdrun",
-        // Media
-        "spotify", "vlc", "mpc-hc",
+        // Security products (legitimate outbound for updates/telemetry)
+        "TmsaInstance64", "coreServiceShell", "PtSvcHost", "AMSPTelemetryService",
+        "ASCService", "LiveTuner3",
+        // Media / streaming
+        "spotify", "vlc", "mpc-hc", "plex", "plexmediaserver",
+        // Backup
+        "veeam", "acronis", "backblaze", "crashplan",
     };
 
     // Processes that legitimately read from USB drives
@@ -604,6 +618,19 @@ public sealed class DataExfiltrationMonitor : BackgroundService
             if (path.Contains(@"\Program Files\", StringComparison.OrdinalIgnoreCase) ||
                 path.Contains(@"\Program Files (x86)\", StringComparison.OrdinalIgnoreCase))
                 return true;
+
+            // v4.1.0: Trust well-known apps that install to AppData (Electron apps, Discord, Spotify, etc.)
+            // These are verified by process name match + known install path pattern.
+            var pathLower = path.ToLowerInvariant();
+            if (pathLower.Contains(@"\appdata\local\") || pathLower.Contains(@"\appdata\roaming\"))
+            {
+                // Only trust if the folder name matches the process name (prevents impersonation)
+                var processLower = processName.ToLowerInvariant();
+                if (pathLower.Contains($@"\{processLower}\") ||
+                    pathLower.Contains($@"\{processLower}app\") ||  // e.g., \discordapp\ 
+                    pathLower.Contains($@"\programs\{processLower}"))
+                    return true;
+            }
 
             // NOT in a trusted path — don't trust it even if name matches
             return false;

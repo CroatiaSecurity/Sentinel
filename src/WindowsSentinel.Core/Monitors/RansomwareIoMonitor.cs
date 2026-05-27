@@ -39,11 +39,18 @@ public sealed class RansomwareIoMonitor : BackgroundService
         "googledrivesync", "googlebackupandsync", "boxsync", "pcloud", "megasync",
         // AV
         "msmpeng", "nissrv", "avp", "avastsvc", "avgsvc", "mcshield", "ccsvchst",
+        // v4.1.0: Trend Micro (legitimate high-IO during scans)
+        "TmsaInstance64", "coreServiceShell", "coreFrameworkHost", "PtSvcHost",
+        "AMSPTelemetryService", "uiSeAgnt", "PtSessionAgent",
         // System
         "svchost", "lsass", "services", "csrss", "smss", "dwm", "winlogon", "wininit",
         "msiexec", "trustedinstaller", "tiworker", "wuauclt",
-        // Dev
-        "git", "devenv", "code", "rider64"
+        // Dev / IDEs (high write I/O during builds, indexing, language server operations)
+        "git", "devenv", "code", "rider64",
+        // v4.1.0: Kiro IDE (Electron — heavy file I/O during workspace indexing and AI operations)
+        "Kiro", "kiro",
+        // v4.1.0: IObit / Ashampoo (optimization tools do mass file operations)
+        "mainProcess", "ASCService", "DriverBooster", "LiveTuner3",
     };
 
     private readonly IDetectionEngine _engine;

@@ -47,6 +47,12 @@ public sealed class UnsignedBinaryRule : IDetectionRule
         if (proc.EventType != "ProcessStart") return null;
         if (string.IsNullOrWhiteSpace(proc.ImagePath)) return null;
 
+        // v4.1.0: If ImagePath is just a filename (no path separator), ETW didn't provide
+        // the full path. These are almost always system binaries launched by the kernel.
+        // Don't flag them — we can't verify their location.
+        if (!proc.ImagePath.Contains('\\') && !proc.ImagePath.Contains('/'))
+            return null;
+
         // Skip trusted system paths
         bool inTrustedPath = TrustedPaths.Any(p =>
             proc.ImagePath.StartsWith(p, StringComparison.OrdinalIgnoreCase));
