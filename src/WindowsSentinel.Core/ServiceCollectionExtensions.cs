@@ -42,6 +42,7 @@ using ThreatReportingConfig = WindowsSentinel.Core.Response.ThreatReportingConfi
 // 3.9.0 — Deception Cleanup & Auto-Reporting (sparse bomb cleanup, threat reporting enabled by default)
 // 4.0.0 — Anti-Tamper & Route Remediation (self-reinstall, last-gasp, anti-suspend, route cleanup)
 // 4.1.0 — False Positive Reduction & Third-Party AV Coexistence (Trend Micro, IObit, Ashampoo allowlists, DNS Blocklist Engine)
+// 4.2.0 — Device Installation Security & Ghost Device Cleanup (virtual keyboard/NIC/storage detection, BYOVD driver monitoring, phantom device cleanup)
 
 namespace WindowsSentinel.Core;
 
@@ -54,30 +55,26 @@ public static class SentinelVersion
     /// Current version - 4.1.0 False Positive Reduction & Third-Party AV Coexistence
     /// Version is managed in version.txt for consistency across build scripts
     /// </summary>
-    public const string Version = "4.1.0";
+    public const string Version = "4.2.0";
 
     /// <summary>
     /// Release date
     /// </summary>
-    public static readonly DateTime ReleaseDate = new(2026, 5, 27);
+    public static readonly DateTime ReleaseDate = new(2026, 5, 28);
 
     /// <summary>
     /// Version description
     /// </summary>
     public const string Description =
-        "4.1.0 — False Positive Reduction & Third-Party AV Coexistence. " +
-        "Fixes critical false positives that caused Trend Micro to flag Sentinel as malicious " +
-        "(RAN4936T ransomware behavioral detection triggered by ACL test files, process dumps, " +
-        "and honeypot deception files). Adds comprehensive allowlists for Trend Micro, IObit " +
-        "Advanced SystemCare, and Ashampoo WinOptimizer processes across all detection monitors. " +
-        "Fixes Cobalt Strike campaign IOC false positive on Microsoft Store apps (x64_ pattern). " +
-        "Fixes unsigned binary FP for system32 binaries reported without full path by ETW. " +
-        "Fixes module validation FP for legitimate unsigned system DLLs (netprofm.dll, " +
-        "frameservermonitor.dll). Fixes TLS MITM FP for Cloudflare DNS using SSL.com CA. " +
-        "Fixes Discord sustained connection FP (AppData install path). Fixes ransomware I/O " +
-        "FP for Kiro IDE. Adds DNS Blocklist Engine with auto-fetching threat intelligence " +
-        "feeds (URLhaus, ThreatFox, Feodo Tracker, PhishTank, OpenPhish, Botvrij.eu). " +
-        "Only blocks confirmed malware/C2/phishing — no ads, no piracy, no gray areas.";
+        "4.2.0 — Device Installation Security & Ghost Device Cleanup. " +
+        "DeviceInstallMonitor: detects new device installations at runtime including virtual " +
+        "keyboards (phantom HID injection), rogue network adapters (TAP/VPN for MITM), " +
+        "storage devices (iSCSI/virtual disk for payload delivery), and kernel driver loads " +
+        "(BYOVD attacks). Baselines all devices on startup, uses WMI real-time events + polling. " +
+        "Scans for hidden/ghost devices (registered but not connected — attacker persistence). " +
+        "Startup cleanup removes stuck/obsolete/phantom devices via SetupAPI. " +
+        "DNS Blocklist Engine: auto-fetching threat intel feeds (URLhaus, ThreatFox, Feodo " +
+        "Tracker, PhishTank, OpenPhish, Botvrij.eu) block confirmed malware/C2/phishing at DNS level.";
 }
 
 public static class ServiceCollectionExtensions
@@ -536,6 +533,9 @@ public static class ServiceCollectionExtensions
 
         // ── Remote Access Monitor (v4.0.0: unauthorized RDP/VNC/TeamViewer detection) ──
         services.AddHostedService<RemoteAccessMonitor>();
+
+        // ── Device Installation Monitor (v4.2.0: virtual keyboard, rogue NIC, storage, driver load) ──
+        services.AddHostedService<DeviceInstallMonitor>();
 
         // ── DNS Response Validation (DNS poisoning, captive portal detection) ─
         services.AddHostedService<DnsResponseValidationMonitor>();

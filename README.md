@@ -2,7 +2,7 @@
 
 **Userland EDR for Windows — Behavioral Detection, Automated Response & Aggressive Deception**
 
-> Version: 4.1.0 (False Positive Reduction & Third-Party AV Coexistence)  
+> Version: 4.2.0 (Device Installation Security & Ghost Device Cleanup)  
 > Author: [Gorstak](https://gorstak.eu) | [GitHub](https://github.com/CroatiaSecurity/Sentinel)  
 > License: MIT
 
@@ -288,6 +288,8 @@ All tactics:
 | Route remediation | Malicious persistent /32 routes auto-deleted on detection and startup (v4.0.0) |
 | Third-party AV coexistence | Comprehensive allowlists prevent false positives against Trend Micro, IObit, Ashampoo (v4.1.0) |
 | DNS Blocklist Engine | Auto-fetching threat intel feeds block malware/C2/phishing domains at DNS level (v4.1.0) |
+| Device installation monitoring | Detects virtual keyboards, rogue NICs, storage devices, kernel driver loads at runtime (v4.2.0) |
+| Ghost device cleanup | Removes stuck/phantom devices on startup via SetupAPI (v4.2.0) |
 
 ---
 
@@ -339,6 +341,7 @@ All tactics:
 | System Integrity | WindowsUpdateIntegrityMonitor | Service + registry monitoring (WU/BITS stopped, Defender stale) | 3.6.0 |
 | Remote Access | RemoteAccessMonitor | Process scanning (35+ tools), RDP state/session monitoring, port detection | 4.0.0 |
 | DNS Protection | DnsBlocklistEngine | Auto-fetching threat intel feeds (URLhaus, ThreatFox, Feodo, PhishTank, OpenPhish, Botvrij.eu) | 4.1.0 |
+| Device Security | DeviceInstallMonitor | PnP device monitoring (virtual HID, rogue NIC, storage, BYOVD drivers), ghost device cleanup | 4.2.0 |
 
 ---
 
@@ -346,7 +349,7 @@ All tactics:
 
 ```powershell
 # Run installer as Administrator
-.\WindowsSentinelSetup-4.1.0.exe
+.\WindowsSentinelSetup-4.2.0.exe
 ```
 
 The installer:
@@ -426,7 +429,7 @@ cd installer
 .\build.ps1
 ```
 
-Output: `installer\output\WindowsSentinelSetup-4.1.0.exe`
+Output: `installer\output\WindowsSentinelSetup-4.2.0.exe`
 
 ---
 
@@ -517,6 +520,7 @@ installer/
 | 3.9.0 | Deception Cleanup & Auto-Reporting | Sparse file bombs (500GB deception files) now deleted after the 2-second pre-kill window completes. Existing sparse bombs from older versions cleaned up on service startup (handles upgrades). Threat intelligence reporting enabled by default — MalwareBazaar hash logging works without API keys; AbuseIPDB/URLhaus activate when users provide their own free keys (no hardcoded keys). |
 | 4.0.0 | Anti-Tamper & Route Remediation | Prevents silent service removal: AntiTamperGuard self-reinstalls the service via native SCM APIs if the registry key is deleted. Last-gasp logging writes death events to a separate tamper-proof file on process termination. Anti-suspend detection identifies NtSuspendProcess attacks via execution gap monitoring. Route table remediation: automatically deletes malicious persistent /32 host routes on detection AND on startup. RemoteAccessMonitor: detects 35+ unauthorized remote access tools (VNC, TeamViewer, AnyDesk, ScreenConnect, RustDesk, ngrok, chisel, etc.), RDP state changes, active RDP sessions, and remote access listening ports. Addresses the 2026-05-25 attack where Sentinel was silently removed overnight after detecting a traffic interception campaign. |
 | 4.1.0 | False Positive Reduction & AV Coexistence | Fixes critical FPs that caused Trend Micro to kill Sentinel (RAN4936T). Adds comprehensive allowlists for Trend Micro, IObit, Ashampoo across all monitors. Fixes Cobalt Strike FP on Microsoft Store apps, unsigned binary noise from ETW, module validation FP for system DLLs, TLS MITM FP for Cloudflare/SSL.com, Discord sustained connection FP, ransomware I/O FP on Kiro IDE. Adds DNS Blocklist Engine with auto-fetching threat intel feeds (URLhaus, ThreatFox, Feodo Tracker, PhishTank, OpenPhish, Botvrij.eu) — blocks confirmed malware/C2/phishing only, no ads/piracy/gray areas. Expands all allowlists with 100+ commonly-used apps while preserving security model (path verification prevents impersonation, President's Law never bypassed). |
+| 4.2.0 | Device Installation Security & Ghost Device Cleanup | DeviceInstallMonitor: baselines all PnP devices and kernel drivers on startup, detects new installations at runtime via WMI events + polling. Categorizes devices (keyboard/HID, network adapter, storage, other) with appropriate confidence levels. Detects virtual keyboard injection (Tier1 0.82), rogue network adapters (Tier1 0.78), storage devices (Tier1 0.70), and runtime kernel driver loads (Tier1 0.80-0.92). Scans for hidden/ghost devices (registered but not connected) that could be attacker persistence. Startup cleanup removes phantom devices via SetupAPI (equivalent to Device Manager "Show hidden → Uninstall"). Protects boot-critical device classes from removal. BYOVD detection: flags drivers loaded from temp/user paths at 0.92 confidence. |
 
 ---
 

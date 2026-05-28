@@ -2,6 +2,39 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [4.2.0] - 2026-05-28
+
+### Added — Device Installation Security
+
+#### DeviceInstallMonitor (new BackgroundService)
+- **Baselines all PnP devices and kernel drivers on startup** via WMI `Win32_PnPEntity` and `Win32_SystemDriver`. Any device or driver appearing after baseline triggers detection.
+- **Real-time WMI event subscription** (`__InstanceCreationEvent` for `Win32_PnPEntity`) for instant detection of new device installations.
+- **Polling fallback** every 15 seconds catches devices that WMI events might miss.
+- **Device categorization** by class GUID with appropriate severity:
+  - Virtual keyboard/HID: Tier1, confidence 0.82 (phantom keystroke injection)
+  - Network adapter: Tier1, confidence 0.78 (rogue NIC for MITM)
+  - Storage device: Tier1, confidence 0.70 (iSCSI/virtual disk for payload delivery)
+  - Other devices: Tier2, confidence 0.55 (informational)
+- **Kernel driver load detection**: Flags new drivers loaded at runtime (not present at boot). Drivers from temp/user paths get 0.92 confidence (BYOVD pattern).
+- **Hidden/ghost device scanning**: On startup, queries all devices with `ConfigManagerErrorCode != 0` to find phantom devices that are registered but not connected. Suspicious hidden HID/network devices get Tier2 alerts.
+- **Trusted device filtering**: Microsoft virtual devices, Hyper-V, VMware, VirtualBox, WSL, and standard Windows virtual adapters are allowlisted to prevent false positives.
+
+#### Ghost Device Cleanup (startup)
+- **Removes stuck/obsolete/phantom devices** on service startup via SetupAPI (`SetupDiRemoveDevice`).
+- Only removes devices that are: (1) not currently present, (2) not in a protected class (boot-critical), (3) not USB root hubs or BT radios that may reconnect.
+- Protected device classes (System, HDC, SCSIAdapter, Display, Battery, Bluetooth) are never touched.
+- Equivalent to manually doing "Show hidden devices" → right-click → Uninstall in Device Manager.
+- Logs every removed device for audit trail.
+
+### Version Bumped
+- All `.csproj` files: 4.1.0 → 4.2.0
+- `version.txt`: 4.1.0 → 4.2.0
+- `setup.iss`: 4.1.0 → 4.2.0
+- All User-Agent strings: 4.1.0 → 4.2.0
+- All documentation headers: 4.1.0 → 4.2.0
+
+---
+
 ## [4.1.0] - 2026-05-27
 
 ### Fixed — Critical False Positives
