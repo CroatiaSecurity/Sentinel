@@ -2,7 +2,7 @@
 
 **Userland EDR for Windows — Behavioral Detection, Automated Response & Aggressive Deception**
 
-> Version: 4.5.0 (Clipboard Sanitization, App Network Policy, USB Fingerprinting)  
+> Version: 4.6.0 (False Positive Reduction III, Unified C2 Detection, BrowserDllMonitor Removed)  
 > Author: [Gorstak](https://gorstak.eu) | [GitHub](https://github.com/CroatiaSecurity/Sentinel)  
 > License: MIT
 

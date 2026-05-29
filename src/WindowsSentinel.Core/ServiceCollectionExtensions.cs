@@ -57,26 +57,29 @@ public static class SentinelVersion
     /// Current version - 4.5.0 False Positive Reduction II
     /// Version is managed in version.txt for consistency across build scripts
     /// </summary>
-    public const string Version = "4.5.0";
+    public const string Version = "4.6.0";
 
     /// <summary>
     /// Release date
     /// </summary>
-    public static readonly DateTime ReleaseDate = new(2026, 5, 29);
+    public static readonly DateTime ReleaseDate = new(2026, 5, 30);
 
     /// <summary>
     /// Version description
     /// </summary>
     public const string Description =
-        "4.5.0 - False Positive Reduction II & Memory Optimization. " +
-        "RouteTableMonitor: excluded multicast/broadcast from next-hop detection. " +
-        "MemoryExecutionRule: excluded svchost.exe from fileless detection. " +
-        "DataExfiltrationMonitor: fixed msedgewebview2 sandboxed process trust. " +
-        "DnsQueryMonitor: added dotnet/nuget to tunneling allowlist. " +
-        "AudioHijackMonitor: replaced generic DLLs with virtual cable indicators. " +
-        "Memory: EventGraph edges capped at 300/process, BehavioralBaseline collections " +
-        "capped (5K net, 3K paths/PC), periodic GC.Collect forces OS page release. " +
-        "Tray: console as separate process, hidden form invisible, FreeConsole on startup.";
+        "4.6.0 - False Positive Reduction III & CPU/RAM Optimization. " +
+        "BrowserDllMonitor: REMOVED — DLL validation now handled system-wide by ModuleValidationRule. " +
+        "Eliminates msedge_elf.dll false positives and reduces CPU from redundant browser scanning. " +
+        "MemoryExecutionRule: expanded exclusion list to 40+ system processes (sppsvc, WmiPrvSE, " +
+        "lsass, csrss, dwm, audiodg, SearchIndexer, etc.) that legitimately lack resolvable paths. " +
+        "DataExfiltrationMonitor: expanded NetworkAllowlist with Microsoft services (MpDefenderCoreService, " +
+        "OneDrive.Sync.Service, MicrosoftStartFeedProvider, widgets, etc.), Windows system processes, " +
+        "NVIDIA/GPU services, and hardware utilities. " +
+        "BehavioralCorrelationEngine: Memory+Network composite now per-process only (no host-level), " +
+        "preventing false 'In-Memory Implant' composites from unrelated process signals. " +
+        "Added 15+ system processes to ElectronAndJitApps exclusion list. " +
+        "BeaconingDetector: expanded LegitimatePeriodicProcesses with 20+ additional entries.";
 }
 
 public static class ServiceCollectionExtensions
@@ -484,8 +487,10 @@ public static class ServiceCollectionExtensions
         // ── DLL Load Failure Monitor (Event Log ID 7, SideBySide errors) ─
         services.AddHostedService<DllLoadFailureMonitor>();
 
-        // ── Browser DLL Monitor / ELF Catcher (browser-specific injection detection + unload) ─
-        services.AddHostedService<BrowserDllMonitor>();
+        // ── Browser DLL Monitor removed in v4.6.0 — browser DLL validation is now handled
+        //    by the system-wide ModuleValidationRule which covers all processes uniformly.
+        //    The browser-specific ELF Catcher caused false positives on legitimate browser DLLs
+        //    (e.g., msedge_elf.dll) that match the _elf.dll naming pattern.
 
         // ═══════════════════════════════════════════════════════════════════════
         // 3.2.0 — BROWSER & ACCOUNT CREDENTIAL PROTECTION

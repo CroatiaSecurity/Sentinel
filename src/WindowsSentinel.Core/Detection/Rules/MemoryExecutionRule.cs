@@ -138,10 +138,10 @@ public sealed class MemoryExecutionRule : IDetectionRule
         string? imagePath = proc.ImagePath;
         if (string.IsNullOrEmpty(imagePath) || imagePath == "N/A")
         {
-            // svchost.exe is a legitimate Windows service host that may not have a
-            // resolvable path from the scanner's context (kernel-launched via SCM).
-            if (string.Equals(proc.ProcessName, "svchost.exe", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(proc.ProcessName, "svchost", StringComparison.OrdinalIgnoreCase))
+            // Windows service hosts and protected system processes that may not have a
+            // resolvable path from the scanner's context (kernel-launched via SCM or
+            // protected process light). These are legitimate OS components.
+            if (IsExcludedSystemProcess(proc.ProcessName))
                 return null;
 
             // Fallback: try to resolve the path natively before firing a detection
@@ -353,6 +353,60 @@ public sealed class MemoryExecutionRule : IDetectionRule
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// System processes that legitimately may not have a resolvable image path.
+    /// These are kernel-launched, protected process light (PPL), or service-hosted
+    /// processes whose paths cannot be read from user-mode without elevation.
+    /// </summary>
+    private static readonly HashSet<string> ExcludedSystemProcesses = new(StringComparer.OrdinalIgnoreCase)
+    {
+        // Windows service hosts (kernel-launched via SCM)
+        "svchost.exe", "svchost",
+        // Software Protection Platform (license validation)
+        "sppsvc.exe", "sppsvc",
+        // Windows Defender / Security
+        "MsMpEng.exe", "MsMpEng",
+        "MpDefenderCoreService.exe", "MpDefenderCoreService",
+        "SecurityHealthService.exe", "SecurityHealthService",
+        "SgrmBroker.exe", "SgrmBroker",
+        "NisSrv.exe", "NisSrv",
+        // Windows Update
+        "WaaSMedicAgent.exe", "WaaSMedicAgent",
+        "TrustedInstaller.exe", "TrustedInstaller",
+        "wuauclt.exe", "wuauclt",
+        "usocoreworker.exe", "usocoreworker",
+        // System services
+        "csrss.exe", "csrss",
+        "smss.exe", "smss",
+        "services.exe", "services",
+        "lsass.exe", "lsass",
+        "wininit.exe", "wininit",
+        "winlogon.exe", "winlogon",
+        "fontdrvhost.exe", "fontdrvhost",
+        "dwm.exe", "dwm",
+        // Registry / WMI
+        "WmiPrvSE.exe", "WmiPrvSE", "wmiprvse.exe", "wmiprvse",
+        "msdtc.exe", "msdtc",
+        // Credential Guard / Virtualization
+        "LsaIso.exe", "LsaIso",
+        "vmcompute.exe", "vmcompute",
+        "vmwp.exe", "vmwp",
+        // Print / Fax
+        "spoolsv.exe", "spoolsv",
+        // Audio
+        "audiodg.exe", "audiodg",
+        // Search
+        "SearchIndexer.exe", "SearchIndexer",
+        "SearchProtocolHost.exe", "SearchProtocolHost",
+        "SearchFilterHost.exe", "SearchFilterHost",
+    };
+
+    private static bool IsExcludedSystemProcess(string? processName)
+    {
+        if (string.IsNullOrEmpty(processName)) return false;
+        return ExcludedSystemProcesses.Contains(processName);
     }
 }
 

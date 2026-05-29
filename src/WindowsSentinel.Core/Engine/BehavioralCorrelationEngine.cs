@@ -20,13 +20,10 @@ namespace WindowsSentinel.Core.Engine;
 ///   3. Composite detections are injected back into the DetectionEngine
 ///      as new Tier1 events with high confidence.
 ///
-/// Example correlations:
-///   - Unsigned binary + outbound C2 port within 60s → "Staged payload phoning home"
-///   - AMSI bypass + encoded PowerShell + network connection → "Fileless attack chain"
-///   - Recon commands (whoami, net user, ipconfig) × 3 within 120s → "Post-exploitation recon"
-///   - Shadow copy delete + bulk file rename → "Active ransomware" (near-certain)
-///   - ThreatIntel injection + C2 port → "Injected C2 beacon"
-///   - High entropy binary + unsigned + staging path + network → "Dropped payload executing"
+/// v4.6.0: Unified C2 detection — all "suspicious process + network" composites
+/// consolidated into a single scored EvaluateC2Communication() method.
+/// Credential theft composites unified into EvaluateCredentialTheft().
+/// Removed 15 redundant methods, reducing composite count from ~40 to ~25.
 /// </summary>
 public sealed class BehavioralCorrelationEngine : IAsyncDisposable
 {
@@ -73,6 +70,18 @@ public sealed class BehavioralCorrelationEngine : IAsyncDisposable
         // Windows system processes with legitimate unbacked executable memory
         "dwm", "TextInputHost", "SearchHost", "ShellExperienceHost",
         "StartMenuExperienceHost", "RuntimeBroker",
+        // Windows services that legitimately have no resolvable image path or RWX memory
+        "sppsvc", "sppsvc.exe",
+        "WmiPrvSE", "wmiprvse",
+        "MpDefenderCoreService", "MsMpEng", "NisSrv",
+        "SgrmBroker", "SecurityHealthService",
+        "OneDrive.Sync.Service",
+        "MicrosoftStartFeedProvider",
+        "backgroundTaskHost", "BackgroundTransferHost",
+        "widgets", "WidgetService",
+        "PhoneExperienceHost", "YourPhone",
+        "GameBarPresenceWriter",
+        "sihost", "taskhostw",
     };
 
     // Pruning interval
@@ -140,30 +149,17 @@ public sealed class BehavioralCorrelationEngine : IAsyncDisposable
         // Run each correlation rule
         var composite = EvaluateRansomwareChain(recent, scopePid)
                      ?? EvaluateFilelessAttackChain(recent, scopePid)
-                     ?? EvaluateDroppedPayloadPhoneHome(recent, scopePid)
                      ?? EvaluatePostExploitRecon(recent, scopePid)
-                     ?? EvaluateInjectedC2Beacon(recent, scopePid)
-                     ?? EvaluateLsassWithNetwork(recent, scopePid)
-                     // v1.1.0 — composites using new anti-APT monitors
-                     ?? EvaluatePpidSpoofWithC2(recent, scopePid)
-                     ?? EvaluateDbghelpWithLsass(recent, scopePid)
-                     ?? EvaluateTokenEscalationWithPersistence(recent, scopePid)
-                     ?? EvaluateDgaWithBeaconing(recent, scopePid)
-                     ?? EvaluateCredentialCanaryWithNetwork(recent, scopePid)
+                     ?? EvaluateC2Communication(recent, scopePid)
+                     ?? EvaluateCredentialTheft(recent, scopePid)
                      ?? EvaluateFullAttackChain(recent, scopePid)
-                     // v1.3.0 — aggressive anchor-based composites
-                     ?? EvaluatePpidSpoofWithAnyNetwork(recent, scopePid)
-                     ?? EvaluateDbghelpWithAnyNetwork(recent, scopePid)
-                     ?? EvaluateTempBinaryWithNonStandardPort(recent, scopePid)
+                     ?? EvaluateTokenEscalationWithPersistence(recent, scopePid)
                      ?? EvaluateBulkFileWriteWithDns(recent, scopePid)
-                     ?? EvaluateTokenEscalationWithAnyNetwork(recent, scopePid)
                      ?? EvaluateInjectionApiWithFileWrite(recent, scopePid)
                      ?? EvaluateDgaWithAnyFileAccess(recent, scopePid)
-                     ?? EvaluateMemoryAnomalyWithNetwork(recent, scopePid)
                      // v1.4.0 — clipboard exfiltration composite
                      ?? EvaluateClipboardWithNetwork(recent, scopePid)
                      // v1.4.0 — module injection composites
-                     ?? EvaluateModuleInjectionWithNetwork(recent, scopePid)
                      ?? EvaluateModuleInjectionWithClipboard(recent, scopePid)
                      // v1.5.0 — screen capture & overlay composites
                      ?? EvaluateScreenCaptureWithNetwork(recent, scopePid)
@@ -182,11 +178,7 @@ public sealed class BehavioralCorrelationEngine : IAsyncDisposable
                      ?? EvaluateNeuroWithMicSession(recent, scopePid)
                      ?? EvaluateNeuroWithAudioHijack(recent, scopePid)
                      ?? EvaluateNeuroWithInjection(recent, scopePid)
-                     ?? EvaluateMultipleNeuroSignals(recent, scopePid)
-                     // v3.5.0 — RAT behavioral composites (novel RAT detection)
-                     ?? EvaluateCovertRatBehavioral(recent, scopePid)
-                     ?? EvaluateConfirmedBeaconingFromUnsigned(recent, scopePid)
-                     ?? EvaluateUnsignedWithSustainedC2(recent, scopePid);
+                     ?? EvaluateMultipleNeuroSignals(recent, scopePid);
 
         if (composite is null) return;
 
@@ -276,33 +268,162 @@ public sealed class BehavioralCorrelationEngine : IAsyncDisposable
     }
 
     /// <summary>
-    /// Unsigned binary in staging path + outbound C2 port = dropped payload phoning home.
+    /// v4.6.0 — Unified C2 Communication Detection.
+    /// Consolidates 10+ overlapping composites into a single scored evaluation.
+    /// 
+    /// Detects: any suspicious process characteristic + network activity = C2.
+    /// Scores based on how many indicators are present:
+    ///   - Kernel injection (ThreatIntel ETW)     → +0.30 (highest-confidence anchor)
+    ///   - PPID spoofing                          → +0.25
+    ///   - Module/DLL injection                   → +0.25
+    ///   - Memory anomaly (RWX/shellcode)         → +0.20
+    ///   - Unsigned binary from staging path      → +0.15
+    ///   - High entropy binary                    → +0.10
+    ///   - DGA DNS resolution                     → +0.15
+    ///   - Statistical beaconing pattern          → +0.20
+    ///   - Sustained connection (60s+)            → +0.10
+    ///   - Non-standard port                      → +0.10
+    ///   - C2 port (4444, 50050, etc.)            → +0.15
+    ///
+    /// Fires when: suspicion score ≥ 0.35 AND network activity is present.
+    /// Confidence = min(0.98, 0.70 + suspicion_score).
     /// </summary>
-    private static DetectionEvent? EvaluateDroppedPayloadPhoneHome(
+    private static DetectionEvent? EvaluateC2Communication(
         IReadOnlyList<Signal> signals, int scopePid)
     {
+        // Only per-process — host-level combines unrelated signals
+        if (scopePid == 0) return null;
+
+        // ── Suspicion indicators (process characteristics) ──
+        bool hasKernelInjection = signals.Any(s =>
+            s.RuleName.Contains("ThreatIntel") || s.RuleName.Contains("Kernel-Observed"));
+        bool hasPpidSpoof = signals.Any(s => s.RuleName.Contains("Parent PID Spoofing"));
+        bool hasModuleInjection = signals.Any(s =>
+            s.RuleName.Contains("Module Integrity") ||
+            s.RuleName.Contains("DLL Injection") ||
+            s.RuleName.Contains("Phantom Module") ||
+            (s.Metadata.ContainsKey("technique") && s.Metadata["technique"].Contains("T1055")));
+        bool hasMemoryAnomaly = signals.Any(s =>
+            s.RuleName.Contains("Memory Behavior") ||
+            s.RuleName.Contains("Memory Execution") ||
+            s.Metadata.ContainsKey("memory_kind") ||
+            s.Metadata.ContainsKey("rwx_regions"));
         bool hasUnsignedStaged = signals.Any(s =>
             s.RuleName.Contains("Unsigned") &&
-            s.Metadata.GetValueOrDefault("InStagingPath", "False") == "True");
-
+            (s.Metadata.GetValueOrDefault("InStagingPath", "False") == "True" ||
+             s.Metadata.GetValueOrDefault("ImagePath", "").Contains("Temp", StringComparison.OrdinalIgnoreCase) ||
+             s.Metadata.GetValueOrDefault("ImagePath", "").Contains("AppData", StringComparison.OrdinalIgnoreCase)));
         bool hasHighEntropy = signals.Any(s => s.RuleName.Contains("Entropy"));
+        bool hasDga = signals.Any(s => s.RuleName.Contains("DGA"));
 
-        bool hasC2Network = signals.Any(s =>
-            s.RuleName.Contains("Reverse Shell") &&
-            s.Metadata.ContainsKey("RemotePort"));
+        // ── Network indicators ──
+        bool hasBeaconing = signals.Any(s =>
+            s.RuleName.Contains("Beacon") || s.RuleName.Contains("Beaconing"));
+        bool hasSustainedConnection = signals.Any(s =>
+            s.RuleName.Contains("Sustained Outbound") ||
+            (s.Metadata.TryGetValue("duration_seconds", out var dur) &&
+             int.TryParse(dur, out var secs) && secs >= 60));
+        bool hasC2Port = signals.Any(s =>
+            s.RuleName.Contains("Reverse Shell") && s.Metadata.ContainsKey("RemotePort"));
+        bool hasNonStandardPort = signals.Any(s =>
+        {
+            if (!s.Metadata.TryGetValue("RemotePort", out var portStr) &&
+                !s.Metadata.TryGetValue("remote_port", out portStr)) return false;
+            if (!int.TryParse(portStr, out var port)) return false;
+            return port != 80 && port != 443 && port != 8080 && port != 8443 && port != 53;
+        });
+        bool hasAnyNetwork = hasBeaconing || hasSustainedConnection || hasC2Port || hasNonStandardPort ||
+            signals.Any(s =>
+                s.RuleName.Contains("Network") ||
+                s.Metadata.ContainsKey("RemotePort") ||
+                s.Metadata.ContainsKey("remote_port"));
 
-        if ((!hasUnsignedStaged && !hasHighEntropy) || !hasC2Network) return null;
+        // Must have at least one network indicator
+        if (!hasAnyNetwork) return null;
+
+        // ── Score calculation ──
+        double suspicionScore = 0;
+        var indicators = new List<string>();
+
+        if (hasKernelInjection)  { suspicionScore += 0.30; indicators.Add("kernel injection"); }
+        if (hasPpidSpoof)        { suspicionScore += 0.25; indicators.Add("PPID spoofing"); }
+        if (hasModuleInjection)  { suspicionScore += 0.25; indicators.Add("module injection"); }
+        if (hasMemoryAnomaly)    { suspicionScore += 0.20; indicators.Add("memory anomaly"); }
+        if (hasUnsignedStaged)   { suspicionScore += 0.15; indicators.Add("unsigned from staging path"); }
+        if (hasHighEntropy)      { suspicionScore += 0.10; indicators.Add("high entropy binary"); }
+        if (hasDga)              { suspicionScore += 0.15; indicators.Add("DGA DNS"); }
+        if (hasBeaconing)        { suspicionScore += 0.20; indicators.Add("statistical beaconing"); }
+        if (hasSustainedConnection) { suspicionScore += 0.10; indicators.Add("sustained connection"); }
+        if (hasNonStandardPort)  { suspicionScore += 0.10; indicators.Add("non-standard port"); }
+        if (hasC2Port)           { suspicionScore += 0.15; indicators.Add("known C2 port"); }
+
+        // Minimum threshold: need meaningful suspicion beyond just "has network"
+        if (suspicionScore < 0.35) return null;
+
+        var confidence = Math.Min(0.98, 0.70 + suspicionScore);
 
         return MakeComposite(
-            "Dropped Payload Phoning Home [COMPOSITE]",
-            "Unsigned/high-entropy binary from staging path followed by C2 network connection. " +
-            $"Signals: {string.Join(", ", signals.Select(s => s.RuleName).Distinct())}",
-            "A binary was dropped to a staging path (Temp/AppData), executed, and immediately " +
-            "established a connection to a known C2 port. This is the standard dropper→beacon " +
-            "sequence used by commodity malware and APT initial access tooling.",
-            0.93,
+            "C2 Communication Detected [COMPOSITE]",
+            $"Process exhibits C2 indicators ({string.Join(" + ", indicators)}) with active network. " +
+            $"Score: {suspicionScore:F2}. Signals: {string.Join(", ", signals.Select(s => s.RuleName).Distinct())}",
+            "Multiple behavioral indicators confirm command-and-control communication. " +
+            "The process shows characteristics incompatible with legitimate software " +
+            "(injection, spoofing, unsigned staging, memory anomalies, DGA) combined with " +
+            "active outbound network activity (beaconing, sustained connections, C2 ports). " +
+            "Covers: Cobalt Strike, Metasploit, Sliver, Brute Ratel, custom RATs, and novel implants.",
+            confidence,
             scopePid,
             signals.Last().Timestamp);
+    }
+
+    /// <summary>
+    /// v4.6.0 — Unified Credential Theft Detection.
+    /// Consolidates LSASS + network, dbghelp + LSASS, dbghelp + network, credential canary + network.
+    /// </summary>
+    private static DetectionEvent? EvaluateCredentialTheft(
+        IReadOnlyList<Signal> signals, int scopePid)
+    {
+        bool hasLsass = signals.Any(s => s.RuleName.Contains("LSASS"));
+        bool hasDbghelp = signals.Any(s => s.RuleName.Contains("dbghelp"));
+        bool hasCanary = signals.Any(s => s.RuleName.Contains("Credential Canary"));
+        bool hasNetwork = signals.Any(s =>
+            s.RuleName.Contains("Reverse Shell") ||
+            s.RuleName.Contains("Beacon") ||
+            s.RuleName.Contains("Network") ||
+            s.Metadata.ContainsKey("RemotePort") ||
+            s.Metadata.ContainsKey("remote_port"));
+
+        // Pattern 1: dbghelp + LSASS = confirmed dump (no network needed)
+        if (hasDbghelp && hasLsass)
+        {
+            return MakeComposite(
+                "Credential Dump Confirmed [COMPOSITE]",
+                "Process loaded dbghelp.dll AND targets LSASS. " +
+                $"Signals: {string.Join(", ", signals.Select(s => s.RuleName).Distinct())}",
+                "dbghelp.dll (MiniDumpWriteDump) combined with LSASS-targeting confirms " +
+                "an active credential dump regardless of tool name or technique.",
+                0.97,
+                scopePid,
+                signals.Last().Timestamp);
+        }
+
+        // Pattern 2: Any credential indicator + network = exfiltration
+        bool hasCredentialSignal = hasLsass || hasDbghelp || hasCanary;
+        if (hasCredentialSignal && hasNetwork)
+        {
+            var credType = hasLsass ? "LSASS dump" : hasCanary ? "credential canary" : "dump tool";
+            return MakeComposite(
+                "Credential Theft + Exfiltration [COMPOSITE]",
+                $"Credential access ({credType}) combined with network activity. " +
+                $"Signals: {string.Join(", ", signals.Select(s => s.RuleName).Distinct())}",
+                "Credential harvesting combined with active network connections indicates " +
+                "stolen credentials are being exfiltrated to an attacker-controlled server.",
+                0.96,
+                scopePid,
+                signals.Last().Timestamp);
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -338,114 +459,6 @@ public sealed class BehavioralCorrelationEngine : IAsyncDisposable
     }
 
     /// <summary>
-    /// Kernel-observed injection (ThreatIntel ETW) + C2 network port = injected C2 beacon.
-    /// This is the highest-confidence composite — kernel evidence + network evidence.
-    /// </summary>
-    private static DetectionEvent? EvaluateInjectedC2Beacon(
-        IReadOnlyList<Signal> signals, int scopePid)
-    {
-        bool hasKernelInjection = signals.Any(s =>
-            s.RuleName.Contains("ThreatIntel") || s.RuleName.Contains("Kernel-Observed"));
-
-        bool hasC2Network = signals.Any(s =>
-            s.RuleName.Contains("Reverse Shell") &&
-            s.Metadata.ContainsKey("RemotePort"));
-
-        if (!hasKernelInjection || !hasC2Network) return null;
-
-        return MakeComposite(
-            "Injected C2 Beacon [COMPOSITE]",
-            "Kernel-observed process injection followed by C2 network activity. " +
-            $"Signals: {string.Join(", ", signals.Select(s => s.RuleName).Distinct())}",
-            "The kernel observed injection APIs (VirtualAllocEx/MapViewOfSection/APC) AND " +
-            "a C2 network connection was established. This is the Cobalt Strike / Metasploit " +
-            "meterpreter / Sliver beacon pattern: inject shellcode into a legitimate process, " +
-            "then beacon out. Near-certain compromise.",
-            0.98,
-            scopePid,
-            signals.Last().Timestamp);
-    }
-
-    /// <summary>
-    /// LSASS credential dump attempt + outbound network = credentials being exfiltrated.
-    /// </summary>
-    private static DetectionEvent? EvaluateLsassWithNetwork(
-        IReadOnlyList<Signal> signals, int scopePid)
-    {
-        bool hasLsass = signals.Any(s => s.RuleName.Contains("LSASS"));
-        bool hasNetwork = signals.Any(s =>
-            s.RuleName.Contains("Reverse Shell") &&
-            s.Metadata.ContainsKey("RemotePort"));
-
-        if (!hasLsass || !hasNetwork) return null;
-
-        return MakeComposite(
-            "Credential Dump + Exfiltration [COMPOSITE]",
-            "LSASS credential dump attempt followed by outbound network connection. " +
-            $"Signals: {string.Join(", ", signals.Select(s => s.RuleName).Distinct())}",
-            "Credential dumping (Mimikatz/procdump) combined with an active C2 channel " +
-            "indicates credentials are being harvested and exfiltrated. " +
-            "This is the standard lateral movement preparation sequence.",
-            0.96,
-            scopePid,
-            signals.Last().Timestamp);
-    }
-
-    // ── v1.1.0 Correlation Rules (using new anti-APT monitors) ────────────────
-
-    /// <summary>
-    /// Parent PID spoofing + C2 network connection = Cobalt Strike / advanced C2 beacon.
-    /// PPID spoofing is the default behavior of Cobalt Strike's spawn command.
-    /// </summary>
-    private static DetectionEvent? EvaluatePpidSpoofWithC2(
-        IReadOnlyList<Signal> signals, int scopePid)
-    {
-        bool hasPpidSpoof = signals.Any(s => s.RuleName.Contains("Parent PID Spoofing"));
-        bool hasC2 = signals.Any(s =>
-            s.RuleName.Contains("Reverse Shell") ||
-            s.RuleName.Contains("Beacon") ||
-            (s.Metadata.ContainsKey("RemotePort") && s.RuleName.Contains("Network")));
-
-        if (!hasPpidSpoof || !hasC2) return null;
-
-        return MakeComposite(
-            "PPID Spoof + C2 Channel [COMPOSITE]",
-            "Process spoofed its parent PID AND established a C2 network connection. " +
-            $"Signals: {string.Join(", ", signals.Select(s => s.RuleName).Distinct())}",
-            "Parent PID spoofing combined with C2 network activity is the signature behavior " +
-            "of Cobalt Strike, Sliver, and Brute Ratel. The attacker spawned a beacon process " +
-            "with a fake parent (typically explorer.exe or svchost.exe) to blend in, then " +
-            "established a command-and-control channel.",
-            0.96,
-            scopePid,
-            signals.Last().Timestamp);
-    }
-
-    /// <summary>
-    /// dbghelp.dll loaded + LSASS-targeting signal = confirmed credential dump in progress.
-    /// dbghelp is the prerequisite for MiniDumpWriteDump; combined with LSASS targeting = certain.
-    /// </summary>
-    private static DetectionEvent? EvaluateDbghelpWithLsass(
-        IReadOnlyList<Signal> signals, int scopePid)
-    {
-        bool hasDbghelp = signals.Any(s => s.RuleName.Contains("dbghelp"));
-        bool hasLsass = signals.Any(s => s.RuleName.Contains("LSASS") || s.RuleName.Contains("Credential"));
-
-        if (!hasDbghelp || !hasLsass) return null;
-
-        return MakeComposite(
-            "Confirmed LSASS Dump (dbghelp + targeting) [COMPOSITE]",
-            "Process loaded dbghelp.dll AND shows LSASS-targeting behavior. " +
-            $"Signals: {string.Join(", ", signals.Select(s => s.RuleName).Distinct())}",
-            "dbghelp.dll contains MiniDumpWriteDump — the function used by all credential " +
-            "dumping tools. Combined with LSASS-targeting command-line patterns, this confirms " +
-            "an active credential dump regardless of what the tool is named or how it was built.",
-            0.97,
-            scopePid,
-            signals.Last().Timestamp);
-    }
-
-    /// <summary>
     /// Token integrity escalation + persistence installation = post-exploitation privilege persistence.
     /// Attacker escalated privileges AND is making them survive reboot.
     /// </summary>
@@ -467,58 +480,6 @@ public sealed class BehavioralCorrelationEngine : IAsyncDisposable
             "followed by Run key, scheduled task, or service creation — is the standard " +
             "post-exploitation sequence for maintaining access across reboots.",
             0.94,
-            scopePid,
-            signals.Last().Timestamp);
-    }
-
-    /// <summary>
-    /// DGA DNS resolution + statistical beaconing = confirmed C2 over generated domains.
-    /// High-entropy domains + periodic connections = DGA-based malware phoning home.
-    /// </summary>
-    private static DetectionEvent? EvaluateDgaWithBeaconing(
-        IReadOnlyList<Signal> signals, int scopePid)
-    {
-        bool hasDga = signals.Any(s => s.RuleName.Contains("DGA") || s.RuleName.Contains("DNS"));
-        bool hasBeaconing = signals.Any(s => s.RuleName.Contains("Beacon"));
-
-        if (!hasDga || !hasBeaconing) return null;
-
-        return MakeComposite(
-            "DGA + C2 Beaconing [COMPOSITE]",
-            "Process resolving high-entropy (DGA) domains AND showing periodic beacon pattern. " +
-            $"Signals: {string.Join(", ", signals.Select(s => s.RuleName).Distinct())}",
-            "Domain Generation Algorithms combined with statistical beaconing confirms an active " +
-            "C2 channel using generated domains. The malware is cycling through algorithmically " +
-            "generated domain names and successfully establishing periodic callbacks. " +
-            "Families: Conficker, Necurs, Emotet, TrickBot, and custom APT implants.",
-            0.95,
-            scopePid,
-            signals.Last().Timestamp);
-    }
-
-    /// <summary>
-    /// Credential canary tripped + outbound network = credentials being exfiltrated.
-    /// Someone harvested credentials AND data is leaving the machine.
-    /// </summary>
-    private static DetectionEvent? EvaluateCredentialCanaryWithNetwork(
-        IReadOnlyList<Signal> signals, int scopePid)
-    {
-        bool hasCanary = signals.Any(s => s.RuleName.Contains("Credential Canary"));
-        bool hasNetwork = signals.Any(s =>
-            s.RuleName.Contains("Reverse Shell") ||
-            s.RuleName.Contains("Beacon") ||
-            s.Metadata.ContainsKey("RemotePort"));
-
-        if (!hasCanary || !hasNetwork) return null;
-
-        return MakeComposite(
-            "Credential Theft + Exfiltration [COMPOSITE]",
-            "Credential canary was tripped AND outbound network activity detected. " +
-            $"Signals: {string.Join(", ", signals.Select(s => s.RuleName).Distinct())}",
-            "The honeypot credential was accessed (indicating active credential harvesting) " +
-            "and network connections are active on the same timeline. Stolen credentials are " +
-            "likely being exfiltrated to an attacker-controlled server.",
-            0.97,
             scopePid,
             signals.Last().Timestamp);
     }
@@ -554,107 +515,6 @@ public sealed class BehavioralCorrelationEngine : IAsyncDisposable
             signals.Last().Timestamp);
     }
 
-    // ── v1.3.0 Aggressive Anchor-Based Composites ─────────────────────────────
-    // Philosophy: if a process is ALREADY suspicious (spoofed parent, loaded dump
-    // tools, came from temp, has DGA DNS, has memory anomalies), then ANY additional
-    // activity becomes the kill trigger. The anchor signal establishes suspicion;
-    // the second signal confirms hostile intent.
-
-    /// <summary>
-    /// PPID-spoofed process + ANY network activity = kill.
-    /// Rationale: legitimate processes never spoof their parent. If it's also talking
-    /// to the network, it's a C2 beacon regardless of what port it uses.
-    /// </summary>
-    private static DetectionEvent? EvaluatePpidSpoofWithAnyNetwork(
-        IReadOnlyList<Signal> signals, int scopePid)
-    {
-        bool hasPpidSpoof = signals.Any(s => s.RuleName.Contains("Parent PID Spoofing"));
-        bool hasAnyNetwork = signals.Any(s =>
-            s.RuleName.Contains("Reverse Shell") ||
-            s.RuleName.Contains("Beacon") ||
-            s.RuleName.Contains("Network") ||
-            s.Metadata.ContainsKey("RemotePort") ||
-            s.Metadata.ContainsKey("remote_port"));
-
-        if (!hasPpidSpoof || !hasAnyNetwork) return null;
-
-        return MakeComposite(
-            "Spoofed Process Phoning Home [COMPOSITE]",
-            "PPID-spoofed process established network connection. " +
-            $"Signals: {string.Join(", ", signals.Select(s => s.RuleName).Distinct())}",
-            "A process with a spoofed parent PID is communicating over the network. " +
-            "Legitimate Windows processes never disagree on parent PID. Any network activity " +
-            "from a spoofed process confirms it is a C2 implant regardless of destination port.",
-            0.95,
-            scopePid,
-            signals.Last().Timestamp);
-    }
-
-    /// <summary>
-    /// Process that loaded dbghelp.dll + ANY outbound connection = kill.
-    /// Rationale: if you loaded the dump library and you're talking to the network,
-    /// you're exfiltrating credentials. No legitimate app does both.
-    /// </summary>
-    private static DetectionEvent? EvaluateDbghelpWithAnyNetwork(
-        IReadOnlyList<Signal> signals, int scopePid)
-    {
-        bool hasDbghelp = signals.Any(s => s.RuleName.Contains("dbghelp"));
-        bool hasAnyNetwork = signals.Any(s =>
-            s.RuleName.Contains("Reverse Shell") ||
-            s.RuleName.Contains("Beacon") ||
-            s.RuleName.Contains("Network") ||
-            s.Metadata.ContainsKey("RemotePort") ||
-            s.Metadata.ContainsKey("remote_port"));
-
-        if (!hasDbghelp || !hasAnyNetwork) return null;
-
-        return MakeComposite(
-            "Dump Tool + Network Exfil [COMPOSITE]",
-            "Process loaded dbghelp.dll AND has outbound network activity. " +
-            $"Signals: {string.Join(", ", signals.Select(s => s.RuleName).Distinct())}",
-            "A non-debugger process loaded dbghelp.dll (required for MiniDumpWriteDump) and is " +
-            "communicating over the network. This is the credential dump + exfiltration pattern " +
-            "regardless of what port or protocol is used.",
-            0.94,
-            scopePid,
-            signals.Last().Timestamp);
-    }
-
-    /// <summary>
-    /// Unsigned binary from temp/staging path + connection to non-standard port = kill.
-    /// Rationale: legitimate software doesn't run from Temp and connect to weird ports.
-    /// </summary>
-    private static DetectionEvent? EvaluateTempBinaryWithNonStandardPort(
-        IReadOnlyList<Signal> signals, int scopePid)
-    {
-        bool hasUnsignedStaged = signals.Any(s =>
-            (s.RuleName.Contains("Unsigned") || s.RuleName.Contains("Entropy")) &&
-            (s.Metadata.GetValueOrDefault("InStagingPath", "False") == "True" ||
-             s.Metadata.GetValueOrDefault("image_path", "").Contains("\\Temp\\", StringComparison.OrdinalIgnoreCase) ||
-             s.Metadata.GetValueOrDefault("image_path", "").Contains("\\AppData\\", StringComparison.OrdinalIgnoreCase)));
-
-        bool hasNonStandardNetwork = signals.Any(s =>
-        {
-            if (!s.Metadata.TryGetValue("RemotePort", out var portStr)) return false;
-            if (!int.TryParse(portStr, out var port)) return false;
-            // Standard ports that legitimate software uses
-            return port != 80 && port != 443 && port != 8080 && port != 8443 && port != 53;
-        });
-
-        if (!hasUnsignedStaged || !hasNonStandardNetwork) return null;
-
-        return MakeComposite(
-            "Staged Payload + Non-Standard Port [COMPOSITE]",
-            "Unsigned binary from staging path connected to non-standard port. " +
-            $"Signals: {string.Join(", ", signals.Select(s => s.RuleName).Distinct())}",
-            "An unsigned or high-entropy binary running from a temporary/staging location " +
-            "(Temp, AppData) established a connection to a non-standard port. Legitimate " +
-            "software uses standard ports (80/443). This is the classic dropper→beacon pattern.",
-            0.92,
-            scopePid,
-            signals.Last().Timestamp);
-    }
-
     /// <summary>
     /// Bulk file writes (50+) + DNS resolution to non-cached domain = kill.
     /// Rationale: ransomware encrypts files then phones home to report success.
@@ -681,37 +541,6 @@ public sealed class BehavioralCorrelationEngine : IAsyncDisposable
             "This is the ransomware completion pattern (encrypt → phone home) or an " +
             "infostealer pattern (collect files → resolve C2 → exfiltrate).",
             0.93,
-            scopePid,
-            signals.Last().Timestamp);
-    }
-
-    /// <summary>
-    /// Token escalation + ANY network activity = kill.
-    /// Rationale: if you just escalated privileges and immediately hit the network,
-    /// you're an attacker establishing a privileged C2 channel.
-    /// </summary>
-    private static DetectionEvent? EvaluateTokenEscalationWithAnyNetwork(
-        IReadOnlyList<Signal> signals, int scopePid)
-    {
-        bool hasEscalation = signals.Any(s =>
-            s.RuleName.Contains("Token Integrity") || s.RuleName.Contains("Privilege Escalation"));
-        bool hasAnyNetwork = signals.Any(s =>
-            s.RuleName.Contains("Reverse Shell") ||
-            s.RuleName.Contains("Beacon") ||
-            s.RuleName.Contains("Network") ||
-            s.Metadata.ContainsKey("RemotePort") ||
-            s.Metadata.ContainsKey("remote_port"));
-
-        if (!hasEscalation || !hasAnyNetwork) return null;
-
-        return MakeComposite(
-            "Privilege Escalation + Network Activity [COMPOSITE]",
-            "Process escalated privileges AND established network connection. " +
-            $"Signals: {string.Join(", ", signals.Select(s => s.RuleName).Distinct())}",
-            "A process that escalated its token integrity (bypassed UAC or manipulated tokens) " +
-            "is now communicating over the network. Legitimate elevation doesn't immediately " +
-            "phone home. This is an attacker establishing a privileged reverse shell.",
-            0.94,
             scopePid,
             signals.Last().Timestamp);
     }
@@ -777,41 +606,6 @@ public sealed class BehavioralCorrelationEngine : IAsyncDisposable
     }
 
     /// <summary>
-    /// Memory anomaly (RWX/shellcode/unbacked) + ANY network = kill.
-    /// Rationale: if your memory looks like shellcode and you're talking to the network,
-    /// you're an in-memory implant beaconing out.
-    /// </summary>
-    private static DetectionEvent? EvaluateMemoryAnomalyWithNetwork(
-        IReadOnlyList<Signal> signals, int scopePid)
-    {
-        bool hasMemoryAnomaly = signals.Any(s =>
-            s.RuleName.Contains("Memory Behavior") ||
-            s.RuleName.Contains("Memory Execution") ||
-            s.Metadata.ContainsKey("memory_kind") ||
-            s.Metadata.ContainsKey("rwx_regions"));
-        bool hasAnyNetwork = signals.Any(s =>
-            s.RuleName.Contains("Reverse Shell") ||
-            s.RuleName.Contains("Beacon") ||
-            s.RuleName.Contains("Network") ||
-            s.Metadata.ContainsKey("RemotePort") ||
-            s.Metadata.ContainsKey("remote_port"));
-
-        if (!hasMemoryAnomaly || !hasAnyNetwork) return null;
-
-        return MakeComposite(
-            "In-Memory Implant + Network Beacon [COMPOSITE]",
-            "Process with suspicious memory (RWX/shellcode/unbacked) AND network activity. " +
-            $"Signals: {string.Join(", ", signals.Select(s => s.RuleName).Distinct())}",
-            "A process with shellcode-like memory patterns (RWX regions, unbacked executable " +
-            "memory, shellcode prologues) is communicating over the network. This is the " +
-            "definitive in-memory implant pattern: injected shellcode beaconing to C2. " +
-            "Cobalt Strike, Metasploit meterpreter, Sliver, and custom implants all exhibit this.",
-            0.96,
-            scopePid,
-            signals.Last().Timestamp);
-    }
-
-    /// <summary>
     /// v1.4.0 — Clipboard access + network activity = clipboard exfiltration.
     /// Catches malware that reads clipboard content (passwords, crypto addresses, sensitive data)
     /// and sends it to an attacker-controlled server. Also catches scenarios where a legitimate
@@ -844,43 +638,6 @@ public sealed class BehavioralCorrelationEngine : IAsyncDisposable
             "and scenarios where a legitimate process is hijacked via DLL injection or " +
             "browser extension to silently exfiltrate clipboard data.",
             0.93,
-            scopePid,
-            signals.Last().Timestamp);
-    }
-
-    /// <summary>
-    /// v1.4.0 — Module injection + network = injected C2 implant.
-    /// A process that received a suspicious DLL injection AND is making network connections
-    /// is almost certainly running an injected C2 beacon (Cobalt Strike, Sliver, etc.).
-    /// </summary>
-    private static DetectionEvent? EvaluateModuleInjectionWithNetwork(
-        IReadOnlyList<Signal> signals, int scopePid)
-    {
-        bool hasModuleInjection = signals.Any(s =>
-            s.RuleName.Contains("Module Integrity") ||
-            s.RuleName.Contains("DLL Injection") ||
-            s.RuleName.Contains("Phantom Module") ||
-            (s.Metadata.ContainsKey("technique") &&
-             s.Metadata["technique"].Contains("T1055")));
-        bool hasNetwork = signals.Any(s =>
-            s.RuleName.Contains("Reverse Shell") ||
-            s.RuleName.Contains("Beacon") ||
-            s.RuleName.Contains("Network") ||
-            s.Metadata.ContainsKey("RemotePort") ||
-            s.Metadata.ContainsKey("remote_port"));
-
-        if (!hasModuleInjection || !hasNetwork) return null;
-
-        return MakeComposite(
-            "Injected Implant + Network C2 [COMPOSITE]",
-            "Process received suspicious DLL injection AND has outbound network activity. " +
-            $"Signals: {string.Join(", ", signals.Select(s => s.RuleName).Distinct())}",
-            "A process that had a suspicious module injected at runtime is now communicating " +
-            "over the network. This is the canonical injected-implant pattern: attacker injects " +
-            "a DLL (via CreateRemoteThread, manual mapping, reflective loading) and the injected " +
-            "code establishes a C2 channel. Cobalt Strike, Sliver, Brute Ratel, and custom " +
-            "implants all follow this exact sequence.",
-            0.95,
             scopePid,
             signals.Last().Timestamp);
     }
@@ -1417,147 +1174,6 @@ public sealed class BehavioralCorrelationEngine : IAsyncDisposable
             "signals are low-confidence, but 3+ distinct techniques from the same source is " +
             "not accidental — it indicates a coordinated visual manipulation attack designed " +
             "to disorient, influence, or incapacitate the user.",
-            0.90,
-            scopePid,
-            signals.Last().Timestamp);
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    // v3.5.0 — RAT BEHAVIORAL COMPOSITES (novel RAT detection without IOCs)
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    /// <summary>
-    /// v3.5.0 — Covert RAT Behavioral: Unsigned binary + no visible window + sustained network.
-    /// Catches novel RATs that don't match any campaign IOC. The combination of:
-    ///   1. Unsigned binary execution (not from a known publisher)
-    ///   2. Sustained outbound network connection (C2 communication)
-    ///   3. No visible window (covert operation)
-    /// ...is incompatible with legitimate software behavior. Real apps are signed,
-    /// have UIs, or don't maintain persistent outbound connections from temp paths.
-    /// </summary>
-    private static DetectionEvent? EvaluateCovertRatBehavioral(
-        IReadOnlyList<Signal> signals, int scopePid)
-    {
-        if (scopePid == 0) return null; // Only per-process, not host-level
-
-        bool hasUnsigned = signals.Any(s =>
-            s.RuleName.Contains("Unsigned Binary") &&
-            (s.Metadata.GetValueOrDefault("InStagingPath", "False") == "True" ||
-             s.Metadata.GetValueOrDefault("ImagePath", "").Contains("Temp", StringComparison.OrdinalIgnoreCase) ||
-             s.Metadata.GetValueOrDefault("ImagePath", "").Contains("AppData", StringComparison.OrdinalIgnoreCase)));
-
-        bool hasSustainedNetwork = signals.Any(s =>
-            s.RuleName.Contains("Sustained Outbound") ||
-            s.RuleName.Contains("Network") &&
-            s.Metadata.TryGetValue("duration_seconds", out var dur) &&
-            int.TryParse(dur, out var secs) && secs >= 60);
-
-        bool hasBeaconing = signals.Any(s =>
-            s.RuleName.Contains("Beacon") ||
-            s.RuleName.Contains("Beaconing"));
-
-        // Need unsigned + (sustained network OR beaconing)
-        if (!hasUnsigned || (!hasSustainedNetwork && !hasBeaconing)) return null;
-
-        // Additional signal: recon activity strengthens confidence
-        bool hasRecon = signals.Any(s =>
-            s.RuleName.Contains("Suspicious API") ||
-            s.RuleName.Contains("Recon"));
-
-        var confidence = hasRecon ? 0.92 : 0.88;
-
-        return MakeComposite(
-            "Covert RAT: Unsigned + Hidden + Network [COMPOSITE]",
-            "Unsigned binary from staging path with sustained outbound network and no visible UI. " +
-            $"Signals: {string.Join(", ", signals.Select(s => s.RuleName).Distinct())}",
-            "An unsigned binary running from a temporary/user path is maintaining a persistent " +
-            "outbound network connection without any visible window. This behavioral combination " +
-            "is the definitive RAT pattern: covert process, persistent C2, no user interaction. " +
-            "Legitimate software is signed, has a UI, or doesn't beacon from temp paths.",
-            confidence,
-            scopePid,
-            signals.Last().Timestamp);
-    }
-
-    /// <summary>
-    /// v3.5.0 — Confirmed Beaconing from Unsigned Process: beaconing pattern + unsigned binary.
-    /// The beaconing detector identifies periodic callback patterns (jitter analysis, interval
-    /// consistency). Combined with an unsigned binary, this confirms C2 communication.
-    /// </summary>
-    private static DetectionEvent? EvaluateConfirmedBeaconingFromUnsigned(
-        IReadOnlyList<Signal> signals, int scopePid)
-    {
-        if (scopePid == 0) return null;
-
-        bool hasBeaconing = signals.Any(s =>
-            s.RuleName.Contains("Beacon") ||
-            s.RuleName.Contains("Beaconing") ||
-            s.RuleName.Contains("C2"));
-
-        bool hasUnsigned = signals.Any(s =>
-            s.RuleName.Contains("Unsigned Binary"));
-
-        if (!hasBeaconing || !hasUnsigned) return null;
-
-        // Check if it's also from a staging path (higher confidence)
-        bool fromStagingPath = signals.Any(s =>
-            s.RuleName.Contains("Unsigned") &&
-            (s.Metadata.GetValueOrDefault("InStagingPath", "False") == "True" ||
-             s.Metadata.GetValueOrDefault("ImagePath", "").Contains("Temp", StringComparison.OrdinalIgnoreCase) ||
-             s.Metadata.GetValueOrDefault("ImagePath", "").Contains("AppData", StringComparison.OrdinalIgnoreCase)));
-
-        var confidence = fromStagingPath ? 0.93 : 0.88;
-
-        return MakeComposite(
-            "Confirmed C2 Beacon: Unsigned Process [COMPOSITE]",
-            "Unsigned binary exhibiting periodic beaconing pattern (C2 callback). " +
-            $"Signals: {string.Join(", ", signals.Select(s => s.RuleName).Distinct())}",
-            "A process that is not signed by any known publisher is exhibiting periodic " +
-            "network callback patterns consistent with C2 beaconing (regular intervals with " +
-            "jitter). Legitimate updaters check once; C2 beacons call back every 30-300 seconds. " +
-            "This is confirmed command-and-control communication.",
-            confidence,
-            scopePid,
-            signals.Last().Timestamp);
-    }
-
-    /// <summary>
-    /// v3.5.0 — Unsigned binary + sustained C2 connection (60s+) from non-allowlisted process.
-    /// This catches the exact PlugX pattern: fake GoogleUpdate.exe from temp path maintaining
-    /// a persistent HTTPS connection to a C2 server. No campaign IOC needed — the behavior alone
-    /// is sufficient when combined with the unsigned binary signal.
-    /// </summary>
-    private static DetectionEvent? EvaluateUnsignedWithSustainedC2(
-        IReadOnlyList<Signal> signals, int scopePid)
-    {
-        if (scopePid == 0) return null;
-
-        bool hasUnsigned = signals.Any(s =>
-            s.RuleName.Contains("Unsigned Binary"));
-
-        bool hasSustainedConnection = signals.Any(s =>
-            s.RuleName.Contains("Sustained Outbound Connection") ||
-            (s.RuleName.Contains("Network") &&
-             s.Metadata.TryGetValue("duration_seconds", out var dur) &&
-             int.TryParse(dur, out var secs) && secs >= 60));
-
-        if (!hasUnsigned || !hasSustainedConnection) return null;
-
-        // Extract the remote address for evidence
-        var networkSignal = signals.FirstOrDefault(s =>
-            s.Metadata.ContainsKey("remote_address"));
-        var remoteAddr = networkSignal?.Metadata.GetValueOrDefault("remote_address", "unknown") ?? "unknown";
-        var remotePort = networkSignal?.Metadata.GetValueOrDefault("remote_port", "unknown") ?? "unknown";
-
-        return MakeComposite(
-            "Covert C2: Unsigned Binary + Sustained Connection [COMPOSITE]",
-            $"Unsigned binary maintaining sustained outbound connection to {remoteAddr}:{remotePort}. " +
-            $"Signals: {string.Join(", ", signals.Select(s => s.RuleName).Distinct())}",
-            "An unsigned binary is maintaining a persistent (60s+) outbound connection. " +
-            "Legitimate software that maintains long connections (browsers, cloud sync) is " +
-            "always signed. An unsigned process holding a sustained connection is either a " +
-            "RAT maintaining C2, a backdoor awaiting commands, or an exfiltration channel. " +
-            "This pattern catches novel RATs without requiring campaign-specific IOCs.",
             0.90,
             scopePid,
             signals.Last().Timestamp);

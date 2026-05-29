@@ -123,6 +123,24 @@ public sealed class DataExfiltrationMonitor : BackgroundService
         // Cloud sync
         "onedrive", "dropbox", "googledrivesync", "icloud",
         "megasync", "pcloud", "boxsync", "nextcloud",
+        // Microsoft services (legitimate sustained connections for telemetry/updates)
+        "MpDefenderCoreService", "MsMpEng", "NisSrv",
+        "OneDrive.Sync.Service",
+        "MicrosoftStartFeedProvider",
+        "SearchHost", "widgets", "WidgetService",
+        "backgroundTaskHost", "BackgroundTransferHost",
+        "PhoneExperienceHost", "YourPhone",
+        "GameBarPresenceWriter", "gamingservices",
+        "WinStore.App", "Microsoft.Photos",
+        "SettingSyncHost", "SettingsSync",
+        "usocoreworker", "WaaSMedicAgent",
+        // Windows system services
+        "svchost", "lsass", "services",
+        "spoolsv", "SearchIndexer",
+        "sihost", "taskhostw", "RuntimeBroker",
+        "SystemSettings", "ShellExperienceHost",
+        "StartMenuExperienceHost", "TextInputHost",
+        "ctfmon", "fontdrvhost",
         // Games (common launchers — individual games are covered by trusted path check)
         "steam", "steamwebhelper", "epicgameslauncher", "origin", "galaxyclient",
         "battle.net", "eadesktop", "UbisoftConnect",
@@ -138,16 +156,23 @@ public sealed class DataExfiltrationMonitor : BackgroundService
         "wireguard", "openvpn", "nordvpn", "ExpressVPN",
         "mullvad-daemon", "ProtonVPN",
         // System
-        "svchost", "wuauclt", "backgroundtaskhost",
+        "wuauclt",
         "sentinelservice", "sentinelagent",
-        "msmpeng", "mpcmdrun",
         // Security products (legitimate outbound for updates/telemetry)
         "TmsaInstance64", "coreServiceShell", "PtSvcHost", "AMSPTelemetryService",
         "ASCService", "LiveTuner3",
+        "SgrmBroker", "SecurityHealthService",
         // Media / streaming
         "spotify", "vlc", "mpc-hc", "plex", "plexmediaserver",
         // Backup
         "veeam", "acronis", "backblaze", "crashplan",
+        // NVIDIA / GPU
+        "NVDisplay.Container", "NVIDIA Web Helper",
+        "nvcontainer", "NvTelemetryContainer",
+        // Hardware utilities
+        "RazerCentralService", "CorsairService", "iCUE",
+        "LogiOverlay", "lghub", "lghub_agent",
+        "AsusSystemAnalysis", "ArmouryCrate",
     };
 
     // Processes that legitimately read from USB drives

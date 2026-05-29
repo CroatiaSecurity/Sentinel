@@ -55,7 +55,21 @@ public sealed class BeaconingDetector : IAsyncDisposable
             "MsMpEng.exe", "SgrmBroker.exe", "WaaSMedicAgent.exe",
             "svchost.exe",  // Windows Update, telemetry — too broad to flag
             "SearchIndexer.exe", "OneDrive.exe", "Teams.exe",
-            "Slack.exe", "Discord.exe", "chrome.exe", "msedge.exe", "firefox.exe"
+            "Slack.exe", "Discord.exe", "chrome.exe", "msedge.exe", "firefox.exe",
+            // v4.6.0: Additional legitimate periodic connectors
+            "MpDefenderCoreService.exe", "NisSrv.exe", "SecurityHealthService.exe",
+            "OneDrive.Sync.Service.exe",
+            "MicrosoftStartFeedProvider.exe",
+            "backgroundTaskHost.exe", "BackgroundTransferHost.exe",
+            "widgets.exe", "WidgetService.exe",
+            "PhoneExperienceHost.exe", "YourPhone.exe",
+            "GameBarPresenceWriter.exe",
+            "usocoreworker.exe", // Windows Update orchestrator
+            "sihost.exe", "taskhostw.exe",
+            "NVDisplay.Container.exe", "nvcontainer.exe", // NVIDIA telemetry
+            "Spotify.exe", "brave.exe", "opera.exe", "vivaldi.exe",
+            "steamwebhelper.exe", "steam.exe",
+            "Kiro.exe", "code.exe", "cursor.exe",
         };
 
     public BeaconingDetector(

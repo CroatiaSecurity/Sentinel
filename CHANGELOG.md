@@ -2,6 +2,54 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [4.6.0] - 2026-05-30
+
+### Removed — BrowserDllMonitor
+
+- **BrowserDllMonitor (ELF Catcher) completely removed.** Browser-specific DLL scanning caused persistent false positives on legitimate browser DLLs (e.g., `msedge_elf.dll` matching the `_elf.dll` regex pattern). DLL validation is now handled exclusively by the system-wide `ModuleValidationRule`, which covers all processes uniformly without browser-specific heuristics.
+- Eliminates repeated Tier1 "Browser DLL: ELF Malware Pattern Detected" alerts on every Edge process.
+- Reduces CPU usage from redundant 45-second browser module enumeration scans.
+
+### Changed — Unified C2 Detection (BehavioralCorrelationEngine)
+
+- **Consolidated 15 overlapping C2/network composite rules into 2 unified methods:**
+  - `EvaluateC2Communication()` — scored evaluation combining 11 indicators (kernel injection, PPID spoofing, module injection, memory anomaly, unsigned staging, high entropy, DGA, beaconing, sustained connection, non-standard port, C2 port). Fires when score ≥ 0.35 + network activity. Confidence scales with indicator count.
+  - `EvaluateCredentialTheft()` — unified credential dump detection (dbghelp + LSASS, any credential signal + network).
+- **Removed composites:** `EvaluateInjectedC2Beacon`, `EvaluateLsassWithNetwork`, `EvaluatePpidSpoofWithC2`, `EvaluateDbghelpWithLsass`, `EvaluateDgaWithBeaconing`, `EvaluateCredentialCanaryWithNetwork`, `EvaluatePpidSpoofWithAnyNetwork`, `EvaluateDbghelpWithAnyNetwork`, `EvaluateTempBinaryWithNonStandardPort`, `EvaluateTokenEscalationWithAnyNetwork`, `EvaluateMemoryAnomalyWithNetwork`, `EvaluateModuleInjectionWithNetwork`, `EvaluateCovertRatBehavioral`, `EvaluateConfirmedBeaconingFromUnsigned`, `EvaluateUnsignedWithSustainedC2`.
+- Composite rule count reduced from ~40 to ~25.
+- Host-level (PID 0) correlation no longer fires C2/memory composites (prevents false composites from unrelated process signals).
+
+### Fixed — False Positive Reduction III
+
+#### MemoryExecutionRule (expanded exclusion list)
+- Expanded from just `svchost.exe` to 40+ system processes that legitimately lack resolvable image paths: `sppsvc`, `WmiPrvSE`, `MsMpEng`, `MpDefenderCoreService`, `csrss`, `lsass`, `dwm`, `audiodg`, `SearchIndexer`, `fontdrvhost`, `spoolsv`, and more.
+- Eliminates false "process has no executable path" detections on Windows system services.
+
+#### DataExfiltrationMonitor (expanded NetworkAllowlist)
+- Added Microsoft services: `MpDefenderCoreService`, `OneDrive.Sync.Service`, `MicrosoftStartFeedProvider`, `widgets`, `SearchHost`, `backgroundTaskHost`, `usocoreworker`, etc.
+- Added Windows system processes: `svchost`, `lsass`, `sihost`, `taskhostw`, `RuntimeBroker`, `SystemSettings`, etc.
+- Added NVIDIA/GPU: `NVDisplay.Container`, `nvcontainer`, `NvTelemetryContainer`.
+- Added hardware utilities: `RazerCentralService`, `CorsairService`, `iCUE`, `LogiOverlay`, `lghub`.
+- Eliminates false "Sustained Outbound Connection" Tier2 alerts on legitimate Microsoft and hardware services.
+
+#### BehavioralCorrelationEngine (expanded ElectronAndJitApps)
+- Added 15+ system processes to the composite correlation exclusion list: `sppsvc`, `WmiPrvSE`, `MpDefenderCoreService`, `MsMpEng`, `NisSrv`, `SgrmBroker`, `OneDrive.Sync.Service`, `MicrosoftStartFeedProvider`, `backgroundTaskHost`, `widgets`, `GameBarPresenceWriter`, `sihost`, `taskhostw`.
+
+#### BeaconingDetector (expanded LegitimatePeriodicProcesses)
+- Added 20+ entries: `MpDefenderCoreService.exe`, `NisSrv.exe`, `OneDrive.Sync.Service.exe`, `MicrosoftStartFeedProvider.exe`, `widgets.exe`, `usocoreworker.exe`, `NVDisplay.Container.exe`, `Spotify.exe`, `brave.exe`, `steamwebhelper.exe`, `Kiro.exe`, `code.exe`, `cursor.exe`, and more.
+
+#### Response Engines (updated kill-authorization lists)
+- Added `"c2 communication detected"` and `"credential dump confirmed"` to President's Law fragment lists in both `AdvancedResponseEngine` and `AgentResponseEngine`.
+- Legacy composite names retained for backward compatibility with existing log analysis tools.
+
+### Version Bumped
+- All `.csproj` files: 4.5.0 → 4.6.0
+- `version.txt`: 4.5.0 → 4.6.0
+- `setup.iss`: 4.5.0 → 4.6.0
+- `ServiceCollectionExtensions.cs` version constant: 4.5.0 → 4.6.0
+
+---
+
 ## [4.5.0] - 2026-05-30
 
 ### Added — Proactive Security Features

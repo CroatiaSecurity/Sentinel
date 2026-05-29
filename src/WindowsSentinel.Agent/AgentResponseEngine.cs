@@ -46,7 +46,9 @@ internal sealed class AgentResponseEngine : IResponseEngine
         "covert rat:",
         "covert c2:",
         "confirmed c2 beacon:",
-        // v3.5.0 — Existing composites now kill-authorized
+        // v4.6.0 — Unified C2 composite (replaces individual C2 composites)
+        "c2 communication detected",
+        // Legacy names kept for backward compatibility with existing log analysis
         "injected c2 beacon",
         "dga + c2 beaconing",
         "spoofed process phoning home",
@@ -60,6 +62,7 @@ internal sealed class AgentResponseEngine : IResponseEngine
         "interactive shell: outbound",
         // Credential theft (v3.3.0)
         "confirmed lsass dump",
+        "credential dump confirmed",
         "lsass dump",
         "credential dump",
         // Data exfiltration (v3.3.0)

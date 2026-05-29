@@ -185,6 +185,7 @@ public sealed class AdvancedResponseEngine : IResponseEngine
         "lsass credential",
         "credential dump",
         "confirmed lsass dump",
+        "credential dump confirmed",
         "lsass dump",
         // Telemetry tampering (EDR blinding)
         "amsi tampering",
@@ -232,7 +233,9 @@ public sealed class AdvancedResponseEngine : IResponseEngine
         "covert rat:",
         "covert c2:",
         "confirmed c2 beacon:",
-        // v3.5.0 — Existing composites now kill-authorized (were log-only)
+        // v4.6.0 — Unified C2 composite (replaces individual C2 composites)
+        "c2 communication detected",
+        // Legacy names kept for backward compatibility with existing log analysis
         "injected c2 beacon",
         "dga + c2 beaconing",
         "spoofed process phoning home",
