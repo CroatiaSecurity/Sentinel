@@ -41,6 +41,14 @@ public sealed class SuspiciousImportsRule : IDetectionRule
         "RegOpenKey", "RegSetValue", "CreateService", "StartService",
     };
 
+    // Reconnaissance exclusions — benign registry queries that match recon patterns
+    // but are standard Windows device ID lookups used by Edge, Steam, Discord, etc.
+    private static readonly string[] ReconExclusions =
+    {
+        @"HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Cryptography /v MachineGuid",
+        @"hkey_local_machine\software\microsoft\cryptography /v machineguid",
+    };
+
     // Reconnaissance patterns — commonly run in sequence after initial access.
     private static readonly (string Process, string Pattern, string Description)[] ReconPatterns =
     {
@@ -120,6 +128,10 @@ public sealed class SuspiciousImportsRule : IDetectionRule
         }
 
         // 2. Reconnaissance patterns
+        // Skip known-benign registry queries (MachineGuid used by Edge, Steam, Discord, etc.)
+        if (ReconExclusions.Any(excl => cmdLower.Contains(excl.ToLowerInvariant())))
+            goto SkipRecon;
+
         foreach (var (reconProcess, reconPattern, reconDesc) in ReconPatterns)
         {
             if ((nameLower == reconProcess.ToLowerInvariant() ||
@@ -148,6 +160,7 @@ public sealed class SuspiciousImportsRule : IDetectionRule
             }
         }
 
+        SkipRecon:
         // 3. Persistence patterns
         foreach (var (persProcess, persPattern) in PersistencePatterns)
         {

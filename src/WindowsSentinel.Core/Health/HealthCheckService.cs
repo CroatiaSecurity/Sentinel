@@ -33,6 +33,11 @@ public sealed class HealthCheckService : BackgroundService
             {
                 await Task.Delay(TimeSpan.FromMinutes(5), stoppingToken);
                 await PerformHealthCheckAsync(stoppingToken);
+
+                // Force GC to return memory to the OS. The .NET GC is lazy about
+                // releasing pages — without this, working set grows monotonically
+                // even after collections free objects internally.
+                GC.Collect(2, GCCollectionMode.Optimized, blocking: false);
             }
             catch (OperationCanceledException)
             {

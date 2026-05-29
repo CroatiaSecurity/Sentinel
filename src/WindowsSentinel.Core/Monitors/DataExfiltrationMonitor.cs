@@ -115,6 +115,7 @@ public sealed class DataExfiltrationMonitor : BackgroundService
     {
         // Browsers
         "chrome", "firefox", "msedge", "brave", "opera", "vivaldi",
+        "msedgewebview2",
         // Communication / social
         "teams", "slack", "discord", "zoom", "webex",
         "telegram", "signal", "whatsapp", "skype",
@@ -604,7 +605,13 @@ public sealed class DataExfiltrationMonitor : BackgroundService
         {
             using var proc = Process.GetProcessById(pid);
             var path = proc.MainModule?.FileName;
-            if (string.IsNullOrEmpty(path)) return false;
+            if (string.IsNullOrEmpty(path))
+            {
+                // Can't get path (sandboxed/protected process) — trust known Microsoft components
+                if (processName is "msedgewebview2" or "SearchHost" or "widgets" or "backgroundTaskHost")
+                    return true;
+                return false;
+            }
 
             // Must be in a trusted install location
             foreach (var trusted in TrustedPaths)

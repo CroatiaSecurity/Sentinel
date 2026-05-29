@@ -30,6 +30,14 @@ public sealed class MemoryExecutionMonitor : BackgroundService
 {
     private static readonly TimeSpan ScanInterval = TimeSpan.FromSeconds(45);
 
+    // Processes that legitimately have no on-disk image path visible to the memory scanner.
+    // svchost.exe instances are kernel-launched service hosts — their image path may not be
+    // resolvable via WMI when launched by the kernel's service control manager.
+    private static readonly HashSet<string> NoPathAllowlist = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "svchost.exe", "svchost",
+    };
+
     private static readonly HashSet<string> SuspiciousParents = new(StringComparer.OrdinalIgnoreCase)
     {
         "winword.exe", "excel.exe", "powerpnt.exe", "outlook.exe", "mshta.exe",
@@ -100,6 +108,10 @@ public sealed class MemoryExecutionMonitor : BackgroundService
             cancellationToken.ThrowIfCancellationRequested();
             if (string.IsNullOrEmpty(proc.ExecutablePath))
             {
+                // Skip kernel-launched service hosts that legitimately have no visible image path
+                if (NoPathAllowlist.Contains(proc.Name))
+                    continue;
+
                 if (!_emittedKeys.TryAdd($"fileless:{proc.Pid}", 0)) continue;
                 await _engine.EmitAsync(new DetectionEvent
                 {

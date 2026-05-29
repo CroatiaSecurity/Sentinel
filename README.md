@@ -2,7 +2,7 @@
 
 **Userland EDR for Windows — Behavioral Detection, Automated Response & Aggressive Deception**
 
-> Version: 4.3.0 (System Tray Icon)  
+> Version: 4.4.0 (False Positive Reduction II)  
 > Author: [Gorstak](https://gorstak.eu) | [GitHub](https://github.com/CroatiaSecurity/Sentinel)  
 > License: MIT
 
@@ -351,7 +351,7 @@ All tactics:
 
 ```powershell
 # Run installer as Administrator
-.\WindowsSentinelSetup-4.3.0.exe
+.\WindowsSentinelSetup-4.4.0.exe
 ```
 
 The installer:
@@ -431,7 +431,7 @@ cd installer
 .\build.ps1
 ```
 
-Output: `installer\output\WindowsSentinelSetup-4.3.0.exe`
+Output: `installer\output\WindowsSentinelSetup-4.4.0.exe`
 
 ---
 

@@ -405,6 +405,39 @@ public sealed class BehavioralBaselineService : BackgroundService
             _knownNetworkDestinations.TryRemove(key, out _);
         }
 
+        // Hard caps to prevent unbounded growth within a single session
+        // Network destinations grow fastest (every unique process:IP:port tuple)
+        if (_knownNetworkDestinations.Count > 5000)
+        {
+            var excess = _knownNetworkDestinations
+                .OrderBy(kv => kv.Value.ConnectionCount)
+                .ThenBy(kv => kv.Value.LastSeen)
+                .Take(_knownNetworkDestinations.Count - 3000)
+                .Select(kv => kv.Key).ToList();
+            foreach (var key in excess)
+                _knownNetworkDestinations.TryRemove(key, out _);
+        }
+
+        if (_knownExecutablePaths.Count > 3000)
+        {
+            var excess = _knownExecutablePaths
+                .OrderBy(kv => kv.Value.LastSeen)
+                .Take(_knownExecutablePaths.Count - 2000)
+                .Select(kv => kv.Key).ToList();
+            foreach (var key in excess)
+                _knownExecutablePaths.TryRemove(key, out _);
+        }
+
+        if (_knownParentChild.Count > 3000)
+        {
+            var excess = _knownParentChild
+                .OrderBy(kv => kv.Value.LastSeen)
+                .Take(_knownParentChild.Count - 2000)
+                .Select(kv => kv.Key).ToList();
+            foreach (var key in excess)
+                _knownParentChild.TryRemove(key, out _);
+        }
+
         if (oldProcesses.Count > 0 || oldPaths.Count > 0)
         {
             _logger.LogDebug(

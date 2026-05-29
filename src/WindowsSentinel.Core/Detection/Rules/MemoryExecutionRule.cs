@@ -138,6 +138,12 @@ public sealed class MemoryExecutionRule : IDetectionRule
         string? imagePath = proc.ImagePath;
         if (string.IsNullOrEmpty(imagePath) || imagePath == "N/A")
         {
+            // svchost.exe is a legitimate Windows service host that may not have a
+            // resolvable path from the scanner's context (kernel-launched via SCM).
+            if (string.Equals(proc.ProcessName, "svchost.exe", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(proc.ProcessName, "svchost", StringComparison.OrdinalIgnoreCase))
+                return null;
+
             // Fallback: try to resolve the path natively before firing a detection
             // to avoid false positives due to delayed ETW image path resolution.
             imagePath = _processValidator.TryGetProcessImagePath(proc.ProcessId);

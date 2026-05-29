@@ -44,6 +44,7 @@ using ThreatReportingConfig = WindowsSentinel.Core.Response.ThreatReportingConfi
 // 4.1.0 — False Positive Reduction & Third-Party AV Coexistence (Trend Micro, IObit, Ashampoo allowlists, DNS Blocklist Engine)
 // 4.2.0 — Device Installation Security & Ghost Device Cleanup (virtual keyboard/NIC/storage detection, BYOVD driver monitoring, phantom device cleanup)
 // 4.3.0 — System Tray Icon (console view, quarantine access, log viewer, stop protection)
+// 4.4.0 — False Positive Reduction II (route monitor, memory execution, DNS tunneling, sustained connection, audio hijack)
 
 namespace WindowsSentinel.Core;
 
@@ -53,10 +54,10 @@ namespace WindowsSentinel.Core;
 public static class SentinelVersion
 {
     /// <summary>
-    /// Current version - 4.3.0 System Tray Icon
+    /// Current version - 4.4.0 False Positive Reduction II
     /// Version is managed in version.txt for consistency across build scripts
     /// </summary>
-    public const string Version = "4.3.0";
+    public const string Version = "4.4.0";
 
     /// <summary>
     /// Release date
@@ -67,14 +68,15 @@ public static class SentinelVersion
     /// Version description
     /// </summary>
     public const string Description =
-        "4.3.0 — System Tray Icon & Fixes. " +
-        "TrayIconService: system tray NotifyIcon with live console (real-time event tail), " +
-        "quarantine folder access, log viewer, dynamic Start/Stop Protection toggle, " +
-        "and balloon tip notifications for detections/kills. " +
-        "Fixed: AudioHijack false positives (removed generic winmm.dll/mf.dll from module hints), " +
-        "EventGraph 3GB memory leak (capped edges per process at 300, halved hard caps), " +
-        "WTSSendMessage popups replaced with tray balloons, " +
-        "Agent launch reliability (Registry Run key + path resolution fix).";
+        "4.4.0 - False Positive Reduction II & Memory Optimization. " +
+        "RouteTableMonitor: excluded multicast/broadcast from next-hop detection. " +
+        "MemoryExecutionRule: excluded svchost.exe from fileless detection. " +
+        "DataExfiltrationMonitor: fixed msedgewebview2 sandboxed process trust. " +
+        "DnsQueryMonitor: added dotnet/nuget to tunneling allowlist. " +
+        "AudioHijackMonitor: replaced generic DLLs with virtual cable indicators. " +
+        "Memory: EventGraph edges capped at 300/process, BehavioralBaseline collections " +
+        "capped (5K net, 3K paths/PC), periodic GC.Collect forces OS page release. " +
+        "Tray: console as separate process, hidden form invisible, FreeConsole on startup.";
 }
 
 public static class ServiceCollectionExtensions

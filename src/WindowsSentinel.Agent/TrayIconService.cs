@@ -268,135 +268,31 @@ internal sealed class TrayIconService : IHostedService, IDisposable
         }
     }
 
-    private CancellationTokenSource? _consoleTailCts;
-
     private void OpenConsole()
     {
         try
         {
-            // Allocate or attach to a console window to show real-time output
-            if (!AttachConsole(unchecked((uint)-1))) // ATTACH_PARENT_PROCESS
+            // Launch a separate cmd.exe process that tails the log file.
+            // This way closing the console doesn't kill the Agent.
+            var script = $"@echo off & chcp 65001 >nul & title Windows Sentinel - Live Detection Console & " +
+                         $"echo +--------------------------------------------------------------+ & " +
+                         $"echo ^|         Windows Sentinel - Live Detection Console            ^| & " +
+                         $"echo ^|  New events appear in real time. Close window to stop.       ^| & " +
+                         $"echo +--------------------------------------------------------------+ & " +
+                         $"echo. & " +
+                         $"powershell -NoProfile -Command \"Get-Content '{EventsLogPath}' -Tail 20 -Wait -ErrorAction SilentlyContinue\"";
+
+            Process.Start(new ProcessStartInfo
             {
-                AllocConsole();
-            }
-
-            // Set UTF-8 output so box-drawing characters render correctly
-            SetConsoleOutputCP(65001);
-            Console.OutputEncoding = System.Text.Encoding.UTF8;
-            Console.SetOut(new StreamWriter(Console.OpenStandardOutput()) { AutoFlush = true });
-            Console.SetError(new StreamWriter(Console.OpenStandardError()) { AutoFlush = true });
-
-            Console.Title = "Windows Sentinel - Live Detection Console";
-            Console.ForegroundColor = ConsoleColor.Cyan;
-            Console.WriteLine("+--------------------------------------------------------------+");
-            Console.WriteLine("|         Windows Sentinel - Live Detection Console            |");
-            Console.WriteLine("|  Detections and responses will appear here in real time.     |");
-            Console.WriteLine("|  Close this window to hide (protection continues).           |");
-            Console.WriteLine("+--------------------------------------------------------------+");
-            Console.ResetColor();
-            Console.WriteLine();
-
-            // Stop any previous tail
-            _consoleTailCts?.Cancel();
-            _consoleTailCts = new CancellationTokenSource();
-
-            // Start live tailing on a background thread
-            var ct = _consoleTailCts.Token;
-            Task.Run(() => LiveTailLog(ct), ct);
+                FileName = "cmd.exe",
+                Arguments = $"/c \"{script}\"",
+                UseShellExecute = true
+            });
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to open console");
         }
-    }
-
-    private void LiveTailLog(CancellationToken ct)
-    {
-        try
-        {
-            long lastPosition = 0;
-
-            // Print last 20 lines first
-            if (File.Exists(EventsLogPath))
-            {
-                using var fs = new FileStream(EventsLogPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-                using var reader = new StreamReader(fs);
-                var allLines = new List<string>();
-                string? line;
-                while ((line = reader.ReadLine()) != null)
-                    allLines.Add(line);
-
-                var tail = allLines.Skip(Math.Max(0, allLines.Count - 20)).ToArray();
-                Console.ForegroundColor = ConsoleColor.DarkGray;
-                Console.WriteLine($"-- Last {tail.Length} events --");
-                Console.ResetColor();
-
-                foreach (var entry in tail)
-                    WriteColoredLine(entry);
-
-                lastPosition = fs.Position;
-            }
-
-            Console.ForegroundColor = ConsoleColor.DarkGray;
-            Console.WriteLine("-- Live tail active (new events appear below) --");
-            Console.ResetColor();
-
-            // Poll for new lines every second
-            while (!ct.IsCancellationRequested)
-            {
-                Thread.Sleep(1000);
-
-                if (!File.Exists(EventsLogPath)) continue;
-
-                try
-                {
-                    using var fs = new FileStream(EventsLogPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-                    if (fs.Length < lastPosition)
-                    {
-                        // File was rotated — reset
-                        lastPosition = 0;
-                        Console.ForegroundColor = ConsoleColor.DarkGray;
-                        Console.WriteLine("-- Log rotated --");
-                        Console.ResetColor();
-                    }
-
-                    if (fs.Length > lastPosition)
-                    {
-                        fs.Seek(lastPosition, SeekOrigin.Begin);
-                        using var reader = new StreamReader(fs);
-                        string? line;
-                        while ((line = reader.ReadLine()) != null)
-                        {
-                            if (!string.IsNullOrWhiteSpace(line))
-                                WriteColoredLine(line);
-                        }
-                        lastPosition = fs.Position;
-                    }
-                }
-                catch (IOException)
-                {
-                    // File briefly locked during rotation — skip this cycle
-                }
-            }
-        }
-        catch (OperationCanceledException) { }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"[Tail error: {ex.Message}]");
-        }
-    }
-
-    private static void WriteColoredLine(string line)
-    {
-        if (line.Contains("\"KillProcess\"", StringComparison.OrdinalIgnoreCase))
-            Console.ForegroundColor = ConsoleColor.Red;
-        else if (line.Contains("\"type\":\"detection\"", StringComparison.OrdinalIgnoreCase))
-            Console.ForegroundColor = ConsoleColor.Yellow;
-        else
-            Console.ForegroundColor = ConsoleColor.Gray;
-
-        Console.WriteLine(line);
-        Console.ResetColor();
     }
 
     private void OpenQuarantine()
@@ -536,19 +432,7 @@ internal sealed class TrayIconService : IHostedService, IDisposable
         _hiddenForm?.Dispose();
     }
 
-    // P/Invoke for console allocation
+    // P/Invoke
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool FreeConsole();
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern bool AllocConsole();
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern bool AttachConsole(uint dwProcessId);
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern bool SetConsoleOutputCP(uint wCodePageID);
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern IntPtr GetStdHandle(int nStdHandle);
 }

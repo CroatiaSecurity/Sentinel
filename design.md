@@ -1,6 +1,6 @@
 # Windows Sentinel — Design Document
 
-**Version: 4.3.0**
+**Version: 4.4.0**
 
 ---
 
@@ -374,6 +374,22 @@ Composite detections are emitted as Tier1 `DetectionEvent`s directly into the de
 | `FirewallIntegrityMonitor` | Windows Firewall integrity via netsh advfirewall. Detects profile disabled, bulk inbound rule additions, firewall service stopped. |
 | `ScheduledTaskMonitor` | Scheduled task persistence detection via schtasks. Detects malicious task creation with multi-indicator analysis (suspicious paths, encoded commands, SYSTEM from user paths, script execution). |
 | `WindowsUpdateIntegrityMonitor` | Update service integrity monitoring. Detects WU/BITS service stopped, automatic updates disabled via registry/GPO, Defender definitions stale (>7 days). |
+
+## Added in 4.4.0
+
+| Component | Purpose |
+|-----------|---------|
+| `RouteTableMonitor` fix | Excluded multicast (224.0.0.0/4) and broadcast (255.255.255.255) from next-hop change detection. Eliminates 104 false alerts per session from normal DHCP renewal behavior. |
+| `MemoryExecutionRule` fix | Added svchost.exe exclusion to fileless execution detection. svchost instances launched by SCM may not have resolvable image paths. |
+| `DataExfiltrationMonitor` fix | Added fallback trust for sandboxed Microsoft processes (msedgewebview2, SearchHost, widgets, backgroundTaskHost) when path verification fails due to access restrictions. |
+| `DnsQueryMonitor` fix | Added dotnet/nuget to DNS tunneling allowlist. Package restore and build operations legitimately burst DNS queries. |
+| `AudioHijackMonitor` fix | Replaced generic multimedia DLLs (winmm.dll, mf.dll) with actual virtual audio cable indicators (vbcable, voicemeeter, wasapiloopback). |
+| `EventGraph` memory fix | AddEdge() caps at 300 edges/process (trims to 150). Prune() hard caps halved. |
+| `BehavioralBaselineService` memory fix | Hard caps: 5K network destinations, 3K paths, 3K parent-child. Evicts by lowest usage. |
+| `HealthCheckService` GC | Non-blocking Gen2 GC.Collect every 5 minutes forces runtime to return pages to OS. |
+| Console view separation | Console now launches as separate cmd.exe process. Closing it no longer kills the Agent. |
+| Hidden form fix | Opacity=0 + off-screen positioning prevents the marshalling form from being visible. |
+| `UserSessionLauncher` path fix | Uses Environment.ProcessPath for single-file exe compatibility. |
 
 ## Added in 4.3.0
 

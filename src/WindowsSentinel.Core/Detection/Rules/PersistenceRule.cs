@@ -87,6 +87,16 @@ public sealed class PersistenceRule : IDetectionRule
         "battle.net", "riotclientservices", "xbox",
     };
 
+    // WMI queries that are standard Windows hardware/system queries, not persistence.
+    // These fire on the WMI persistence patterns because they contain WMI class names,
+    // but they are benign system information queries (battery status, hardware inventory, etc.)
+    private static readonly string[] WmiQueryExclusions =
+    {
+        "batterystaticdata",
+        "root/wmi",
+        "root\\wmi",
+    };
+
     // Suspicious persistence payloads.
     private static readonly string[] SuspiciousPayloadPatterns =
     {
@@ -187,6 +197,10 @@ public sealed class PersistenceRule : IDetectionRule
         }
 
         // 3. WMI event subscription persistence
+        // Skip standard Windows hardware queries (BatteryStaticData, ROOT/WMI, etc.)
+        if (WmiQueryExclusions.Any(excl => cmdLower.Contains(excl)))
+            goto SkipWmi;
+
         foreach (var wmiPattern in WmiPersistencePatterns)
         {
             if (cmdLower.Contains(wmiPattern.ToLowerInvariant()))
@@ -215,6 +229,8 @@ public sealed class PersistenceRule : IDetectionRule
                 };
             }
         }
+
+        SkipWmi:
 
         // 4. Service creation with suspicious binary path
         foreach (var svcPattern in ServiceCreationPatterns)

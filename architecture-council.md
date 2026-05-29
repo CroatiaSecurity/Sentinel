@@ -3,7 +3,7 @@
 **Status:** Architecture spec. Extends, does not replace, `requirements.md`,
 `design.md`, `constraints.md` (all v0.9.0).
 
-**Last updated:** v4.3.0 (May 2026) — System Tray Icon.
+**Last updated:** v4.4.0 (May 2026) — False Positive Reduction II.
 
 ---
 

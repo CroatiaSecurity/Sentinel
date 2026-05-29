@@ -50,6 +50,21 @@ public sealed class DnsQueryMonitor : IMonitor
         "dnscat", "iodine", "dns2tcp", "dnsexfil", "dnstunnel"
     };
 
+    // Processes excluded from DNS tunneling detection — these legitimately make
+    // high-volume DNS queries as part of normal operation (IDE language servers, etc.)
+    private static readonly HashSet<string> TunnelingProcessAllowlist = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "kiro", "Kiro",
+        "dotnet", "nuget",
+    };
+
+    // Domain suffixes excluded from DNS tunneling / DGA detection — known-good high-query domains
+    private static readonly string[] TunnelingDomainAllowlist =
+    {
+        ".kiro.dev",
+        "api.nuget.org",
+    };
+
     // Known exfiltration / file-sharing / paste service domains (v1.8.0)
     // Resolution of these by non-browser processes = immediate Tier1 exfil alert
     private static readonly HashSet<string> ExfilServiceDomains = new(StringComparer.OrdinalIgnoreCase)
@@ -357,6 +372,16 @@ public sealed class DnsQueryMonitor : IMonitor
                 var queriesPerMinute = stats.TotalQueries / elapsed;
                 if (queriesPerMinute > 30 && !stats.TunnelingAlerted)
                 {
+                    // Skip processes in the tunneling allowlist (e.g., Kiro IDE making frequent API calls)
+                    var tunnelingProcessName = GetProcessNameSafe(processPid);
+                    if (tunnelingProcessName != null && TunnelingProcessAllowlist.Contains(tunnelingProcessName))
+                        goto SkipTunneling;
+
+                    // Skip if recent domains are all in the domain allowlist
+                    var recentDomainsList = stats.RecentDomains.ToArray();
+                    if (recentDomainsList.Length > 0 && recentDomainsList.All(d => IsAllowlistedDomain(d)))
+                        goto SkipTunneling;
+
                     stats.TunnelingAlerted = true;
 
                     _ = _detectionEngine.EmitAsync(new DetectionEvent
@@ -380,6 +405,8 @@ public sealed class DnsQueryMonitor : IMonitor
                             ["technique"] = "T1071.004 - Application Layer Protocol: DNS"
                         }
                     }, ct);
+
+                    SkipTunneling:;
                 }
             }
         }
@@ -392,6 +419,31 @@ public sealed class DnsQueryMonitor : IMonitor
         {
             if (lower == safe || lower.EndsWith("." + safe))
                 return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Checks if a domain is in the tunneling domain allowlist (e.g., *.kiro.dev, api.nuget.org).
+    /// These domains generate high query volumes legitimately.
+    /// </summary>
+    private static bool IsAllowlistedDomain(string domain)
+    {
+        var lower = domain.ToLowerInvariant().TrimEnd('.');
+        foreach (var allowed in TunnelingDomainAllowlist)
+        {
+            if (allowed.StartsWith("."))
+            {
+                // Wildcard suffix match (e.g., ".kiro.dev" matches "foo.kiro.dev")
+                if (lower.EndsWith(allowed) || lower == allowed.TrimStart('.'))
+                    return true;
+            }
+            else
+            {
+                // Exact match
+                if (lower == allowed)
+                    return true;
+            }
         }
         return false;
     }

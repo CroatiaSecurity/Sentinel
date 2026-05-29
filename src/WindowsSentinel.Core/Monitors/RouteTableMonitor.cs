@@ -221,6 +221,14 @@ public sealed class RouteTableMonitor : BackgroundService
             {
                 if (IsVirtualAdapterRoute(route.InterfaceIndex)) continue;
 
+                // Skip multicast (224.0.0.0/240.0.0.0) and broadcast (255.255.255.255) routes —
+                // these fluctuate normally during DHCP renewal / network reconnection.
+                if (route.Destination == "224.0.0.0" && route.Mask == "240.0.0.0") continue;
+                if (route.Destination == "255.255.255.255") continue;
+                if (route.NextHop == "127.0.0.1" &&
+                    (route.Destination == "224.0.0.0" || route.Destination == "255.255.255.255" ||
+                     route.Destination.StartsWith("224."))) continue;
+
                 var dedupeKey = $"route_mod:{route.Key}:{route.NextHop}";
                 if (_alertedEvents.ContainsKey(dedupeKey)) continue;
                 _alertedEvents.TryAdd(dedupeKey, DateTimeOffset.UtcNow);

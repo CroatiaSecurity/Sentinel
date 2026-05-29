@@ -2,6 +2,58 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [4.4.0] - 2026-05-29
+
+### Fixed — False Positive Reduction II
+
+#### RouteTableMonitor (104 false alerts eliminated)
+- **Root cause**: Multicast (224.0.0.0/240.0.0.0) and broadcast (255.255.255.255) routes naturally fluctuate during DHCP renewal, sleep/wake, and network reconnection. Windows temporarily routes these through loopback (127.0.0.1) then re-establishes them on the physical interface. The monitor was flagging every fluctuation as "Route Next-Hop Modified" — a Tier1 Malicious detection.
+- **Fix**: Excluded multicast (224.0.0.0/4) and broadcast (255.255.255.255) destinations from next-hop change detection. Only actual unicast route modifications (the real attack pattern) are now flagged.
+
+#### MemoryExecutionRule (72 false alerts eliminated)
+- **Root cause**: `svchost.exe` instances hosting Windows services (e.g., AppXSvc) sometimes have no resolvable image path from the scanner's context (kernel-launched via SCM). The rule flagged these as "process has no executable path" — fileless execution.
+- **Fix**: Added svchost.exe exclusion to the `CheckFilelessExecution` path in `MemoryExecutionRule`. The `MemoryExecutionMonitor` already had this exclusion but the separate rule in the detection pipeline did not.
+
+#### DataExfiltrationMonitor — msedgewebview2 (41 false alerts eliminated)
+- **Root cause**: `msedgewebview2` (Windows Search/Widgets WebView) connects to Microsoft infrastructure (52.108.x, 204.79.197.x, 13.107.x, 131.253.x — all Microsoft-owned). It was in the NetworkAllowlist but `IsProcessTrusted` couldn't verify its path because `proc.MainModule.FileName` returns null for sandboxed WebView subprocesses.
+- **Fix**: Added fallback trust for known Microsoft sandboxed processes (`msedgewebview2`, `SearchHost`, `widgets`, `backgroundTaskHost`) when path verification fails due to access restrictions.
+
+#### DnsQueryMonitor — DNS Tunneling (Kiro/NuGet)
+- **Root cause**: Kiro IDE telemetry (`prod.us-east-1.telemetry.desktop.kiro.dev`) and NuGet package restore (`api.nuget.org`) legitimately make 50+ DNS queries in short bursts, exceeding the 30 queries/minute tunneling threshold.
+- **Fix**: Added `dotnet` and `nuget` to the DNS tunneling process allowlist. `kiro` was already present.
+
+#### AudioHijackMonitor (from 4.3.0, documented here)
+- **Root cause**: `MicInputModuleHints` included `winmm.dll`, `mf.dll`, `mfreadwrite.dll`, and `directsound` — generic Windows multimedia DLLs loaded by any process that touches audio.
+- **Fix**: Replaced with actual output-to-mic routing indicators: `vbcable`, `vbaudiow`, `voicemeeter`, `virtualcable`, `stereomix`, `audiorepeater`, `loopback`, `wasapiloopback`.
+
+#### Composite Detection Cascade (25+ false composites eliminated)
+- All "In-Memory Implant + Network Beacon" and "DGA + C2 Beaconing" composite alerts were cascading from the individual false positives above. With the root causes fixed, these composites can no longer form from legitimate activity.
+
+### Fixed — Memory Usage (Service 1.2GB+ growth)
+- **EventGraph**: `AddEdge()` now caps at 300 edges per process (trims to 150 when hit). `Prune()` thresholds halved: 5K processes, 10K files, 3K endpoints.
+- **BehavioralBaselineService**: Added hard caps — network destinations capped at 5000, executable paths at 3000, parent-child relationships at 3000. Excess entries evicted by lowest connection count / oldest last-seen.
+- **GC pressure relief**: Added `GC.Collect(2, Optimized, non-blocking)` every 5 minutes in HealthCheckService. Forces the .NET runtime to return freed pages to the OS instead of hoarding them for future allocations.
+
+### Fixed — Tray Icon Issues (from 4.3.0)
+- **Hidden form visible**: The cross-thread marshalling form was briefly visible at (0,0). Fixed with `Opacity=0`, off-screen position, and immediate `Visible=false` after `Show()`.
+- **Console kills Agent**: `AllocConsole` attached a console to the Agent process; closing it sent `CTRL_CLOSE_EVENT` killing the Agent. Console view now launches as a separate `cmd.exe` process with `Get-Content -Tail -Wait`.
+- **Agent not launching from Service**: `UserSessionLauncher` used `AppContext.BaseDirectory` which points to the single-file extraction temp dir. Fixed to use `Environment.ProcessPath`. Also added HKLM Run key as primary launch mechanism.
+
+### Changed
+- `UserSessionLauncher` path resolution uses `Environment.ProcessPath` for single-file exe compatibility
+- Console view runs as separate process (cmd.exe + PowerShell Get-Content -Tail -Wait)
+- Hidden form uses Opacity=0 + off-screen positioning
+- HealthCheckService triggers non-blocking GC every 5 minutes
+
+### Version Bumped
+- All `.csproj` files: 4.3.0 -> 4.4.0
+- `version.txt`: 4.3.0 -> 4.4.0
+- `setup.iss`: 4.3.0 -> 4.4.0
+- All User-Agent strings: 4.3.0 -> 4.4.0
+- All documentation headers: 4.3.0 -> 4.4.0
+
+---
+
 ## [4.3.0] - 2026-05-29
 
 ### Added — System Tray Icon
