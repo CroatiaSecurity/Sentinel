@@ -2,6 +2,57 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [4.5.0] - 2026-05-30
+
+### Added — Proactive Security Features
+
+#### ClipboardSanitizer (new BackgroundService)
+- **Active clipboard sanitization** every 2 seconds on a dedicated STA thread.
+- Strips dangerous Unicode content before it can be pasted into chat/browser/terminal:
+  - Zero-width characters (U+200B, U+200C, U+200D, U+FEFF, U+2060) — used for fingerprinting/tracking
+  - RTL override characters (U+202A-U+202E) — used for filename spoofing (e.g., `document[RLO]fdp.exe` appearing as `documentexe.pdf`)
+  - Cyrillic homoglyphs (a/e/o/p/c lookalikes) — used for phishing URLs (`paypal.com` with Cyrillic 'a')
+  - Invisible Unicode tags (U+E0001-U+E007F) — used for steganography
+- Only modifies clipboard when dangerous content is actually found.
+- Emits Tier2 detection when sanitization occurs.
+
+#### AppNetworkPolicyMonitor (new BackgroundService)
+- **Per-application network destination learning and enforcement.**
+- 30-minute learning phase on startup: records which /24 subnets each process connects to.
+- After learning: alerts when a process connects to a subnet it has never used before.
+- Broad allowlist excludes browsers, system processes, and known-noisy apps.
+- Caps: 1000 subnets per process, 5000 total processes. Prunes hourly.
+- Detection: "Network Policy: Unusual Destination", Tier2, confidence 0.55.
+
+#### UsbDeviceFingerprinter (new BackgroundService)
+- **USB device baseline and BadUSB detection** via VID:PID:Serial fingerprinting.
+- Baselines all USB devices on startup via WMI (Win32_PnPEntity).
+- Polls every 30 seconds for new devices.
+- Detection tiers:
+  - Unknown HID device (keyboard with unrecognized VID) → Tier1, confidence 0.80 ("BadUSB: Unknown HID Device")
+  - Composite device (multiple interfaces) → Tier1, confidence 0.75
+  - New mass storage → Tier2, confidence 0.50
+  - Other new USB device → Tier2, confidence 0.40
+- Known-good keyboard VID allowlist: Logitech, Microsoft, Chicony, Corsair, Razer, SINO WEALTH, Kingston/HyperX, Keychron, Apple.
+
+### Added — Tests
+- ClipboardSanitizer: 14 tests (zero-width, RTL, homoglyphs, clean input, multiple findings)
+- AppNetworkPolicyMonitor: 14 tests (subnet calculation, local address classification)
+- UsbDeviceFingerprinter: 18 tests (device ID parsing, HID detection, VID allowlist, mass storage detection)
+- EventGraph: 5 tests (edge cap, prune old nodes, trim bags, hard cap, network edge)
+- AudioHijackMonitor: 12 tests (generic DLL removal verification, virtual cable indicator presence)
+- RouteTableMonitor: 10 tests (multicast/broadcast exclusion, unicast host route detection)
+- Total test count: 340 → 367
+
+### Version Bumped
+- All `.csproj` files: 4.4.0 → 4.5.0
+- `version.txt`: 4.4.0 → 4.5.0
+- `setup.iss`: 4.4.0 → 4.5.0
+- All User-Agent strings: 4.4.0 → 4.5.0
+- All documentation headers: 4.4.0 → 4.5.0
+
+---
+
 ## [4.4.0] - 2026-05-29
 
 ### Fixed — False Positive Reduction II

@@ -44,7 +44,7 @@ using ThreatReportingConfig = WindowsSentinel.Core.Response.ThreatReportingConfi
 // 4.1.0 — False Positive Reduction & Third-Party AV Coexistence (Trend Micro, IObit, Ashampoo allowlists, DNS Blocklist Engine)
 // 4.2.0 — Device Installation Security & Ghost Device Cleanup (virtual keyboard/NIC/storage detection, BYOVD driver monitoring, phantom device cleanup)
 // 4.3.0 — System Tray Icon (console view, quarantine access, log viewer, stop protection)
-// 4.4.0 — False Positive Reduction II (route monitor, memory execution, DNS tunneling, sustained connection, audio hijack)
+// 4.5.0 — False Positive Reduction II (route monitor, memory execution, DNS tunneling, sustained connection, audio hijack)
 
 namespace WindowsSentinel.Core;
 
@@ -54,10 +54,10 @@ namespace WindowsSentinel.Core;
 public static class SentinelVersion
 {
     /// <summary>
-    /// Current version - 4.4.0 False Positive Reduction II
+    /// Current version - 4.5.0 False Positive Reduction II
     /// Version is managed in version.txt for consistency across build scripts
     /// </summary>
-    public const string Version = "4.4.0";
+    public const string Version = "4.5.0";
 
     /// <summary>
     /// Release date
@@ -68,7 +68,7 @@ public static class SentinelVersion
     /// Version description
     /// </summary>
     public const string Description =
-        "4.4.0 - False Positive Reduction II & Memory Optimization. " +
+        "4.5.0 - False Positive Reduction II & Memory Optimization. " +
         "RouteTableMonitor: excluded multicast/broadcast from next-hop detection. " +
         "MemoryExecutionRule: excluded svchost.exe from fileless detection. " +
         "DataExfiltrationMonitor: fixed msedgewebview2 sandboxed process trust. " +
@@ -539,6 +539,11 @@ public static class ServiceCollectionExtensions
         // ── Device Installation Monitor (v4.2.0: virtual keyboard, rogue NIC, storage, driver load) ──
         services.AddHostedService<DeviceInstallMonitor>();
 
+        // ── 4.5.0 — Clipboard Sanitization, App Network Policy, USB Fingerprinting ──
+        services.AddHostedService<ClipboardSanitizer>();
+        services.AddHostedService<AppNetworkPolicyMonitor>();
+        services.AddHostedService<UsbDeviceFingerprinter>();
+
         // ── DNS Response Validation (DNS poisoning, captive portal detection) ─
         services.AddHostedService<DnsResponseValidationMonitor>();
 
@@ -718,5 +723,6 @@ public class LogRotationOptions
     /// </summary>
     public int MaxRetainedFiles { get; set; } = 5;
 }
+
 
 

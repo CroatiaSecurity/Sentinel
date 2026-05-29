@@ -70,7 +70,7 @@ public sealed class ThreatIntelReporter : BackgroundService
         {
             Timeout = TimeSpan.FromSeconds(15)
         };
-        _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("WindowsSentinel-EDR/4.4.0");
+        _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("WindowsSentinel-EDR/4.5.0");
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -413,5 +413,6 @@ public sealed class ThreatReportingConfig
     /// <summary>Deduplication window — same IP/hash won't be reported twice within this window.</summary>
     public TimeSpan DeduplicationWindow { get; set; } = TimeSpan.FromHours(24);
 }
+
 
 
