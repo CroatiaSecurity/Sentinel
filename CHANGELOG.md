@@ -2,6 +2,60 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [4.3.0] - 2026-05-29
+
+### Added — System Tray Icon
+
+#### TrayIconService (new BackgroundService in Agent)
+- **System tray NotifyIcon** in the Agent process, running on a dedicated STA thread with a WinForms message pump alongside the Generic Host.
+- **Context menu items:**
+  - **Open Console** (bold, default double-click action) — Allocates a console window, live-tails `events.jsonl` with color-coded output (yellow for detections, red for kills). Updates in real time (1-second poll). Handles log rotation.
+  - **Open Quarantine Folder** — Opens `%ProgramData%\WindowsSentinel\Quarantine` in Explorer.
+  - **Open Event Log** — Opens `events.jsonl` in Notepad for quick inspection.
+  - **Stop/Start Protection** (dynamic) — Shows "Stop Protection" (red) when service is running, "Start Protection" (green) when stopped. Stop requires balloon-click confirmation. Start uses ServiceController.
+- **Balloon tip notifications** for Agent-side detections: Tier1 kills show error balloon, Tier1 detections show warning balloon. Thread-safe `ShowBalloon()` API callable from any thread.
+- **Icon**: Extracts the embedded `Sentinel.ico` from the exe via `Icon.ExtractAssociatedIcon`. Falls back to `SystemIcons.Shield` if unavailable.
+- **Tooltip**: Shows "Windows Sentinel v4.3.0 — Protection Active".
+- **Graceful cleanup**: Removes the tray icon on shutdown (no ghost icons in the notification area).
+- **FreeConsole on startup**: Detaches from the console allocated by `CreateProcessAsUser` so the WinForms message pump works correctly.
+- **Auto-start via Registry Run key**: `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run` entry ensures Agent launches on user login without relying on `CreateProcessAsUser`.
+- **Installer launches Agent**: Post-install step runs the Agent immediately so the tray icon appears without requiring a reboot.
+
+### Fixed — Audio Hijack False Positives
+- **Root cause**: `MicInputModuleHints` included `winmm.dll`, `mf.dll`, `mfreadwrite.dll`, and `directsound` — generic Windows multimedia DLLs loaded by virtually any process that touches audio. Any background process playing a notification sound would trigger "Audio routed to microphone" detection.
+- **Fix**: Replaced generic DLLs with actual output-to-mic routing indicators: virtual audio cable drivers (`vbcable`, `vbaudiow`, `voicemeeter`, `virtualcable`), loopback capture DLLs (`wasapiloopback`, `loopback`), and audio repeater modules (`audiorepeater`). Command-line token detection unchanged.
+
+### Fixed — WTSSendMessage Popups Replaced with Balloon Tips
+- **Root cause**: The SYSTEM service used `WTSSendMessage` to show modal dialog boxes to the user desktop for threat alerts. These were intrusive and blocked user interaction.
+- **Fix**: Removed all `WTSSendMessage` calls from `ToastNotificationService`. User-facing notifications now come exclusively from the Agent's tray icon balloon tips (non-intrusive, auto-dismiss).
+
+### Fixed — EventGraph Memory Leak (3GB RAM usage)
+- **Root cause**: `EventGraph.AddEdge()` had zero bounds checking. Every file write, network connection, and process start added a `GraphEdge` object with no cap. Browsers and IDEs generate thousands of events per minute. The prune (every 30s) only triggered at 500 entries per bag — too late.
+- **Fix**: (1) `AddEdge()` now caps at 300 edges per process; when hit, trims to 150 most recent within retention window. (2) `Prune()` trims all bags over 150 entries. (3) Hard caps halved: 5K processes (was 10K), 10K files (was 20K), 3K endpoints (was 5K).
+
+### Fixed — Console View
+- **File locking**: `File.ReadAllLines()` conflicted with the Service's writer. Now uses `FileStream` with `FileShare.ReadWrite`.
+- **Garbled characters**: Replaced Unicode box-drawing characters with ASCII. Added `SetConsoleOutputCP(65001)` for UTF-8.
+- **Static snapshot**: Console now live-tails the log (1-second poll) instead of showing a one-time snapshot.
+
+### Fixed — Agent Launch from Service
+- **UserSessionLauncher path resolution**: `AppContext.BaseDirectory` for single-file published apps points to the temp extraction directory, not the install folder. Fixed to use `Environment.ProcessPath` to resolve the actual exe location.
+- **Registry Run key**: Added `HKLM\...\Run` entry as primary launch mechanism. `UserSessionLauncher` remains as a watchdog/fallback.
+
+### Changed
+- Agent project now includes WinForms support (`<UseWindowsForms>true</UseWindowsForms>`) for the tray icon UI.
+- `ToastNotificationService` no longer shows any popups from SYSTEM service context.
+- Installer adds Registry Run key for Agent auto-start and launches Agent post-install.
+
+### Version Bumped
+- All `.csproj` files: 4.2.0 → 4.3.0
+- `version.txt`: 4.2.0 → 4.3.0
+- `setup.iss`: 4.2.0 → 4.3.0
+- All User-Agent strings: 4.2.0 → 4.3.0
+- All documentation headers: 4.2.0 → 4.3.0
+
+---
+
 ## [4.2.0] - 2026-05-28
 
 ### Added — Device Installation Security
@@ -25,6 +79,34 @@ All notable changes to Windows Sentinel are documented in this file.
 - Protected device classes (System, HDC, SCSIAdapter, Display, Battery, Bluetooth) are never touched.
 - Equivalent to manually doing "Show hidden devices" → right-click → Uninstall in Device Manager.
 - Logs every removed device for audit trail.
+
+### Fixed — Critical Runtime Issues
+
+#### Notification System (broken since v1.0.0)
+- **Root cause**: `ToastNotificationService` used WinRT `Windows.UI.Notifications` from the SYSTEM service (session 0). Due to Windows session isolation (since Vista), toasts rendered in session 0 are invisible to the user. This has been broken since the notification system was first added.
+- **Fix**: Added `WTSSendMessage` fallback — this Win32 API CAN show message boxes to the user desktop from a SYSTEM service. Critical/Malicious threat alerts now show a modal dialog in the user session. Rate-limited to one every 2 minutes to avoid spam. WinRT toasts still used when called from the Agent (user session).
+- **Detection**: Added `IsRunningAsSystem()` check to route notifications through the correct mechanism.
+
+#### Memory Leak (EventGraph unbounded growth)
+- **Root cause**: `EventGraph.Prune()` was never called — the doc said "Called periodically by TelemetryFusionEngine" but no code actually invoked it. Additionally, `ConcurrentBag<GraphEdge>` for long-running processes (browsers, services) grew unbounded because the process node's `LastSeen` kept updating, preventing node removal.
+- **Fix**: (1) Added `_eventGraph.Prune()` call to TelemetryFusionEngine's cleanup loop. (2) Prune now rebuilds edge bags for active processes when they exceed 500 entries, keeping only the 200 most recent within the retention window. (3) Added hard caps: 10K process nodes, 20K file nodes, 5K endpoint nodes — aggressively prunes oldest when exceeded.
+
+#### Sparse File Bomb Cleanup (not deleting 500GB files)
+- **Root cause**: Cleanup only checked the primary `SparseBombDirectory`. If the path resolved differently between deploy and cleanup (SYSTEM profile path variations), or if Trend Micro locked the file, cleanup silently failed.
+- **Fix**: (1) Added retry logic (3 attempts with 500ms delay). (2) Scans multiple alternate paths. (3) Clears read-only/system attributes before deletion. (4) Catches any file >1GB in the deception directory (renamed bombs). (5) Added evidence dump cleanup — keeps only 3 most recent cases, deletes older 300-900MB dump files.
+
+#### Agent Keeps Dying (Trend Micro killing SentinelAgent.exe)
+- **Root cause**: Trend Micro's AEGIS engine rates SentinelAgent.exe as "Suspicious" and terminates it on launch. The UserSessionLauncher retried every 30 seconds indefinitely, flooding the event log.
+- **Fix**: (1) Added consecutive failure counter. (2) After 10 failures, logs a CRITICAL alert explaining that an antivirus is blocking the Agent and listing which monitors are offline. (3) After 20 failures, backs off to 5-minute retry intervals instead of 30-second spam. (4) Logs recovery when Agent finally stays alive.
+- **User action required**: Add `C:\Program Files\WindowsSentinel\` to Trend Micro's exclusion list.
+
+#### Ransomware I/O False Positive (msedge)
+- **Root cause**: Edge's cache writes, IndexedDB operations, and service workers produce 23K+ write ops / 130MB per minute continuously. This exceeds the ransomware threshold every 60 seconds.
+- **Fix**: Added `msedge`, `chrome`, `firefox`, `brave`, `opera`, `vivaldi`, `msedgewebview2` to the ransomware I/O whitelist. Browsers are high-IO by nature.
+
+#### Startup Folder False Positive (desktop.ini)
+- **Root cause**: `desktop.ini` is a normal Windows file that controls folder display settings. The startup folder scan flagged it as a suspicious persistence item.
+- **Fix**: Added exclusion for `desktop.ini`, `thumbs.db`, and all `.ini` files in startup folders.
 
 ### Version Bumped
 - All `.csproj` files: 4.1.0 → 4.2.0

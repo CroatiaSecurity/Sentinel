@@ -38,7 +38,6 @@ class Program
         using var mutex = new Mutex(true, "WindowsSentinelAgent", out bool createdNew);
         if (!createdNew)
         {
-            Console.WriteLine("[Agent] Another instance already running. Exiting.");
             return 0;
         }
 
@@ -59,7 +58,12 @@ class Program
                 Enumerable.Empty<IDetectionRule>(),
                 sp.GetRequiredService<ILogger<DetectionEngine>>()));
         builder.Services.AddSingleton<IEventLogger, AgentEventLogger>();
-        builder.Services.AddSingleton<IResponseEngine, AgentResponseEngine>();
+        builder.Services.AddSingleton<TrayIconService>();
+        builder.Services.AddSingleton<IResponseEngine>(sp =>
+            new AgentResponseEngine(
+                sp.GetRequiredService<IEventLogger>(),
+                sp.GetRequiredService<ILogger<AgentResponseEngine>>(),
+                sp.GetRequiredService<TrayIconService>()));
         // TelemetryFusionEngine is optional for monitors — register as null
         builder.Services.AddSingleton<TelemetryFusionEngine>(_ => null!);
 
@@ -74,13 +78,16 @@ class Program
         // ── Detection pipeline consumer (reads channel, routes to response engine) ──
         builder.Services.AddHostedService<AgentDetectionPipeline>();
 
+        // ── System tray icon ─────────────────────────────────────────────────
+        builder.Services.AddHostedService(sp => sp.GetRequiredService<TrayIconService>());
+
         // ── Service watchdog ─────────────────────────────────────────────────
         builder.Services.AddHostedService<ServiceWatchdogService>();
 
         var host = builder.Build();
 
         var logger = host.Services.GetRequiredService<ILogger<Program>>();
-        logger.LogInformation("Windows Sentinel Agent v4.2.0 starting in user session (with user-context monitors)");
+        logger.LogInformation("Windows Sentinel Agent v4.3.0 starting in user session (with user-context monitors)");
 
         await host.RunAsync();
 

@@ -1,6 +1,6 @@
 # Windows Sentinel — Design Document
 
-**Version: 4.2.0**
+**Version: 4.3.0**
 
 ---
 
@@ -374,6 +374,17 @@ Composite detections are emitted as Tier1 `DetectionEvent`s directly into the de
 | `FirewallIntegrityMonitor` | Windows Firewall integrity via netsh advfirewall. Detects profile disabled, bulk inbound rule additions, firewall service stopped. |
 | `ScheduledTaskMonitor` | Scheduled task persistence detection via schtasks. Detects malicious task creation with multi-indicator analysis (suspicious paths, encoded commands, SYSTEM from user paths, script execution). |
 | `WindowsUpdateIntegrityMonitor` | Update service integrity monitoring. Detects WU/BITS service stopped, automatic updates disabled via registry/GPO, Defender definitions stale (>7 days). |
+
+## Added in 4.3.0
+
+| Component | Purpose |
+|-----------|---------|
+| `TrayIconService` | System tray NotifyIcon in the Agent process. Context menu: Open Console (live-tails events.jsonl with color-coded output, 1s poll), Open Quarantine Folder (Explorer), Open Event Log (Notepad), Start/Stop Protection (dynamic toggle with balloon confirmation). Balloon tip notifications for Tier1 detections/kills. Runs on dedicated STA thread with WinForms ApplicationContext message pump. FreeConsole on startup to detach from CreateProcessAsUser console. |
+| `AudioHijackMonitor` fix | Removed false-positive-prone generic DLLs (winmm.dll, mf.dll, mfreadwrite.dll, directsound) from MicInputModuleHints. Replaced with actual output-to-mic routing indicators (virtual cable drivers, loopback capture DLLs). |
+| `EventGraph` memory fix | AddEdge() now caps at 300 edges per process (trims to 150 when hit). Prune() thresholds halved. Prevents 3GB+ memory growth on busy systems. |
+| `ToastNotificationService` | Removed WTSSendMessage modal popups from SYSTEM service. User notifications delegated to Agent tray icon balloons. |
+| `UserSessionLauncher` path fix | Uses Environment.ProcessPath instead of AppContext.BaseDirectory for single-file exe compatibility. |
+| Registry Run key | HKLM Run entry for Agent auto-start on login (installer). Primary launch mechanism replacing unreliable CreateProcessAsUser. |
 
 ---
 

@@ -67,6 +67,8 @@ public sealed class TelemetryFusionEngine : BackgroundService
                 await Task.Delay(CleanupInterval, stoppingToken);
                 PruneStaleChains();
                 PruneStaleRelations();
+                // v4.2.0: Prune the EventGraph to prevent unbounded memory growth
+                _eventGraph.Prune();
             }
             catch (OperationCanceledException) { break; }
             catch (Exception ex)

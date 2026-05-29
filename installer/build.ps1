@@ -37,7 +37,16 @@ foreach ($dir in $cleanDirs) {
 $publishService = Join-Path $Installer "publish\service"
 $publishAgent = Join-Path $Installer "publish\agent"
 if (Test-Path "$publishService\SentinelService.exe") { Remove-Item "$publishService\SentinelService.exe" -Force -ErrorAction SilentlyContinue }
+if (Test-Path "$publishService\SentinelService.pdb") { Remove-Item "$publishService\SentinelService.pdb" -Force -ErrorAction SilentlyContinue }
 if (Test-Path "$publishAgent\SentinelAgent.exe") { Remove-Item "$publishAgent\SentinelAgent.exe" -Force -ErrorAction SilentlyContinue }
+if (Test-Path "$publishAgent\SentinelAgent.pdb") { Remove-Item "$publishAgent\SentinelAgent.pdb" -Force -ErrorAction SilentlyContinue }
+
+# Clean old installer output — prevents confusion about which exe to run
+$outputDir = Join-Path $Installer "output"
+if (Test-Path $outputDir) {
+    Remove-Item "$outputDir\*.exe" -Force -ErrorAction SilentlyContinue
+    Write-Host "[OK] Old installer output cleaned" -ForegroundColor Green
+}
 
 # dotnet clean as belt-and-suspenders
 dotnet clean "$RepoRoot\src\WindowsSentinel.Service\WindowsSentinel.Service.csproj" -c $Configuration --nologo -v q 2>$null
@@ -101,6 +110,17 @@ dotnet publish "$RepoRoot\src\WindowsSentinel.Agent\WindowsSentinel.Agent.csproj
     -p:Version=$Version `
     -o $AgentOut
 if ($LASTEXITCODE -ne 0) { throw "Agent publish failed" }
+
+# ── Verify publish outputs exist ──────────────────────────────────────────────
+Write-Host "`n[Verify] Checking publish outputs..." -ForegroundColor Yellow
+$serviceExe = Join-Path $ServiceOut "SentinelService.exe"
+$agentExe = Join-Path $AgentOut "SentinelAgent.exe"
+if (-not (Test-Path $serviceExe)) { throw "FATAL: SentinelService.exe not found at $serviceExe - publish failed silently" }
+if (-not (Test-Path $agentExe)) { throw "FATAL: SentinelAgent.exe not found at $agentExe - publish failed silently" }
+$svcInfo = Get-Item $serviceExe
+$agtInfo = Get-Item $agentExe
+Write-Host "[OK] SentinelService.exe: $([math]::Round($svcInfo.Length / 1MB, 1)) MB, built $(($svcInfo.LastWriteTime).ToString('HH:mm:ss'))" -ForegroundColor Green
+Write-Host "[OK] SentinelAgent.exe:   $([math]::Round($agtInfo.Length / 1MB, 1)) MB, built $(($agtInfo.LastWriteTime).ToString('HH:mm:ss'))" -ForegroundColor Green
 
 # ── 3. Compile Installer ──────────────────────────────────────────────────────
 Write-Host "`n[3/3] Compiling installer..." -ForegroundColor Yellow

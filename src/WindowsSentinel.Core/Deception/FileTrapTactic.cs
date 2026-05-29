@@ -532,47 +532,43 @@ public sealed class FileTrapTactic : IDeceptionTactic
     /// Called after the 2-second deception window completes (the bombs have served their
     /// purpose of wasting the attacker's exfil bandwidth) and on service startup to clean
     /// up leftovers from previous runs or upgrades from older versions.
+    /// v4.2.0: Enhanced with retry logic, broader path scanning, and evidence cleanup.
     /// </summary>
     public static void CleanupSparseFileBombs(ILogger? logger = null)
     {
         try
         {
-            if (!Directory.Exists(SparseBombDirectory)) return;
-
             int deleted = 0;
-            foreach (var name in SparseBombFileNames)
+
+            // Clean the primary sparse bomb directory
+            deleted += CleanupDirectory(SparseBombDirectory, SparseBombFileNames, logger);
+
+            // v4.2.0: Also scan for sparse bombs in alternate locations
+            // (service runs as SYSTEM — UserProfile = systemprofile)
+            var alternatePaths = new[]
             {
-                var filePath = Path.Combine(SparseBombDirectory, name);
-                try
-                {
-                    if (File.Exists(filePath))
-                    {
-                        File.Delete(filePath);
-                        deleted++;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    logger?.LogDebug(ex, "Failed to delete sparse bomb: {Path}", filePath);
-                }
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                    "Documents", ".cache", "sync"),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                    "WindowsSentinel", "deception"),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+                    ".cache", "sync"),
+            };
+
+            foreach (var dir in alternatePaths)
+            {
+                if (dir == SparseBombDirectory) continue; // Already cleaned
+                deleted += CleanupDirectory(dir, SparseBombFileNames, logger);
             }
 
-            // Remove the directory if empty
-            try
-            {
-                if (Directory.Exists(SparseBombDirectory) &&
-                    !Directory.EnumerateFileSystemEntries(SparseBombDirectory).Any())
-                {
-                    Directory.Delete(SparseBombDirectory, recursive: false);
-                }
-            }
-            catch { /* Non-fatal */ }
+            // v4.2.0: Clean up old Evidence dump files (process dumps can be 300-900MB each)
+            // Keep only the last 3 evidence cases, delete older ones
+            CleanupEvidenceDumps(logger);
 
             if (deleted > 0)
             {
                 logger?.LogInformation(
-                    "[DECEPTION] v3.9.0: Cleaned up {Count} sparse file bombs from {Dir}",
-                    deleted, SparseBombDirectory);
+                    "[DECEPTION] v4.2.0: Cleaned up {Count} sparse file bombs", deleted);
             }
         }
         catch (Exception ex)
@@ -580,6 +576,114 @@ public sealed class FileTrapTactic : IDeceptionTactic
             logger?.LogDebug(ex, "Failed to cleanup sparse file bombs");
         }
     }
+
+    private static int CleanupDirectory(string directory, string[] fileNames, ILogger? logger)
+    {
+        if (!Directory.Exists(directory)) return 0;
+
+        int deleted = 0;
+        foreach (var name in fileNames)
+        {
+            var filePath = Path.Combine(directory, name);
+            for (int attempt = 0; attempt < 3; attempt++)
+            {
+                try
+                {
+                    if (!File.Exists(filePath)) break;
+
+                    // Clear read-only/system attributes that might prevent deletion
+                    var attrs = File.GetAttributes(filePath);
+                    if ((attrs & (FileAttributes.ReadOnly | FileAttributes.System)) != 0)
+                        File.SetAttributes(filePath, FileAttributes.Normal);
+
+                    File.Delete(filePath);
+                    deleted++;
+                    break;
+                }
+                catch
+                {
+                    if (attempt < 2) System.Threading.Thread.Sleep(500);
+                }
+            }
+        }
+
+        // Also delete any other large files in this directory (catch renamed bombs)
+        try
+        {
+            foreach (var file in Directory.GetFiles(directory))
+            {
+                try
+                {
+                    var info = new FileInfo(file);
+                    // Sparse files report large size but use zero disk space
+                    // Delete anything over 1GB in the deception directory
+                    if (info.Length > 1L * 1024 * 1024 * 1024)
+                    {
+                        File.Delete(file);
+                        deleted++;
+                        logger?.LogInformation("[DECEPTION] Deleted large file: {Path} ({Size}GB)",
+                            file, info.Length / (1024.0 * 1024 * 1024));
+                    }
+                }
+                catch { }
+            }
+        }
+        catch { }
+
+        // Remove directory if empty
+        try
+        {
+            if (Directory.Exists(directory) &&
+                !Directory.EnumerateFileSystemEntries(directory).Any())
+            {
+                Directory.Delete(directory, recursive: false);
+            }
+        }
+        catch { }
+
+        return deleted;
+    }
+
+    /// <summary>
+    /// v4.2.0: Cleans up old evidence dump files to prevent disk exhaustion.
+    /// Keeps only the 3 most recent cases, deletes older ones.
+    /// </summary>
+    private static void CleanupEvidenceDumps(ILogger? logger)
+    {
+        try
+        {
+            var evidenceDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "WindowsSentinel", "Evidence");
+
+            if (!Directory.Exists(evidenceDir)) return;
+
+            var caseDirs = Directory.GetDirectories(evidenceDir, "CASE_*")
+                .Select(d => new DirectoryInfo(d))
+                .OrderByDescending(d => d.CreationTime)
+                .ToArray();
+
+            // Keep the 3 most recent, delete the rest
+            if (caseDirs.Length <= 3) return;
+
+            int cleaned = 0;
+            foreach (var dir in caseDirs.Skip(3))
+            {
+                try
+                {
+                    dir.Delete(recursive: true);
+                    cleaned++;
+                }
+                catch { }
+            }
+
+            if (cleaned > 0)
+            {
+                logger?.LogInformation(
+                    "[DECEPTION] v4.2.0: Cleaned up {Count} old evidence cases from {Dir}",
+                    cleaned, evidenceDir);
+            }
+        }
+        catch { }
+    }
 }
-
-

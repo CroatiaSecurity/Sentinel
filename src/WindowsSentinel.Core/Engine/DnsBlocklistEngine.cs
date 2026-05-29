@@ -128,7 +128,7 @@ public sealed class DnsBlocklistEngine : BackgroundService
         {
             Timeout = FeedTimeout
         };
-        _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("WindowsSentinel-EDR/4.2.0");
+        _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("WindowsSentinel-EDR/4.3.0");
 
         // Load cached blocklist immediately (before first network fetch)
         LoadFromCache();

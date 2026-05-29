@@ -43,6 +43,7 @@ using ThreatReportingConfig = WindowsSentinel.Core.Response.ThreatReportingConfi
 // 4.0.0 — Anti-Tamper & Route Remediation (self-reinstall, last-gasp, anti-suspend, route cleanup)
 // 4.1.0 — False Positive Reduction & Third-Party AV Coexistence (Trend Micro, IObit, Ashampoo allowlists, DNS Blocklist Engine)
 // 4.2.0 — Device Installation Security & Ghost Device Cleanup (virtual keyboard/NIC/storage detection, BYOVD driver monitoring, phantom device cleanup)
+// 4.3.0 — System Tray Icon (console view, quarantine access, log viewer, stop protection)
 
 namespace WindowsSentinel.Core;
 
@@ -52,29 +53,28 @@ namespace WindowsSentinel.Core;
 public static class SentinelVersion
 {
     /// <summary>
-    /// Current version - 4.1.0 False Positive Reduction & Third-Party AV Coexistence
+    /// Current version - 4.3.0 System Tray Icon
     /// Version is managed in version.txt for consistency across build scripts
     /// </summary>
-    public const string Version = "4.2.0";
+    public const string Version = "4.3.0";
 
     /// <summary>
     /// Release date
     /// </summary>
-    public static readonly DateTime ReleaseDate = new(2026, 5, 28);
+    public static readonly DateTime ReleaseDate = new(2026, 5, 29);
 
     /// <summary>
     /// Version description
     /// </summary>
     public const string Description =
-        "4.2.0 — Device Installation Security & Ghost Device Cleanup. " +
-        "DeviceInstallMonitor: detects new device installations at runtime including virtual " +
-        "keyboards (phantom HID injection), rogue network adapters (TAP/VPN for MITM), " +
-        "storage devices (iSCSI/virtual disk for payload delivery), and kernel driver loads " +
-        "(BYOVD attacks). Baselines all devices on startup, uses WMI real-time events + polling. " +
-        "Scans for hidden/ghost devices (registered but not connected — attacker persistence). " +
-        "Startup cleanup removes stuck/obsolete/phantom devices via SetupAPI. " +
-        "DNS Blocklist Engine: auto-fetching threat intel feeds (URLhaus, ThreatFox, Feodo " +
-        "Tracker, PhishTank, OpenPhish, Botvrij.eu) block confirmed malware/C2/phishing at DNS level.";
+        "4.3.0 — System Tray Icon & Fixes. " +
+        "TrayIconService: system tray NotifyIcon with live console (real-time event tail), " +
+        "quarantine folder access, log viewer, dynamic Start/Stop Protection toggle, " +
+        "and balloon tip notifications for detections/kills. " +
+        "Fixed: AudioHijack false positives (removed generic winmm.dll/mf.dll from module hints), " +
+        "EventGraph 3GB memory leak (capped edges per process at 300, halved hard caps), " +
+        "WTSSendMessage popups replaced with tray balloons, " +
+        "Agent launch reliability (Registry Run key + path resolution fix).";
 }
 
 public static class ServiceCollectionExtensions

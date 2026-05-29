@@ -21,6 +21,7 @@ internal sealed class AgentResponseEngine : IResponseEngine
 {
     private readonly IEventLogger _eventLogger;
     private readonly ILogger<AgentResponseEngine> _logger;
+    private readonly TrayIconService? _trayIcon;
 
     // President's Law fragments that authorize a kill from the Agent
     private static readonly string[] KillFragments =
@@ -68,10 +69,11 @@ internal sealed class AgentResponseEngine : IResponseEngine
 
     private const double KillConfidenceThreshold = 0.85;
 
-    public AgentResponseEngine(IEventLogger eventLogger, ILogger<AgentResponseEngine> logger)
+    public AgentResponseEngine(IEventLogger eventLogger, ILogger<AgentResponseEngine> logger, TrayIconService? trayIcon = null)
     {
         _eventLogger = eventLogger;
         _logger = logger;
+        _trayIcon = trayIcon;
     }
 
     public async Task HandleAsync(DetectionEvent detection, CancellationToken cancellationToken)
@@ -101,6 +103,11 @@ internal sealed class AgentResponseEngine : IResponseEngine
             _logger.LogCritical("[AGENT-KILL] {Rule} | Conf {Conf:P0} | PID {Pid} ({Name})",
                 detection.RuleName, detection.Confidence, detection.ProcessId, detection.ProcessName);
 
+            _trayIcon?.ShowBalloon(
+                "\U0001f6e1 Threat Killed",
+                $"{detection.ProcessName} (PID {detection.ProcessId})\n{detection.RuleName}",
+                System.Windows.Forms.ToolTipIcon.Error);
+
             await KillProcessAsync(detection, cancellationToken);
             return;
         }
@@ -108,6 +115,11 @@ internal sealed class AgentResponseEngine : IResponseEngine
         // Tier1 but below kill threshold — log only
         _logger.LogWarning("[AGENT-T1] {Rule} | Conf {Conf:P0} | PID {Pid} | {Process} — log only",
             detection.RuleName, detection.Confidence, detection.ProcessId, detection.ProcessName);
+
+        _trayIcon?.ShowBalloon(
+            "\u26a0 Threat Detected",
+            $"{detection.ProcessName} (PID {detection.ProcessId})\n{detection.RuleName} [{detection.Confidence:P0}]",
+            System.Windows.Forms.ToolTipIcon.Warning);
 
         await _eventLogger.LogResponseAsync(new ResponseAction
         {

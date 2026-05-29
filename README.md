@@ -2,7 +2,7 @@
 
 **Userland EDR for Windows — Behavioral Detection, Automated Response & Aggressive Deception**
 
-> Version: 4.2.0 (Device Installation Security & Ghost Device Cleanup)  
+> Version: 4.3.0 (System Tray Icon)  
 > Author: [Gorstak](https://gorstak.eu) | [GitHub](https://github.com/CroatiaSecurity/Sentinel)  
 > License: MIT
 
@@ -290,6 +290,7 @@ All tactics:
 | DNS Blocklist Engine | Auto-fetching threat intel feeds block malware/C2/phishing domains at DNS level (v4.1.0) |
 | Device installation monitoring | Detects virtual keyboards, rogue NICs, storage devices, kernel driver loads at runtime (v4.2.0) |
 | Ghost device cleanup | Removes stuck/phantom devices on startup via SetupAPI (v4.2.0) |
+| System tray icon | User-accessible console, quarantine, logs, start/stop protection, and balloon notifications via NotifyIcon (v4.3.0) |
 
 ---
 
@@ -342,6 +343,7 @@ All tactics:
 | Remote Access | RemoteAccessMonitor | Process scanning (35+ tools), RDP state/session monitoring, port detection | 4.0.0 |
 | DNS Protection | DnsBlocklistEngine | Auto-fetching threat intel feeds (URLhaus, ThreatFox, Feodo, PhishTank, OpenPhish, Botvrij.eu) | 4.1.0 |
 | Device Security | DeviceInstallMonitor | PnP device monitoring (virtual HID, rogue NIC, storage, BYOVD drivers), ghost device cleanup | 4.2.0 |
+| User Interface | TrayIconService | System tray icon with live console, quarantine access, log viewer, start/stop protection, balloon notifications | 4.3.0 |
 
 ---
 
@@ -349,7 +351,7 @@ All tactics:
 
 ```powershell
 # Run installer as Administrator
-.\WindowsSentinelSetup-4.2.0.exe
+.\WindowsSentinelSetup-4.3.0.exe
 ```
 
 The installer:
@@ -429,7 +431,7 @@ cd installer
 .\build.ps1
 ```
 
-Output: `installer\output\WindowsSentinelSetup-4.2.0.exe`
+Output: `installer\output\WindowsSentinelSetup-4.3.0.exe`
 
 ---
 

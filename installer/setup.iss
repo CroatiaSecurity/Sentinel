@@ -15,7 +15,7 @@
 
 #define AppName      "Windows Sentinel"
 #ifndef AppVersion
-  #define AppVersion   "4.2.0"
+  #define AppVersion   "4.3.0"
 #endif
 #define AppPublisher "Gorstak"
 #define AppURL       "https://github.com/CroatiaSecurity/Sentinel"
@@ -68,6 +68,10 @@ Source: "publish\agent\{#AgentExe}";    DestDir: "{app}"; Flags: ignoreversion r
 ; If a user customized LogPath/WatchPath they will need to re-apply (logged in release notes).
 Source: "publish\service\appsettings.json"; DestDir: "{app}"; Flags: ignoreversion
 
+[Registry]
+; Auto-start Agent in user session on login (tray icon + user-context monitors)
+Root: HKLM; Subkey: "SOFTWARE\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "Windows Sentinel Agent"; ValueData: """{app}\{#AgentExe}"""; Flags: uninsdeletevalue
+
 [Dirs]
 ; Create the quarantine and log directories under ProgramData upfront
 ; so they exist even before the first detection fires.
@@ -99,6 +103,9 @@ Filename: "{sys}\sc.exe"; Parameters: "start ""{#ServiceName}"""; Flags: runhidd
 ;     so the installer can reset this DACL on future upgrades via sc sdset.
 ; IU/SU: Read/Query only.
 Filename: "{sys}\sc.exe"; Parameters: "sdset ""{#ServiceName}"" D:(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCLCSWLOCRRCWD;;;BA)(A;;CCLCSWLOCRRC;;;IU)(A;;CCLCSWLOCRRC;;;SU)"; Flags: runhidden waituntilterminated; StatusMsg: "Applying Tamper Protection..."
+
+; ── Launch Agent into user session (tray icon)
+Filename: "{app}\{#AgentExe}"; Flags: nowait postinstall skipifsilent runasoriginaluser; Description: "Launch Windows Sentinel Agent"
 
 [UninstallRun]
 ; Reset DACL to allow uninstallation (admins back to full control)

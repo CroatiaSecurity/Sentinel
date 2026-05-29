@@ -51,6 +51,9 @@ public sealed class RansomwareIoMonitor : BackgroundService
         "Kiro", "kiro",
         // v4.1.0: IObit / Ashampoo (optimization tools do mass file operations)
         "mainProcess", "ASCService", "DriverBooster", "LiveTuner3",
+        // v4.2.0: Browsers (cache writes, IndexedDB, service workers — sustained high I/O is normal)
+        "msedge", "chrome", "firefox", "brave", "opera", "vivaldi",
+        "msedgewebview2",
     };
 
     private readonly IDetectionEngine _engine;

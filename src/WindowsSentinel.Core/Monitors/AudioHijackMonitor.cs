@@ -34,7 +34,17 @@ public sealed class AudioHijackMonitor : BackgroundService
 
     private static readonly string[] MicInputModuleHints =
     {
-        "portaudio", "naudio", "directsound", "winmm.dll", "mfreadwrite.dll", "mf.dll"
+        // Virtual audio cable / loopback DLLs — indicate output-to-mic routing
+        "portaudio",          // PortAudio library (used by routing tools)
+        "naudio",             // NAudio library (used by routing tools)
+        "vbcable",            // VB-Audio Virtual Cable
+        "vbaudiow",           // VB-Audio VAIO
+        "voicemeeter",        // Voicemeeter routing
+        "virtualcable",       // Generic virtual cable
+        "stereomix",          // Stereo Mix capture
+        "audiorepeater",      // Audio repeater/router
+        "loopback",           // Loopback capture DLLs
+        "wasapiloopback"      // WASAPI loopback capture
     };
 
     private static readonly string[] OutputToMicTokens =

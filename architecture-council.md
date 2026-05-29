@@ -3,7 +3,7 @@
 **Status:** Architecture spec. Extends, does not replace, `requirements.md`,
 `design.md`, `constraints.md` (all v0.9.0).
 
-**Last updated:** v4.2.0 (May 2026) — Device Installation Security & Ghost Device Cleanup.
+**Last updated:** v4.3.0 (May 2026) — System Tray Icon.
 
 ---
 

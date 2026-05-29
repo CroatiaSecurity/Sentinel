@@ -88,6 +88,7 @@ public sealed class UserSessionLauncher : BackgroundService
 
     private const uint CREATE_UNICODE_ENVIRONMENT = 0x00000400;
     private const uint CREATE_NEW_CONSOLE = 0x00000010;
+    private const uint DETACHED_PROCESS = 0x00000008;
     private const uint MAXIMUM_ALLOWED = 0x02000000;
     private const int SecurityImpersonation = 2;
     private const int TokenPrimary = 1;
@@ -95,7 +96,13 @@ public sealed class UserSessionLauncher : BackgroundService
     public UserSessionLauncher(ILogger<UserSessionLauncher> logger)
     {
         _logger = logger;
-        _agentPath = Path.Combine(AppContext.BaseDirectory, "SentinelAgent.exe");
+        // For single-file published apps, AppContext.BaseDirectory points to the
+        // temp extraction directory. Use the actual exe path instead.
+        var serviceExePath = Environment.ProcessPath
+            ?? System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName
+            ?? Path.Combine(AppContext.BaseDirectory, "SentinelService.exe");
+        var installDir = Path.GetDirectoryName(serviceExePath)!;
+        _agentPath = Path.Combine(installDir, "SentinelAgent.exe");
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -127,6 +134,8 @@ public sealed class UserSessionLauncher : BackgroundService
         LaunchAgent();
 
         // Monitor for session changes and relaunch if needed
+        int consecutiveFailures = 0;
+
         while (!stoppingToken.IsCancellationRequested)
         {
             try
@@ -138,14 +147,50 @@ public sealed class UserSessionLauncher : BackgroundService
                 {
                     _logger.LogInformation("User Session Launcher: Session changed from {Old} to {New}, relaunching agent",
                         _currentSessionId, activeSession);
+                    consecutiveFailures = 0;
                     LaunchAgent();
                 }
 
                 // Check if agent is still running
                 if (!IsAgentRunning())
                 {
-                    _logger.LogWarning("User Session Launcher: Agent not running, restarting...");
+                    consecutiveFailures++;
+
+                    // v4.2.0: Track consecutive failures — if Agent keeps dying, something is killing it
+                    if (consecutiveFailures >= 10 && consecutiveFailures % 10 == 0)
+                    {
+                        _logger.LogCritical(
+                            "User Session Launcher: Agent has been killed {Count} consecutive times! " +
+                            "A third-party security product (antivirus) is likely blocking SentinelAgent.exe. " +
+                            "Add the Sentinel install folder to your antivirus exclusion list. " +
+                            "User-session monitors (overlay detection, clipboard, webcam/mic, audio hijack) " +
+                            "are OFFLINE until the Agent can stay alive.",
+                            consecutiveFailures);
+                    }
+                    else
+                    {
+                        _logger.LogWarning("User Session Launcher: Agent not running, restarting... (attempt {Count})",
+                            consecutiveFailures);
+                    }
+
+                    // Back off if it keeps failing (don't spam launches every 30s forever)
+                    if (consecutiveFailures > 20)
+                    {
+                        // Slow down to every 5 minutes after 20 failures
+                        await Task.Delay(TimeSpan.FromMinutes(4.5), stoppingToken);
+                    }
+
                     LaunchAgent();
+                }
+                else
+                {
+                    // Agent is alive — reset failure counter
+                    if (consecutiveFailures > 0)
+                    {
+                        _logger.LogInformation("User Session Launcher: Agent recovered after {Count} failures",
+                            consecutiveFailures);
+                    }
+                    consecutiveFailures = 0;
                 }
             }
             catch (OperationCanceledException)
@@ -209,11 +254,12 @@ public sealed class UserSessionLauncher : BackgroundService
             var startupInfo = new STARTUPINFO
             {
                 cb = Marshal.SizeOf<STARTUPINFO>(),
-                lpDesktop = "winsta0\\default",
-                dwFlags = 0,
-                wShowWindow = 1 // SW_SHOWNORMAL
+                lpDesktop = "winsta0\\default"
             };
 
+            // CREATE_NEW_CONSOLE required for CreateProcessAsUser to properly
+            // launch into the user's interactive session from SYSTEM service.
+            // The Agent is a WinExe so the console window is hidden by default.
             var creationFlags = CREATE_UNICODE_ENVIRONMENT | CREATE_NEW_CONSOLE;
 
             if (!CreateProcessAsUser(

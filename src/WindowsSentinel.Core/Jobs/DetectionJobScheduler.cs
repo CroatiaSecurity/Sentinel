@@ -916,6 +916,12 @@ public sealed class DetectionJobScheduler : BackgroundService
                 var files = Directory.GetFiles(path);
                 foreach (var file in files)
                 {
+                    // v4.2.0: Skip known legitimate files in startup folders
+                    var fileName = Path.GetFileName(file).ToLowerInvariant();
+                    if (fileName == "desktop.ini" || fileName == "thumbs.db" ||
+                        fileName.EndsWith(".ini"))
+                        continue;
+
                     if (IsSuspiciousPath(file))
                     {
                         detections.Add(new DetectionEvent

@@ -336,6 +336,56 @@ public sealed class EventGraph
             _edges.TryRemove(pid, out _);
         }
 
+        // Prune old edges from ALL processes (including active ones)
+        foreach (var (pid, bag) in _edges)
+        {
+            if (bag.Count > 150)
+            {
+                var fresh = new ConcurrentBag<GraphEdge>(
+                    bag.Where(e => e.Timestamp >= cutoff)
+                       .OrderByDescending(e => e.Timestamp)
+                       .Take(150));
+                _edges[pid] = fresh;
+            }
+        }
+
+        // Hard cap on total graph size
+        if (_processes.Count > 5000)
+        {
+            var oldest = _processes
+                .OrderBy(kv => kv.Value.LastSeen)
+                .Take(_processes.Count - 2500)
+                .Select(kv => kv.Key)
+                .ToList();
+            foreach (var pid in oldest)
+            {
+                _processes.TryRemove(pid, out _);
+                _edges.TryRemove(pid, out _);
+            }
+        }
+
+        if (_files.Count > 10000)
+        {
+            var oldest = _files
+                .OrderBy(kv => kv.Value.LastSeen)
+                .Take(_files.Count - 5000)
+                .Select(kv => kv.Key)
+                .ToList();
+            foreach (var path in oldest)
+                _files.TryRemove(path, out _);
+        }
+
+        if (_endpoints.Count > 3000)
+        {
+            var oldest = _endpoints
+                .OrderBy(kv => kv.Value.LastSeen)
+                .Take(_endpoints.Count - 1500)
+                .Select(kv => kv.Key)
+                .ToList();
+            foreach (var ep in oldest)
+                _endpoints.TryRemove(ep, out _);
+        }
+
         // Prune old file nodes
         var oldFiles = _files
             .Where(kv => kv.Value.LastSeen < cutoff)
@@ -355,9 +405,27 @@ public sealed class EventGraph
 
     // ── Private helpers ──────────────────────────────────────────────────────
 
+    // Hard cap: max edges per process before we start dropping oldest
+    private const int MaxEdgesPerProcess = 300;
+
     private void AddEdge(int sourcePid, GraphEdge edge)
     {
         var bag = _edges.GetOrAdd(sourcePid, _ => new ConcurrentBag<GraphEdge>());
+
+        // Cap per-process edges to prevent unbounded growth from high-I/O processes
+        // (browsers, IDEs, etc. can generate thousands of file/network events per minute)
+        if (bag.Count >= MaxEdgesPerProcess)
+        {
+            // Replace with only the most recent half — amortized O(1) per add
+            var cutoff = DateTimeOffset.UtcNow - RetentionWindow;
+            var fresh = new ConcurrentBag<GraphEdge>(
+                bag.Where(e => e.Timestamp >= cutoff)
+                   .OrderByDescending(e => e.Timestamp)
+                   .Take(MaxEdgesPerProcess / 2));
+            _edges[sourcePid] = fresh;
+            bag = fresh;
+        }
+
         bag.Add(edge);
     }
 
