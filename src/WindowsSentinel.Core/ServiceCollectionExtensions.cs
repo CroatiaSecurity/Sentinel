@@ -57,7 +57,7 @@ public static class SentinelVersion
     /// Current version - 4.7.0 Aggressive RAM Optimization
     /// Version is managed in version.txt for consistency across build scripts
     /// </summary>
-    public const string Version = "4.7.0";
+    public const string Version = "4.8.0";
 
     /// <summary>
     /// Release date
@@ -68,19 +68,16 @@ public static class SentinelVersion
     /// Version description
     /// </summary>
     public const string Description =
-        "4.7.0 - Aggressive RAM Optimization. " +
-        "Tightened all in-memory retention windows and collection caps to reduce steady-state " +
-        "working set from ~3.4 GB to ~300-600 MB on typical desktops. " +
-        "EventGraph: retention 10min→3min, process cap 5000→1000, file cap 10000→2000, " +
-        "endpoint cap 3000→1000, edges/process 300→100. " +
-        "TelemetryFusionEngine: chain window 5min→2min, cleanup interval 30s→15s, " +
-        "events/chain 500→100. " +
-        "BehavioralCorrelationEngine: correlation window 120s→60s, prune interval 30s→15s, " +
-        "SignalBuffer hard cap added (50 signals max). " +
-        "BeaconingDetector: stale cutoff 2h→30min, history/key 50→20. " +
-        "BehavioralBaselineService: retention 30d→7d, network dest cap 5000→1500, " +
-        "path/parent caps 3000→1000. " +
-        "Added periodic forced GC (every ~5min) to release committed pages back to OS.";
+        "4.8.0 - Overlay Detection False Positive Fix. " +
+        "ScreenCaptureMonitor: overlay detection now checks process path and Authenticode signature " +
+        "before firing Tier1. Processes from trusted install paths (Program Files, Steam, Epic, GOG, " +
+        "Riot, Battle.net, Ubisoft, EA, Origin) or with valid signatures are downgraded to Tier2 " +
+        "(advisory only, never killed). Only unsigned processes from untrusted paths trigger kills. " +
+        "Eliminates false overlay-attack kills on games (Football Manager, etc.) without maintaining " +
+        "a hardcoded game allowlist. " +
+        "LsassDumpCanaryMonitor: added fm.exe to LegitimateDbghelpUsers (crash reporting). " +
+        "BehavioralCorrelationEngine: added fm to ElectronAndJitApps exclusion (RWX + network). " +
+        "ScreenCaptureMonitor: added fm to AllowedOverlayProcesses.";
 }
 
 public static class ServiceCollectionExtensions

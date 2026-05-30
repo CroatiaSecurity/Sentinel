@@ -230,6 +230,9 @@ public sealed class ScreenCaptureMonitor : BackgroundService
         // Steam (overlay notifications)
         "steam", "steam.exe",
         "steamwebhelper", "steamwebhelper.exe",
+        // Games (legitimate overlay/topmost windows for in-game UI, Steam integration)
+        "fm", "fm.exe",                         // Football Manager
+        "GameOverlayUI", "GameOverlayUI.exe",   // Steam game overlay (already above but kept for clarity)
     };
 
     // ── P/Invoke declarations ─────────────────────────────────────────────────
@@ -641,6 +644,50 @@ public sealed class ScreenCaptureMonitor : BackgroundService
             if (isTransparent && isTopmost) confidence = 0.82;
             if (isTransparent && isTopmost && isNoActivate) confidence = 0.88;
 
+            // v4.7.0: Reduce false positives on games and legitimate apps.
+            // If the process runs from a trusted install path (Program Files, Steam, Epic, GOG, etc.)
+            // OR is Authenticode-signed, downgrade to Tier2 (advisory only, never kills).
+            // Real banking trojans run from Temp/AppData/Downloads and are unsigned.
+            var tier = DetectionTier.Tier1Behavioral;
+            bool isTrustedPath = false;
+            bool isSigned = false;
+
+            if (!string.IsNullOrEmpty(processPath))
+            {
+                var pathLower = processPath.ToLowerInvariant();
+                isTrustedPath = pathLower.Contains(@"\program files\") ||
+                                pathLower.Contains(@"\program files (x86)\") ||
+                                pathLower.Contains(@"\steamapps\") ||
+                                pathLower.Contains(@"\steam\") ||
+                                pathLower.Contains(@"\epic games\") ||
+                                pathLower.Contains(@"\gog galaxy\") ||
+                                pathLower.Contains(@"\riot games\") ||
+                                pathLower.Contains(@"\battle.net\") ||
+                                pathLower.Contains(@"\ubisoft\") ||
+                                pathLower.Contains(@"\ea games\") ||
+                                pathLower.Contains(@"\origin\") ||
+                                pathLower.Contains(@"\windows\");
+
+                if (!isTrustedPath)
+                {
+                    // Check Authenticode signature as fallback
+                    try
+                    {
+                        using var cert = new System.Security.Cryptography.X509Certificates.X509Certificate2(
+                            System.Security.Cryptography.X509Certificates.X509Certificate.CreateFromSignedFile(processPath));
+                        isSigned = true;
+                    }
+                    catch { isSigned = false; }
+                }
+            }
+
+            if (isTrustedPath || isSigned)
+            {
+                // Trusted app with overlay — log as Tier2 advisory, never kill
+                tier = DetectionTier.Tier2Indicator;
+                confidence = Math.Min(confidence, 0.60); // Cap confidence below kill threshold
+            }
+
             _ = _detectionEngine.EmitAsync(new DetectionEvent
             {
                 RuleName = "Overlay Attack: Suspicious Transparent Window",
@@ -649,16 +696,20 @@ public sealed class ScreenCaptureMonitor : BackgroundService
                           $"Title: '{title}'. Styles: Layered={true}, Transparent={isTransparent}, " +
                           $"Topmost={isTopmost}, NoActivate={isNoActivate}. " +
                           $"Path: {processPath ?? "unknown"}. " +
+                          $"TrustedPath: {isTrustedPath}, Signed: {isSigned}. " +
                           $"Seen {count} times (persistent overlay).",
-                Reasoning = "A large transparent topmost window from a non-system process is the " +
-                           "primary technique used by banking trojans and credential phishing malware. " +
-                           "The overlay is drawn on top of legitimate applications (browsers, banking apps) " +
-                           "to capture credentials entered by the user who believes they're typing into " +
-                           "the real application. The WS_EX_TRANSPARENT flag makes it click-through, " +
-                           "and WS_EX_TOPMOST keeps it above all other windows. This can also cause " +
-                           "visual glitches/flicker when the overlay renders imperfectly.",
+                Reasoning = tier == DetectionTier.Tier2Indicator
+                    ? "A large transparent topmost window was detected from a process running from a " +
+                      "trusted install location or with a valid Authenticode signature. This is likely " +
+                      "a game overlay, media player, or legitimate application UI. Logged as advisory only."
+                    : "A large transparent topmost window from a non-system process is the " +
+                      "primary technique used by banking trojans and credential phishing malware. " +
+                      "The overlay is drawn on top of legitimate applications (browsers, banking apps) " +
+                      "to capture credentials entered by the user who believes they're typing into " +
+                      "the real application. The WS_EX_TRANSPARENT flag makes it click-through, " +
+                      "and WS_EX_TOPMOST keeps it above all other windows.",
                 Confidence = confidence,
-                Tier = DetectionTier.Tier1Behavioral,
+                Tier = tier,
                 ProcessName = processName,
                 ProcessId = pid,
                 Timestamp = DateTimeOffset.UtcNow,

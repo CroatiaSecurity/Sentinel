@@ -63,6 +63,8 @@ public sealed class BehavioralCorrelationEngine : IAsyncDisposable
         "clickup", "ClickUp",
         // Steam (CEF embedded browser)
         "steam", "steamwebhelper",
+        // Games (JIT/RWX memory + network is normal for game engines)
+        "fm",                                   // Football Manager
         // Browsers (V8/SpiderMonkey JIT + network is their entire purpose)
         "chrome", "msedge", "firefox", "brave", "opera", "vivaldi", "arc",
         // IDEs with JIT

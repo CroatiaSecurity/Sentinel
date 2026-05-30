@@ -97,6 +97,8 @@ public sealed class LsassDumpCanaryMonitor : BackgroundService
         // IObit processes
         "mainProcess", "mainProcess.exe",         // IObit Advanced SystemCare main process
         "ASCService", "ASCService.exe",           // IObit ASC Service
+        // v4.7.0: Games that legitimately load dbghelp.dll for crash reporting
+        "fm", "fm.exe",                           // Football Manager (Sports Interactive)
     };
 
     // Track which PIDs we've already alerted on

@@ -2,6 +2,34 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [4.8.0] - 2026-05-30
+
+### Fixed — Overlay Detection False Positive Kill on Games
+
+The overlay detection (`ScreenCaptureMonitor`) was killing legitimate games that use transparent/topmost windows for in-game UI (e.g., Football Manager). The previous approach relied on a hardcoded allowlist of process names, which is unmaintainable — there are thousands of games.
+
+#### New approach: Path + Signature validation
+- Before firing a Tier1 (kill-authorized) overlay detection, the monitor now checks:
+  1. **Trusted install path** — Process running from Program Files, Steam, Epic Games, GOG Galaxy, Riot Games, Battle.net, Ubisoft, EA Games, Origin, or Windows directories
+  2. **Authenticode signature** — Process executable has a valid code signature
+- If either check passes → detection is **downgraded to Tier2** (advisory log only, confidence capped at 0.60, never triggers a kill)
+- If both fail (unsigned binary from Temp/AppData/Downloads/random path) → stays **Tier1** with kill authority
+
+This eliminates false kills on all games installed via any standard game launcher or Program Files without needing per-game allowlist entries.
+
+#### Additional FM-specific fixes
+- `LsassDumpCanaryMonitor`: added `fm.exe` to `LegitimateDbghelpUsers` (games load dbghelp.dll for crash reporting)
+- `BehavioralCorrelationEngine`: added `fm` to `ElectronAndJitApps` exclusion (game engines have legitimate RWX memory + network)
+- `ScreenCaptureMonitor`: added `fm` to `AllowedOverlayProcesses` (belt-and-suspenders)
+
+### Version Bumped
+- All `.csproj` files: 4.7.0 → 4.8.0
+- `version.txt`: 4.7.0 → 4.8.0
+- `setup.iss`: 4.7.0 → 4.8.0
+- `ServiceCollectionExtensions.cs` version constant: 4.7.0 → 4.8.0
+
+---
+
 ## [4.7.0] - 2026-05-30
 
 ### Changed — Aggressive RAM Optimization

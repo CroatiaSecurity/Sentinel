@@ -2,7 +2,7 @@
 
 **Userland EDR for Windows — Behavioral Detection, Automated Response & Aggressive Deception**
 
-> Version: 4.7.0 (Aggressive RAM Optimization)  
+> Version: 4.8.0 (Overlay Detection False Positive Fix)  
 > Author: [Gorstak](https://gorstak.eu) | [GitHub](https://github.com/CroatiaSecurity/Sentinel)  
 > License: MIT
 
@@ -98,7 +98,7 @@ These rules can trigger immediate process termination + quarantine:
 | NeuroBehavior Anomaly | Process behavior entropy, multi-vector activity scoring | Behavioral (statistical) |
 | NeuroBehavior Visual | Focus abuse, flash stimulus, topmost abuse, cursor jitter, color distortion | Behavioral (screen/input analysis) |
 | Honeypot Trip | Decoy file access detection | Behavioral (canary) |
-| Transparent Overlay Phishing | WS_EX_LAYERED + WS_EX_TRANSPARENT + WS_EX_TOPMOST from non-allowlisted processes | Behavioral (window enumeration) |
+| Transparent Overlay Phishing | WS_EX_LAYERED + WS_EX_TRANSPARENT + WS_EX_TOPMOST from unsigned processes in untrusted paths (signed/trusted-path apps auto-downgraded to Tier2) | Behavioral (window enumeration + path/signature validation) |
 | Browser DLL Injection (ELF) | ELF-pattern DLLs in browser processes → active unload | Behavioral (module analysis + response) |
 | Malicious DLL on Disk (IoC) | Disk-scanned DLL matches threat intel hash → active unload from all processes | Behavioral (hash reputation + response) |
 | Unauthorized Remote Access Tool | VNC/TeamViewer/AnyDesk/ScreenConnect/RustDesk/ngrok/chisel detected running | Behavioral (process scanning) |
