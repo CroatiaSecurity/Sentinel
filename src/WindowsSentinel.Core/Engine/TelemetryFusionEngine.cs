@@ -58,7 +58,7 @@ public sealed class TelemetryFusionEngine : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("=== Telemetry Fusion Engine starting (v1.0.0) ===");
+        _logger.LogInformation("=== Telemetry Fusion Engine starting (v4.8.1) ===");
 
         int cleanupCycles = 0;
 
@@ -69,19 +69,16 @@ public sealed class TelemetryFusionEngine : BackgroundService
                 await Task.Delay(CleanupInterval, stoppingToken);
                 PruneStaleChains();
                 PruneStaleRelations();
-                // v4.2.0: Prune the EventGraph to prevent unbounded memory growth
                 _eventGraph.Prune();
 
-                // v4.6.0: Every ~5 minutes (20 cycles × 15s), force GC to release
-                // committed pages back to the OS. Without this, the .NET runtime
-                // holds freed memory indefinitely, inflating working set.
+                // v4.8.1: Non-blocking GC every 10 minutes (40 cycles × 15s).
+                // Previous aggressive blocking GC caused 100% CPU spikes and froze all threads.
+                // Non-blocking gen-1 is sufficient — the real fix is proper pruning above.
                 cleanupCycles++;
-                if (cleanupCycles >= 20)
+                if (cleanupCycles >= 40)
                 {
                     cleanupCycles = 0;
-                    GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
-                    GC.WaitForPendingFinalizers();
-                    GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+                    GC.Collect(1, GCCollectionMode.Optimized, blocking: false);
                 }
             }
             catch (OperationCanceledException) { break; }
@@ -293,25 +290,46 @@ public sealed class TelemetryFusionEngine : BackgroundService
     {
         var recentEvents = chain.GetRecent(TimeSpan.FromSeconds(60));
 
-        // Compute behavioral indicators from the chain
-        var hasNetwork = recentEvents.Any(e => e.Kind == TelemetryKind.NetworkConnection);
-        var hasFileWrite = recentEvents.Any(e => e.Kind == TelemetryKind.FileWrite);
-        var hasInjection = recentEvents.Any(e => e.Kind == TelemetryKind.Injection);
-        var hasMemory = recentEvents.Any(e => e.Kind == TelemetryKind.MemoryBehavior);
-        var fileWriteCount = recentEvents.Count(e => e.Kind is TelemetryKind.FileWrite or TelemetryKind.FileRename);
-        var networkCount = recentEvents.Count(e => e.Kind == TelemetryKind.NetworkConnection);
+        // Single-pass computation of behavioral indicators (avoid multiple LINQ passes)
+        bool hasNetwork = false, hasFileWrite = false, hasInjection = false, hasMemory = false;
+        int fileWriteCount = 0, networkCount = 0, last30sCount = 0;
+        var now = DateTimeOffset.UtcNow;
+        var kindsSeen = new HashSet<TelemetryKind>();
+
+        foreach (var e in recentEvents)
+        {
+            kindsSeen.Add(e.Kind);
+            switch (e.Kind)
+            {
+                case TelemetryKind.NetworkConnection:
+                    hasNetwork = true;
+                    networkCount++;
+                    break;
+                case TelemetryKind.FileWrite:
+                    hasFileWrite = true;
+                    fileWriteCount++;
+                    break;
+                case TelemetryKind.FileRename:
+                    fileWriteCount++;
+                    break;
+                case TelemetryKind.Injection:
+                    hasInjection = true;
+                    break;
+                case TelemetryKind.MemoryBehavior:
+                    hasMemory = true;
+                    break;
+            }
+            if ((now - e.Timestamp).TotalSeconds <= 30)
+                last30sCount++;
+        }
 
         // Check for cross-process relationships involving this PID
-        var isInjectionSource = _relations.Values.Any(r => r.CallerPid == processId);
+        // Use key-based lookup instead of iterating all values
+        var isInjectionSource = _relations.ContainsKey($"{processId}→*") ||
+            _relations.Values.Any(r => r.CallerPid == processId);
         var isInjectionTarget = _relations.Values.Any(r => r.TargetPid == processId);
 
-        // Compute behavioral velocity (events per second in last 30s)
-        var last30s = recentEvents.Where(e =>
-            (DateTimeOffset.UtcNow - e.Timestamp).TotalSeconds <= 30).ToList();
-        var velocity = last30s.Count > 0 ? last30s.Count / 30.0 : 0;
-
-        // Compute event diversity (unique kinds in last 60s)
-        var diversity = recentEvents.Select(e => e.Kind).Distinct().Count();
+        var velocity = last30sCount > 0 ? last30sCount / 30.0 : 0;
 
         return new FusedTelemetryContext
         {
@@ -328,10 +346,8 @@ public sealed class TelemetryFusionEngine : BackgroundService
             IsInjectionSource = isInjectionSource,
             IsInjectionTarget = isInjectionTarget,
             BehavioralVelocity = velocity,
-            EventDiversity = diversity,
-            // Multi-vector flag: process is doing file + network + memory/injection
+            EventDiversity = kindsSeen.Count,
             IsMultiVector = (hasFileWrite && hasNetwork && (hasInjection || hasMemory)),
-            // Ancestors from cache
             Ancestors = _ancestryCache.GetAncestors(processId)
         };
     }

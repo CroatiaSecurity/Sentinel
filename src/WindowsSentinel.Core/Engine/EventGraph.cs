@@ -36,8 +36,8 @@ public sealed class EventGraph
     // Network endpoint nodes: "ip:port" → NetworkGraphNode
     private readonly ConcurrentDictionary<string, NetworkGraphNode> _endpoints = new();
 
-    // Edges (all types stored in a single concurrent bag per source PID for fast traversal)
-    private readonly ConcurrentDictionary<int, ConcurrentBag<GraphEdge>> _edges = new();
+    // Edges (all types stored per source PID — using List with lock for efficient trimming)
+    private readonly ConcurrentDictionary<int, EdgeBuffer> _edges = new();
 
     // Retention window (tightened for RAM — detection rules only look at last 60s)
     private static readonly TimeSpan RetentionWindow = TimeSpan.FromMinutes(3);
@@ -189,10 +189,10 @@ public sealed class EventGraph
     {
         var cutoff = DateTimeOffset.UtcNow - (window ?? RetentionWindow);
 
-        if (!_edges.TryGetValue(pid, out var edges))
+        if (!_edges.TryGetValue(pid, out var buffer))
             return Array.Empty<GraphEdge>();
 
-        return edges.Where(e => e.Timestamp >= cutoff)
+        return buffer.Where(e => e.Timestamp >= cutoff)
                    .OrderBy(e => e.Timestamp)
                    .ToList();
     }
@@ -236,9 +236,9 @@ public sealed class EventGraph
         var normalizedPath = NormalizePath(filePath);
         var accessors = new HashSet<int>();
 
-        foreach (var (pid, edges) in _edges)
+        foreach (var (pid, buffer) in _edges)
         {
-            if (edges.Any(e => e.TargetPath == normalizedPath &&
+            if (buffer.Any(e => e.TargetPath == normalizedPath &&
                 e.Kind is EdgeKind.Read or EdgeKind.Wrote or EdgeKind.Created))
             {
                 accessors.Add(pid);
@@ -256,9 +256,9 @@ public sealed class EventGraph
         var endpointKey = $"{address}:{port}";
         var connectors = new HashSet<int>();
 
-        foreach (var (pid, edges) in _edges)
+        foreach (var (pid, buffer) in _edges)
         {
-            if (edges.Any(e => e.TargetPath == endpointKey && e.Kind == EdgeKind.Connected))
+            if (buffer.Any(e => e.TargetPath == endpointKey && e.Kind == EdgeKind.Connected))
             {
                 connectors.Add(pid);
             }
@@ -282,9 +282,9 @@ public sealed class EventGraph
         // Also include injection targets
         foreach (var pid in relatedPids.ToList())
         {
-            if (_edges.TryGetValue(pid, out var edges))
+            if (_edges.TryGetValue(pid, out var buffer))
             {
-                foreach (var edge in edges.Where(e => e.Kind == EdgeKind.Injected))
+                foreach (var edge in buffer.Where(e => e.Kind == EdgeKind.Injected))
                 {
                     relatedPids.Add(edge.TargetPid);
                 }
@@ -297,9 +297,9 @@ public sealed class EventGraph
 
         foreach (var pid in relatedPids)
         {
-            if (_edges.TryGetValue(pid, out var edges))
+            if (_edges.TryGetValue(pid, out var buffer))
             {
-                timeline.AddRange(edges.Where(e => e.Timestamp >= cutoff));
+                timeline.AddRange(buffer.Where(e => e.Timestamp >= cutoff));
             }
         }
 
@@ -314,7 +314,7 @@ public sealed class EventGraph
         ProcessNodes = _processes.Count,
         FileNodes = _files.Count,
         NetworkNodes = _endpoints.Count,
-        TotalEdges = _edges.Values.Sum(bag => bag.Count)
+        TotalEdges = _edges.Values.Sum(buffer => buffer.Count)
     };
 
     /// <summary>
@@ -325,7 +325,7 @@ public sealed class EventGraph
     {
         var cutoff = DateTimeOffset.UtcNow - RetentionWindow;
 
-        // Prune old process nodes
+        // Prune old process nodes and their edges
         var oldProcesses = _processes
             .Where(kv => kv.Value.LastSeen < cutoff)
             .Select(kv => kv.Key)
@@ -336,20 +336,13 @@ public sealed class EventGraph
             _edges.TryRemove(pid, out _);
         }
 
-        // Prune old edges from ALL processes (including active ones)
-        foreach (var (pid, bag) in _edges)
+        // Prune old edges from active processes (in-place, no allocation)
+        foreach (var (_, buffer) in _edges)
         {
-            if (bag.Count > 50)
-            {
-                var fresh = new ConcurrentBag<GraphEdge>(
-                    bag.Where(e => e.Timestamp >= cutoff)
-                       .OrderByDescending(e => e.Timestamp)
-                       .Take(50));
-                _edges[pid] = fresh;
-            }
+            buffer.PruneOlderThan(cutoff);
         }
 
-        // Hard cap on total graph size (tightened for RAM)
+        // Hard cap on total graph size
         if (_processes.Count > 1000)
         {
             var oldest = _processes
@@ -405,33 +398,87 @@ public sealed class EventGraph
 
     // ── Private helpers ──────────────────────────────────────────────────────
 
-    // Hard cap: max edges per process before we start dropping oldest (tightened)
+    // Hard cap: max edges per process
     private const int MaxEdgesPerProcess = 100;
 
     private void AddEdge(int sourcePid, GraphEdge edge)
     {
-        var bag = _edges.GetOrAdd(sourcePid, _ => new ConcurrentBag<GraphEdge>());
-
-        // Cap per-process edges to prevent unbounded growth from high-I/O processes
-        // (browsers, IDEs, etc. can generate thousands of file/network events per minute)
-        if (bag.Count >= MaxEdgesPerProcess)
-        {
-            // Replace with only the most recent half — amortized O(1) per add
-            var cutoff = DateTimeOffset.UtcNow - RetentionWindow;
-            var fresh = new ConcurrentBag<GraphEdge>(
-                bag.Where(e => e.Timestamp >= cutoff)
-                   .OrderByDescending(e => e.Timestamp)
-                   .Take(MaxEdgesPerProcess / 2));
-            _edges[sourcePid] = fresh;
-            bag = fresh;
-        }
-
-        bag.Add(edge);
+        var buffer = _edges.GetOrAdd(sourcePid, _ => new EdgeBuffer(MaxEdgesPerProcess));
+        buffer.Add(edge);
     }
 
     private static string NormalizePath(string path)
     {
         return path.ToLowerInvariant().Replace('/', '\\').TrimEnd('\\');
+    }
+}
+
+// ── EdgeBuffer — bounded, lock-based edge storage ────────────────────────────
+
+/// <summary>
+/// Thread-safe bounded buffer for graph edges. Uses a lock + List instead of
+/// ConcurrentBag to enable efficient in-place pruning without allocating new collections.
+/// </summary>
+public sealed class EdgeBuffer
+{
+    private readonly List<GraphEdge> _edges;
+    private readonly object _lock = new();
+    private readonly int _maxCapacity;
+
+    public EdgeBuffer(int maxCapacity)
+    {
+        _maxCapacity = maxCapacity;
+        _edges = new List<GraphEdge>(Math.Min(maxCapacity, 32));
+    }
+
+    public int Count
+    {
+        get { lock (_lock) return _edges.Count; }
+    }
+
+    public void Add(GraphEdge edge)
+    {
+        lock (_lock)
+        {
+            if (_edges.Count >= _maxCapacity)
+            {
+                // Drop oldest half — O(N) but only triggers at capacity
+                _edges.RemoveRange(0, _edges.Count / 2);
+            }
+            _edges.Add(edge);
+        }
+    }
+
+    public void PruneOlderThan(DateTimeOffset cutoff)
+    {
+        lock (_lock)
+        {
+            _edges.RemoveAll(e => e.Timestamp < cutoff);
+        }
+    }
+
+    public IReadOnlyList<GraphEdge> Where(Func<GraphEdge, bool> predicate)
+    {
+        lock (_lock)
+        {
+            return _edges.Where(predicate).ToList();
+        }
+    }
+
+    public bool Any(Func<GraphEdge, bool> predicate)
+    {
+        lock (_lock)
+        {
+            return _edges.Any(predicate);
+        }
+    }
+
+    public IEnumerable<GraphEdge> GetAll()
+    {
+        lock (_lock)
+        {
+            return _edges.ToList();
+        }
     }
 }
 

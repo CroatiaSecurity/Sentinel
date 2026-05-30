@@ -42,8 +42,8 @@ public sealed class DiskWideDllScanner : BackgroundService
     private readonly HashReputationService? _reputationService;
     private readonly IoCScanner? _iocScanner;
 
-    private static readonly TimeSpan HighRiskScanInterval = TimeSpan.FromMinutes(5);
-    private static readonly TimeSpan DriveRootScanInterval = TimeSpan.FromMinutes(15);
+    private static readonly TimeSpan HighRiskScanInterval = TimeSpan.FromMinutes(15);
+    private static readonly TimeSpan DriveRootScanInterval = TimeSpan.FromMinutes(30);
     private const int MaxFilesPerScan = 500;
     private const int DriveRootScanDepth = 2;
 

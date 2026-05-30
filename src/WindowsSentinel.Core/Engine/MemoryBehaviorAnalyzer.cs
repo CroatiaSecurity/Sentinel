@@ -36,8 +36,8 @@ public sealed class MemoryBehaviorAnalyzer : BackgroundService
     // Track known-good processes to reduce scan overhead
     private readonly ConcurrentDictionary<int, ProcessMemoryProfile> _profiles = new();
 
-    // Scan interval
-    private static readonly TimeSpan ScanInterval = TimeSpan.FromSeconds(45);
+    // Scan interval (v4.8.1: relaxed from 45s to 90s — still catches implants within 2 minutes)
+    private static readonly TimeSpan ScanInterval = TimeSpan.FromSeconds(90);
 
     // Shellcode prologue patterns (common x64 shellcode starts)
     private static readonly byte[][] ShellcodePrologues = new byte[][]

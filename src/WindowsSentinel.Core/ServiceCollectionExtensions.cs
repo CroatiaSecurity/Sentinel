@@ -54,10 +54,10 @@ namespace WindowsSentinel.Core;
 public static class SentinelVersion
 {
     /// <summary>
-    /// Current version - 4.7.0 Aggressive RAM Optimization
+    /// Current version - 4.8.1 Performance Optimization: reduced polling, removed redundant monitors, fixed EventGraph
     /// Version is managed in version.txt for consistency across build scripts
     /// </summary>
-    public const string Version = "4.8.0";
+    public const string Version = "4.8.1";
 
     /// <summary>
     /// Release date
@@ -68,16 +68,10 @@ public static class SentinelVersion
     /// Version description
     /// </summary>
     public const string Description =
-        "4.8.0 - Overlay Detection False Positive Fix. " +
-        "ScreenCaptureMonitor: overlay detection now checks process path and Authenticode signature " +
-        "before firing Tier1. Processes from trusted install paths (Program Files, Steam, Epic, GOG, " +
-        "Riot, Battle.net, Ubisoft, EA, Origin) or with valid signatures are downgraded to Tier2 " +
-        "(advisory only, never killed). Only unsigned processes from untrusted paths trigger kills. " +
-        "Eliminates false overlay-attack kills on games (Football Manager, etc.) without maintaining " +
-        "a hardcoded game allowlist. " +
-        "LsassDumpCanaryMonitor: added fm.exe to LegitimateDbghelpUsers (crash reporting). " +
-        "BehavioralCorrelationEngine: added fm to ElectronAndJitApps exclusion (RWX + network). " +
-        "ScreenCaptureMonitor: added fm to AllowedOverlayProcesses.";
+        "4.8.1 - Performance Optimization: removed redundant monitors, fixed EventGraph, relaxed polling. " +
+        "ModuleValidationMonitor removed (subsumed by RuntimeModuleIntegrityMonitor). " +
+        "DiskWideDllScanner disabled (expensive, covered by runtime module scanning). " +
+        "Aggressive blocking GC removed. All polling intervals relaxed 2-3x.";
 }
 
 public static class ServiceCollectionExtensions
@@ -395,7 +389,10 @@ public static class ServiceCollectionExtensions
         // NOTE: AudioHijackMonitor moved to Agent (v2.3.0 — requires user session)
         services.AddHostedService<RansomwareIoMonitor>();
         services.AddHostedService<MemoryExecutionMonitor>();
-        services.AddHostedService<ModuleValidationMonitor>();
+        // NOTE: ModuleValidationMonitor removed in v4.8.1 — its functionality is fully
+        // subsumed by RuntimeModuleIntegrityMonitor which scans the same process sets
+        // (critical + high-value) on the same or faster intervals, with baseline tracking.
+        // Running both was redundant: double Process.Modules enumeration on the same PIDs.
 
         // ── 2.8.0 — Canary File Monitor (Ransomware) ──────────────────────────
         services.AddHostedService<CanaryFileMonitor>();
@@ -515,8 +512,12 @@ public static class ServiceCollectionExtensions
         // ── Work Folders Exfiltration Monitor (unauthorized sync/exfil detection + kill) ─
         services.AddHostedService<WorkFoldersExfilMonitor>();
 
-        // ── Disk-Wide DLL Scanner (all drives, unsigned DLL detection, IoC matching + unload) ─
-        services.AddHostedService<DiskWideDllScanner>();
+        // ── Disk-Wide DLL Scanner — DISABLED in v4.8.1 ─────────────────────────
+        // Scanning all drives for unsigned DLLs every 15-30 minutes is extremely expensive
+        // (500 signature validations per cycle). RuntimeModuleIntegrityMonitor already catches
+        // malicious DLLs when they're loaded into processes (which is when they're dangerous).
+        // Pre-execution scanning is a nice-to-have but not worth the CPU/IO cost.
+        // services.AddHostedService<DiskWideDllScanner>();
 
         // ═══════════════════════════════════════════════════════════════════════
         // 3.6.0 — NETWORK HIJACK PROTECTION

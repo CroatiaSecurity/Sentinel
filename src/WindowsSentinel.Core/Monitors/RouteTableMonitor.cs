@@ -40,7 +40,7 @@ public sealed class RouteTableMonitor : BackgroundService
     // Deduplication
     private readonly ConcurrentDictionary<string, DateTimeOffset> _alertedEvents = new();
     private static readonly TimeSpan AlertDedupeWindow = TimeSpan.FromMinutes(10);
-    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(30);
 
     // Known virtual adapter name fragments (routes from these are expected)
     private static readonly string[] VirtualAdapterFragments =

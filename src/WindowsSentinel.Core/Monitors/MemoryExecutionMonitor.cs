@@ -28,7 +28,7 @@ namespace WindowsSentinel.Core.Monitors;
 /// </summary>
 public sealed class MemoryExecutionMonitor : BackgroundService
 {
-    private static readonly TimeSpan ScanInterval = TimeSpan.FromSeconds(45);
+    private static readonly TimeSpan ScanInterval = TimeSpan.FromSeconds(90);
 
     // Processes that legitimately have no on-disk image path visible to the memory scanner.
     // svchost.exe instances are kernel-launched service hosts — their image path may not be

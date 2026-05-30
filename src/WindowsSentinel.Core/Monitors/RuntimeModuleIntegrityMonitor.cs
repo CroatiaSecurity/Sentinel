@@ -44,10 +44,10 @@ public sealed class RuntimeModuleIntegrityMonitor : BackgroundService
     private readonly ILogger<RuntimeModuleIntegrityMonitor> _logger;
     private readonly TelemetryFusionEngine? _fusionEngine;
 
-    // Scan intervals per tier
-    private static readonly TimeSpan TierAScanInterval = TimeSpan.FromSeconds(30);
-    private static readonly TimeSpan TierBScanInterval = TimeSpan.FromSeconds(60);
-    private static readonly TimeSpan TierCScanInterval = TimeSpan.FromMinutes(2);
+    // Scan intervals per tier (v4.8.1: relaxed from 30/60/120s to reduce CPU pressure)
+    private static readonly TimeSpan TierAScanInterval = TimeSpan.FromSeconds(60);
+    private static readonly TimeSpan TierBScanInterval = TimeSpan.FromMinutes(2);
+    private static readonly TimeSpan TierCScanInterval = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan BaselineGracePeriod = TimeSpan.FromSeconds(90);
     private const int TierCBatchSize = 25; // scan 25 Tier-C processes per cycle
 

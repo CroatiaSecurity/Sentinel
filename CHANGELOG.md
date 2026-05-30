@@ -2,6 +2,64 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [4.8.1] - 2026-05-30
+
+### Fixed — Performance Optimization & Monitor Unification
+
+Service resource usage reduced from ~25% CPU / 3GB RAM to an expected ~3-5% CPU / 200-400MB RAM. Root cause: 55+ background services with aggressive polling intervals accumulated over 9 days without performance budgeting. The code quality was sound — the problem was cumulative resource exhaustion.
+
+#### Removed Redundant Monitors
+
+- **ModuleValidationMonitor** — Completely removed. Its functionality (scanning critical/high-value process modules for unsigned DLLs) is fully subsumed by `RuntimeModuleIntegrityMonitor`, which scans the same process sets on the same or faster intervals with additional baseline tracking. Running both caused double `Process.Modules` enumeration on the same PIDs.
+- **DiskWideDllScanner** — Disabled. Scanning all drives for unsigned DLLs every 15-30 minutes (500 signature validations per cycle) is extremely expensive. `RuntimeModuleIntegrityMonitor` already catches malicious DLLs when they're loaded into processes, which is when they're actually dangerous.
+
+#### Removed Aggressive Blocking GC (CPU spike source)
+
+- **TelemetryFusionEngine**: Removed `GC.Collect(2, Aggressive, blocking: true, compacting: true)` ×2 every 5 minutes. This caused stop-the-world pauses freezing all 55+ threads. Replaced with non-blocking gen-1 every 10 minutes.
+- **HealthCheckService**: Removed `GC.Collect(2, Optimized)` every 5 minutes. Forced GC was masking actual memory growth instead of fixing it.
+
+#### Relaxed Polling Intervals (all monitors)
+
+| Monitor | Before | After |
+|---------|--------|-------|
+| ProcessAncestryCache | 2s | 5s |
+| ArpSpoofMonitor | 5s | 15s |
+| RouteTableMonitor | 10s | 30s |
+| WifiSecurityMonitor | 10s | 30s |
+| ClipboardSanitizer | 2s | 10s |
+| LsassDumpCanaryMonitor | 15s | 45s |
+| ChromeSessionGuardMonitor | 15s | 30s |
+| AppNetworkPolicyMonitor | 15s | 30s |
+| TokenIntegrityMonitor | 20s | 45s |
+| ScheduledTaskMonitor | 30s | 60s |
+| FirewallIntegrityMonitor | 30s | 60s |
+| RemoteAccessMonitor | 30s | 60s |
+| RuntimeModuleIntegrityMonitor (Tier A) | 30s | 60s |
+| RuntimeModuleIntegrityMonitor (Tier B) | 60s | 2min |
+| RuntimeModuleIntegrityMonitor (Tier C) | 2min | 5min |
+| MemoryBehaviorAnalyzer | 45s | 90s |
+| MemoryExecutionMonitor | 45s | 90s |
+
+#### Fixed EventGraph Memory Architecture
+
+- Replaced `ConcurrentBag<GraphEdge>` (append-only, required full replacement on trim) with `EdgeBuffer` — a bounded `List<T>` + lock structure that supports in-place `RemoveAll` for pruning and `RemoveRange` for capacity enforcement. Eliminates O(N log N) sort + new collection allocation that occurred on every high-I/O process.
+
+#### Fixed TelemetryFusionEngine.BuildContext() Hot Path
+
+- Replaced 6 separate LINQ passes over `recentEvents` (called on every telemetry event) with a single-pass loop. Reduces allocations and CPU on the hottest code path in the system.
+
+#### Fixed HealthCheckService.IsEtwEnabled()
+
+- Replaced `new EventLog("Security").Entries.Count` (loads entire security log index — can take seconds) with a lightweight registry check.
+
+### Version Bumped
+- All `.csproj` files: 4.8.0 → 4.8.1
+- `version.txt`: 4.8.0 → 4.8.1
+- `setup.iss`: 4.8.0 → 4.8.1
+- `ServiceCollectionExtensions.cs` version constant: 4.8.0 → 4.8.1
+
+---
+
 ## [4.8.0] - 2026-05-30
 
 ### Fixed — Overlay Detection False Positive Kill on Games

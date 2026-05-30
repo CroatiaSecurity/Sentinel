@@ -39,7 +39,7 @@ public sealed class FirewallIntegrityMonitor : BackgroundService
     // Deduplication
     private readonly ConcurrentDictionary<string, DateTimeOffset> _alertedEvents = new();
     private static readonly TimeSpan AlertDedupeWindow = TimeSpan.FromMinutes(10);
-    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(60);
 
     public FirewallIntegrityMonitor(
         IDetectionEngine detectionEngine,

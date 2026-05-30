@@ -88,7 +88,7 @@ public sealed class ProcessAncestryCache : IAsyncDisposable
         {
             try
             {
-                await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
+                await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
                 TakeSnapshot();
             }
             catch (OperationCanceledException) { break; }

@@ -34,7 +34,7 @@ public sealed class TokenIntegrityMonitor : BackgroundService
     private readonly IDetectionEngine _detectionEngine;
     private readonly ILogger<TokenIntegrityMonitor> _logger;
 
-    private static readonly TimeSpan ScanInterval = TimeSpan.FromSeconds(20);
+    private static readonly TimeSpan ScanInterval = TimeSpan.FromSeconds(45);
 
     // Track known integrity levels per PID
     private readonly ConcurrentDictionary<int, IntegrityRecord> _knownIntegrity = new();

@@ -43,7 +43,7 @@ public sealed class ArpSpoofMonitor : BackgroundService
     // Deduplication
     private readonly ConcurrentDictionary<string, DateTimeOffset> _alertedEvents = new();
     private static readonly TimeSpan AlertDedupeWindow = TimeSpan.FromMinutes(5);
-    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(15);
 
     // Known virtual/suspicious MAC OUI prefixes (first 3 bytes)
     // These are legitimate in VMs but suspicious as a gateway MAC on physical hardware

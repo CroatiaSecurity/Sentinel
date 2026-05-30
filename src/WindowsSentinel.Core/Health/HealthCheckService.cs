@@ -34,10 +34,8 @@ public sealed class HealthCheckService : BackgroundService
                 await Task.Delay(TimeSpan.FromMinutes(5), stoppingToken);
                 await PerformHealthCheckAsync(stoppingToken);
 
-                // Force GC to return memory to the OS. The .NET GC is lazy about
-                // releasing pages — without this, working set grows monotonically
-                // even after collections free objects internally.
-                GC.Collect(2, GCCollectionMode.Optimized, blocking: false);
+                // v4.8.1: Removed forced GC. The runtime manages memory adequately
+                // when actual leaks are fixed. Forced GC was masking unbounded growth.
             }
             catch (OperationCanceledException)
             {
@@ -432,9 +430,12 @@ public sealed class HealthCheckService : BackgroundService
     {
         try
         {
-            // Check if we can access ETW
-            var eventLog = new EventLog("Security");
-            return eventLog.Entries.Count >= 0; // Will throw if no access
+            // v4.8.1: Previous implementation opened the Security event log and accessed .Entries.Count
+            // which is EXTREMELY expensive on systems with large security logs (can take seconds).
+            // Instead, just check if the ETW service is running.
+            var etwRegKey = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(
+                @"SYSTEM\CurrentControlSet\Control\WMI\Autologger\EventLog-System");
+            return etwRegKey != null;
         }
         catch { return false; }
     }

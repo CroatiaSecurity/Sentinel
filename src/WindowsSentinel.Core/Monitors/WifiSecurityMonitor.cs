@@ -40,7 +40,7 @@ public sealed class WifiSecurityMonitor : BackgroundService
     // Deduplication
     private readonly ConcurrentDictionary<string, DateTimeOffset> _alertedEvents = new();
     private static readonly TimeSpan AlertDedupeWindow = TimeSpan.FromMinutes(10);
-    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(30);
 
     // Deauth detection: X disconnects in Y seconds = attack
     private const int DeauthDisconnectThreshold = 4;

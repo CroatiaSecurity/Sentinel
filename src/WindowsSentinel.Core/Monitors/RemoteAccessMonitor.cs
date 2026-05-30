@@ -33,7 +33,7 @@ public sealed class RemoteAccessMonitor : BackgroundService
     private readonly IDetectionEngine _detectionEngine;
     private readonly ILogger<RemoteAccessMonitor> _logger;
 
-    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(60);
 
     // Known remote access tool process names (lowercase for comparison)
     private static readonly Dictionary<string, string> RemoteAccessTools = new(StringComparer.OrdinalIgnoreCase)

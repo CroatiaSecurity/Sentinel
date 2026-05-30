@@ -31,7 +31,7 @@ public sealed class LsassDumpCanaryMonitor : BackgroundService
     private readonly IDetectionEngine _detectionEngine;
     private readonly ILogger<LsassDumpCanaryMonitor> _logger;
 
-    private static readonly TimeSpan ScanInterval = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan ScanInterval = TimeSpan.FromSeconds(45);
 
     // Processes that legitimately load dbghelp.dll
     private static readonly HashSet<string> LegitimateDbghelpUsers = new(StringComparer.OrdinalIgnoreCase)

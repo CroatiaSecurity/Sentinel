@@ -42,7 +42,7 @@ public sealed class ScheduledTaskMonitor : BackgroundService
     // Deduplication
     private readonly ConcurrentDictionary<string, DateTimeOffset> _alertedEvents = new();
     private static readonly TimeSpan AlertDedupeWindow = TimeSpan.FromMinutes(10);
-    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(60);
 
     // Suspicious path fragments in task actions
     private static readonly string[] SuspiciousPathFragments =

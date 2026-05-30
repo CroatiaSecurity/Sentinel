@@ -24,7 +24,7 @@ public sealed class AppNetworkPolicyMonitor : BackgroundService
     private readonly IDetectionEngine _detectionEngine;
     private readonly ILogger<AppNetworkPolicyMonitor> _logger;
 
-    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan LearningDuration = TimeSpan.FromMinutes(30);
     private static readonly TimeSpan PruneInterval = TimeSpan.FromHours(1);
 

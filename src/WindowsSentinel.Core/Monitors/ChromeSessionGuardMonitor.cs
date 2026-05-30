@@ -34,7 +34,7 @@ public sealed class ChromeSessionGuardMonitor : BackgroundService
     private readonly IDetectionEngine _detectionEngine;
     private readonly ILogger<ChromeSessionGuardMonitor> _logger;
 
-    private static readonly TimeSpan ScanInterval = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan ScanInterval = TimeSpan.FromSeconds(30);
     private readonly ConcurrentDictionary<string, DateTimeOffset> _alertedKeys = new();
 
     // Chrome remote debugging indicators

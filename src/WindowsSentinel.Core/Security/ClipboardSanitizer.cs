@@ -25,7 +25,7 @@ public sealed class ClipboardSanitizer : BackgroundService
     private readonly IDetectionEngine _detectionEngine;
     private readonly ILogger<ClipboardSanitizer> _logger;
 
-    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(10);
 
     // Zero-width characters
     private static readonly HashSet<char> ZeroWidthChars = new()
