@@ -401,6 +401,13 @@ public sealed class MemoryExecutionRule : IDetectionRule
         "SearchIndexer.exe", "SearchIndexer",
         "SearchProtocolHost.exe", "SearchProtocolHost",
         "SearchFilterHost.exe", "SearchFilterHost",
+        // Network / console utilities (kernel-launched, path often unresolvable)
+        "netsh.exe", "netsh",
+        "conhost.exe", "conhost",
+        "dllhost.exe", "dllhost",
+        "mmc.exe", "mmc",
+        "consent.exe", "consent",
+        "CompPkgSrv.exe", "CompPkgSrv",
     };
 
     private static bool IsExcludedSystemProcess(string? processName)
