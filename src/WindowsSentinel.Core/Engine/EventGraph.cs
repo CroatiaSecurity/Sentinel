@@ -39,8 +39,8 @@ public sealed class EventGraph
     // Edges (all types stored in a single concurrent bag per source PID for fast traversal)
     private readonly ConcurrentDictionary<int, ConcurrentBag<GraphEdge>> _edges = new();
 
-    // Retention window
-    private static readonly TimeSpan RetentionWindow = TimeSpan.FromMinutes(10);
+    // Retention window (tightened for RAM — detection rules only look at last 60s)
+    private static readonly TimeSpan RetentionWindow = TimeSpan.FromMinutes(3);
 
     public EventGraph(ILogger<EventGraph> logger)
     {
@@ -339,22 +339,22 @@ public sealed class EventGraph
         // Prune old edges from ALL processes (including active ones)
         foreach (var (pid, bag) in _edges)
         {
-            if (bag.Count > 150)
+            if (bag.Count > 50)
             {
                 var fresh = new ConcurrentBag<GraphEdge>(
                     bag.Where(e => e.Timestamp >= cutoff)
                        .OrderByDescending(e => e.Timestamp)
-                       .Take(150));
+                       .Take(50));
                 _edges[pid] = fresh;
             }
         }
 
-        // Hard cap on total graph size
-        if (_processes.Count > 5000)
+        // Hard cap on total graph size (tightened for RAM)
+        if (_processes.Count > 1000)
         {
             var oldest = _processes
                 .OrderBy(kv => kv.Value.LastSeen)
-                .Take(_processes.Count - 2500)
+                .Take(_processes.Count - 500)
                 .Select(kv => kv.Key)
                 .ToList();
             foreach (var pid in oldest)
@@ -364,22 +364,22 @@ public sealed class EventGraph
             }
         }
 
-        if (_files.Count > 10000)
+        if (_files.Count > 2000)
         {
             var oldest = _files
                 .OrderBy(kv => kv.Value.LastSeen)
-                .Take(_files.Count - 5000)
+                .Take(_files.Count - 1000)
                 .Select(kv => kv.Key)
                 .ToList();
             foreach (var path in oldest)
                 _files.TryRemove(path, out _);
         }
 
-        if (_endpoints.Count > 3000)
+        if (_endpoints.Count > 1000)
         {
             var oldest = _endpoints
                 .OrderBy(kv => kv.Value.LastSeen)
-                .Take(_endpoints.Count - 1500)
+                .Take(_endpoints.Count - 500)
                 .Select(kv => kv.Key)
                 .ToList();
             foreach (var ep in oldest)
@@ -405,8 +405,8 @@ public sealed class EventGraph
 
     // ── Private helpers ──────────────────────────────────────────────────────
 
-    // Hard cap: max edges per process before we start dropping oldest
-    private const int MaxEdgesPerProcess = 300;
+    // Hard cap: max edges per process before we start dropping oldest (tightened)
+    private const int MaxEdgesPerProcess = 100;
 
     private void AddEdge(int sourcePid, GraphEdge edge)
     {

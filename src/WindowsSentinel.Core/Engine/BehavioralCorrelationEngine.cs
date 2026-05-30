@@ -33,8 +33,8 @@ public sealed class BehavioralCorrelationEngine : IAsyncDisposable
     // Signal buffer: key = ProcessId (0 = host-level), value = list of recent signals
     private readonly ConcurrentDictionary<int, SignalBuffer> _buffers = new();
 
-    // Correlation window — signals older than this are ignored
-    private static readonly TimeSpan CorrelationWindow = TimeSpan.FromSeconds(120);
+    // Correlation window — signals older than this are ignored (tightened for RAM)
+    private static readonly TimeSpan CorrelationWindow = TimeSpan.FromSeconds(60);
 
     // v3.3.0: Electron/JIT apps that legitimately have RWX memory + network connections.
     // These are excluded from composite correlation to prevent false "In-Memory Implant" alerts.
@@ -1219,7 +1219,7 @@ public sealed class BehavioralCorrelationEngine : IAsyncDisposable
         {
             try
             {
-                await Task.Delay(TimeSpan.FromSeconds(30), cancellationToken);
+                await Task.Delay(TimeSpan.FromSeconds(15), cancellationToken);
                 foreach (var buffer in _buffers.Values)
                     buffer.Prune(CorrelationWindow);
 
@@ -1266,7 +1266,13 @@ public sealed class SignalBuffer
 
     public void Add(Signal signal)
     {
-        lock (_lock) { _signals.Add(signal); }
+        lock (_lock)
+        {
+            _signals.Add(signal);
+            // Hard cap: keep only the most recent 50 signals to bound RAM
+            if (_signals.Count > 50)
+                _signals.RemoveRange(0, _signals.Count - 50);
+        }
     }
 
     public IReadOnlyList<Signal> GetRecent(TimeSpan window)

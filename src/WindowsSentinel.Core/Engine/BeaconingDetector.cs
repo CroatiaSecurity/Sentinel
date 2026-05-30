@@ -46,7 +46,7 @@ public sealed class BeaconingDetector : IAsyncDisposable
     private const double MaxBeaconCv          = 0.40;  // CV below this = regular = beacon
     private const double MinBeaconIntervalSec = 5.0;   // faster than 5s = not a beacon
     private const double MaxBeaconIntervalSec = 1800.0; // slower than 30min = not a beacon
-    private const int    MaxHistoryPerKey     = 50;    // cap memory per connection
+    private const int    MaxHistoryPerKey     = 20;    // cap memory per connection (tightened)
 
     // Known-legitimate periodic connectors — skip these to reduce noise
     private static readonly HashSet<string> LegitimatePeriodicProcesses =
@@ -169,7 +169,7 @@ public sealed class BeaconingDetector : IAsyncDisposable
 
     private void PruneStaleHistory()
     {
-        var cutoff = DateTimeOffset.UtcNow - TimeSpan.FromHours(2);
+        var cutoff = DateTimeOffset.UtcNow - TimeSpan.FromMinutes(30);
         foreach (var key in _history.Keys.ToList())
         {
             if (_history.TryGetValue(key, out var h) && h.LastSeen < cutoff)

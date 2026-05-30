@@ -38,9 +38,9 @@ public sealed class TelemetryFusionEngine : BackgroundService
     // Cross-process relationships (caller → target for injection, network relay, etc.)
     private readonly ConcurrentDictionary<string, CrossProcessRelation> _relations = new();
 
-    // Temporal window for chain analysis
-    private static readonly TimeSpan ChainWindow = TimeSpan.FromMinutes(5);
-    private static readonly TimeSpan CleanupInterval = TimeSpan.FromSeconds(30);
+    // Temporal window for chain analysis (tightened for RAM — correlation only uses last 60s)
+    private static readonly TimeSpan ChainWindow = TimeSpan.FromMinutes(2);
+    private static readonly TimeSpan CleanupInterval = TimeSpan.FromSeconds(15);
 
     // Statistics
     private long _totalEventsProcessed;
@@ -60,6 +60,8 @@ public sealed class TelemetryFusionEngine : BackgroundService
     {
         _logger.LogInformation("=== Telemetry Fusion Engine starting (v1.0.0) ===");
 
+        int cleanupCycles = 0;
+
         while (!stoppingToken.IsCancellationRequested)
         {
             try
@@ -69,6 +71,18 @@ public sealed class TelemetryFusionEngine : BackgroundService
                 PruneStaleRelations();
                 // v4.2.0: Prune the EventGraph to prevent unbounded memory growth
                 _eventGraph.Prune();
+
+                // v4.6.0: Every ~5 minutes (20 cycles × 15s), force GC to release
+                // committed pages back to the OS. Without this, the .NET runtime
+                // holds freed memory indefinitely, inflating working set.
+                cleanupCycles++;
+                if (cleanupCycles >= 20)
+                {
+                    cleanupCycles = 0;
+                    GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+                    GC.WaitForPendingFinalizers();
+                    GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+                }
             }
             catch (OperationCanceledException) { break; }
             catch (Exception ex)
@@ -433,9 +447,9 @@ public sealed class ProcessEventChain
             _events.Add(evt);
             LastActivity = evt.Timestamp;
 
-            // Cap at 500 events per chain to prevent unbounded growth
-            if (_events.Count > 500)
-                _events.RemoveRange(0, _events.Count - 500);
+            // Cap at 100 events per chain to minimize RAM footprint
+            if (_events.Count > 100)
+                _events.RemoveRange(0, _events.Count - 100);
         }
     }
 

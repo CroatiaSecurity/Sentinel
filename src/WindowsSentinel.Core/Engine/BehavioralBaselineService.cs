@@ -375,7 +375,7 @@ public sealed class BehavioralBaselineService : BackgroundService
 
     private void CleanupOldEntries()
     {
-        var cutoff = DateTimeOffset.UtcNow.AddDays(-30);
+        var cutoff = DateTimeOffset.UtcNow.AddDays(-7);
         
         // Remove old process entries
         var oldProcesses = _knownProcesses.Where(p => p.Value.LastSeen < cutoff).Select(p => p.Key).ToList();
@@ -405,34 +405,34 @@ public sealed class BehavioralBaselineService : BackgroundService
             _knownNetworkDestinations.TryRemove(key, out _);
         }
 
-        // Hard caps to prevent unbounded growth within a single session
+        // Hard caps to prevent unbounded growth within a single session (tightened for RAM)
         // Network destinations grow fastest (every unique process:IP:port tuple)
-        if (_knownNetworkDestinations.Count > 5000)
+        if (_knownNetworkDestinations.Count > 1500)
         {
             var excess = _knownNetworkDestinations
                 .OrderBy(kv => kv.Value.ConnectionCount)
                 .ThenBy(kv => kv.Value.LastSeen)
-                .Take(_knownNetworkDestinations.Count - 3000)
+                .Take(_knownNetworkDestinations.Count - 1000)
                 .Select(kv => kv.Key).ToList();
             foreach (var key in excess)
                 _knownNetworkDestinations.TryRemove(key, out _);
         }
 
-        if (_knownExecutablePaths.Count > 3000)
+        if (_knownExecutablePaths.Count > 1000)
         {
             var excess = _knownExecutablePaths
                 .OrderBy(kv => kv.Value.LastSeen)
-                .Take(_knownExecutablePaths.Count - 2000)
+                .Take(_knownExecutablePaths.Count - 750)
                 .Select(kv => kv.Key).ToList();
             foreach (var key in excess)
                 _knownExecutablePaths.TryRemove(key, out _);
         }
 
-        if (_knownParentChild.Count > 3000)
+        if (_knownParentChild.Count > 1000)
         {
             var excess = _knownParentChild
                 .OrderBy(kv => kv.Value.LastSeen)
-                .Take(_knownParentChild.Count - 2000)
+                .Take(_knownParentChild.Count - 750)
                 .Select(kv => kv.Key).ToList();
             foreach (var key in excess)
                 _knownParentChild.TryRemove(key, out _);

@@ -2,7 +2,7 @@
 
 **Userland EDR for Windows — Behavioral Detection, Automated Response & Aggressive Deception**
 
-> Version: 4.6.0 (False Positive Reduction III, Unified C2 Detection, BrowserDllMonitor Removed)  
+> Version: 4.7.0 (Aggressive RAM Optimization)  
 > Author: [Gorstak](https://gorstak.eu) | [GitHub](https://github.com/CroatiaSecurity/Sentinel)  
 > License: MIT
 
@@ -151,7 +151,7 @@ These never kill independently. Multiple Tier2 signals on the same PID within 12
 
 ### Composite Detections (Behavioral Correlation Engine)
 
-Multiple weak signals within a 120-second window produce high-confidence composite kills:
+Multiple weak signals within a 60-second window produce high-confidence composite kills:
 
 | Composite | Confidence | Trigger |
 |-----------|-----------|---------|
@@ -291,7 +291,7 @@ All tactics:
 | Device installation monitoring | Detects virtual keyboards, rogue NICs, storage devices, kernel driver loads at runtime (v4.2.0) |
 | Ghost device cleanup | Removes stuck/phantom devices on startup via SetupAPI (v4.2.0) |
 | System tray icon | User-accessible console, quarantine, logs, start/stop protection, and balloon notifications via NotifyIcon (v4.3.0) |
-| Memory optimization | EventGraph edge caps, BehavioralBaseline collection caps, periodic GC pressure relief (v4.4.0) |
+| Memory optimization | Aggressive retention tightening (EventGraph 3min, chains 2min/100 events, correlation 60s, beaconing 30min), forced GC every 5min, hard caps on all collections (v4.7.0) |
 | Clipboard sanitization | Active stripping of dangerous Unicode (zero-width, RTL override, homoglyphs) prevents chat/input injection (v4.5.0) |
 | Per-app network policy | Learned baseline of normal destinations per process, alerts on novel connections (v4.5.0) |
 | USB device fingerprinting | VID:PID:Serial baseline, BadUSB detection for unknown HID devices (v4.5.0) |

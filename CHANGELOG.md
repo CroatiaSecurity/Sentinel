@@ -2,6 +2,52 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [4.7.0] - 2026-05-30
+
+### Changed — Aggressive RAM Optimization
+
+Service working set reduced from ~3.4 GB to an expected ~300–600 MB on typical desktops. All in-memory analysis structures tightened to the minimum retention needed for detection (correlation rules only look at the last 60 seconds of signals).
+
+#### TelemetryFusionEngine
+- Chain window: 5 min → 2 min
+- Cleanup interval: 30s → 15s
+- Events per chain cap: 500 → 100
+
+#### EventGraph
+- Retention window: 10 min → 3 min
+- Max edges per process: 300 → 100
+- Edge prune threshold: 150 → 50
+- Process node cap: 5000 → 1000
+- File node cap: 10000 → 2000
+- Endpoint cap: 3000 → 1000
+
+#### BehavioralCorrelationEngine
+- Correlation window: 120s → 60s
+- Prune interval: 30s → 15s
+- SignalBuffer: added hard cap of 50 signals per buffer (was unbounded)
+
+#### BeaconingDetector
+- Stale history cutoff: 2 hours → 30 min
+- Max history per connection key: 50 → 20
+
+#### BehavioralBaselineService
+- Entry retention: 30 days → 7 days
+- Network destination cap: 5000 → 1500
+- Executable path cap: 3000 → 1000
+- Parent-child relationship cap: 3000 → 1000
+
+#### Periodic GC Reclaim (new)
+- Added forced `GC.Collect(2, Aggressive, compacting)` every ~5 minutes after pruning
+- Forces the .NET runtime to release committed pages back to the OS instead of hoarding freed memory
+
+### Version Bumped
+- All `.csproj` files: 4.6.0 → 4.7.0
+- `version.txt`: 4.6.0 → 4.7.0
+- `setup.iss`: 4.6.0 → 4.7.0
+- `ServiceCollectionExtensions.cs` version constant: 4.6.0 → 4.7.0
+
+---
+
 ## [4.6.0] - 2026-05-30
 
 ### Removed — BrowserDllMonitor

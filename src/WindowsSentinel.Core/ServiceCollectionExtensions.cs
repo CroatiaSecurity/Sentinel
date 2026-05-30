@@ -54,10 +54,10 @@ namespace WindowsSentinel.Core;
 public static class SentinelVersion
 {
     /// <summary>
-    /// Current version - 4.5.0 False Positive Reduction II
+    /// Current version - 4.7.0 Aggressive RAM Optimization
     /// Version is managed in version.txt for consistency across build scripts
     /// </summary>
-    public const string Version = "4.6.0";
+    public const string Version = "4.7.0";
 
     /// <summary>
     /// Release date
@@ -68,18 +68,19 @@ public static class SentinelVersion
     /// Version description
     /// </summary>
     public const string Description =
-        "4.6.0 - False Positive Reduction III & CPU/RAM Optimization. " +
-        "BrowserDllMonitor: REMOVED — DLL validation now handled system-wide by ModuleValidationRule. " +
-        "Eliminates msedge_elf.dll false positives and reduces CPU from redundant browser scanning. " +
-        "MemoryExecutionRule: expanded exclusion list to 40+ system processes (sppsvc, WmiPrvSE, " +
-        "lsass, csrss, dwm, audiodg, SearchIndexer, etc.) that legitimately lack resolvable paths. " +
-        "DataExfiltrationMonitor: expanded NetworkAllowlist with Microsoft services (MpDefenderCoreService, " +
-        "OneDrive.Sync.Service, MicrosoftStartFeedProvider, widgets, etc.), Windows system processes, " +
-        "NVIDIA/GPU services, and hardware utilities. " +
-        "BehavioralCorrelationEngine: Memory+Network composite now per-process only (no host-level), " +
-        "preventing false 'In-Memory Implant' composites from unrelated process signals. " +
-        "Added 15+ system processes to ElectronAndJitApps exclusion list. " +
-        "BeaconingDetector: expanded LegitimatePeriodicProcesses with 20+ additional entries.";
+        "4.7.0 - Aggressive RAM Optimization. " +
+        "Tightened all in-memory retention windows and collection caps to reduce steady-state " +
+        "working set from ~3.4 GB to ~300-600 MB on typical desktops. " +
+        "EventGraph: retention 10min→3min, process cap 5000→1000, file cap 10000→2000, " +
+        "endpoint cap 3000→1000, edges/process 300→100. " +
+        "TelemetryFusionEngine: chain window 5min→2min, cleanup interval 30s→15s, " +
+        "events/chain 500→100. " +
+        "BehavioralCorrelationEngine: correlation window 120s→60s, prune interval 30s→15s, " +
+        "SignalBuffer hard cap added (50 signals max). " +
+        "BeaconingDetector: stale cutoff 2h→30min, history/key 50→20. " +
+        "BehavioralBaselineService: retention 30d→7d, network dest cap 5000→1500, " +
+        "path/parent caps 3000→1000. " +
+        "Added periodic forced GC (every ~5min) to release committed pages back to OS.";
 }
 
 public static class ServiceCollectionExtensions
