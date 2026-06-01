@@ -187,6 +187,7 @@ public sealed class AdvancedResponseEngine : IResponseEngine
         "confirmed lsass dump",
         "credential dump confirmed",
         "lsass dump",
+        "credential theft",
         // Telemetry tampering (EDR blinding)
         "amsi tampering",
         "etw tampering",
@@ -194,6 +195,7 @@ public sealed class AdvancedResponseEngine : IResponseEngine
         "amsi patching",
         "etw unhooking",
         // Ransomware
+        "ransomware",
         "ransomware: mass write",
         "ransomware activity",
         "shadow copy deletion",
@@ -201,6 +203,8 @@ public sealed class AdvancedResponseEngine : IResponseEngine
         "reflective dll",
         "memory execution: reflective",
         "memory execution: process has no executable path",
+        "in-memory execution",
+        "fileless",
         // Audio hijack / screen capture / overlay (attack on user)
         "audiohijack",
         "audio hijack",
@@ -221,6 +225,7 @@ public sealed class AdvancedResponseEngine : IResponseEngine
         "exfiltration: credential theft + network",
         "exfiltration: usb media + network",
         "exfiltration: staging + upload service",
+        "exfiltration",
         // Browser credential theft (v3.2.0)
         "browser credential theft",
         // RAT / APT campaign composites (v3.3.0) — confirmed RAT activity kills
@@ -246,8 +251,10 @@ public sealed class AdvancedResponseEngine : IResponseEngine
         "uac bypass: active exploitation",
         // Process injection / hollowing (v3.3.0) — runtime behavioral confirmation
         "process hollowing",
-        "process injection: confirmed",
+        "process injection",
         "hollow process",
+        "module injection",
+        "injection tool",
         // Keylogging / input capture (v3.3.0) — spyware behavior
         "keylogger",
         "keystroke capture",
@@ -268,7 +275,18 @@ public sealed class AdvancedResponseEngine : IResponseEngine
         "critical: service registry key deleted",
         "critical: service removed from scm",
         // ADS verdict-gated
-        "verdict-gated"
+        "verdict-gated",
+        // v5.1.0 — Hardened active response
+        "dll hijacking",
+        "module integrity",
+        "advanced attack chain",
+        "beaconing behavior",
+        "c2 beaconing",
+        "attack tool",
+        "account manipulation",
+        "certificate store tampering",
+        "firewall & network tampering",
+        "recon sequence"
     };
 
     private const double MustKillConfidenceThreshold = 0.85;

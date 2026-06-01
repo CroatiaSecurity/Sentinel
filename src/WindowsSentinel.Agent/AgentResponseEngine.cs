@@ -65,9 +65,29 @@ internal sealed class AgentResponseEngine : IResponseEngine
         "credential dump confirmed",
         "lsass dump",
         "credential dump",
+        "credential theft",
         // Data exfiltration (v3.3.0)
         "data exfiltration",
         "exfiltration: credential theft + network",
+        "exfiltration",
+        // Ransomware
+        "ransomware",
+        // Process injection and DLL validation
+        "process injection",
+        "dll hijacking",
+        "module integrity",
+        "in-memory execution",
+        "fileless",
+        "module injection",
+        "injection tool",
+        "advanced attack chain",
+        "beaconing behavior",
+        "c2 beaconing",
+        "attack tool",
+        "account manipulation",
+        "certificate store tampering",
+        "firewall & network tampering",
+        "recon sequence"
     };
 
     private const double KillConfidenceThreshold = 0.85;

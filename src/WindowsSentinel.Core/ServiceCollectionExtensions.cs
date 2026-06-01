@@ -54,24 +54,22 @@ namespace WindowsSentinel.Core;
 public static class SentinelVersion
 {
     /// <summary>
-    /// Current version - 5.0.0 Performance Optimization: reduced polling, removed redundant monitors, fixed EventGraph
+    /// Current version - 5.1.0 Hardened Active Response
     /// Version is managed in version.txt for consistency across build scripts
     /// </summary>
-    public const string Version = "5.0.0";
+    public const string Version = "5.1.0";
 
     /// <summary>
     /// Release date
     /// </summary>
-    public static readonly DateTime ReleaseDate = new(2026, 5, 30);
+    public static readonly DateTime ReleaseDate = new(2026, 6, 2);
 
     /// <summary>
     /// Version description
     /// </summary>
     public const string Description =
-        "4.8.1 - Performance Optimization: removed redundant monitors, fixed EventGraph, relaxed polling. " +
-        "ModuleValidationMonitor removed (subsumed by RuntimeModuleIntegrityMonitor). " +
-        "DiskWideDllScanner disabled (expensive, covered by runtime module scanning). " +
-        "Aggressive blocking GC removed. All polling intervals relaxed 2-3x.";
+        "5.1.0 - Active response updates: added DLL hijacking, sideloading, process injection, " +
+        "and advanced attack chain rules to the President's Law kill list. Unified exfiltration rules.";
 }
 
 public static class ServiceCollectionExtensions
@@ -110,7 +108,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IDetectionRule, ReverseShellRule>();
         services.AddSingleton<IDetectionRule, ProcessInjectionRule>();
         services.AddSingleton<IDetectionRule, RansomwareDetectionRule>(); // Unified (merged RansomwareActivity + RansomwareBehavior)
-        // services.AddSingleton<IDetectionRule, EtwTamperingRule>();
+        services.AddSingleton<IDetectionRule, EtwTamperingRule>();
         services.AddSingleton<IDetectionRule, ThreatIntelInjectionRule>(); // kernel-observed injection
         services.AddSingleton<IDetectionRule, BeaconingRule>();            // statistical C2 beaconing
         services.AddSingleton<IDetectionRule, HollowProcessRule>();        // process hollowing

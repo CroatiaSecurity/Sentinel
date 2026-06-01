@@ -21,6 +21,7 @@ public sealed class RouteTableMonitorTests
     [InlineData("0.0.0.0", "0.0.0.0", false)]               // Default route
     public void IsMulticastOrBroadcast_ClassifiesCorrectly(string destination, string mask, bool expected)
     {
+        _ = mask;
         // The exclusion logic checks:
         // 1. First octet >= 224 (multicast range 224.0.0.0/4)
         // 2. Destination == 255.255.255.255 (broadcast)

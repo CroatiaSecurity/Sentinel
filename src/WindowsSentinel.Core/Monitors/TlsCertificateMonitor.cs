@@ -370,7 +370,7 @@ public sealed class TlsCertificateMonitor : BackgroundService
         };
 
         using var client = new HttpClient(handler) { Timeout = HttpTimeout };
-        client.DefaultRequestHeaders.UserAgent.ParseAdd("WindowsSentinel/5.0.0");
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("WindowsSentinel/5.1.0");
 
         try
         {

@@ -2,6 +2,17 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [5.1.0] - 2026-06-02
+
+### Added
+- **Active Response Hardening** — Expanded the President's Law whitelists (`PresidentsLawFragments` in `AdvancedResponseEngine` and `KillFragments` in `AgentResponseEngine`) to authorize process termination (active response kill) for:
+  - DLL hijacking & Module Integrity violations (e.g. `dbghelp.dll` side-loading attempts)
+  - Process Injection attempts (including the ThreatIntel ETW process injection rule)
+  - Fileless / In-Memory Execution rules
+  - Advanced composites (Active Ransomware Chain, Fileless Attack Chain, Advanced Attack Chain, Clipboard Exfiltration, and various exfiltration composites)
+  - Statistical beaconing, local account manipulation, firewall tampering, certificate store tampering, and post-exploitation recon sequences.
+- **Unified Exfiltration Matching** — Added generic `"exfiltration"` keyword to match any custom exfiltration rule names and avoid minor word mismatches (such as "network upload" vs "network").
+
 ## [5.0.0] - 2026-06-01
 
 ### Added

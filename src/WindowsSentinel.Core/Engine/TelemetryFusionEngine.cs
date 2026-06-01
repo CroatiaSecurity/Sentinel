@@ -58,7 +58,7 @@ public sealed class TelemetryFusionEngine : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("=== Telemetry Fusion Engine starting (v5.0.0) ===");
+        _logger.LogInformation("=== Telemetry Fusion Engine starting (v5.1.0) ===");
 
         int cleanupCycles = 0;
 

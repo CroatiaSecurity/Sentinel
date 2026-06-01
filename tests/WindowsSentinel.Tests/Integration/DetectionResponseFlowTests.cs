@@ -201,7 +201,7 @@ public sealed class DetectionResponseFlowTests
     // ── Tier Enforcement ────────────────────────────────────────────────────
 
     [Fact]
-    public async Task ResponseEngine_OnlyKills_Tier1Detections()
+    public void ResponseEngine_OnlyKills_Tier1Detections()
     {
         // This test verifies the architectural constraint that Tier2 signals
         // NEVER trigger kill actions independently.
