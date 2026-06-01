@@ -1,6 +1,6 @@
 # Windows Sentinel — Requirements
 
-**Version: 4.8.1**
+**Version: 5.0.0**
 
 ---
 
@@ -52,6 +52,7 @@ The system must detect the following behavioral threats:
 | T1-10 | Privilege escalation | UAC bypass (COM, manifests), token manipulation, named pipe impersonation, DLL hijacking |
 | T1-11 | Known attack tools | C2 frameworks, credential tools, network attack tools, AD attack tools, LOLBin abuse |
 | T1-12 | Campaign IOCs | Known malicious hashes, domains, IPs, file names, threat campaign patterns |
+| T1-13 | Phantom keystrokes | Injected keystrokes detected via `LLKHF_INJECTED` flag and blocked via `WH_KEYBOARD_LL` |
 
 ### FR-3: Tier 2 Detection Rules
 

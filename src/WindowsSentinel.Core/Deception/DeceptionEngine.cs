@@ -122,7 +122,7 @@ public sealed class DeceptionEngine : IDeceptionEngine
                     try
                     {
                         var tacticSw = Stopwatch.StartNew();
-                        var result = await tactic.ExecuteAsync(context, cancellationToken);
+                        var result = await tactic.ExecuteAsync(context, CancellationToken.None);
                         tacticSw.Stop();
                         
                         if (result.Success)

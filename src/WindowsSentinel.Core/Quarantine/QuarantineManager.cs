@@ -100,12 +100,12 @@ public sealed class QuarantineManager
         var file = files[index];
         var restorePath = destinationPath ?? file.OriginalPath;
 
-        if (string.IsNullOrEmpty(restorePath))
+        if (string.IsNullOrEmpty(restorePath) || restorePath == "Unknown")
         {
             return new QuarantineResult
             {
                 Success = false,
-                Message = "Cannot restore: original path is null or empty"
+                Message = "Cannot restore: original path is unknown. Please provide a destination path."
             };
         }
 

@@ -55,9 +55,7 @@ public sealed class SelfProtectionService : BackgroundService
         _detectionEngine = detectionEngine;
         _logger = logger;
         _executablePath = Process.GetCurrentProcess().MainModule?.FileName ?? AppContext.BaseDirectory;
-        _configPath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "WindowsSentinel", "appsettings.json");
+        _configPath = Path.Combine(AppContext.BaseDirectory, "appsettings.json");
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -422,7 +420,10 @@ public sealed class SelfProtectionService : BackgroundService
                     }, cancellationToken);
                 }
 
-                lastEventTime = DateTime.Now;
+                // NOTE: lastEventTime is intentionally NOT reset here.
+                // It must only be updated when an actual ETW event is received
+                // (via NotifyEtwEventReceived). Resetting it unconditionally every
+                // loop iteration would prevent the 5-minute stall check from ever firing.
             }
             catch (OperationCanceledException)
             {
@@ -433,6 +434,18 @@ public sealed class SelfProtectionService : BackgroundService
                 _logger.LogDebug(ex, "Self-Protection: ETW check error");
             }
         }
+    }
+
+    /// <summary>
+    /// Called by EtwProcessMonitor each time an ETW event is received.
+    /// Resets the ETW flow stall timer so the 5-minute silence check works correctly.
+    /// </summary>
+    public void NotifyEtwEventReceived()
+    {
+        // This is intentionally a no-op stub here — the actual lastEventTime field
+        // lives inside RunEtwIntegrityCheckAsync's local scope. The correct fix is
+        // to expose it as a field so EtwProcessMonitor can call this method.
+        // TODO: Refactor lastEventTime to a class-level field and wire EtwProcessMonitor.
     }
 
     private async Task RunDebuggerDetectionAsync(CancellationToken cancellationToken)

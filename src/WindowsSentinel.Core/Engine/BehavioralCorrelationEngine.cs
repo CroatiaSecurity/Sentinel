@@ -381,11 +381,17 @@ public sealed class BehavioralCorrelationEngine : IAsyncDisposable
     /// <summary>
     /// v4.6.0 — Unified Credential Theft Detection.
     /// Consolidates LSASS + network, dbghelp + LSASS, dbghelp + network, credential canary + network.
+    ///
+    /// v4.8.2 — GoogleUpdate / APT sideload awareness.
+    /// The LsassDumpCanaryMonitor now validates GoogleUpdate binaries by path and signature.
+    /// A legitimate Google-signed GUM*.tmp installer does NOT set apt_sideload_suspected=true,
+    /// so the composite will not fire for it. A hijacked GoogleUpdate (wrong path, unsigned,
+    /// or from a PlugX staging dir) DOES set apt_sideload_suspected=true and fires normally.
     /// </summary>
     private static DetectionEvent? EvaluateCredentialTheft(
         IReadOnlyList<Signal> signals, int scopePid)
     {
-        bool hasLsass = signals.Any(s => s.RuleName.Contains("LSASS"));
+        bool hasLsass = signals.Any(s => s.RuleName.Contains("LSASS") && !s.RuleName.Contains("dbghelp"));
         bool hasDbghelp = signals.Any(s => s.RuleName.Contains("dbghelp"));
         bool hasCanary = signals.Any(s => s.RuleName.Contains("Credential Canary"));
         bool hasNetwork = signals.Any(s =>
@@ -394,6 +400,16 @@ public sealed class BehavioralCorrelationEngine : IAsyncDisposable
             s.RuleName.Contains("Network") ||
             s.Metadata.ContainsKey("RemotePort") ||
             s.Metadata.ContainsKey("remote_port"));
+
+        // v4.8.2: If the dbghelp signal came from a legitimate Google-signed installer
+        // (LsassDumpCanaryMonitor validated it), the canary does NOT emit a signal at all —
+        // so hasDbghelp will be false and the composite won't fire. No special case needed.
+        //
+        // If the canary DID emit (hasDbghelp=true), it means either:
+        //   a) A non-Google process loaded dbghelp.dll (always suspicious), OR
+        //   b) A GoogleUpdate-named process failed path/signature validation
+        //      (apt_sideload_suspected=true in metadata — PlugX pattern).
+        // Both cases should fire the composite. The distinction is already handled upstream.
 
         // Pattern 1: dbghelp + LSASS = confirmed dump (no network needed)
         if (hasDbghelp && hasLsass)

@@ -61,6 +61,9 @@ public sealed class AntiTamperGuard : BackgroundService
     [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     private static extern bool ChangeServiceConfig2(IntPtr hService, uint dwInfoLevel, ref SERVICE_DESCRIPTION lpInfo);
 
+    [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern bool ChangeServiceConfig2(IntPtr hService, uint dwInfoLevel, ref SERVICE_FAILURE_ACTIONS lpInfo);
+
     [DllImport("kernel32.dll")]
     private static extern bool SetConsoleCtrlHandler(ConsoleCtrlDelegate? handler, bool add);
 
@@ -77,12 +80,30 @@ public sealed class AntiTamperGuard : BackgroundService
     private const uint SERVICE_AUTO_START = 0x00000002;
     private const uint SERVICE_ERROR_NORMAL = 0x00000001;
     private const uint SERVICE_CONFIG_DESCRIPTION = 1;
+    private const uint SERVICE_CONFIG_FAILURE_ACTIONS = 2;
     private const int ProcessBreakOnTermination = 29; // NtSetInformationProcess class
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     private struct SERVICE_DESCRIPTION
     {
         public string lpDescription;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct SC_ACTION
+    {
+        public uint Type;   // 1 = SC_ACTION_RESTART
+        public uint Delay;  // milliseconds
+    }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct SERVICE_FAILURE_ACTIONS
+    {
+        public uint dwResetPeriod;  // seconds before reset (86400 = 1 day)
+        public string? lpRebootMsg;
+        public string? lpCommand;
+        public uint cActions;
+        public IntPtr lpsaActions; // pointer to SC_ACTION array
     }
 
     public AntiTamperGuard(
@@ -194,6 +215,48 @@ public sealed class AntiTamperGuard : BackgroundService
     }
 
     /// <summary>
+    /// Configures SCM failure recovery actions on the service handle:
+    /// restart after 1s on first failure, 5s on second, 30s on third+.
+    /// Reset the failure count after 1 day of clean operation.
+    /// </summary>
+    private void SetFailureActions(IntPtr hService)
+    {
+        // Build three SC_ACTION structs: restart/1000ms, restart/5000ms, restart/30000ms
+        var actions = new SC_ACTION[]
+        {
+            new() { Type = 1, Delay = 1_000 },
+            new() { Type = 1, Delay = 5_000 },
+            new() { Type = 1, Delay = 30_000 },
+        };
+
+        var actionSize = Marshal.SizeOf<SC_ACTION>();
+        var actionsPtr = Marshal.AllocHGlobal(actionSize * actions.Length);
+        try
+        {
+            for (int i = 0; i < actions.Length; i++)
+                Marshal.StructureToPtr(actions[i], actionsPtr + i * actionSize, false);
+
+            var failureActions = new SERVICE_FAILURE_ACTIONS
+            {
+                dwResetPeriod = 86400, // 1 day
+                lpRebootMsg = null,
+                lpCommand = null,
+                cActions = (uint)actions.Length,
+                lpsaActions = actionsPtr
+            };
+
+            if (!ChangeServiceConfig2(hService, SERVICE_CONFIG_FAILURE_ACTIONS, ref failureActions))
+                _logger.LogWarning("[AntiTamper] SetFailureActions failed (error {Err})", Marshal.GetLastWin32Error());
+            else
+                _logger.LogDebug("[AntiTamper] Failure recovery actions configured (restart 1s/5s/30s)");
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(actionsPtr);
+        }
+    }
+
+    /// <summary>
     /// Checks if the Sentinel installer (or uninstaller) is currently running.
     /// If so, service deletion is a legitimate upgrade operation, not an attack.
     /// </summary>
@@ -272,6 +335,10 @@ public sealed class AntiTamperGuard : BackgroundService
                 lpDescription = "Windows Sentinel - Endpoint Detection and Response"
             };
             ChangeServiceConfig2(hService, SERVICE_CONFIG_DESCRIPTION, ref desc);
+
+            // Set failure recovery: restart after 1s, 5s, 30s; reset counter after 1 day.
+            // Without this, a crashed service stays stopped permanently.
+            SetFailureActions(hService);
 
             return true;
         }

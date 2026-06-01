@@ -1,6 +1,6 @@
 # Windows Sentinel — Design Document
 
-**Version: 4.8.1**
+**Version: 5.0.0**
 
 ---
 
@@ -62,6 +62,7 @@ The fusion layer is PASSIVE — it never blocks, kills, or modifies telemetry.
 | `ParentPidSpoofDetector` | Compares ETW-reported parent PID vs snapshot-reported parent | Yes (requires ETW) |
 | `FileActivityMonitor` | `FileSystemWatcher` on user profile (or configured path) | No |
 | `HollowProcessMonitor` | `GetMappedFileName` + `EnumProcessModules` P/Invoke, scans every 30s | No (own integrity level) |
+| `PhantomKeystrokeGuard` | **5.0.0** Intercepts and actively blocks software-injected keystrokes (e.g., via `SendInput`) to prevent automated typing via global `WH_KEYBOARD_LL` hook. | No |
 | `ScreenCaptureMonitor` | **1.5.0** Detects background DXGI screen capture + transparent overlay phishing windows via `EnumWindows` + `GetWindowLong`, scans every 15–25s | No |
 | `LocalServerMonitor` | **1.5.0** Detects suspicious processes listening on localhost via `GetExtendedTcpTable` (LISTEN state), flags mounted ISO/VHD/removable origins, scans every 30s | No |
 | `WebcamMicMonitor` | **1.6.0** Detects background processes accessing camera/microphone via DLL analysis (Media Foundation, DirectShow, WASAPI). Allowlists browsers, conferencing, streaming apps. Confirmation threshold prevents transient FPs. Scans every 20s | No |

@@ -1356,12 +1356,7 @@ Blocked IPs ({result.BlockedIps.Count}):
             // Kernel / session
             "system", "registry", "smss", "csrss", "wininit", "services", "lsass", "svchost",
             // Desktop / shell (killing these crashes the user session)
-            "explorer", "dwm", "sihost", "fontdrvhost", "winlogon",
-            // User-facing apps that must never be killed by overlay/capture heuristics
-            "msedge", "chrome", "firefox", "brave", "opera", "vivaldi",
-            "code", "kiro", "devenv", "rider64", "idea64",
-            "teams", "ms-teams", "zoom", "slack", "discord",
-            "windowsterminal", "wt",
+            "explorer", "dwm", "sihost", "fontdrvhost", "winlogon"
         };
         return critical.Contains(processName.Replace(".exe", ""));
     }

@@ -54,10 +54,10 @@ namespace WindowsSentinel.Core;
 public static class SentinelVersion
 {
     /// <summary>
-    /// Current version - 4.8.1 Performance Optimization: reduced polling, removed redundant monitors, fixed EventGraph
+    /// Current version - 5.0.0 Performance Optimization: reduced polling, removed redundant monitors, fixed EventGraph
     /// Version is managed in version.txt for consistency across build scripts
     /// </summary>
-    public const string Version = "4.8.1";
+    public const string Version = "5.0.0";
 
     /// <summary>
     /// Release date
@@ -110,7 +110,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IDetectionRule, ReverseShellRule>();
         services.AddSingleton<IDetectionRule, ProcessInjectionRule>();
         services.AddSingleton<IDetectionRule, RansomwareDetectionRule>(); // Unified (merged RansomwareActivity + RansomwareBehavior)
-        services.AddSingleton<IDetectionRule, EtwTamperingRule>();
+        // services.AddSingleton<IDetectionRule, EtwTamperingRule>();
         services.AddSingleton<IDetectionRule, ThreatIntelInjectionRule>(); // kernel-observed injection
         services.AddSingleton<IDetectionRule, BeaconingRule>();            // statistical C2 beaconing
         services.AddSingleton<IDetectionRule, HollowProcessRule>();        // process hollowing

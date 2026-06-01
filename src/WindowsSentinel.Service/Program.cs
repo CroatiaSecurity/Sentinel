@@ -94,9 +94,13 @@ try
 
     // Increase service startup timeout — Sentinel has 50+ services to initialize
     // and ETW session creation can be slow on first boot.
+    // ShutdownTimeout raised to 60s — with 50+ hosted services to stop, the default
+    // 5s is far too short. SCM kills the process when it times out, which looks like
+    // a crash and prevents clean shutdown (last-gasp logging, heartbeat cleanup, etc.).
     builder.Services.Configure<Microsoft.Extensions.Hosting.HostOptions>(options =>
     {
         options.StartupTimeout = TimeSpan.FromSeconds(120);
+        options.ShutdownTimeout = TimeSpan.FromSeconds(60);
     });
 
     var host = builder.Build();

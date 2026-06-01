@@ -74,6 +74,7 @@ class Program
         builder.Services.AddHostedService<AudioHijackMonitor>();
         builder.Services.AddHostedService<MicSessionMonitor>();
         builder.Services.AddHostedService<NeuroBehaviorVisualMonitor>();
+        builder.Services.AddHostedService<PhantomKeystrokeGuard>();
 
         // ── Detection pipeline consumer (reads channel, routes to response engine) ──
         builder.Services.AddHostedService<AgentDetectionPipeline>();
@@ -213,6 +214,10 @@ class Program
                     sc.Start();
                     sc.WaitForStatus(System.ServiceProcess.ServiceControllerStatus.Running, TimeSpan.FromSeconds(30));
                     _logger.LogInformation("Service Watchdog: Service restarted successfully");
+                    // Reset counter after a successful restart so future crashes can also
+                    // be recovered. Without this, 3 crashes in a row permanently disables
+                    // the watchdog for the lifetime of the Agent process.
+                    _restartAttempts = 0;
                 }
                 else
                 {

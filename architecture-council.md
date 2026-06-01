@@ -3,7 +3,7 @@
 **Status:** Architecture spec. Extends, does not replace, `requirements.md`,
 `design.md`, `constraints.md` (all v0.9.0).
 
-**Last updated:** v4.5.0 (May 2026) — Clipboard Sanitization, App Network Policy, USB Fingerprinting.
+**Last updated:** v5.0.0 (June 2026) — Phantom Keystroke Guard, Clipboard Sanitization, App Network Policy, USB Fingerprinting.
 
 ---
 
@@ -110,6 +110,7 @@ is low and their target (the user) is high-value:
 - `AudioHijackDetection` (already President's-law)
 - `WebcamHijackDetection` (already President's-law)
 - `KeyScrambler` events (keylogger attempted / scrambling triggered)
+- `PhantomKeystrokeGuard` (injected keystrokes blocked)
 - `CursorTakeoverDetection`
 - `FakeUacDetection`
 - `LNKProtection` (malicious LNK aimed at user)

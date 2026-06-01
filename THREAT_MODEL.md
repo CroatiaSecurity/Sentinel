@@ -1,6 +1,6 @@
 # Windows Sentinel — Threat Model
 
-**Version: 4.8.1**
+**Version: 5.0.0**
 
 This document assumes the attacker has read the source code.
 
@@ -195,7 +195,9 @@ These detections are hard to bypass without kernel access. All are **Tier2 corro
 | DNS tunneling | MEDIUM | LOW (attacker can stay under 30 queries/min threshold) |
 | C2 beaconing (statistical) | MEDIUM | LOW (attacker uses jitter/legitimate ports) |
 | Memory behavior (RWX/shellcode) | MEDIUM | MEDIUM (hard to avoid RWX entirely) |
+| Phantom keystrokes (SendInput) | HIGH | HIGH (blocked globally at ring 3 via WH_KEYBOARD_LL) |
 | File entropy | LOW | LOW (trivially bypassed with padding) |
+| Campaign IOCs | MEDIUM | LOW (attacker uses fresh infrastructure) |
 | Campaign IOCs | MEDIUM | LOW (attacker uses fresh infrastructure) |
 
 ---

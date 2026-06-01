@@ -2,6 +2,18 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [5.0.0] - 2026-06-01
+
+### Added
+- **PhantomKeystrokeGuard** — Background service that runs in the user session and installs a global low-level keyboard hook (`WH_KEYBOARD_LL`). Intercepts and actively blocks software-injected keystrokes (e.g., via `SendInput`) to prevent automated typing, input corruption, and AI prompt hijacking. Emits a Tier1 detection event when phantom keystrokes are blocked.
+
+### Fixed
+- Fixed cryptographic salt logic in `SecureCacheStore.cs` to ensure MAC unpredictability.
+- Fixed an infinite thread hang in `DeceptionEngine.cs` by supplying a cancellation token to `Task.Delay()`.
+- Fixed a path validation bug in `QuarantineManager.cs` where files with "Unknown" original paths were restored to the working directory.
+- Fixed false positive credential theft loops in `BehavioralCorrelationEngine.cs` where single signals erroneously satisfied multiple composite components.
+- Removed user-facing applications (e.g., `chrome.exe`, `teams.exe`) from `ChainTracer.cs`'s critical system allowlist to prevent malware termination immunity.
+
 ## [4.8.1] - 2026-05-30
 
 ### Fixed — Performance Optimization & Monitor Unification
@@ -882,14 +894,20 @@ This release closes the browser credential theft gap across ALL browsers and add
 
 ### Added — Observability, Blind Spots & Resilience
 
-- Centralized security validation (`SecurityValidation` utility)
-- Rate limiting with burst capability (`BurstRateLimiter`)
-- Configuration integrity monitoring (`ConfigIntegrityMonitor`)
-- Structured health checks (`SentinelHealthCheck`)
-- Performance metrics (`SentinelMetrics`)
-- Secure HTTP client factory (`SecureHttpClientFactory`)
-- Atomic quarantine operations
-- Comprehensive test coverage
+- **NamedPipeMonitor** — Polls `\\.\pipe\` every 15s for C2/lateral movement pipe patterns (Cobalt Strike, PsExec, Impacket, Metasploit). Uses `GetNamedPipeServerProcessId` for owner attribution. Tier2 advisory.
+- **WmiPersistenceMonitor** — Periodic WMI namespace scan every 5 minutes for `__EventFilter` / `__EventConsumer` / `__FilterToConsumerBinding` subscriptions (T1546.003 — most common fileless persistence mechanism). Direct emission to DetectionEngine.
+- **SentinelMetrics** wiring — DetectionEngine and AdvancedResponseEngine now record metrics (detection rate, response latency, FP tracking) with P50/P90/P95/P99 histograms.
+- **HashReputationService** two-tier cache — In-memory + DPAPI-encrypted disk cache cuts API calls by 90%+.
+- **StartupSelfTest** — Verifies ETW, DPAPI, quarantine, log file, and rule loading on service start before activating monitors.
+- **Watchdog HMAC signing** — Heartbeat file HMAC-signed with DPAPI-derived key. Unforgeable without SYSTEM access.
+- **ProcessAncestryCache WMI fallback** — Falls back to `Win32_Process` WMI query when Toolhelp32 fails (Server Core / IoT environments).
+- **SecurityValidation** utility — Centralized input validation for filenames, paths, IPs, PIDs, ports, timestamps, and secure string comparison.
+- **BurstRateLimiter** — Thread-safe rate limiting with burst capability for response actions.
+- **SafeExecution** — Retry, timeout, circuit breaker, and performance measurement patterns.
+- **ConfigIntegrityMonitor** — Runtime detection of config/executable tampering via SHA-256 baseline, checked every 5 minutes.
+- **SentinelHealthCheck** — Structured health checks: process, memory, handles, log file, quarantine, thread pool.
+- **SecureHttpClientFactory** — TLS 1.2+ enforcement, domain allowlisting, certificate validation for all threat intel API calls.
+- **QuarantineFileAtomicAsync** — Atomic quarantine: encrypt → move → delete prevents race conditions on quarantine operations.
 
 ---
 
@@ -897,12 +915,12 @@ This release closes the browser credential theft gap across ALL browsers and add
 
 ### Added — Security Hardening, Observability & Resilience
 
-- DLL-search-order hardening (`ProcessHardening`)
-- Strict install directory validation (opt-in via `SENTINEL_STRICT_INSTALL_DIR=1`)
-- Service binary tamper protection (`ServiceProtectionMonitor`)
-- Event Log flooding reduction (Warning+ only to Event Viewer)
-- Log rotation service with configurable size/retention
-- Graceful shutdown service
+- **ProcessHardening** — DLL-search-order hardening via CIG (Code Integrity Guard), `SetDefaultDllDirectories`, and install-directory ACL enforcement. Prevents DLL sideloading against Sentinel itself.
+- **Strict install directory validation** — Opt-in via `SENTINEL_STRICT_INSTALL_DIR=1`. Rejects execution from unexpected paths.
+- **ServiceProtectionMonitor** — Service binary tamper protection. Monitors the service executable for modification.
+- **Event Log flooding reduction** — Warning+ severity only written to Windows Event Viewer. Debug/Info stays in `events.jsonl` only.
+- **LogRotationService** — Configurable size-based log rotation (50 MB per file, up to 5 rotated files). Replaces ad-hoc rotation.
+- **GracefulShutdownService** — Ordered teardown of all monitors and engines on service stop. Ensures no events are lost on shutdown.
 
 ---
 
@@ -910,8 +928,15 @@ This release closes the browser credential theft gap across ALL browsers and add
 
 ### Fixed — Architecture Hardening & Bug Fixes
 
-- Version management via version.txt
-- Build script improvements
+- **QuarantineManager** — Fixed filename parsing metadata collision when quarantining files with special characters in their names.
+- **HardeningModule** — Fixed process handle leaks when hardening fails mid-operation.
+- **ImplantDestabilizer** — Fixed named kernel object premature GC. Objects were being collected before the deception window completed, causing handle-pollution tactic to silently fail.
+- **Sync-over-async blocking** — Removed `.Result` / `.Wait()` calls in several deception tactics that were causing thread pool starvation under load.
+- **Process name resolution in network telemetry** — Fixed race condition where process name could be null in `NetworkTelemetry` if the process exited between connection snapshot and name lookup.
+- **Honeypot lifetime truncation** — Network honeypot listeners were being torn down after 2 seconds (the deception budget) instead of the intended 30-minute lifetime. Fixed lifetime tracking to be independent of the pre-kill budget timer.
+- **NTP-resistant boot-bound nonce generation** — Boot nonce now derived from `Environment.TickCount64` (monotonic) rather than `DateTime.UtcNow`. Prevents nonce reuse if system clock is rolled back.
+- **Version management** — Introduced `version.txt` as single source of truth for version string. Build script reads it to stamp all assemblies.
+- **Build script improvements** — `build.ps1` now validates version consistency across all `.csproj` files before publishing.
 
 ---
 
@@ -919,21 +944,22 @@ This release closes the browser credential theft gap across ALL browsers and add
 
 ### Added — Deception Refinements & Ransomware Fast-Path
 
-- Aggressive Deception Engine (memory flooding, file traps, clipboard poison, beacon flooding)
-- Canary File Monitor (ransomware fast-path detection)
-- Firewall Tampering Rule
-- Account Manipulation Rule
-- Data Exfiltration Rule
-- Asynchronous off-host deception
+- **Ransomware Fast-Path** — If `"ransomware"` appears in the rule name or reasoning, the pre-kill deception phase is bypassed entirely. Process is terminated immediately to minimize file encryption damage. Deception is counterproductive against ransomware — every millisecond counts.
+- **x64 Context-Aligned Stack Corruption** — Thread context queries now suspend target threads and use a native 16-byte packed `CONTEXT` struct on x64. Fixes access violations and stack corruption that occurred when querying thread context without suspension.
+- **Asynchronous off-host deception** — `BeaconFlooder` and `NetworkHoneypotDeployer` now run as fire-and-forget background tasks. They no longer block process termination or consume the 2-second pre-kill budget. Network honeypots persist for their full 30-minute lifetime regardless of kill timing.
+- **CanaryFileMonitor** — Ransomware fast-path detection via decoy files placed in common ransomware target directories. Any rename or encryption of canary files triggers immediate kill without waiting for bulk I/O threshold.
+- **FirewallTamperingRule** — Detects and kills processes that disable Windows Firewall profiles or bulk-add inbound allow rules.
+- **AccountManipulationRule** — Detects local account creation, privilege escalation via `net localgroup administrators`, and SAM database access patterns.
+- **DataExfiltrationRule** — Detects sustained high-volume outbound connections, bulk access to credential stores, and large file copies to removable media. Feeds `Credential Theft + Exfiltration` composite.
 
 ---
 
 ## [2.5.0] - 2026-04-28
 
-### Added — NeuroBehavior & AudioHijack
+### Added — NeuroBehavior & Audio Hijack
 
-- NeuroBehavior Visual Monitor
-- AudioHijack module-based detection
+- **NeuroBehaviorVisualMonitor** — Screen capture + foreground window + cursor analysis. Detects focus abuse (>8 steals in 10s), flash stimulus (rapid brightness oscillation), topmost abuse (non-allowlisted WS_EX_TOPMOST), cursor jitter (>6 programmatic jumps in 10s), color inversion, and screen distortion. All signals are Tier2 advisory; feed `Coordinated Visual Manipulation Attack` composite.
+- **AudioHijackMonitor** — Module-based detection of output-to-microphone redirection. Detects virtual audio cable drivers (`vbcable`, `voicemeeter`, `virtualcable`) and WASAPI loopback capture DLLs loaded by background processes. Tier1 kill-authorized on confirmed audio hijack.
 
 ---
 
@@ -941,8 +967,8 @@ This release closes the browser credential theft gap across ALL browsers and add
 
 ### Changed — Agent Architecture
 
-- Moved user-session monitors to Agent (Clipboard, ScreenCapture, WebcamMic, AudioHijack, MicSession)
-- ADS Data Staging Monitor
+- **User-session monitors moved to Agent** — `ClipboardMonitor`, `ScreenCaptureMonitor`, `WebcamMicMonitor`, `AudioHijackMonitor`, and `MicSessionMonitor` relocated from the SYSTEM service to the Agent process running in the user session. These monitors require access to the interactive desktop and user-session resources that are not available from session 0.
+- **ADS Data Staging Monitor** — Detects processes writing data to Alternate Data Streams (NTFS ADS) as a staging/exfiltration technique. Monitors for ADS creation on files in user-writable paths. Tier2 advisory.
 
 ---
 
@@ -950,7 +976,12 @@ This release closes the browser credential theft gap across ALL browsers and add
 
 ### Added — Community Threat Intelligence
 
-- ThreatIntelReporter (AbuseIPDB, URLhaus, MalwareBazaar)
+- **ThreatIntelReporter** — After a confirmed kill (President's Law, confidence ≥ 0.85), reports attacker infrastructure to community platforms:
+  - **MalwareBazaar** (abuse.ch) — SHA-256 hash of quarantined binary. No API key required.
+  - **AbuseIPDB** — C2 IP address + attack category + evidence summary. Requires free API key.
+  - **URLhaus** (abuse.ch) — C2 URL/IP:port. Requires free API key.
+- Safety guarantees: never reports private/RFC1918 IPs, never uploads file contents (hashes only), rate-limited to 10 reports/hour, 24-hour deduplication per IP/hash, async queue (never blocks kill response).
+- Disabled by default until v3.9.0 when it was enabled by default.
 
 ---
 
@@ -958,12 +989,34 @@ This release closes the browser credential theft gap across ALL browsers and add
 
 ### Added — DLL Analysis & Active Response
 
-- DLL Unload Engine (active response via FreeLibrary)
-- Browser DLL Monitor / ELF Catcher
-- Disk-Wide DLL Scanner
-- DLL Entropy Analyzer
-- UAC Bypass Surface Monitor
-- PE Analyzer, ClamAV Engine, YARA-X Engine
+- **DLL Unload Engine** — Active response via `CreateRemoteThread` + `FreeLibrary`. Forcefully ejects injected/malicious DLLs from live processes. Rate-limited to 10 unloads/minute. Never targets system-critical processes.
+- **Browser DLL Monitor / ELF Catcher** — Detects ELF-pattern DLLs in browser processes. Tier1 kill-authorized.
+- **Disk-Wide DLL Scanner** — Scans all drives for unsigned/suspicious DLLs. IoC hash match triggers Tier1 + active unload from all processes.
+- **DLL Entropy Analyzer** — Shannon entropy analysis. Flags packed/encrypted DLLs (≥ 7.2) and random hex-named DLLs.
+- **UAC Bypass Surface Monitor** — COM AutoElevation vectors and manifest `autoElevate` + copy-drop detection.
+- **PE Analyzer** — Static PE header analysis for suspicious characteristics.
+- **ClamAV Engine** — ClamAV signature scanning integration.
+- **YARA-X Engine** — YARA rule matching on suspicious files and memory regions.
+
+---
+
+## [1.9.0] - 2026-02-20
+
+### Added — DLL Analysis Suite & Active DLL Unloading
+
+#### New Monitors
+
+- **DllEntropyAnalyzer** — Shannon entropy analysis on loaded DLLs. Flags packed/encrypted DLLs (entropy ≥ 7.2) and random hex-named DLLs as Tier2 signals.
+- **BrowserDllMonitor (ELF Catcher)** — Browser-specific DLL injection detection. Flags ELF-pattern DLLs (`_elf.dll`) in browser processes. Tier1 kill-authorized.
+- **DiskWideDllScanner** — Scans all drives for unsigned/suspicious DLLs in user-writable locations. Matches against threat intel hashes. Tier1 on IoC match.
+- **DllLoadFailureMonitor** — Monitors Event Log ID 7 (driver load failure) and SideBySide manifest errors as indicators of failed DLL hijacking attempts.
+- **UacBypassSurfaceMonitor** — Detects COM AutoElevation vectors and manifest `autoElevate` + copy-drop patterns against vulnerable binaries.
+
+#### Active DLL Unloading (Response)
+
+- `CreateRemoteThread` + `FreeLibrary` to forcefully eject injected/malicious DLLs from live processes.
+- Rate-limited to 10 unloads per minute. Never targets system-critical processes.
+- Used by BrowserDllMonitor (ELF patterns) and DiskWideDllScanner (IoC hash matches).
 
 ---
 
@@ -971,7 +1024,7 @@ This release closes the browser credential theft gap across ALL browsers and add
 
 ### Added — Data Exfiltration Prevention
 
-- Data Exfiltration Monitor (outbound volume, sensitive file access, USB)
+- **DataExfiltrationMonitor** — Monitors outbound network volume, sensitive file access patterns, and USB storage writes. Detects sustained high-volume outbound connections, access to credential stores, and bulk file copies to removable media. Tier2 advisory; feeds `Credential Theft + Exfiltration` composite.
 
 ---
 
@@ -979,7 +1032,95 @@ This release closes the browser credential theft gap across ALL browsers and add
 
 ### Added — Aggressive Deception Engine
 
-- Pre-kill deception tactics (memory flooding, implant destabilizer, beacon flooder)
+Pre-kill deception tactics execute within a strict 2-second budget before process termination:
+
+- **Memory flooding** — Injects 256MB of random garbage into target process (pollutes crash dumps and C2 crash reports)
+- **DLL stomping** — Overwrites malicious module `.text` section with INT3 breakpoints (implant crashes on restart)
+- **Stack corruption** — Injects garbage into thread stacks before termination (corrupts C2 telemetry)
+- **Handle pollution** — Creates 60+ decoy named objects with fake debugger/EDR/C2 names
+- **Beacon flooding** — Sends 50+ fake Cobalt Strike/Sliver beacon check-ins to identified C2 server
+- **Protocol confusion** — Sends malformed payloads to crash C2 team server parsers
+- **Clipboard poisoning** — Replaces clipboard with fake AWS keys, SSH keys, crypto wallet seeds (canary tokens)
+- **File traps** — Sparse file bombs (500GB), symlink loops, polyglot files, corrupted archives in exfil-target directories
+- **Environment poisoning** — Corrupts proxy, TLS, and persistence registry settings (HKCU)
+- **Honeypot weaponization** — Deploys fake SSH keys, cloud credentials, wallet seeds, VPN configs, zip bombs
+- **Network honeypots** — Spins up fake SMB/RDP/HTTP/SSH listeners (30-minute lifetime post-kill)
+
+Kill always proceeds regardless of deception success or failure.
+
+---
+
+## [1.6.0] - 2026-02-25
+
+### Added — Webcam & Microphone Protection
+
+- **WebcamMicMonitor** — Detects camera and microphone DLLs loaded by background processes with no visible window. Tier2 advisory signal; feeds `Full Surveillance Suite` composite.
+- **New composite rules** (BehavioralCorrelationEngine):
+  - Camera/Mic Exfiltration: Capture + Network (0.94) — background webcam/mic access + outbound network
+  - Total AV Surveillance: Camera + Screen Capture (0.95) — webcam/mic + screen capture active simultaneously
+- **Full Surveillance Suite updated** — Now covers 4 vectors (screen + clipboard + audio + webcam). Max confidence raised to 0.99.
+
+---
+
+## [1.5.0] - 2026-02-22
+
+### Added — Screen Capture & Local Server Detection
+
+- **ScreenCaptureMonitor** — Detects DXGI/D3D11 + image encoding DLLs loaded by background processes (no visible window). Overlay phishing detection via `WS_EX_LAYERED + WS_EX_TRANSPARENT + WS_EX_TOPMOST` from unsigned processes in untrusted paths. Tier1 kill-authorized.
+- **LocalServerMonitor** — Detects processes from ISO/VHD/removable media or staging paths (Temp/AppData/Downloads) binding listening sockets. Tier2 advisory.
+- **Volume Dismount (ChainTracer)** — When `File.Delete` fails on ISO/CD-ROM/VHD during quarantine, ChainTracer now dismounts the read-only media volume before retrying deletion.
+- **New composite rules** (BehavioralCorrelationEngine):
+  - Screen Capture + Network Exfiltration (0.93)
+  - Screen Capture + Clipboard Access (0.92)
+  - Transparent Overlay + DLL Injection (0.96)
+  - Full Surveillance Suite (0.94–0.99) — 2+ of: screen, clipboard, audio, webcam
+
+---
+
+## [1.4.0] - 2026-02-18
+
+### Added — Runtime Module Integrity & Clipboard Monitoring
+
+- **RuntimeModuleIntegrityMonitor** — Per-process module baseline tracking. Detects new suspicious DLLs appearing in any process after baseline (Module Injection: Runtime). Three-tier polling: Tier A (60s), Tier B (2min), Tier C (5min) by process risk level.
+- **ClipboardMonitor** — Win32 clipboard API polling. Detects rapid automated clipboard changes (crypto swappers, stealers), clipboard hijacking (background process taking ownership silently), and clipboard locking (process holding clipboard, blocking copy/paste).
+
+---
+
+## [1.3.0] - 2026-02-12
+
+### Added — Composite Detection Expansion
+
+New composite rules added to `BehavioralCorrelationEngine` (all Tier1 via `EmitAsync`):
+
+| Composite | Confidence | Trigger |
+|-----------|-----------|---------|
+| Spoofed Process Phoning Home | 0.95 | PPID spoof + ANY network activity |
+| Dump Tool + Network Exfil | 0.94 | dbghelp.dll loaded + ANY outbound connection |
+| Staged Payload + Non-Standard Port | 0.92 | Unsigned binary from temp + non-80/443 port |
+| Mass File Operation + DNS | 0.93 | 50+ file writes + DNS resolution |
+| Privilege Escalation + Network | 0.94 | Token escalation + ANY network activity |
+| Injection Tool + File Staging | 0.91 | Injection API in cmdline + file writes |
+| DGA + File Operations | 0.94 | DGA DNS resolution + ANY file access |
+| In-Memory Implant + Network | 0.96 | Memory anomaly (RWX/shellcode) + ANY network |
+
+---
+
+## [1.2.0] - 2026-02-08
+
+### Added — Composite Detection Foundation
+
+New composite rules added to `BehavioralCorrelationEngine` (all Tier1 via `EmitAsync`):
+
+| Composite | Confidence | Trigger |
+|-----------|-----------|---------|
+| PPID Spoof + C2 Channel | 0.96 | Parent PID spoofing + C2 network |
+| Confirmed LSASS Dump | 0.97 | dbghelp.dll loaded + LSASS-targeting pattern |
+| Privilege Escalation + Persistence | 0.94 | Token integrity change + persistence installation |
+| DGA + C2 Beaconing | 0.95 | High-entropy DNS + periodic beacon pattern |
+| Credential Theft + Exfiltration | 0.97 | Credential canary tripped + outbound network |
+| Advanced Attack Chain | 0.98 | 2 of 3: PPID spoof + token escalation + injection |
+
+These complement the initial composites from v1.0.0 (Active Ransomware Chain, Fileless Attack Chain, Dropped Payload Phoning Home, Post-Exploitation Recon, Injected C2 Beacon, Credential Dump + Exfiltration).
 
 ---
 
@@ -987,10 +1128,223 @@ This release closes the browser credential theft gap across ALL browsers and add
 
 ### Added — Advanced Anti-APT Monitors
 
-- DNS Query Monitor (DGA, tunneling)
-- Parent PID Spoof Detector
-- Syscall Stub Integrity Monitor
-- Credential Canary Monitor
-- Token Integrity Monitor
-- LSASS Dump Canary Monitor
-- WMI Persistence Monitor
+- **DnsQueryMonitor** — ETW DNS-Client provider. Detects DGA domains (high-entropy, 3+ hits from same process) and DNS tunneling (sustained >30 queries/min from single process).
+- **ParentPidSpoofDetector** — Compares ETW-reported parent PID against snapshot-reported parent. Mismatch = PPID spoofing. Tier2 advisory; feeds multiple composite rules.
+- **SyscallStubMonitor** — Monitors ntdll and AMSI function prologues every 10s against a baseline snapshot. Detects ETW/AMSI tampering and direct syscall stub patching. Tier1 kill-authorized (self-protection).
+- **CredentialCanaryMonitor** — Deploys a honeypot credential in Windows Credential Manager. Access or deletion triggers Tier2 detection.
+- **TokenIntegrityMonitor** — Scans processes via `GetTokenInformation`. Detects Medium → High integrity escalation without UAC consent prompt.
+- **LsassDumpCanaryMonitor** — Detects `dbghelp.dll` loaded in any non-debugger process as a canary for LSASS dump preparation. Tier2 advisory.
+- **WmiPersistenceMonitor** — Scans WMI namespace for `__EventFilter` / `__EventConsumer` subscriptions (most common fileless persistence mechanism).
+- **Cache integrity** — Boot-nonce-bound HMAC on all cached reputation data. Previous-session caches rejected on startup to prevent poisoning.
+
+---
+
+## [1.0.0] - 2026-01-20
+
+### Added — Telemetry Fusion Engine
+
+#### TelemetryFusionEngine
+
+All monitors now feed raw telemetry through a central fusion layer before the detection engine:
+
+- **Per-process event chains** — Ordered sequence of all actions per PID, retained for 2 minutes / 100 events.
+- **EventGraph** — Process/file/network relationship graph with temporal edges. Queryable for cross-source correlation.
+- **FusedTelemetryContext** — Produced per event: behavioral velocity, event diversity score, multi-vector flags.
+- Enables composite detections that no single rule can achieve alone.
+
+#### MemoryBehaviorAnalyzer
+
+- `VirtualQueryEx` + `ReadProcessMemory` scanning for RWX memory regions, unbacked executables, and shellcode prologues.
+- Tier1 kill-authorized on confirmed shellcode or unbacked executable memory.
+
+#### Detection Philosophy Established
+
+1. Behavioral over static — detect what processes DO, not what they ARE
+2. No security theater — features that don't work against competent attackers are removed
+3. Fewer solid detections > many fragile ones
+4. Assume the attacker reads the code — no security-by-obscurity
+5. Honest documentation — state what works and what doesn't
+
+### Removed
+
+| Component | Reason |
+|-----------|--------|
+| `ResponseEngine` | Superseded by `AdvancedResponseEngine` |
+| `LearningModeService` | Protection is active by default; dead code |
+| Key Scrambler (agent) | Security theater — fake keystroke injection ineffective against real keyloggers |
+| Password Rotator | Disabled stub that did nothing |
+
+### Changed
+
+| Component | Change | Reason |
+|-----------|--------|--------|
+| `LsassAccessRule` | Removed `KnownDumperHashes` (placeholder SHA-256 values) and `CheckHashMatch()` | Fake hashes gave false confidence. Hash reputation handled by live API lookup instead. |
+| `ProcessInjectionRule` | Tool-name matching no longer triggers detection | Trivially bypassed by renaming. Demoted to metadata enrichment only. |
+| `SecureCacheStore` | Format v2: boot-nonce-bound HMAC key | Defeats SYSTEM-context replay from previous boot sessions. |
+| `DumperNames` list | Retained for threat intel correlation only | Not used for detection decisions — clearly documented. |
+
+---
+
+## [0.9.0] - 2026-01-15
+
+### Added — Honeypot, Allowlist & Baseline
+
+- **HoneypotMonitor** — Deploys decoy files in common attacker-targeted locations. Any access triggers Tier1 detection ("Honeypot Trip"). First deception primitive in the project.
+- **AllowlistService** — 3-tier trust system: signed vendor publishers, dev tools, user allowlist. Persisted via `SecureCacheStore` (DPAPI + HMAC). President's Law rules are never suppressed regardless of allowlist status. Includes `TrustedPublishers`, `DevelopmentProcesses`, and `GamingProcesses` built-in sets.
+- **BehavioralBaselineService** — Learns normal processes, executable paths, parent-child relationships, and network destinations over time. Established processes (5+ executions over 3+ days) receive a trust score boost in detection scoring. Persisted via `SecureCacheStore`.
+- **ReputationCache** — 5-tier hash reputation system (KnownSafe / LikelySafe / Unknown / Suspicious / KnownBad). Disk-loaded `KnownSafe` entries are downgraded to `LikelySafe` until re-verified by a trusted Authenticode source — closes the v0.3.x cache-poisoning bypass.
+- **FalsePositiveTracker** — Records user-restored files. Automatically reduces future scoring after repeated false positives on the same process/path.
+- **ContextualAnalysisEngine** — Detects installer, update, boot, dev, and gaming contexts. Applies confidence modifiers to reduce false positives during expected high-activity periods.
+- **AkinatorEngine** — Contextual heuristic scoring layer. Combines process ancestry, path reputation, behavioral baseline, and allowlist signals into a unified pre-kill confidence adjustment.
+
+---
+
+## [0.7.0] - 2026-01-13
+
+### Added — Intelligence & Analysis Engines
+
+- **ScoringEngine** — Weighted multi-factor threat scoring. Combines detection source weights (BehaviorEngine 1.5×, MemoryScanner 1.5×, ProcessChain 1.4×, YaraRules 1.3×, Network 1.2×), category base scores, and corroboration bonuses (2+ sources: +15, 3+: +25, 4+: +35). Verdict thresholds: Clean / Low / Suspicious / Malicious / Critical.
+- **MitreMapper** — Maps detection rule names to MITRE ATT&CK technique IDs. Enriches detection events with tactic/technique metadata for structured threat reporting.
+- **PEAnalyzer** — Static PE header analysis: entropy calculation, import/export table analysis, section characteristics, and suspicious indicator detection. Ported from HydraDragonAntivirus `pe_feature_extractor.py`.
+- **YaraEngine** — YARA rule matching on suspicious files and memory regions.
+- **YaraXEngine** — YARA-X (Rust rewrite of YARA) integration for improved performance and modern rule support.
+- **ClamAVEngine** — ClamAV CLI-based virus scanning integration. Ported from HydraDragonAntivirus antivirus integration pattern.
+- **HeadersCheckEngine** — File header / magic byte analysis for type spoofing detection (e.g., PE disguised as PDF).
+- **CrudePayloadGuard** — Simple payload pattern detection for common shellcode prologues and packer signatures.
+- **IoCScanner** / **IoCScannerRule** — Process-start hash matching against a local IoC database. Tier2 advisory.
+- **HashReputationService** — Live 3-API hash reputation lookup: CIRCL HASHLOOKUP, Team Cymru, MalwareBazaar. Results cached via `ReputationCache`.
+- **HashReputationRule** — Detection rule that fires on `KnownBad` hash reputation hits. Tier2 advisory.
+- **FileEntropyRule** — Shannon entropy analysis on files accessed by suspicious processes. Flags packed/encrypted files (entropy ≥ 7.2).
+- **CertificateTamperingRule** — Detects modifications to the Windows certificate store (root CA additions, trusted publisher changes).
+
+---
+
+## [0.6.0] - 2026-01-12
+
+### Added — Process Monitoring & Resilience
+
+- **WmiProcessMonitor** — `Win32_ProcessStartTrace` WMI event subscription. Fallback process monitor when ETW kernel provider is unavailable (non-elevated, Server Core, IoT). Runs alongside `EtwProcessMonitor`.
+- **ProcessAncestryCache** — `CreateToolhelp32Snapshot` refreshed every 2s. Provides parent name resolution for all monitors and rules. Uses atomic `volatile IReadOnlyDictionary` swap — readers never block. WMI fallback for Server Core/IoT.
+- **DetectionJobScheduler** — Background job scheduler for periodic detection tasks (memory scans, module integrity checks, baseline cleanup). Prevents all monitors from polling simultaneously.
+- **CircuitBreaker** — API failure handling for external threat intel calls. Opens after 5 consecutive failures, half-opens after 60s, closes on success. Prevents cascading failures when AbuseIPDB/URLhaus/MalwareBazaar are unreachable.
+- **SentinelGracefulShutdown** — Ordered teardown of all monitors and engines on service stop. Ensures in-flight detections are flushed to the log before exit.
+- **ToastNotificationService** — Windows toast notification integration via WinRT `Windows.UI.Notifications`. (Note: broken from session 0 — fixed in v4.2.0 with `WTSSendMessage` fallback, then replaced with tray balloon tips in v4.3.0.)
+- **IncidentResponseService** — Coordinates forensic evidence collection on kill: memory dump, module inventory, network snapshot, process tree capture.
+- **ChainTracer** — Walks process parent chain (forensic), collects descendants. Kills leaves first, root last.
+- **QuarantineManager** — DPAPI-encrypted quarantine with restrictive ACL (SYSTEM + Admins only). Atomic encrypt → move → delete.
+
+---
+
+## [0.5.0] - 2026-01-11
+
+### Added — Self-Protection & Hardening
+
+- **SelfProtectionService** — Monitors Sentinel's own process integrity. Detects AMSI/ETW tampering against Sentinel itself, DLL hijacking of Sentinel's load path, and config file tampering. Triggers Tier1 self-protection kill on confirmed attack.
+- **HardeningModule** — Applies process-level hardening on startup: `SetDefaultDllDirectories` (prevents DLL search-order hijacking), install-directory ACL enforcement, CIG (Code Integrity Guard) opt-in.
+- **SecureCacheStore** — DPAPI machine-scope encryption + HMAC integrity for all persisted cache files. ACL-hardened to SYSTEM + Admins under `%ProgramData%\WindowsSentinel\Secure\`. Rejects tampered or foreign cache files on load.
+- **HeartbeatService** — Cross-process watchdog. Service writes HMAC-signed heartbeat file every 30s. Agent monitors it and restarts the service if heartbeat goes stale.
+- **UserSessionLauncher** — Launches the Agent process into the active user session from the SYSTEM service using `CreateProcessAsUser`. Monitors Agent liveness and restarts on exit.
+- **ProcessValidator** — Validates process names to prevent Unicode spoofing, homoglyph attacks, and path traversal in process identifiers.
+- **ElfCatcher** — Detects ELF binary patterns in Windows process memory and DLL loads (WSL abuse, cross-platform payload staging).
+- **ShadowProxyDetector** — Detects proxy manipulation: PAC file injection, WPAD poisoning, system proxy registry changes by non-trusted processes. Runs as a background service.
+- **HIDMacroGuard** — USB HID macro injection detection. Monitors for rapid automated keystroke sequences from HID devices that don't match user typing patterns.
+- **PseudoSandbox** — Lightweight behavioral sandbox for suspicious files: spawns in a restricted job object, monitors API calls and file/network activity for the first 5 seconds of execution.
+- **ConsultantSignalIngestor** — Tails `%ProgramData%\WindowsSentinel\consultants\*.jsonl` for signals from external PowerShell consultant scripts (Council of Elders architecture). Ingests Tier2 signals into the detection engine.
+
+---
+
+## [0.4.0] - 2026-01-10
+
+### Added — GIDR Port & Security Hardening
+
+This release ports the core detection rules from the GIDR reference architecture and applies security hardening to the persistence layer.
+
+#### Ported Detection Rules (from GIDR)
+
+- **AudioHijackRule** — Detects audio output routed to microphone input. Tier1 kill-authorized (attack-on-user, President's Law).
+- **MemoryExecutionRule** — Detects fileless/in-memory execution: processes with no resolvable image path, unbacked executable memory regions, and PE headers in non-image memory. Tier1 kill-authorized.
+- **ModuleValidationRule** — Detects DLL hijacking and sideloading: loaded module path doesn't match expected system path, unsigned DLL in critical process, module hash mismatch. Tier2 advisory.
+- **UserProtectionRule** — Composite rule covering direct attacks on the user: fake UAC dialogs, cursor takeover, screen overlay phishing, keylogger indicators. Tier1 kill-authorized.
+- **RansomwareIoMonitor** — High-frequency I/O monitoring for ransomware patterns: bulk file renames, extension changes, and write rates exceeding normal thresholds. Feeds `RansomwareDetectionRule`.
+
+#### Security Hardening
+
+- **BehavioralBaselineService** persistence hardened — moved from plain-text `%LOCALAPPDATA%` JSON (hand-editable, exploitable) to `SecureCacheStore` (DPAPI + HMAC). Pre-0.4 an attacker could mark their process as "established" to suppress detection.
+- **ReputationCache** hardened — disk-loaded `KnownSafe` entries downgraded to `LikelySafe` until re-verified by a trusted Authenticode source. Closes the v0.3.x cache-poisoning bypass.
+- **HashReputationService** introduced — live 3-API lookup (CIRCL, Cymru, MalwareBazaar) replaces static hash lists. Static placeholder hashes removed from `LsassAccessRule` (fake SHA-256 values gave false confidence).
+- **AudioHijackMonitor** (initial) — Command-line token detection for audio routing tools. Module-based detection added later in v2.5.0.
+
+---
+
+## [0.3.0] - 2026-01-08
+
+### Added — Detection Rules Expansion
+
+- **LsassAccessRule** — LSASS credential dump detection via known dumper command-line tokens, dump file name patterns, and LSASS-targeting arguments. Tier1 kill-authorized. (Note: placeholder SHA-256 hash list removed in v0.4.0.)
+- **ReverseShellRule** — Reverse shell / C2 callback detection via encoded PowerShell patterns, LOLBin abuse, C2 framework strings, and suspicious outbound ports. Tier1 kill-authorized.
+- **ProcessInjectionRule** — Process injection detection via known injection API names in command-line arguments. Tier1 kill-authorized. (Note: tool-name matching demoted to metadata-only in v1.0.0.)
+- **RansomwareDetectionRule** — Ransomware detection via shadow copy deletion, backup destruction commands, bulk file renames, and 60+ ransomware extension patterns. Tier1 kill-authorized.
+- **EtwTamperingRule** — Security tool evasion detection: AMSI bypass patterns, ETW patching, event log clearing, AV/EDR process termination. Tier1 kill-authorized.
+- **ThreatIntelInjectionRule** — Processes kernel-observed injection API calls from `EtwThreatIntelMonitor`. Tier1 kill-authorized.
+- **BeaconingRule** — Fires on `BeaconingTelemetry` from `BeaconingDetector` when CV < 0.40 with 5+ observations. Tier1 kill-authorized.
+- **HollowProcessRule** — Fires on `HollowProcessTelemetry` from `HollowProcessMonitor`. Tier1 kill-authorized.
+- **PersistenceRule** — Detects Registry Run/RunOnce keys, scheduled task creation, WMI event subscriptions, and service installation. Tier1 kill-authorized.
+- **PrivilegeEscalationRule** — Detects UAC bypass vectors (COM, manifests), token manipulation, named pipe impersonation, DLL hijacking. Tier1 kill-authorized.
+- **AttackToolsRule** — Detects known C2 frameworks (Cobalt Strike, Metasploit, Sliver), credential tools (Mimikatz, LaZagne), AD attack tools (BloodHound, Rubeus), and LOLBin abuse. Tier1 kill-authorized.
+- **CampaignIocRule** — Known malicious hashes, domains, IPs, and file name patterns from tracked threat campaigns. Tier2 advisory.
+- **CampaignDetectionRule** — DragonBreathHunter APT campaign detection: RONINGLOADER, Gh0st RAT, NSIS trojans, rogue DLLs, C2 ports, persistence patterns. Tier2 advisory.
+- **UnsignedBinaryRule** — Unsigned binary execution outside trusted system paths. Staging path boost (Temp/AppData/Downloads). Tier2 advisory.
+- **HighEntropyRule** — Shannon entropy > 4.2 on process name stem (GUID exclusion). Tier2 advisory.
+- **SuspiciousImportsRule** — Injection API names in command line, post-exploitation recon commands, persistence mechanism patterns. Tier2 advisory.
+- **BehavioralCorrelationEngine** — Initial composite detection framework. Time-windowed (120s) multi-signal correlator. First composites: Active Ransomware Chain (0.99), Fileless Attack Chain (0.95), Dropped Payload Phoning Home (0.93), Post-Exploitation Recon Sequence (0.88), Injected C2 Beacon (0.98), Credential Dump + Exfiltration (0.96).
+
+---
+
+## [0.2.0] - 2026-01-07
+
+### Added — Logging & Event Model
+
+- **JsonlEventLogger** — JSONL output to `%ProgramData%\WindowsSentinel\events.jsonl`. Thread-safe via `SemaphoreSlim`. `System.Text.Json` only (no string-built JSON). `FileShare.ReadWrite` for concurrent readers. Size-based rotation at 50 MB, up to 5 rotated files. Rate-limited to 100 entries/second, burst of 200. Graceful degradation on file access failure. Self-healing writer (retries on each write). Stale file handling (renames locked files to `.stale.<timestamp>`).
+- **StructuredLoggingExtensions** — `BeginScope` helpers for consistent operation context in all log entries.
+- **DetectionEvent model** — Structured event with `RuleName`, `Evidence`, `Reasoning`, `Confidence`, `Tier`, `ProcessName`, `ProcessId`, `Metadata`.
+- **DetectionTier** — `Tier1Behavioral` (kill-authorized) and `Tier2Indicator` (log-only). Tier2 enforcement is unconditional in `AdvancedResponseEngine` — no config override possible.
+- **ResponseAction** — `LogOnly`, `KillProcess`, `SuspendProcess` (reserved), `AlertUser` (reserved).
+- **AdvancedResponseEngine** — Replaces initial `ResponseEngine`. Single point of action enforcement. President's Law closed kill list. Tier2 hard-coded to `LogOnly` regardless of configuration. 60s deduplication window per `(RuleName, ProcessId)`.
+- **DetectionEngine** — Channel-based async stream. Runs all `IDetectionRule` instances against incoming telemetry. 60s deduplication window. Supports `EmitAsync` for composite detections that bypass the rule pipeline.
+
+---
+
+## [0.1.0] - 2026-01-05
+
+### Added — Initial Release
+
+Core detection and response pipeline established.
+
+#### Monitors
+
+- **EtwProcessMonitor** — ETW kernel provider for process start/stop events. Fallback to WMI when ETW is unavailable.
+- **HollowProcessMonitor** — `GetMappedFileName` + `EnumProcessModules` to detect process hollowing (image path mismatch between mapped file and reported module).
+- **NetworkMonitor** — `GetExtendedTcpTable` / `UdpTable` (IPv4 + IPv6) polling for active connections and listening ports.
+- **BeaconingDetector** — Statistical coefficient of variation (CV) analysis on connection timing to detect periodic C2 beacon patterns.
+- **FileActivityMonitor** — `FileSystemWatcher`-based monitoring for bulk file operations, suspicious extensions, and shadow copy deletion.
+- **EtwThreatIntelMonitor** — `Microsoft-Windows-Threat-Intelligence` ETW provider for kernel-observed API calls: `VirtualAllocEx`, `VirtualProtect` RWX, `MapViewOfSection`, `QueueUserAPC`, `SetThreadContext`. Tier1 kill-authorized.
+
+#### Architecture
+
+```
+Monitors → DetectionEngine → ResponseEngine → JsonlEventLogger
+```
+
+#### Response Engine
+
+- Process tree kill (leaves first, root last)
+- Binary quarantine (DPAPI-encrypted, ACL-hardened — SYSTEM + Admins only)
+- Persistence removal (Registry Run keys, startup folder, scheduled tasks, services)
+- Attacker IP blocking via Windows Firewall COM API (registry fallback)
+- Forensic evidence collection (memory dump, module inventory, network snapshot)
+- Zero LOLBin dependencies — all response actions use native C# APIs
+
+#### Detection Tiers
+
+- **Tier 1 (President's Law)** — Kill-authorized rules. Process termination + quarantine on confidence ≥ 0.85.
+- **Tier 2 (Advisory)** — Log-only signals that feed the Behavioral Correlation Engine. Multiple Tier2 signals on the same PID within 120s can produce a composite Tier1 kill.

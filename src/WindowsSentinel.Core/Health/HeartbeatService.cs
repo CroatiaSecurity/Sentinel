@@ -163,32 +163,63 @@ public sealed class HeartbeatService : BackgroundService
     }
 
     /// <summary>
-    /// Derives a stable HMAC key using DPAPI machine scope.
-    /// Both the Service and Agent derive the same key (same machine, same entropy).
-    /// The key is bound to the machine — copying the heartbeat file to another
-    /// machine won't pass verification.
+    /// Derives a stable, deterministic HMAC key that is the same in both the Service
+    /// and Agent processes on the same machine.
+    ///
+    /// IMPORTANT: ProtectedData.Protect() is intentionally NOT used here.
+    /// Despite the comment in older versions, DPAPI Protect() with LocalMachine scope
+    /// uses a random session component — it produces a different ciphertext on every
+    /// call, so SHA256(Protect(seed)) is non-deterministic. The Service and Agent would
+    /// derive different keys, causing every HMAC verification to fail. After 3 failed
+    /// verifications the Agent watchdog permanently stops trying to restart the service.
+    ///
+    /// Instead we derive the key from stable machine-bound material:
+    ///   - Machine SID (unique per machine, stable across reboots)
+    ///   - Fixed application entropy string
+    /// This is machine-bound (can't be replayed from another machine) and deterministic
+    /// (same key in both processes on the same machine).
     /// </summary>
     private static byte[] DeriveHmacKey()
     {
         try
         {
-            // Use a fixed entropy value that both Service and Agent know
-            var entropy = Encoding.UTF8.GetBytes("WindowsSentinel.Watchdog.HMAC.v1");
-            var seed = Encoding.UTF8.GetBytes("WatchdogHeartbeatKey");
-
-            // DPAPI machine-scope: same key on same machine regardless of user
-            var protectedKey = ProtectedData.Protect(seed, entropy, DataProtectionScope.LocalMachine);
-
-            // Use SHA256 of the protected blob as the HMAC key
-            // This ensures the key is deterministic per-machine
-            return SHA256.HashData(protectedKey);
+            // Get the machine SID — stable, unique per machine, available to both
+            // SYSTEM (service) and user (agent) processes.
+            var machineSid = GetMachineSid();
+            var keyMaterial = $"{machineSid}|WindowsSentinel.Watchdog.HMAC.v1";
+            return SHA256.HashData(Encoding.UTF8.GetBytes(keyMaterial));
         }
         catch
         {
-            // Fallback: if DPAPI is unavailable, use a machine-specific but weaker key
-            // (machine name + install path — better than nothing)
-            var fallback = $"{Environment.MachineName}|{AppContext.BaseDirectory}|WatchdogFallback";
+            // Fallback: machine name + fixed entropy. Weaker but deterministic.
+            var fallback = $"{Environment.MachineName}|WindowsSentinel.Watchdog.HMAC.v1.fallback";
             return SHA256.HashData(Encoding.UTF8.GetBytes(fallback));
+        }
+    }
+
+    /// <summary>
+    /// Returns the machine SID as a string (e.g. "S-1-5-21-...").
+    /// Works from both SYSTEM context (service) and user context (agent).
+    /// </summary>
+    private static string GetMachineSid()
+    {
+        // Derive the machine SID by looking up the local Administrator account (RID 500).
+        // The machine SID is the domain SID prefix of that account: S-1-5-21-<X>-<Y>-<Z>.
+        // This is stable across reboots and available to both SYSTEM (service) and user (agent).
+        try
+        {
+            // NTAccount "Administrator" resolves to the local built-in admin (RID 500).
+            // Its SID is S-1-5-21-<machine>-500. Strip the last sub-authority to get the machine SID.
+            var adminAccount = new System.Security.Principal.NTAccount("Administrator");
+            var adminSid = (System.Security.Principal.SecurityIdentifier)
+                adminAccount.Translate(typeof(System.Security.Principal.SecurityIdentifier));
+            // AccountDomainSid strips the last RID, giving S-1-5-21-<X>-<Y>-<Z>
+            return adminSid.AccountDomainSid?.Value ?? Environment.MachineName;
+        }
+        catch
+        {
+            // Fallback: machine name. Weaker but deterministic and still cross-process consistent.
+            return Environment.MachineName;
         }
     }
 

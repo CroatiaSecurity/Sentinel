@@ -253,9 +253,8 @@ public sealed class SecureCacheStore
         var combined = new byte[seed.Length + BootNonce.Length];
         Buffer.BlockCopy(seed, 0, combined, 0, seed.Length);
         Buffer.BlockCopy(BootNonce, 0, combined, seed.Length, BootNonce.Length);
-        var protectedSeed = MachineProtect(combined);
         using var sha = SHA256.Create();
-        return sha.ComputeHash(protectedSeed);
+        return sha.ComputeHash(combined);
     }
 
     /// <summary>

@@ -99,6 +99,11 @@ public sealed class LsassDumpCanaryMonitor : BackgroundService
         "ASCService", "ASCService.exe",           // IObit ASC Service
         // v4.7.0: Games that legitimately load dbghelp.dll for crash reporting
         "fm", "fm.exe",                           // Football Manager (Sports Interactive)
+        // NOTE: GoogleUpdate.exe is intentionally NOT in this list.
+        // PlugX, APT41, and other threat actors specifically abuse GoogleUpdate.exe as a
+        // DLL sideloading carrier (T1574.002). A GoogleUpdate process loading dbghelp.dll
+        // must be validated by path and signature before being trusted — see the
+        // IsLegitimateGoogleUpdateProcess() check below.
     };
 
     // Track which PIDs we've already alerted on
@@ -167,6 +172,70 @@ public sealed class LsassDumpCanaryMonitor : BackgroundService
                 if (LegitimateDbghelpUsers.Contains(process.ProcessName)) continue;
                 if (_alertedPids.ContainsKey(process.Id)) continue;
 
+                // ── GoogleUpdate / Google installer family ────────────────────────
+                // PlugX (APT41), Mustang Panda, and other threat actors specifically
+                // abuse GoogleUpdate.exe as a DLL sideloading carrier (T1574.002).
+                // The technique: drop a malicious DLL alongside a legitimate signed
+                // GoogleUpdate.exe copy in a user-writable directory, then execute it.
+                // The signed binary loads the malicious DLL, which loads dbghelp.dll.
+                //
+                // We cannot simply allowlist "GoogleUpdate" by name — that's exactly
+                // what the attacker is counting on. Instead, validate the binary's
+                // actual path and signature before deciding whether to trust it.
+                if (IsGoogleUpdateProcessName(process.ProcessName))
+                {
+                    var (isLegitimate, reason) = ValidateGoogleUpdateProcess(process);
+                    if (isLegitimate)
+                    {
+                        // Confirmed legitimate Google Update — skip dbghelp alert.
+                        // Still add to alertedPids to avoid re-checking every scan.
+                        _alertedPids[process.Id] = DateTimeOffset.UtcNow;
+                        continue;
+                    }
+
+                    // GoogleUpdate name but failed path/signature validation — this is
+                    // the PlugX sideloading pattern. Emit with elevated confidence and
+                    // explicit APT context so the composite fires correctly.
+                    if (HasDbghelpLoaded(process.Id))
+                    {
+                        _alertedPids[process.Id] = DateTimeOffset.UtcNow;
+
+                        _logger.LogCritical(
+                            "LSASS DUMP CANARY [APT SIDELOAD]: '{Name}' (PID {Pid}) loaded dbghelp.dll " +
+                            "but failed Google Update legitimacy check: {Reason}",
+                            process.ProcessName, process.Id, reason);
+
+                        await _detectionEngine.EmitAsync(new DetectionEvent
+                        {
+                            RuleName = "LSASS Credential Dump: dbghelp.dll Loaded",
+                            Evidence = $"Process '{process.ProcessName}' (PID {process.Id}) has dbghelp.dll " +
+                                      $"loaded but is NOT a legitimate Google Update binary: {reason}. " +
+                                      $"This matches the PlugX/APT DLL sideloading pattern (T1574.002) where " +
+                                      $"threat actors abuse the GoogleUpdate.exe name to evade detection.",
+                            Reasoning = "dbghelp.dll loaded by a process impersonating GoogleUpdate.exe from " +
+                                       "an unexpected path or without a valid Google signature. PlugX (used by " +
+                                       "APT41, Mustang Panda) and other APT toolkits specifically copy " +
+                                       "GoogleUpdate.exe to user-writable directories and sideload malicious " +
+                                       "DLLs alongside it. The legitimate binary loads the malicious DLL, " +
+                                       "which then loads dbghelp.dll for LSASS credential dumping.",
+                            Confidence = 0.92, // Higher than normal — name+path mismatch is very suspicious
+                            Tier = DetectionTier.Tier2Indicator,
+                            ProcessName = process.ProcessName,
+                            ProcessId = process.Id,
+                            Timestamp = DateTimeOffset.UtcNow,
+                            Metadata = new Dictionary<string, string>
+                            {
+                                ["loaded_module"] = "dbghelp.dll",
+                                ["technique"] = "T1003.001 - OS Credential Dumping: LSASS Memory",
+                                ["apt_sideload_suspected"] = "true",
+                                ["validation_failure"] = reason ?? "unknown",
+                                ["mitre_sideload"] = "T1574.002 - DLL Side-Loading"
+                            }
+                        }, ct);
+                    }
+                    continue;
+                }
+
                 // Check if this process has dbghelp.dll loaded
                 if (HasDbghelpLoaded(process.Id))
                 {
@@ -215,6 +284,157 @@ public sealed class LsassDumpCanaryMonitor : BackgroundService
         {
             if (kv.Value < cutoff)
                 _alertedPids.TryRemove(kv.Key, out _);
+        }
+    }
+
+    // ── Google Update legitimacy validation ───────────────────────────────────
+
+    private static readonly HashSet<string> GoogleUpdateProcessNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "GoogleUpdate", "GoogleUpdate.exe",
+        "GoogleUpdateSetup", "GoogleUpdateSetup.exe",
+        "GoogleUpdateOnDemand", "GoogleUpdateOnDemand.exe",
+        "GoogleUpdateComRegisterShell64", "GoogleUpdateComRegisterShell64.exe",
+        "elevation_service", "elevation_service.exe",
+    };
+
+    // Legitimate paths where Google Update binaries reside.
+    // PlugX drops copies into ProgramData, Public, AppData, or random temp dirs.
+    private static readonly string[] LegitimateGoogleUpdatePaths = new[]
+    {
+        @"\Program Files (x86)\Google\Update\",
+        @"\Program Files\Google\Update\",
+        @"\Program Files (x86)\Google\Chrome\Application\",
+        @"\Program Files\Google\Chrome\Application\",
+        // Temp path used during Chrome installation (GUM*.tmp bootstrapper)
+        // This is legitimate: the installer extracts itself to a GUM*.tmp dir and runs.
+        // We allow it only if the binary is signed by Google.
+        @"\AppData\Local\Temp\GUM",
+        @"\Users\",  // Covered by signature check below — allowed only if Google-signed
+    };
+
+    private static bool IsGoogleUpdateProcessName(string processName) =>
+        GoogleUpdateProcessNames.Contains(processName) ||
+        processName.StartsWith("GoogleUpdate", StringComparison.OrdinalIgnoreCase) ||
+        processName.StartsWith("GoogleCrash", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Validates that a GoogleUpdate-named process is actually a legitimate Google binary.
+    /// Returns (true, null) if legitimate, (false, reason) if suspicious.
+    ///
+    /// Checks:
+    ///   1. Binary is digitally signed by Google LLC or Google Inc.
+    ///   2. If running from a temp/user-writable path, signature is mandatory.
+    ///   3. Binary is not running from a known PlugX staging path
+    ///      (ProgramData\[random], Public\[random], AppData\Roaming\[random]).
+    /// </summary>
+    private (bool isLegitimate, string? reason) ValidateGoogleUpdateProcess(Process process)
+    {
+        try
+        {
+            string? imagePath = null;
+            try { imagePath = process.MainModule?.FileName; }
+            catch { /* access denied or process exited */ }
+
+            if (string.IsNullOrEmpty(imagePath))
+            {
+                // Can't read path — treat as suspicious (legitimate Google Update is always readable)
+                return (false, "cannot read process image path (access denied or process exited)");
+            }
+
+            var pathLower = imagePath.ToLowerInvariant();
+
+            // Check for known PlugX staging paths — these are never legitimate for Google Update
+            if (IsPlugXStagingPath(pathLower))
+            {
+                return (false, $"running from known APT staging path: {imagePath}");
+            }
+
+            // Validate digital signature
+            bool isGoogleSigned = IsSignedByGoogle(imagePath);
+
+            // If running from a non-standard path, require Google signature
+            bool isStandardPath = LegitimateGoogleUpdatePaths
+                .Take(4) // First 4 are definitive standard paths (not temp)
+                .Any(p => pathLower.Contains(p.ToLowerInvariant()));
+
+            if (isStandardPath && isGoogleSigned)
+                return (true, null);
+
+            if (isStandardPath && !isGoogleSigned)
+                return (false, $"running from standard path but signature invalid or missing: {imagePath}");
+
+            // Temp path (GUM*.tmp) — allowed only if Google-signed (this is the Chrome installer)
+            bool isGumTempPath = pathLower.Contains(@"\appdata\local\temp\gum") ||
+                                 System.Text.RegularExpressions.Regex.IsMatch(
+                                     pathLower, @"\\temp\\gum[0-9a-f]+\.tmp\\");
+            if (isGumTempPath && isGoogleSigned)
+                return (true, null);
+
+            if (isGumTempPath && !isGoogleSigned)
+                return (false, $"running from GUM temp path but NOT signed by Google — likely PlugX sideload: {imagePath}");
+
+            // Any other path — require Google signature
+            if (!isGoogleSigned)
+                return (false, $"not signed by Google, running from non-standard path: {imagePath}");
+
+            // Google-signed but from an unusual path — still suspicious
+            return (false, $"Google-signed but running from unexpected path: {imagePath}");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "GoogleUpdate validation failed for PID {Pid}", process.Id);
+            // Validation failure → treat as suspicious (fail-secure)
+            return (false, $"validation exception: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Checks if a path matches known PlugX/APT staging locations.
+    /// APTs drop GoogleUpdate copies into random-named subdirectories of
+    /// ProgramData, Public, or AppData\Roaming to blend in.
+    /// </summary>
+    private static bool IsPlugXStagingPath(string pathLower)
+    {
+        // ProgramData\[8-char random hex] — classic PlugX drop location
+        if (System.Text.RegularExpressions.Regex.IsMatch(
+            pathLower, @"\\programdata\\[a-z0-9]{6,12}\\"))
+            return true;
+
+        // C:\Users\Public\[anything] — world-writable, used by multiple APT families
+        if (pathLower.Contains(@"\users\public\"))
+            return true;
+
+        // AppData\Roaming\[random] — used by Gh0st RAT, PlugX variants
+        if (System.Text.RegularExpressions.Regex.IsMatch(
+            pathLower, @"\\appdata\\roaming\\[a-z0-9]{6,12}\\"))
+            return true;
+
+        // Windows\Temp\[random] — used by some PlugX variants
+        if (System.Text.RegularExpressions.Regex.IsMatch(
+            pathLower, @"\\windows\\temp\\[a-z0-9]{6,12}\\"))
+            return true;
+
+        return false;
+    }
+
+    /// <summary>
+    /// Checks if a file is digitally signed by Google LLC or Google Inc.
+    /// </summary>
+    private static bool IsSignedByGoogle(string filePath)
+    {
+        try
+        {
+            if (!File.Exists(filePath)) return false;
+            using var cert = new System.Security.Cryptography.X509Certificates.X509Certificate2(
+                System.Security.Cryptography.X509Certificates.X509Certificate.CreateFromSignedFile(filePath));
+            var subject = cert.Subject;
+            return subject.Contains("Google LLC", StringComparison.OrdinalIgnoreCase) ||
+                   subject.Contains("Google Inc", StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
         }
     }
 
