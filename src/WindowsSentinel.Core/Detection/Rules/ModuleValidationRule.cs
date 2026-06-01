@@ -134,6 +134,13 @@ public sealed class ModuleValidationRule : IDetectionRule
 
                     if (!isSystemLocation && isCurrentDir)
                     {
+                        // Check if the DLL is digitally signed by Microsoft.
+                        // If it is a legitimate Microsoft-signed binary, this is NOT a malicious hijacking.
+                        if (IsSignedByMicrosoft(modulePath))
+                        {
+                            continue;
+                        }
+
                         return new DetectionEvent
                         {
                             RuleName = Name,
@@ -298,6 +305,28 @@ public sealed class ModuleValidationRule : IDetectionRule
 
             var signer = X509Certificate.CreateFromSignedFile(filePath);
             return signer != null;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Checks if a file is digitally signed by Microsoft Corporation or Microsoft Windows.
+    /// </summary>
+    private bool IsSignedByMicrosoft(string filePath)
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(filePath) || !File.Exists(filePath))
+                return false;
+
+            using var cert = new X509Certificate2(X509Certificate.CreateFromSignedFile(filePath));
+            var subject = cert.Subject;
+            return subject.Contains("Microsoft Corporation", StringComparison.OrdinalIgnoreCase) ||
+                   subject.Contains("Microsoft Windows", StringComparison.OrdinalIgnoreCase) ||
+                   subject.Contains("Microsoft ", StringComparison.OrdinalIgnoreCase);
         }
         catch
         {

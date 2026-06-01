@@ -85,6 +85,11 @@ public static class ProcessHardening
         "vcruntime140_1.dll",
         "msvcp140.dll",
         "ucrtbase.dll",
+        // Debugging/Diagnostics native DLLs commonly packaged or generated
+        "dbghelp.dll",
+        "dbgcore.dll",
+        "symsrv.dll",
+        "srcsrv.dll",
     };
 
     /// <summary>
