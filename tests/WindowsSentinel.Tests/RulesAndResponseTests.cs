@@ -142,6 +142,16 @@ namespace WindowsSentinel.Tests
         }
 
         [Fact]
+        public void QuarantineManager_Parses_Metadata_With_Dots()
+        {
+            var manager = new QuarantineManager();
+            var result = manager.ParseQuarantineMetadata("q_f514b8a2e2f34cbca8e792e316a19f2a_malware.exe", out var uniqueId, out var originalName);
+            Assert.True(result);
+            Assert.Equal("f514b8a2e2f34cbca8e792e316a19f2a", uniqueId);
+            Assert.Equal("malware.exe", originalName);
+        }
+
+        [Fact]
         public void Deception_Tactics_Safe_Execution()
         {
             // Spawn a dummy idle process

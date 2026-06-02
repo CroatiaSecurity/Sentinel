@@ -2,6 +2,7 @@ using System;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Configuration;
 using WindowsSentinel.Core;
 
 namespace WindowsSentinel.Service
@@ -20,12 +21,22 @@ namespace WindowsSentinel.Service
                 {
                     // Configuration
                     var config = new SentinelConfig();
-                    // Simple CLI flag parse
-                    foreach (var arg in args)
+                    hostContext.Configuration.GetSection("Sentinel").Bind(config);
+
+                    // CLI flag overrides
+                    for (int i = 0; i < args.Length; i++)
                     {
-                        if (arg.Equals("--active-response", StringComparison.OrdinalIgnoreCase))
+                        if (args[i].Equals("--active-response", StringComparison.OrdinalIgnoreCase))
                         {
                             config.ActiveResponse = true;
+                        }
+                        else if ((args[i].Equals("--log", StringComparison.OrdinalIgnoreCase) || args[i].Equals("-l", StringComparison.OrdinalIgnoreCase)) && i + 1 < args.Length)
+                        {
+                            config.LogPath = args[++i];
+                        }
+                        else if ((args[i].Equals("--watch", StringComparison.OrdinalIgnoreCase) || args[i].Equals("-w", StringComparison.OrdinalIgnoreCase)) && i + 1 < args.Length)
+                        {
+                            config.WatchPath = args[++i];
                         }
                     }
                     services.AddSingleton(config);
@@ -56,6 +67,7 @@ namespace WindowsSentinel.Service
 
                     // Monitors/Background items
                     services.AddSingleton<WmiProcessMonitor>();
+                    services.AddSingleton<FileActivityMonitor>();
                     services.AddSingleton<ClipboardSanitizer>();
                     services.AddSingleton<UsbDeviceFingerprinter>();
                     services.AddSingleton<AppNetworkPolicyMonitor>();

@@ -20,6 +20,7 @@ namespace WindowsSentinel.Service
         private readonly AppNetworkPolicyMonitor _networkPolicyMonitor;
         private readonly DnsBlocklistEngine _dnsBlocklistEngine;
         private readonly WmiProcessMonitor _wmiProcessMonitor;
+        private readonly FileActivityMonitor _fileActivityMonitor;
 
         public SentinelService(
             ILogger<SentinelService> logger,
@@ -31,7 +32,8 @@ namespace WindowsSentinel.Service
             UsbDeviceFingerprinter usbDeviceFingerprinter,
             AppNetworkPolicyMonitor networkPolicyMonitor,
             DnsBlocklistEngine dnsBlocklistEngine,
-            WmiProcessMonitor wmiProcessMonitor)
+            WmiProcessMonitor wmiProcessMonitor,
+            FileActivityMonitor fileActivityMonitor)
         {
             _logger = logger;
             _config = config;
@@ -43,6 +45,7 @@ namespace WindowsSentinel.Service
             _networkPolicyMonitor = networkPolicyMonitor;
             _dnsBlocklistEngine = dnsBlocklistEngine;
             _wmiProcessMonitor = wmiProcessMonitor;
+            _fileActivityMonitor = fileActivityMonitor;
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)

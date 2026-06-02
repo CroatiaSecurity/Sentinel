@@ -9,7 +9,7 @@ namespace WindowsSentinel.Core
     public class QuarantineManager
     {
         private readonly string _quarantineDir;
-        private static readonly Regex MetadataRegex = new(@"^q_([a-fA-F0-9]+)_([a-zA-Z0-9_\-\s]+)$", RegexOptions.Compiled);
+        private static readonly Regex MetadataRegex = new(@"^q_([a-fA-F0-9]+)_([a-zA-Z0-9_\-\s\.]+)$", RegexOptions.Compiled);
 
         public QuarantineManager(string? customPath = null)
         {

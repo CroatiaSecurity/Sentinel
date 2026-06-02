@@ -2,6 +2,7 @@ using System;
 using System.Runtime.InteropServices;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Configuration;
 using WindowsSentinel.Core;
 
 namespace WindowsSentinel.Agent
@@ -31,7 +32,9 @@ namespace WindowsSentinel.Agent
             Host.CreateDefaultBuilder(args)
                 .ConfigureServices((hostContext, services) =>
                 {
-                    services.AddSingleton<SentinelConfig>();
+                    var config = new SentinelConfig();
+                    hostContext.Configuration.GetSection("Sentinel").Bind(config);
+                    services.AddSingleton(config);
                     services.AddHostedService<TrayIconService>();
                 });
     }

@@ -17,12 +17,12 @@ if (Test-Path $PublishDir) {
 # 2. Build and Publish Service (win-x64 self-contained single-file)
 Write-Host "Publishing Sentinel Service (win-x64 self-contained)..." -ForegroundColor Yellow
 $ServiceProj = Join-Path $PSScriptRoot "..\src\WindowsSentinel.Service\WindowsSentinel.Service.csproj"
-dotnet publish $ServiceProj -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -p:PublishReadyToRun=true -o (Join-Path $PublishDir "service")
+& "C:\Program Files\dotnet\dotnet.exe" publish $ServiceProj -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -p:PublishReadyToRun=true -o (Join-Path $PublishDir "service")
 
 # 3. Build and Publish Agent (win-x64 self-contained single-file)
 Write-Host "Publishing Sentinel Agent (win-x64 self-contained)..." -ForegroundColor Yellow
 $AgentProj = Join-Path $PSScriptRoot "..\src\WindowsSentinel.Agent\WindowsSentinel.Agent.csproj"
-dotnet publish $AgentProj -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -o (Join-Path $PublishDir "agent")
+& "C:\Program Files\dotnet\dotnet.exe" publish $AgentProj -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -o (Join-Path $PublishDir "agent")
 
 # 3a. Copy Sentinel.ico to publish outputs for runtime icon access
 Write-Host "Deploying Sentinel.ico to publish directories..." -ForegroundColor Yellow
