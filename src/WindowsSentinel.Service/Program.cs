@@ -55,6 +55,7 @@ namespace WindowsSentinel.Service
                     services.AddSingleton<DetectionEngine>();
 
                     // Monitors/Background items
+                    services.AddSingleton<WmiProcessMonitor>();
                     services.AddSingleton<ClipboardSanitizer>();
                     services.AddSingleton<UsbDeviceFingerprinter>();
                     services.AddSingleton<AppNetworkPolicyMonitor>();
