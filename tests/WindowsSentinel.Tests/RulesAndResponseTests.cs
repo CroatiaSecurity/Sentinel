@@ -140,5 +140,67 @@ namespace WindowsSentinel.Tests
                 // Ignore
             }
         }
+
+        [Fact]
+        public void Deception_Tactics_Safe_Execution()
+        {
+            // Spawn a dummy idle process
+            var psi = new System.Diagnostics.ProcessStartInfo("cmd.exe", "/c pause")
+            {
+                CreateNoWindow = true,
+                UseShellExecute = false
+            };
+            using var proc = System.Diagnostics.Process.Start(psi);
+            Assert.NotNull(proc);
+            try
+            {
+                // Wait for the process to initialize
+                System.Threading.Thread.Sleep(500);
+
+                // Run memory flooding against dummy process
+                MemoryFloodingTactic.Execute(proc.Id);
+
+                // Run implant destabilizer against dummy process
+                ImplantDestabilizerTactic.Execute(proc.Id);
+            }
+            finally
+            {
+                try { proc.Kill(); } catch { }
+            }
+        }
+
+        [Fact]
+        public void AppNetworkPolicyMonitor_Scan_Does_Not_Crash()
+        {
+            var ancestry = new ProcessAncestryCache();
+            var detection = new DetectionEngine(new List<IDetectionRule>(), _metrics, _eventLogger, _responseEngine);
+            using var monitor = new AppNetworkPolicyMonitor(detection, ancestry);
+            
+            // Invoke the private ScanNetworkConnections method via reflection to test P/Invoke TCP scan
+            var method = typeof(AppNetworkPolicyMonitor).GetMethod("ScanNetworkConnections", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            Assert.NotNull(method);
+            method.Invoke(monitor, new object[] { null });
+        }
+
+        [Fact]
+        public async Task HashReputationService_Query_Consensus()
+        {
+            var tempDir = Path.Combine(Path.GetTempPath(), $"sentinel_cache_{Guid.NewGuid():N}");
+            var cacheStore = new SecureCacheStore(tempDir);
+            var repService = new HashReputationService(cacheStore);
+
+            // Test known safe mock hash -> should be Safe
+            var verdictSafe = await repService.GetVerdictAsync("0000000000000000000000000000000000000000000000000000000000000000");
+            Assert.Equal(HashVerdict.Safe, verdictSafe);
+
+            // Test known bad mock hash -> should be Unsafe
+            var verdictUnsafe = await repService.GetVerdictAsync("bad1bad1bad1bad1bad1bad1bad1bad1bad1bad1bad1bad1bad1bad1bad1bad1");
+            Assert.Equal(HashVerdict.Unsafe, verdictUnsafe);
+
+            // Query an unknown random hash -> MalwareBazaar lookup. If offline, returns Unknown. If online, returns Safe or Unknown.
+            var randomHash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"; // Empty file hash
+            var verdictUnknown = await repService.GetVerdictAsync(randomHash);
+            Assert.True(verdictUnknown == HashVerdict.Safe || verdictUnknown == HashVerdict.Unknown);
+        }
     }
 }

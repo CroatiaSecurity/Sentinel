@@ -5,6 +5,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <Platforms>AnyCPU;x64;ARM64</Platforms>
+    <ApplicationIcon>..\..\installer\assets\Sentinel.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>

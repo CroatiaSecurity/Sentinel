@@ -4,6 +4,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 
+using System.Runtime.InteropServices;
+
 namespace WindowsSentinel.Core
 {
     public class AppNetworkPolicyMonitor : IDisposable
@@ -11,7 +13,32 @@ namespace WindowsSentinel.Core
         private readonly DateTime _startTime = DateTime.UtcNow;
         private readonly ConcurrentDictionary<string, HashSet<string>> _processSubnets = new();
         private readonly DetectionEngine _detectionEngine;
+        private readonly ProcessAncestryCache _ancestryCache;
         private readonly System.Threading.Timer _timer;
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct MIB_TCPROW_OWNER_PID
+        {
+            public uint dwState;
+            public uint dwLocalAddr;
+            public uint dwLocalPort;
+            public uint dwRemoteAddr;
+            public uint dwRemotePort;
+            public uint dwOwningPid;
+        }
+
+        [DllImport("iphlpapi.dll", SetLastError = true)]
+        private static extern uint GetExtendedTcpTable(
+            IntPtr pTcpTable,
+            ref uint pdwSize,
+            bool bOrder,
+            uint ulAf,
+            int tableClass,
+            uint reserved = 0);
+
+        private const int AF_INET = 2;
+        private const int TCP_TABLE_OWNER_PID_ALL = 5;
+        private const int MIB_TCP_STATE_ESTAB = 5;
 
         private const int LearningPhaseDurationMinutes = 30;
         private const int MaxSubnetsPerProcess = 1000;
@@ -23,17 +50,79 @@ namespace WindowsSentinel.Core
             "svchost", "lsass", "sihost", "taskhostw", "RuntimeBroker", "SystemSettings"
         };
 
-        public AppNetworkPolicyMonitor(DetectionEngine detectionEngine)
+        public AppNetworkPolicyMonitor(DetectionEngine detectionEngine, ProcessAncestryCache ancestryCache)
         {
             _detectionEngine = detectionEngine;
+            _ancestryCache = ancestryCache;
             // Scan TCP connections every 30 seconds
             _timer = new System.Threading.Timer(ScanNetworkConnections, null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
         }
 
         private void ScanNetworkConnections(object? state)
         {
-            // In a real system, we P/Invoke GetExtendedTcpTable.
-            // Under this stub/implementation, we feed mock network connections or queries.
+            try
+            {
+                uint size = 0;
+                uint ret = GetExtendedTcpTable(IntPtr.Zero, ref size, true, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0);
+                if (ret != 122) // ERROR_INSUFFICIENT_BUFFER
+                {
+                    return;
+                }
+
+                IntPtr pTable = Marshal.AllocHGlobal((int)size);
+                try
+                {
+                    ret = GetExtendedTcpTable(pTable, ref size, true, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0);
+                    if (ret == 0) // NO_ERROR
+                    {
+                        int numEntries = Marshal.ReadInt32(pTable);
+                        IntPtr rowPtr = pTable + Marshal.SizeOf<int>();
+                        int rowSize = Marshal.SizeOf<MIB_TCPROW_OWNER_PID>();
+
+                        for (int i = 0; i < numEntries; i++)
+                        {
+                            var row = Marshal.PtrToStructure<MIB_TCPROW_OWNER_PID>(rowPtr);
+                            rowPtr += rowSize;
+
+                            if (row.dwState == MIB_TCP_STATE_ESTAB)
+                            {
+                                int pid = (int)row.dwOwningPid;
+                                if (pid <= 0) continue;
+
+                                string processName = "unknown";
+                                var ancestry = _ancestryCache.GetParent(pid);
+                                if (ancestry.name != "unknown")
+                                {
+                                    processName = ancestry.name;
+                                }
+                                else
+                                {
+                                    try
+                                    {
+                                        using var proc = System.Diagnostics.Process.GetProcessById(pid);
+                                        processName = proc.ProcessName;
+                                    }
+                                    catch
+                                    {
+                                        // Ignore access denied / terminated
+                                    }
+                                }
+
+                                var remoteIp = new System.Net.IPAddress(row.dwRemoteAddr).ToString();
+                                RegisterConnection(pid, processName + ".exe", remoteIp);
+                            }
+                        }
+                    }
+                }
+                finally
+                {
+                    Marshal.FreeHGlobal(pTable);
+                }
+            }
+            catch
+            {
+                // Degrade gracefully
+            }
         }
 
         public void RegisterConnection(int pid, string processName, string remoteAddress)

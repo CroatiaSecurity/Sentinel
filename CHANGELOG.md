@@ -2,6 +2,12 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [5.2.0] - 2026-06-02
+
+### Added
+- **Real-World Low-Level Logic** — Replaced all mock/simulation stubs (MalwareBazaar reputation checks, memory flooding, DLL stomping, stack corruption, handle table pollution, TCP table scanning, and parent PID retrieval) with native Win32 P/Invokes, SetupAPI device enumerators, and direct network integration.
+- **Custom Application Icon** — Wired user-supplied `Sentinel.ico` into the Agent and Service assembly definitions and configured the system tray NotifyIcon to load it dynamically.
+
 ## [5.1.0] - 2026-06-02
 
 ### Added

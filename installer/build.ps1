@@ -24,6 +24,12 @@ Write-Host "Publishing Sentinel Agent (win-x64 self-contained)..." -ForegroundCo
 $AgentProj = Join-Path $PSScriptRoot "..\src\WindowsSentinel.Agent\WindowsSentinel.Agent.csproj"
 dotnet publish $AgentProj -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -o (Join-Path $PublishDir "agent")
 
+# 3a. Copy Sentinel.ico to publish outputs for runtime icon access
+Write-Host "Deploying Sentinel.ico to publish directories..." -ForegroundColor Yellow
+$IconSource = Join-Path $PSScriptRoot "assets\Sentinel.ico"
+Copy-Item $IconSource -Destination (Join-Path $PublishDir "agent\Sentinel.ico") -Force
+Copy-Item $IconSource -Destination (Join-Path $PublishDir "service\Sentinel.ico") -Force
+
 # 4. Locate Inno Setup Compiler (ISCC.exe)
 Write-Host "Locating Inno Setup compiler..." -ForegroundColor Yellow
 $DefaultIsccPaths = @(
@@ -59,5 +65,5 @@ $SetupScript = Join-Path $PSScriptRoot "setup.iss"
 
 Write-Host "==============================================" -ForegroundColor Green
 Write-Host "Build completed successfully!" -ForegroundColor Green
-Write-Host "Installer output: installer\WindowsSentinelSetup-5.1.0.exe" -ForegroundColor Green
+Write-Host "Installer output: installer\WindowsSentinelSetup-5.2.0.exe" -ForegroundColor Green
 Write-Host "==============================================" -ForegroundColor Green

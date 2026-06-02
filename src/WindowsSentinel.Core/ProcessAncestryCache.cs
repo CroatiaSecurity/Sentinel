@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Threading;
 
 namespace WindowsSentinel.Core
@@ -55,15 +56,36 @@ namespace WindowsSentinel.Core
             return (0, "unknown");
         }
 
+        [StructLayout(LayoutKind.Sequential)]
+        private struct PROCESS_BASIC_INFORMATION
+        {
+            public IntPtr Reserved1;
+            public IntPtr PebBaseAddress;
+            public IntPtr Reserved2_0;
+            public IntPtr Reserved2_1;
+            public IntPtr UniqueProcessId;
+            public IntPtr InheritedFromUniqueProcessId;
+        }
+
+        [DllImport("ntdll.dll", SetLastError = true)]
+        private static extern int NtQueryInformationProcess(
+            IntPtr processHandle,
+            int processInformationClass,
+            ref PROCESS_BASIC_INFORMATION processInformation,
+            int processInformationLength,
+            out int returnLength);
+
         private static int GetParentProcessId(Process process)
         {
             try
             {
-                // Fallback-friendly P/Invoke or process querying.
-                // In full Windows (.NET 8), we'd use native APIs, but for a solid platform-agnostic fallback:
-                // we can return 0 or look it up.
-                // To keep it simple and compile-safe, let's use a standard implementation:
-                return 0; // Simple stub for ancestry parent ID
+                var pbi = new PROCESS_BASIC_INFORMATION();
+                int status = NtQueryInformationProcess(process.Handle, 0, ref pbi, Marshal.SizeOf(pbi), out _);
+                if (status == 0)
+                {
+                    return pbi.InheritedFromUniqueProcessId.ToInt32();
+                }
+                return 0;
             }
             catch
             {
@@ -77,3 +99,4 @@ namespace WindowsSentinel.Core
         }
     }
 }
+

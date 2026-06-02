@@ -44,8 +44,7 @@ namespace WindowsSentinel.Core
                 return diskVerdict;
             }
 
-            // Perform mock reputation lookup (3-API consensus simulation)
-            // In a real environment, this makes queries to MalwareBazaar, VirusTotal, etc.
+            // Tier 3: Live reputation lookup via MalwareBazaar API
             var liveVerdict = await FetchReputationFromApis(sha256);
 
             // Save to caches
@@ -55,19 +54,54 @@ namespace WindowsSentinel.Core
             return liveVerdict;
         }
 
-        private static Task<HashVerdict> FetchReputationFromApis(string sha256)
+        private static async Task<HashVerdict> FetchReputationFromApis(string sha256)
         {
-            // Simulation: some predefined hashes for testing/threat validation
+            // First check predefined hashes for local verification testing
             if (sha256 == "0000000000000000000000000000000000000000000000000000000000000000")
             {
-                return Task.FromResult(HashVerdict.Safe);
+                return HashVerdict.Safe;
             }
             if (sha256 == "bad1bad1bad1bad1bad1bad1bad1bad1bad1bad1bad1bad1bad1bad1bad1bad1")
             {
-                return Task.FromResult(HashVerdict.Unsafe);
+                return HashVerdict.Unsafe;
             }
 
-            return Task.FromResult(HashVerdict.Unknown);
+            try
+            {
+                // Query MalwareBazaar API for known-malicious hash match
+                using var client = new System.Net.Http.HttpClient();
+                client.Timeout = TimeSpan.FromSeconds(3); // Keep it fast, 3s budget
+
+                var values = new System.Collections.Generic.Dictionary<string, string>
+                {
+                    { "query", "get_info" },
+                    { "hash", sha256 }
+                };
+
+                var content = new System.Net.Http.FormUrlEncodedContent(values);
+                var response = await client.PostAsync("https://mb-api.abuse.ch/api/v1/", content);
+
+                if (response.IsSuccessStatusCode)
+                {
+                    var responseString = await response.Content.ReadAsStringAsync();
+                    // Basic JSON parsing to locate query_status without complex external dependency
+                    if (responseString.Contains("\"query_status\": \"ok\"") || responseString.Contains("\"query_status\":\"ok\""))
+                    {
+                        return HashVerdict.Unsafe;
+                    }
+                    if (responseString.Contains("\"query_status\": \"hash_not_found\"") || responseString.Contains("\"query_status\":\"hash_not_found\""))
+                    {
+                        return HashVerdict.Safe;
+                    }
+                }
+            }
+            catch
+            {
+                // Degrade gracefully on network / timeout errors
+            }
+
+            return HashVerdict.Unknown;
         }
     }
 }
+

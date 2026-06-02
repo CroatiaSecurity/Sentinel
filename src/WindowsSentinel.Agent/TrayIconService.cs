@@ -52,11 +52,28 @@ namespace WindowsSentinel.Agent
             _contextMenu.Items.Add("Stop Protection", null, OnToggleProtection);
             _contextMenu.Items.Add("Exit Agent", null, OnExit);
 
+            System.Drawing.Icon? appIcon = null;
+            try
+            {
+                // Primary: load the deployed Sentinel.ico from the application directory
+                var icoPath = Path.Combine(AppContext.BaseDirectory, "Sentinel.ico");
+                if (File.Exists(icoPath))
+                {
+                    appIcon = new System.Drawing.Icon(icoPath);
+                }
+                else
+                {
+                    // Fallback: extract the icon embedded in the exe via ApplicationIcon
+                    appIcon = System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+                }
+            }
+            catch { }
+
             _notifyIcon = new NotifyIcon
             {
-                Icon = System.Drawing.SystemIcons.Shield,
+                Icon = appIcon ?? System.Drawing.SystemIcons.Shield,
                 ContextMenuStrip = _contextMenu,
-                Text = "Windows Sentinel v5.1.0 — Protection Active",
+                Text = "Windows Sentinel v5.2.0 — Protection Active",
                 Visible = true
             };
 
@@ -128,7 +145,7 @@ namespace WindowsSentinel.Agent
         {
             _config.ActiveResponse = !_config.ActiveResponse;
             var status = _config.ActiveResponse ? "Active" : "Disabled";
-            _notifyIcon!.Text = $"Windows Sentinel v5.1.0 — Protection {status}";
+            _notifyIcon!.Text = $"Windows Sentinel v5.2.0 — Protection {status}";
             _notifyIcon.ShowBalloonTip(2000, "Windows Sentinel", $"Protection mode set to {status}.", ToolTipIcon.Warning);
         }
 

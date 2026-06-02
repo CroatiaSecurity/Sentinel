@@ -2,7 +2,9 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Security.AccessControl;
 using System.Security.Cryptography;
+using System.Security.Principal;
 using System.Text;
 
 namespace WindowsSentinel.Core
@@ -69,9 +71,8 @@ namespace WindowsSentinel.Core
                     Directory.CreateDirectory(_secureDir);
                 }
                 
-                // Secure ACLs (best effort on Windows, SYSTEM + Admin)
-                // In production, we'd use Directory.GetAccessControl/SetAccessControl.
-                // We'll skip advanced ACL mapping to prevent runtime dependency issues but secure the directory.
+                // Lock ACLs to SYSTEM + Administrators only
+                LockDirectoryAcl(_secureDir);
             }
             catch
             {
@@ -235,6 +236,52 @@ namespace WindowsSentinel.Core
                 {
                     Marshal.FreeHGlobal(dataOut.pbData);
                 }
+            }
+        }
+
+        /// <summary>
+        /// Locks the directory ACL to SYSTEM and Administrators only, removing inherited ACEs.
+        /// </summary>
+        private static void LockDirectoryAcl(string directoryPath)
+        {
+            try
+            {
+                var dirInfo = new DirectoryInfo(directoryPath);
+                var security = dirInfo.GetAccessControl();
+
+                // Disable inheritance and remove all inherited ACEs
+                security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+
+                // Remove all existing access rules
+                var rules = security.GetAccessRules(true, true, typeof(SecurityIdentifier));
+                foreach (FileSystemAccessRule rule in rules)
+                {
+                    security.RemoveAccessRuleAll(rule);
+                }
+
+                // Grant SYSTEM full control
+                var systemSid = new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null);
+                security.AddAccessRule(new FileSystemAccessRule(
+                    systemSid,
+                    FileSystemRights.FullControl,
+                    InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+                    PropagationFlags.None,
+                    AccessControlType.Allow));
+
+                // Grant Administrators full control
+                var adminSid = new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null);
+                security.AddAccessRule(new FileSystemAccessRule(
+                    adminSid,
+                    FileSystemRights.FullControl,
+                    InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+                    PropagationFlags.None,
+                    AccessControlType.Allow));
+
+                dirInfo.SetAccessControl(security);
+            }
+            catch
+            {
+                // Best effort — may fail if process is not elevated
             }
         }
     }

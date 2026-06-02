@@ -6,6 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWindowsForms>true</UseWindowsForms>
     <Platforms>AnyCPU;x64;ARM64</Platforms>
+    <ApplicationIcon>..\..\installer\assets\Sentinel.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>

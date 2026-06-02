@@ -1,23 +1,26 @@
 [Setup]
 AppName=Windows Sentinel
-AppVersion=5.1.0
+AppVersion=5.2.0
 AppPublisher=Gorstak
 AppPublisherURL=https://gorstak.eu
+SourceDir=.
 DefaultDirName={autopf}\WindowsSentinel
 DefaultGroupName=Windows Sentinel
-UninstallDisplayIcon={app}\WindowsSentinel.Agent.exe
+SetupIconFile=assets\sentinel.ico
+UninstallDisplayIcon={app}\Sentinel.ico
 Compression=lzma2
 SolidCompression=yes
 OutputDir=.
-OutputBaseFilename=WindowsSentinelSetup-5.1.0
+OutputBaseFilename=WindowsSentinelSetup-5.2.0
 PrivilegesRequired=admin
 
 [Files]
+Source: "assets\Sentinel.ico"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\publish\service\WindowsSentinel.Service.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\publish\agent\WindowsSentinel.Agent.exe"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\Windows Sentinel Agent"; Filename: "{app}\WindowsSentinel.Agent.exe"
+Name: "{group}\Windows Sentinel Agent"; Filename: "{app}\WindowsSentinel.Agent.exe"; IconFilename: "{app}\Sentinel.ico"
 
 [Registry]
 ; Auto-start agent on user login
