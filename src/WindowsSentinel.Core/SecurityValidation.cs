@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Net;
 using System.Runtime.CompilerServices;
@@ -47,6 +47,9 @@ namespace WindowsSentinel.Core
         {
             return pid >= 0 && pid <= 4194304; // Max PID limit in Windows/Linux
         }
+
+        /// <summary>Alias for ValidatePid â€” used by DllUnloadEngine.</summary>
+        public static bool IsValidProcessId(int pid) => ValidatePid(pid);
 
         public static bool ValidatePort(int port)
         {

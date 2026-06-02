@@ -52,7 +52,6 @@ namespace WindowsSentinel.Service
                     
                     // Engines
                     services.AddSingleton<TelemetryFusionEngine>();
-                    services.AddSingleton<DeceptionEngine>();
                     services.AddSingleton<AdvancedResponseEngine>();
                     services.AddSingleton<BehavioralCorrelationEngine>();
 
@@ -72,6 +71,15 @@ namespace WindowsSentinel.Service
                     services.AddSingleton<UsbDeviceFingerprinter>();
                     services.AddSingleton<AppNetworkPolicyMonitor>();
                     services.AddSingleton<DnsBlocklistEngine>();
+                    services.AddSingleton<NetworkMonitor>();
+                    services.AddSingleton<LsassDumpCanaryMonitor>();
+                    services.AddSingleton<RouteTableMonitor>();
+                    services.AddSingleton<HollowProcessMonitor>();
+                    services.AddSingleton<MemoryBehaviorAnalyzer>();
+                    services.AddSingleton<TokenIntegrityMonitor>();
+                    services.AddSingleton<CredentialCanaryMonitor>();
+                    services.AddSingleton<PhantomKeystrokeGuard>();
+                    services.AddSingleton<LocalServerMonitor>();
 
                     // Service Background Worker
                     services.AddHostedService<SentinelService>();

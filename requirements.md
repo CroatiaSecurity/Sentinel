@@ -1,6 +1,6 @@
-# Windows Sentinel — Requirements
+﻿# Windows Sentinel â€” Requirements
 
-**Version: 5.2.0**
+**Version: 5.3.0**
 
 ---
 
@@ -32,7 +32,7 @@ Focus: transparency, safety, real-world threat detection, and blue-team educatio
 The system must implement two detection tiers with strictly enforced response contracts:
 
 - **Tier 1 (Behavioral):** Active response allowed when explicitly enabled
-- **Tier 2 (Indicator):** Log only — response action is **never** permitted regardless of configuration
+- **Tier 2 (Indicator):** Log only â€” response action is **never** permitted regardless of configuration
 
 ### FR-2: Tier 1 Detection Rules
 
@@ -136,7 +136,7 @@ Constraints:
 - Size-based rotation: 50 MB per file, up to 5 rotated files
 - Each entry must include: `type`, `timestamp`, `data` (with `ruleName`, `evidence`, `reasoning`, `confidence`, `tier`, `processName`, `processId`, `metadata`)
 - Rate limiting: max 100 entries/second, burst of 200 (prevents log flooding attacks)
-- File sharing: `FileShare.ReadWrite` — concurrent readers must not be blocked
+- File sharing: `FileShare.ReadWrite` â€” concurrent readers must not be blocked
 - Graceful degradation: log file access failure must NOT crash the service; fall back to degraded mode
 - Self-healing: writer must retry opening the file on each write if the initial open failed
 - Stale file handling: locked/inaccessible files renamed to `.stale.<timestamp>` and fresh file created
@@ -144,18 +144,18 @@ Constraints:
 ### FR-8: Explainability
 
 Every `DetectionEvent` must include:
-- `RuleName` — which rule fired
-- `Evidence` — what was specifically observed
-- `Reasoning` — why it is suspicious (human-readable)
-- `Confidence` — 0.0–1.0 score calibrated per rule
-- `Metadata` — key-value pairs with raw observable data
+- `RuleName` â€” which rule fired
+- `Evidence` â€” what was specifically observed
+- `Reasoning` â€” why it is suspicious (human-readable)
+- `Confidence` â€” 0.0â€“1.0 score calibrated per rule
+- `Metadata` â€” key-value pairs with raw observable data
 
 ### FR-9: CLI Interface
 
 The CLI must support:
-- `--active-response` — enable Tier1 process termination
-- `--log <path>` — override log file path
-- `--verbose` — enable debug logging
+- `--active-response` â€” enable Tier1 process termination
+- `--log <path>` â€” override log file path
+- `--verbose` â€” enable debug logging
 - Configuration via `appsettings.json` (CLI flags override config)
 
 ### FR-10: Deduplication
@@ -173,7 +173,7 @@ The CLI must support:
 - No kernel drivers, no direct syscalls
 
 ### NFR-2: Reliability
-- Monitors must fail independently — one monitor failure must not crash the service
+- Monitors must fail independently â€” one monitor failure must not crash the service
 - All exceptions must be caught and logged; no silent failures
 - All `IDisposable` / `IAsyncDisposable` objects must be properly disposed
 
@@ -195,7 +195,7 @@ The CLI must support:
 ### NFR-6: Deception Safety (v1.7.0)
 - Deception must never delay kill beyond 2 seconds
 - Deception failure must be non-fatal (kill always proceeds)
-- Deception must never target own process or system-critical processes (PID ≤ 4)
+- Deception must never target own process or system-critical processes (PID â‰¤ 4)
 - Environment poisoning must be HKCU-scoped only (never HKLM)
 - Beacon flooding must only target public IP addresses (never private/loopback)
 - All deception actions must be logged with full detail for forensic review and reversal

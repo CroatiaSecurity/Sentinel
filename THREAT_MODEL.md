@@ -1,6 +1,6 @@
-# Windows Sentinel — Threat Model
+﻿# Windows Sentinel â€” Threat Model
 
-**Version: 5.2.0**
+**Version: 5.3.0**
 
 This document assumes the attacker has read the source code.
 
@@ -9,32 +9,32 @@ This document assumes the attacker has read the source code.
 ## Trust Boundaries
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│ KERNEL (ring 0)                                         │
-│   - Sentinel has NO visibility here                     │
-│   - Attacker with driver = game over                    │
-└─────────────────────────────────────────────────────────┘
-                          │
-┌─────────────────────────────────────────────────────────┐
-│ SYSTEM (ring 3, highest userland privilege)              │
-│   - Sentinel service runs here                          │
-│   - ETW providers, full process access                  │
-│   - SecureCacheStore, quarantine, firewall rules        │
-└─────────────────────────────────────────────────────────┘
-                          │
-┌─────────────────────────────────────────────────────────┐
-│ ADMINISTRATOR (ring 3, elevated)                        │
-│   - Can stop/delete services via SCM                    │
-│   - Can take ownership of SYSTEM files                  │
-│   - Can load drivers (BYOVD)                            │
-└─────────────────────────────────────────────────────────┘
-                          │
-┌─────────────────────────────────────────────────────────┐
-│ STANDARD USER (ring 3)                                  │
-│   - Cannot touch Sentinel service or files              │
-│   - Sentinel agent (watchdog) runs here                 │
-│   - Limited telemetry (WMI fallback, no ThreatIntel)    │
-└─────────────────────────────────────────────────────────┘
+â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚ KERNEL (ring 0)                                         â”‚
+â”‚   - Sentinel has NO visibility here                     â”‚
+â”‚   - Attacker with driver = game over                    â”‚
+â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
+                          â”‚
+â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚ SYSTEM (ring 3, highest userland privilege)              â”‚
+â”‚   - Sentinel service runs here                          â”‚
+â”‚   - ETW providers, full process access                  â”‚
+â”‚   - SecureCacheStore, quarantine, firewall rules        â”‚
+â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
+                          â”‚
+â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚ ADMINISTRATOR (ring 3, elevated)                        â”‚
+â”‚   - Can stop/delete services via SCM                    â”‚
+â”‚   - Can take ownership of SYSTEM files                  â”‚
+â”‚   - Can load drivers (BYOVD)                            â”‚
+â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
+                          â”‚
+â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚ STANDARD USER (ring 3)                                  â”‚
+â”‚   - Cannot touch Sentinel service or files              â”‚
+â”‚   - Sentinel agent (watchdog) runs here                 â”‚
+â”‚   - Limited telemetry (WMI fallback, no ThreatIntel)    â”‚
+â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
 ```
 
 ---
@@ -62,7 +62,7 @@ This document assumes the attacker has read the source code.
 
 **Mitigation:**
 - BYOVD detection rule (known vulnerable driver hashes)
-- Memory Integrity (HVCI) monitoring — alerts if disabled
+- Memory Integrity (HVCI) monitoring â€” alerts if disabled
 
 **Residual risk:** HIGH. If HVCI is off and attacker has admin, they can load any signed driver. Sentinel cannot prevent kernel-level attacks.
 
@@ -86,8 +86,8 @@ This document assumes the attacker has read the source code.
 **Attack (pre-1.1.0):** Attacker running as SYSTEM writes a "safe" verdict for their payload into the SecureCacheStore.
 
 **Mitigation (v1.1.0):**
-- HMAC key now incorporates boot-time nonce — caches from previous boots are rejected
-- DPAPI machine-scope encryption — file is unreadable on another machine
+- HMAC key now incorporates boot-time nonce â€” caches from previous boots are rejected
+- DPAPI machine-scope encryption â€” file is unreadable on another machine
 - ACL restricts to SYSTEM + Administrators only
 - Boot-nonce means attacker must poison DURING current session (narrower window)
 
@@ -152,29 +152,29 @@ This document assumes the attacker has read the source code.
 
 These are fundamental limitations, not bugs:
 
-1. **Kernel-level attacks** — No visibility below ring 3
-2. **Hardware implants** — No visibility into firmware/UEFI (but detects Secure Boot disabled)
-3. **Pre-boot attacks** — Sentinel starts after Windows boots (but detects boot config tampering)
-4. **Attacker with physical access** — Can boot from USB, modify disk offline
-5. **Attacker who already has SYSTEM** — Can kill Sentinel (watchdog adds delay only)
-6. **Nation-state tooling** — Custom kernel implants, 0-days, hardware backdoors
-7. **Encrypted C2 over legitimate ports** — Looks like normal HTTPS traffic (but TLS cert monitor detects MITM)
-8. **Direct syscalls from custom code** — Bypasses ntdll hooks (but SyscallStubMonitor detects unhooking attempts)
-9. **Upstream BGP hijacking** — Detectable via public IP shift but not preventable
-10. **Physical-layer Wi-Fi attacks** — Cannot see deauth frames directly (detects the symptom: rapid disconnects)
+1. **Kernel-level attacks** â€” No visibility below ring 3
+2. **Hardware implants** â€” No visibility into firmware/UEFI (but detects Secure Boot disabled)
+3. **Pre-boot attacks** â€” Sentinel starts after Windows boots (but detects boot config tampering)
+4. **Attacker with physical access** â€” Can boot from USB, modify disk offline
+5. **Attacker who already has SYSTEM** â€” Can kill Sentinel (watchdog adds delay only)
+6. **Nation-state tooling** â€” Custom kernel implants, 0-days, hardware backdoors
+7. **Encrypted C2 over legitimate ports** â€” Looks like normal HTTPS traffic (but TLS cert monitor detects MITM)
+8. **Direct syscalls from custom code** â€” Bypasses ntdll hooks (but SyscallStubMonitor detects unhooking attempts)
+9. **Upstream BGP hijacking** â€” Detectable via public IP shift but not preventable
+10. **Physical-layer Wi-Fi attacks** â€” Cannot see deauth frames directly (detects the symptom: rapid disconnects)
 
 ## What Sentinel CAN Detect Even Against Skilled Attackers
 
-These detections are hard to bypass without kernel access. All are **Tier2 corroborating signals** (except SyscallStubMonitor which is self-protection). They feed the correlation engine — multiple signals on the same PID within 120s produce a composite kill:
+These detections are hard to bypass without kernel access. All are **Tier2 corroborating signals** (except SyscallStubMonitor which is self-protection). They feed the correlation engine â€” multiple signals on the same PID within 120s produce a composite kill:
 
-1. **Parent PID spoofing** (Tier2) — ETW reports kernel truth; can't be faked from userland
-2. **Credential harvesting** (Tier2) — Canary credential is a zero-FP tripwire
-3. **Ransomware** (Tier1) — Shadow copy deletion + bulk encryption is behaviorally unavoidable
-4. **ntdll unhooking** (Tier1 self-protection) — Stub integrity check detects the modification itself
-5. **Privilege escalation** (Tier2) — Token integrity transitions are observable regardless of method
-6. **dbghelp.dll abuse** (Tier2) — Module load is visible even if the tool is custom-built
-7. **DNS-based C2** (Tier2) — ETW DNS-Client fires on all resolutions regardless of method
-8. **Process injection (kernel ETW)** (Tier1) — API calls observed at kernel level
+1. **Parent PID spoofing** (Tier2) â€” ETW reports kernel truth; can't be faked from userland
+2. **Credential harvesting** (Tier2) â€” Canary credential is a zero-FP tripwire
+3. **Ransomware** (Tier1) â€” Shadow copy deletion + bulk encryption is behaviorally unavoidable
+4. **ntdll unhooking** (Tier1 self-protection) â€” Stub integrity check detects the modification itself
+5. **Privilege escalation** (Tier2) â€” Token integrity transitions are observable regardless of method
+6. **dbghelp.dll abuse** (Tier2) â€” Module load is visible even if the tool is custom-built
+7. **DNS-based C2** (Tier2) â€” ETW DNS-Client fires on all resolutions regardless of method
+8. **Process injection (kernel ETW)** (Tier1) â€” API calls observed at kernel level
 
 ---
 
@@ -186,7 +186,7 @@ These detections are hard to bypass without kernel access. All are **Tier2 corro
 | Credential canary (honeypot credential) | HIGH | HIGH (zero-FP tripwire, can't avoid without knowing it exists) |
 | LSASS dump (dbghelp.dll load) | HIGH | MEDIUM (attacker can bring own dbghelp or use direct syscalls) |
 | LSASS dump (cmdline patterns) | HIGH | LOW (attacker uses direct syscalls) |
-| Parent PID spoofing detection | HIGH | HIGH (kernel truth vs userland — can't fake ETW) |
+| Parent PID spoofing detection | HIGH | HIGH (kernel truth vs userland â€” can't fake ETW) |
 | Syscall stub integrity | HIGH | MEDIUM (attacker must patch before Sentinel starts, or use kernel) |
 | Token integrity escalation | HIGH | MEDIUM (detects the result, not the method) |
 | Process injection (ETW ThreatIntel) | HIGH | MEDIUM (kernel-level, but can be blinded with driver) |
@@ -204,14 +204,14 @@ These detections are hard to bypass without kernel access. All are **Tier2 corro
 
 ## Design Principles (v1.7.0)
 
-1. **Behavioral over static** — Detect what processes DO, not what they ARE
-2. **No security theater** — If a feature doesn't work against a competent attacker, remove it or honestly document its limitations
-3. **Fewer solid detections > many fragile ones** — Each rule must justify its existence
-4. **Assume the attacker reads the code** — No security-by-obscurity
-5. **Layered defense** — Sentinel is ONE layer alongside Defender, not a replacement
-6. **Honest documentation** — State what works and what doesn't
-7. **Kill only on corroboration** — New monitors are Tier2 (corroborating signals). Only the President's Law closed list authorizes kills. Multiple Tier2 signals correlating on the same PID produce composite kills via the BehavioralCorrelationEngine. Single signals never kill independently (except self-protection).
-8. **Make kills hurt** (v1.7.0) — Every authorized kill should cost the attacker time, data integrity, and operational security. Deception tactics execute pre-kill to maximize damage to attacker operations.
+1. **Behavioral over static** â€” Detect what processes DO, not what they ARE
+2. **No security theater** â€” If a feature doesn't work against a competent attacker, remove it or honestly document its limitations
+3. **Fewer solid detections > many fragile ones** â€” Each rule must justify its existence
+4. **Assume the attacker reads the code** â€” No security-by-obscurity
+5. **Layered defense** â€” Sentinel is ONE layer alongside Defender, not a replacement
+6. **Honest documentation** â€” State what works and what doesn't
+7. **Kill only on corroboration** â€” New monitors are Tier2 (corroborating signals). Only the President's Law closed list authorizes kills. Multiple Tier2 signals correlating on the same PID produce composite kills via the BehavioralCorrelationEngine. Single signals never kill independently (except self-protection).
+8. **Make kills hurt** (v1.7.0) â€” Every authorized kill should cost the attacker time, data integrity, and operational security. Deception tactics execute pre-kill to maximize damage to attacker operations.
 
 ---
 
@@ -254,7 +254,7 @@ The attacker could theoretically:
 
 **Mitigation:** All deception actions are logged with full detail. Proxy/TLS poisoning is HKCU-scoped and easily reversed. Fake credential files are clearly named (.bak, backup) and placed in non-standard locations.
 
-**Residual risk:** LOW. The user's legitimate applications are unaffected (they don't read .bak files or backup SSH keys). Proxy poisoning may briefly affect the user's browser until reverted — acceptable tradeoff for breaking C2 reconnection.
+**Residual risk:** LOW. The user's legitimate applications are unaffected (they don't read .bak files or backup SSH keys). Proxy poisoning may briefly affect the user's browser until reverted â€” acceptable tradeoff for breaking C2 reconnection.
 
 ---
 

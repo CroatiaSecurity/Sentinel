@@ -9,6 +9,18 @@ namespace WindowsSentinel.Core
         Tier2Indicator
     }
 
+    /// <summary>Kind of file activity observed — used by IngestFileActivity shim.</summary>
+    public enum FileActivityKind
+    {
+        Write,
+        Read,
+        Delete,
+        Rename,
+        Create,
+        Chmod,
+        Execute
+    }
+
     public class SentinelConfig
     {
         public bool ActiveResponse { get; set; } = true;
@@ -63,6 +75,28 @@ namespace WindowsSentinel.Core
         public int TargetProcessId { get; set; }
         public string ApiName { get; set; } = string.Empty; // VirtualAllocEx, SetThreadContext, etc.
         public string Protection { get; set; } = string.Empty;
+    }
+
+    public enum MemoryBehaviorKind
+    {
+        RwxAllocation,
+        UnbackedExecutable,
+        ShellcodePattern,
+        ReflectiveLoad
+    }
+
+    public class MemoryBehaviorTelemetry : TelemetryEvent
+    {
+        public MemoryBehaviorKind Kind { get; set; }
+        public string Details { get; set; } = string.Empty;
+    }
+
+    public class HollowProcessTelemetry : TelemetryEvent
+    {
+        public string DeclaredPath { get; set; } = string.Empty;
+        public string HollowType { get; set; } = string.Empty;
+        public string Evidence { get; set; } = string.Empty;
+        public double Confidence { get; set; }
     }
 
     public class DetectionEvent

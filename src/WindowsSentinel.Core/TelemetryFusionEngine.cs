@@ -64,6 +64,21 @@ namespace WindowsSentinel.Core
             return BuildContext(pid, telemetryEvent);
         }
 
+        /// <summary>Compatibility shim for monitors that use IngestFileActivity.</summary>
+        public FusedTelemetryContext IngestFileActivity(int processId, string processName, string filePath, FileActivityKind kind, DateTime timestamp)
+        {
+            var telemetry = new FileActivityTelemetry
+            {
+                Type = kind.ToString(),
+                ProcessId = processId,
+                ProcessName = processName,
+                FilePath = filePath,
+                OperationType = kind.ToString(),
+                Timestamp = timestamp
+            };
+            return FeedEvent(telemetry);
+        }
+
         private FusedTelemetryContext BuildContext(int pid, TelemetryEvent triggeringEvent)
         {
             var context = new FusedTelemetryContext

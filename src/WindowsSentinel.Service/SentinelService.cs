@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -21,6 +21,15 @@ namespace WindowsSentinel.Service
         private readonly DnsBlocklistEngine _dnsBlocklistEngine;
         private readonly WmiProcessMonitor _wmiProcessMonitor;
         private readonly FileActivityMonitor _fileActivityMonitor;
+        private readonly NetworkMonitor _networkMonitor;
+        private readonly LsassDumpCanaryMonitor _lsassDumpCanaryMonitor;
+        private readonly RouteTableMonitor _routeTableMonitor;
+        private readonly HollowProcessMonitor _hollowProcessMonitor;
+        private readonly MemoryBehaviorAnalyzer _memoryBehaviorAnalyzer;
+        private readonly TokenIntegrityMonitor _tokenIntegrityMonitor;
+        private readonly CredentialCanaryMonitor _credentialCanaryMonitor;
+        private readonly PhantomKeystrokeGuard _phantomKeystrokeGuard;
+        private readonly LocalServerMonitor _localServerMonitor;
 
         public SentinelService(
             ILogger<SentinelService> logger,
@@ -33,7 +42,16 @@ namespace WindowsSentinel.Service
             AppNetworkPolicyMonitor networkPolicyMonitor,
             DnsBlocklistEngine dnsBlocklistEngine,
             WmiProcessMonitor wmiProcessMonitor,
-            FileActivityMonitor fileActivityMonitor)
+            FileActivityMonitor fileActivityMonitor,
+            NetworkMonitor networkMonitor,
+            LsassDumpCanaryMonitor lsassDumpCanaryMonitor,
+            RouteTableMonitor routeTableMonitor,
+            HollowProcessMonitor hollowProcessMonitor,
+            MemoryBehaviorAnalyzer memoryBehaviorAnalyzer,
+            TokenIntegrityMonitor tokenIntegrityMonitor,
+            CredentialCanaryMonitor credentialCanaryMonitor,
+            PhantomKeystrokeGuard phantomKeystrokeGuard,
+            LocalServerMonitor localServerMonitor)
         {
             _logger = logger;
             _config = config;
@@ -46,6 +64,15 @@ namespace WindowsSentinel.Service
             _dnsBlocklistEngine = dnsBlocklistEngine;
             _wmiProcessMonitor = wmiProcessMonitor;
             _fileActivityMonitor = fileActivityMonitor;
+            _networkMonitor = networkMonitor;
+            _lsassDumpCanaryMonitor = lsassDumpCanaryMonitor;
+            _routeTableMonitor = routeTableMonitor;
+            _hollowProcessMonitor = hollowProcessMonitor;
+            _memoryBehaviorAnalyzer = memoryBehaviorAnalyzer;
+            _tokenIntegrityMonitor = tokenIntegrityMonitor;
+            _credentialCanaryMonitor = credentialCanaryMonitor;
+            _phantomKeystrokeGuard = phantomKeystrokeGuard;
+            _localServerMonitor = localServerMonitor;
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -65,7 +92,7 @@ namespace WindowsSentinel.Service
             await _eventLogger.LogEventAsync("service_start", new
             {
                 Status = "started",
-                Version = "5.2.0",
+                Version = "5.3.0",
                 Timestamp = DateTime.UtcNow
             });
 

@@ -1,6 +1,6 @@
-# Windows Sentinel — Design Document
+﻿# Windows Sentinel â€” Design Document
 
-**Version: 5.2.0**
+**Version: 5.3.0**
 
 ---
 
@@ -17,13 +17,13 @@
 Windows Sentinel follows a clean pipeline architecture with strict separation of concerns:
 
 ```
-Monitors → TelemetryFusionEngine → DetectionEngine → ResponseEngine → JsonlEventLogger
-                    ↓                      ↑               ↓
+Monitors â†’ TelemetryFusionEngine â†’ DetectionEngine â†’ ResponseEngine â†’ JsonlEventLogger
+                    â†“                      â†‘               â†“
                EventGraph          BehavioralCorrelationEngine
-           (queryable graph)              ↑               ↓
+           (queryable graph)              â†‘               â†“
                                    (composite detections via EmitAsync)
                                                      DeceptionEngine (pre-kill)
-                                                          ↓
+                                                          â†“
                                                      ChainTracer (kill + quarantine)
 ```
 
@@ -37,7 +37,7 @@ Every monitor feeds raw telemetry through the `TelemetryFusionEngine` before the
 3. Maintains the `EventGraph` for causal/temporal queries
 4. Produces `FusedTelemetryContext` with behavioral velocity, diversity, and multi-vector flags
 
-The fusion layer is PASSIVE — it never blocks, kills, or modifies telemetry.
+The fusion layer is PASSIVE â€” it never blocks, kills, or modifies telemetry.
 
 ---
 
@@ -63,7 +63,7 @@ The fusion layer is PASSIVE — it never blocks, kills, or modifies telemetry.
 | `FileActivityMonitor` | `FileSystemWatcher` on user profile (or configured path) | No |
 | `HollowProcessMonitor` | `GetMappedFileName` + `EnumProcessModules` P/Invoke, scans every 30s | No (own integrity level) |
 | `PhantomKeystrokeGuard` | **5.1.0** Intercepts and actively blocks software-injected keystrokes (e.g., via `SendInput`) to prevent automated typing via global `WH_KEYBOARD_LL` hook. | No |
-| `ScreenCaptureMonitor` | **1.5.0** Detects background DXGI screen capture + transparent overlay phishing windows via `EnumWindows` + `GetWindowLong`, scans every 15–25s | No |
+| `ScreenCaptureMonitor` | **1.5.0** Detects background DXGI screen capture + transparent overlay phishing windows via `EnumWindows` + `GetWindowLong`, scans every 15â€“25s | No |
 | `LocalServerMonitor` | **1.5.0** Detects suspicious processes listening on localhost via `GetExtendedTcpTable` (LISTEN state), flags mounted ISO/VHD/removable origins, scans every 30s | No |
 | `WebcamMicMonitor` | **1.6.0** Detects background processes accessing camera/microphone via DLL analysis (Media Foundation, DirectShow, WASAPI). Allowlists browsers, conferencing, streaming apps. Confirmation threshold prevents transient FPs. Scans every 20s | No |
 | `NamedPipeMonitor` | **3.1.0** Polls `\\.\pipe\` for C2/lateral movement pipe patterns (Cobalt Strike, PsExec, Impacket, Metasploit). Uses `GetNamedPipeServerProcessId` for owner attribution. Scans every 15s | No |
@@ -105,40 +105,40 @@ The fusion layer is PASSIVE — it never blocks, kills, or modifies telemetry.
 
 ### Detection Rules
 
-#### Tier 1 — Behavioral (active response allowed via President's Law)
+#### Tier 1 â€” Behavioral (active response allowed via President's Law)
 
 Only rules whose name matches a President's Law fragment can trigger kills. All others are log-only regardless of tier.
 
 | Rule | Key Signals | Confidence Range | Notes (v1.1.0) |
 |------|-------------|-----------------|----------------|
-| `LsassAccessRule` | LSASS-targeting cmdline tokens, dump file names | 0.85–0.92 | Behavioral only. Placeholder hashes removed. |
-| `ReverseShellRule` | Encoded PowerShell, LOLBins, C2 ports, C2 framework strings | 0.80–0.93 | |
-| `ProcessInjectionRule` | Injection API names in cmdline | 0.78–0.92 | Tool-name matching demoted to metadata. Parent-child is Tier2. |
-| `RansomwareDetectionRule` | Shadow copy deletion, bulk renames, I/O rate, 100+ extensions | 0.68–0.99 | Multi-signal weighted scoring. |
-| `EtwTamperingRule` | AMSI bypass, ETW patching, event log clearing, AV/EDR termination | 0.85–0.95 | |
-| `ThreatIntelInjectionRule` | Kernel-observed VirtualAllocEx, VirtualProtect RWX, MapViewOfSection, APC, SetThreadContext | 0.72–0.93 | Strongest injection signal (kernel-level). |
-| `SyscallStubMonitor` | ntdll/amsi function prologue modification in own process | 0.97 | Self-protection — President's Law. |
-| `BeaconingRule` | Statistical CV analysis of connection intervals | 0.70–0.95 | |
-| `HollowProcessRule` | Image path vs mapped file mismatch | 0.75–0.92 | |
-| `PersistenceRule` | Registry Run keys, scheduled tasks, WMI subscriptions, service creation | 0.80–0.92 | |
-| `PrivilegeEscalationRule` | UAC bypass, token manipulation, named pipe impersonation | 0.80–0.95 | |
-| `AttackToolsRule` | Known C2 frameworks, credential tools, AD tools, LOLBin abuse | 0.75–0.97 | |
-| `CampaignIocRule` | Known malicious hashes, domains, IPs, campaign patterns | 0.78–0.92 | |
+| `LsassAccessRule` | LSASS-targeting cmdline tokens, dump file names | 0.85â€“0.92 | Behavioral only. Placeholder hashes removed. |
+| `ReverseShellRule` | Encoded PowerShell, LOLBins, C2 ports, C2 framework strings | 0.80â€“0.93 | |
+| `ProcessInjectionRule` | Injection API names in cmdline | 0.78â€“0.92 | Tool-name matching demoted to metadata. Parent-child is Tier2. |
+| `RansomwareDetectionRule` | Shadow copy deletion, bulk renames, I/O rate, 100+ extensions | 0.68â€“0.99 | Multi-signal weighted scoring. |
+| `EtwTamperingRule` | AMSI bypass, ETW patching, event log clearing, AV/EDR termination | 0.85â€“0.95 | |
+| `ThreatIntelInjectionRule` | Kernel-observed VirtualAllocEx, VirtualProtect RWX, MapViewOfSection, APC, SetThreadContext | 0.72â€“0.93 | Strongest injection signal (kernel-level). |
+| `SyscallStubMonitor` | ntdll/amsi function prologue modification in own process | 0.97 | Self-protection â€” President's Law. |
+| `BeaconingRule` | Statistical CV analysis of connection intervals | 0.70â€“0.95 | |
+| `HollowProcessRule` | Image path vs mapped file mismatch | 0.75â€“0.92 | |
+| `PersistenceRule` | Registry Run keys, scheduled tasks, WMI subscriptions, service creation | 0.80â€“0.92 | |
+| `PrivilegeEscalationRule` | UAC bypass, token manipulation, named pipe impersonation | 0.80â€“0.95 | |
+| `AttackToolsRule` | Known C2 frameworks, credential tools, AD tools, LOLBin abuse | 0.75â€“0.97 | |
+| `CampaignIocRule` | Known malicious hashes, domains, IPs, campaign patterns | 0.78â€“0.92 | |
 
-#### Tier 2 — Corroborating Signals (log only, feeds correlation engine)
+#### Tier 2 â€” Corroborating Signals (log only, feeds correlation engine)
 
 These never kill independently. Multiple Tier2 signals on the same PID within 120s can produce a composite kill.
 
 | Rule | Key Signals | Confidence Range | Notes (v1.1.0) |
 |------|-------------|-----------------|----------------|
-| `DnsQueryMonitor` | DGA domains (entropy > 3.8), DNS tunneling (>30 qpm) | 0.60–0.90 | NEW. |
-| `ParentPidSpoofDetector` | ETW parent ≠ snapshot parent | 0.95 | NEW. Near-zero FP. |
-| `TokenIntegrityMonitor` | Medium→High integrity without consent.exe | 0.93 | NEW. |
+| `DnsQueryMonitor` | DGA domains (entropy > 3.8), DNS tunneling (>30 qpm) | 0.60â€“0.90 | NEW. |
+| `ParentPidSpoofDetector` | ETW parent â‰  snapshot parent | 0.95 | NEW. Near-zero FP. |
+| `TokenIntegrityMonitor` | Mediumâ†’High integrity without consent.exe | 0.93 | NEW. |
 | `LsassDumpCanaryMonitor` | dbghelp.dll in non-debugger process | 0.85 | NEW. |
-| `CredentialCanaryMonitor` | Honeypot credential accessed/deleted | 0.98–0.99 | NEW. Zero-FP, no PID. |
-| `UnsignedBinaryRule` | Unsigned binary outside system paths, staging path boost | 0.50–0.68 | |
-| `HighEntropyRule` | Shannon entropy > 4.2 on process name stem, GUID exclusion | 0.30–0.85 | |
-| `SuspiciousImportsRule` | Injection APIs in command line, recon commands, persistence patterns | 0.30–0.65 | |
+| `CredentialCanaryMonitor` | Honeypot credential accessed/deleted | 0.98â€“0.99 | NEW. Zero-FP, no PID. |
+| `UnsignedBinaryRule` | Unsigned binary outside system paths, staging path boost | 0.50â€“0.68 | |
+| `HighEntropyRule` | Shannon entropy > 4.2 on process name stem, GUID exclusion | 0.30â€“0.85 | |
+| `SuspiciousImportsRule` | Injection APIs in command line, recon commands, persistence patterns | 0.30â€“0.65 | |
 
 #### Composite Detections (BehavioralCorrelationEngine)
 
@@ -174,29 +174,29 @@ Composite detections are emitted as Tier1 `DetectionEvent`s directly into the de
 `JsonlEventLogger` writes newline-delimited JSON to `%ProgramData%\WindowsSentinel\events.jsonl`.
 
 - Thread-safe via `SemaphoreSlim`
-- No string-built JSON — `System.Text.Json` only
-- Size-based rotation at 50 MB, up to 5 rotated files (`events.jsonl.1` … `.5`)
+- No string-built JSON â€” `System.Text.Json` only
+- Size-based rotation at 50 MB, up to 5 rotated files (`events.jsonl.1` â€¦ `.5`)
 - Each line: `{"type":"detection"|"response","timestamp":"...","data":{...}}`
-- Rate-limited: max 100 entries/second, burst of 200 — prevents log flooding attacks
-- `FileShare.ReadWrite` — concurrent readers (SIEMs, forensic tools) never blocked
+- Rate-limited: max 100 entries/second, burst of 200 â€” prevents log flooding attacks
+- `FileShare.ReadWrite` â€” concurrent readers (SIEMs, forensic tools) never blocked
 - **Graceful degradation:** If the log file cannot be opened at startup, the service starts in degraded mode (detections processed but not persisted) and logs a warning
-- **Self-healing:** On each write, if the writer is null, it retries opening the file — auto-recovers when the file becomes accessible
+- **Self-healing:** On each write, if the writer is null, it retries opening the file â€” auto-recovers when the file becomes accessible
 - **Stale file handling:** If the file is locked or inaccessible, renames it to `.stale.<timestamp>` and creates fresh
 
 ---
 
 ## Key Design Rules
 
-- **Dependency Injection** — all components receive dependencies via constructor injection
-- **No static mutable state** — `ConcurrentDictionary`, `Channel<T>`, `SemaphoreSlim` for shared state
-- **CancellationToken everywhere** — no `Thread.Sleep`, no blocking waits without cancellation
-- **No silent failures** — all exceptions caught and logged; monitors fail independently
-- **Graceful degradation** — ETW → WMI fallback; ThreatIntel ETW unavailable → log warning and continue; ProcessAncestryCache Toolhelp32 → WMI fallback on Server Core
-- **Startup self-test** — Verifies ETW, DPAPI, quarantine, log file, and rule loading before activating monitors
-- **Tier2 enforcement** — `ResponseEngine` hard-codes `LogOnly` for all `Tier2Indicator` events regardless of configuration
-- **Deduplication** — `DetectionEngine` suppresses identical `(RuleName, ProcessId)` pairs within 60s; `NetworkMonitor` suppresses identical `(pid, remote, port)` alerts within 5 minutes
-- **Atomic snapshot** — `ProcessAncestryCache` uses `volatile IReadOnlyDictionary` swap; readers never block
-- **All disposable objects disposed** — `IAsyncDisposable` throughout; `SentinelService.StopAsync` disposes all components in order
+- **Dependency Injection** â€” all components receive dependencies via constructor injection
+- **No static mutable state** â€” `ConcurrentDictionary`, `Channel<T>`, `SemaphoreSlim` for shared state
+- **CancellationToken everywhere** â€” no `Thread.Sleep`, no blocking waits without cancellation
+- **No silent failures** â€” all exceptions caught and logged; monitors fail independently
+- **Graceful degradation** â€” ETW â†’ WMI fallback; ThreatIntel ETW unavailable â†’ log warning and continue; ProcessAncestryCache Toolhelp32 â†’ WMI fallback on Server Core
+- **Startup self-test** â€” Verifies ETW, DPAPI, quarantine, log file, and rule loading before activating monitors
+- **Tier2 enforcement** â€” `ResponseEngine` hard-codes `LogOnly` for all `Tier2Indicator` events regardless of configuration
+- **Deduplication** â€” `DetectionEngine` suppresses identical `(RuleName, ProcessId)` pairs within 60s; `NetworkMonitor` suppresses identical `(pid, remote, port)` alerts within 5 minutes
+- **Atomic snapshot** â€” `ProcessAncestryCache` uses `volatile IReadOnlyDictionary` swap; readers never block
+- **All disposable objects disposed** â€” `IAsyncDisposable` throughout; `SentinelService.StopAsync` disposes all components in order
 
 ---
 
@@ -221,7 +221,7 @@ Composite detections are emitted as Tier1 `DetectionEvent`s directly into the de
 |------|------|
 | `DeceptionPhase` | **1.7.0** Always before kill. 2s budget. Memory flooding, DLL stomping, beacon flooding, clipboard poisoning, file traps, environment poisoning, honeypot deployment. |
 | `LogOnly` | Always for Tier2; Tier1 when `--active-response` is not set; Tier1 non-President's-Law rules |
-| `KillProcess` | Tier1 President's Law rules only, with `--active-response`, confidence ≥ 0.85, via ChainTracer |
+| `KillProcess` | Tier1 President's Law rules only, with `--active-response`, confidence â‰¥ 0.85, via ChainTracer |
 | `SuspendProcess` | Reserved for future use |
 | `AlertUser` | Reserved for future use |
 
@@ -233,7 +233,7 @@ Composite detections are emitted as Tier1 `DetectionEvent`s directly into the de
 |-----------|--------|
 | `ResponseEngine` | Superseded by `AdvancedResponseEngine` |
 | `LearningModeService` | Protection is active by default; dead code |
-| Key Scrambler (agent) | Security theater — fake keystroke injection ineffective against real keyloggers |
+| Key Scrambler (agent) | Security theater â€” fake keystroke injection ineffective against real keyloggers |
 | Password Rotator | Disabled stub that did nothing |
 
 ## Changed in 1.1.0
@@ -243,7 +243,7 @@ Composite detections are emitted as Tier1 `DetectionEvent`s directly into the de
 | `LsassAccessRule` | Removed `KnownDumperHashes` (placeholder values) and `CheckHashMatch()` | Fake hashes gave false confidence. Hash reputation handled by live API. |
 | `ProcessInjectionRule` | Tool-name matching no longer triggers detection | Trivially bypassed by renaming. Demoted to metadata enrichment. |
 | `SecureCacheStore` | Format v2: boot-nonce-bound HMAC key | Defeats SYSTEM-context replay from previous boot sessions. |
-| `DumperNames` list | Retained for threat intel correlation only | Not used for detection decisions — clearly documented. |
+| `DumperNames` list | Retained for threat intel correlation only | Not used for detection decisions â€” clearly documented. |
 
 ## Added in 1.5.0
 
@@ -294,7 +294,7 @@ Composite detections are emitted as Tier1 `DetectionEvent`s directly into the de
 
 | Component | Purpose |
 |-----------|---------|
-| `SecurityValidation` | Centralized input validation utility — filenames, paths, IPs, PIDs, ports, timestamps, secure comparison. |
+| `SecurityValidation` | Centralized input validation utility â€” filenames, paths, IPs, PIDs, ports, timestamps, secure comparison. |
 | `RateLimiter` / `BurstRateLimiter` | Thread-safe rate limiting with burst capability for response actions. |
 | `SafeExecution` | Retry, timeout, circuit breaker, and performance measurement patterns. |
 | `ConfigurationValidation` | Startup validation framework for all configuration sections. |
@@ -303,7 +303,7 @@ Composite detections are emitted as Tier1 `DetectionEvent`s directly into the de
 | `SentinelMetrics` | Performance counters with histograms (P50/P90/P95/P99) for detection, response, deception. |
 | `SecureHttpClientFactory` | TLS 1.2+ enforcement, domain allowlisting, certificate validation for threat intel APIs. |
 | `StructuredLoggingExtensions` | BeginScope helpers for consistent operation context in all log entries. |
-| `QuarantineFileAtomicAsync` | Atomic quarantine: encrypt→move→delete prevents race conditions. |
+| `QuarantineFileAtomicAsync` | Atomic quarantine: encryptâ†’moveâ†’delete prevents race conditions. |
 | `DllUnloadEngine` improvements | IDisposable, burst rate limiter, async API, validation, safe unload. |
 
 ## Added in 3.1.0
@@ -315,7 +315,7 @@ Composite detections are emitted as Tier1 `DetectionEvent`s directly into the de
 | `NamedPipeMonitor` | Detects C2/lateral movement via named pipe pattern matching (Cobalt Strike, PsExec, Impacket, Metasploit). |
 | `WmiPersistenceMonitor` | Periodic WMI namespace scan for planted event subscription persistence (T1546.003). |
 | `StartupSelfTest` | Verifies ETW, DPAPI, quarantine, log file, and rule loading on service start. |
-| Watchdog HMAC signing | Heartbeat file HMAC-signed with DPAPI-derived key — unforgeable without SYSTEM access. |
+| Watchdog HMAC signing | Heartbeat file HMAC-signed with DPAPI-derived key â€” unforgeable without SYSTEM access. |
 | `ProcessAncestryCache` WMI fallback | Falls back to `Win32_Process` WMI query when Toolhelp32 fails (Server Core/IoT). |
 
 ## Added in 3.2.0
@@ -323,7 +323,7 @@ Composite detections are emitted as Tier1 `DetectionEvent`s directly into the de
 | Component | Purpose |
 |-----------|---------|
 | `ChromeCredentialGuardMonitor` | Monitors Chromium browser credential files (Login Data, Cookies, Local State) for unauthorized access. Detects copy-then-read infostealer patterns. Covers Chrome, Edge, Brave, Opera, Vivaldi, Arc. |
-| `FirefoxCredentialGuardMonitor` | Monitors Firefox/Gecko credential files (key4.db, logins.json, cookies.sqlite). Firefox cookies are UNENCRYPTED — trivial to steal. Covers Firefox, Waterfox, Pale Moon, Thunderbird. |
+| `FirefoxCredentialGuardMonitor` | Monitors Firefox/Gecko credential files (key4.db, logins.json, cookies.sqlite). Firefox cookies are UNENCRYPTED â€” trivial to steal. Covers Firefox, Waterfox, Pale Moon, Thunderbird. |
 | `MicrosoftAccountGuardMonitor` | Protects Microsoft account tokens: TokenBroker cache (.tbres), PRT extraction via BrowserCore, Azure AD token theft tools (ROADtools, AADInternals, TokenTacticsV2). |
 | `BrowserExtensionMonitor` | Baselines installed extensions, detects new extensions with dangerous permission combinations, registry-based force-install (enterprise policy abuse). |
 | `ChromeSessionGuardMonitor` | Detects Chrome remote debugging abuse, CDP connections from scripting processes, App-Bound Encryption bypass (elevation_service.exe spawned by non-browser). |
@@ -367,7 +367,7 @@ Composite detections are emitted as Tier1 `DetectionEvent`s directly into the de
 | `GatewayFingerprintMonitor` | Comprehensive network fingerprint baseline (gateway, DNS, DHCP, subnet). Detects evil twin AP, rogue DHCP, DNS server hijack, subnet change. |
 | `PublicIpMonitor` | Public IP baseline via Cloudflare/ipify/icanhazip. Detects VPN hijack, BGP manipulation, geo/ASN shift, network isolation. |
 | `RouteTableMonitor` | Routing table integrity via GetIpForwardTable P/Invoke. Detects static route injection, selective traffic redirection, default route hijack. Filters VPN/Docker/Hyper-V routes. |
-| `DnsResponseValidationMonitor` | DNS response validation against hardcoded CIDR ranges for canary domains. Detects DNS poisoning, captive portal (all domains → same IP). |
+| `DnsResponseValidationMonitor` | DNS response validation against hardcoded CIDR ranges for canary domains. Detects DNS poisoning, captive portal (all domains â†’ same IP). |
 | `TlsCertificateMonitor` | TLS certificate inspection on well-known endpoints. Detects self-signed certs, unexpected CA (MITM), enterprise TLS inspection, cert pinning violations. |
 | `WifiSecurityMonitor` | Wi-Fi state monitoring via netsh. Detects deauthentication flood (rapid disconnect pattern), open network connection, encryption downgrade (evil twin), BSSID change. |
 | `BluetoothMonitor` | Bluetooth attack surface monitoring via registry + service state. Detects BadBT HID device pairing, unauthorized device pairing, unexpected BT activation. |
@@ -419,21 +419,21 @@ Composite detections are emitted as Tier1 `DetectionEvent`s directly into the de
 | Capability | Standard User | Elevated (Admin) |
 |-----------|--------------|-----------------|
 | Process start events | WMI fallback | ETW kernel provider |
-| Injection API calls | ❌ | ETW Threat Intelligence provider |
-| DNS query monitoring | ❌ | ETW DNS-Client provider |
-| Parent PID spoof detection | ❌ | ETW + snapshot comparison |
-| Network connections (IPv4+IPv6 TCP/UDP) | ✅ | ✅ |
-| File rename/write activity | ✅ | ✅ |
-| Hollow process detection | ✅ (same integrity) | ✅ (all processes) |
-| Memory behavior analysis | ✅ (same integrity) | ✅ (all processes) |
-| Syscall stub integrity | ✅ (own process) | ✅ (own process) |
-| Token integrity monitoring | ✅ (limited) | ✅ (all processes) |
-| LSASS dump canary (dbghelp) | ✅ (same integrity) | ✅ (all processes) |
-| Credential canary | ✅ | ✅ |
-| Process ancestry resolution | ✅ | ✅ |
-| Named pipe C2 detection | ✅ | ✅ |
-| WMI persistence scanning | ✅ | ✅ |
-| Behavioral correlation | ✅ | ✅ |
-| Statistical beaconing detection | ✅ | ✅ |
+| Injection API calls | âŒ | ETW Threat Intelligence provider |
+| DNS query monitoring | âŒ | ETW DNS-Client provider |
+| Parent PID spoof detection | âŒ | ETW + snapshot comparison |
+| Network connections (IPv4+IPv6 TCP/UDP) | âœ… | âœ… |
+| File rename/write activity | âœ… | âœ… |
+| Hollow process detection | âœ… (same integrity) | âœ… (all processes) |
+| Memory behavior analysis | âœ… (same integrity) | âœ… (all processes) |
+| Syscall stub integrity | âœ… (own process) | âœ… (own process) |
+| Token integrity monitoring | âœ… (limited) | âœ… (all processes) |
+| LSASS dump canary (dbghelp) | âœ… (same integrity) | âœ… (all processes) |
+| Credential canary | âœ… | âœ… |
+| Process ancestry resolution | âœ… | âœ… |
+| Named pipe C2 detection | âœ… | âœ… |
+| WMI persistence scanning | âœ… | âœ… |
+| Behavioral correlation | âœ… | âœ… |
+| Statistical beaconing detection | âœ… | âœ… |
 
 

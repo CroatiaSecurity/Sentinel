@@ -49,6 +49,13 @@ namespace WindowsSentinel.Core
             await HandleDetectionEventAsync(detectionEvent);
         }
 
+        /// <summary>Overload accepting CancellationToken for compatibility with imported monitors.</summary>
+        public async Task EmitAsync(DetectionEvent detectionEvent, CancellationToken cancellationToken)
+        {
+            if (cancellationToken.IsCancellationRequested) return;
+            await HandleDetectionEventAsync(detectionEvent);
+        }
+
         private async Task ProcessTelemetryQueueAsync()
         {
             var reader = _telemetryChannel.Reader;

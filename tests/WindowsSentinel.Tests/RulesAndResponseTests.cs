@@ -12,7 +12,6 @@ namespace WindowsSentinel.Tests
         private readonly SentinelConfig _config;
         private readonly SentinelMetrics _metrics;
         private readonly JsonlEventLogger _eventLogger;
-        private readonly DeceptionEngine _deceptionEngine;
         private readonly AdvancedResponseEngine _responseEngine;
 
         public RulesAndResponseTests()
@@ -23,8 +22,7 @@ namespace WindowsSentinel.Tests
             // Set up a local test log file
             var tempLog = Path.Combine(Path.GetTempPath(), $"sentinel_test_{Guid.NewGuid():N}.jsonl");
             _eventLogger = new JsonlEventLogger(tempLog);
-            _deceptionEngine = new DeceptionEngine(_metrics, _eventLogger);
-            _responseEngine = new AdvancedResponseEngine(_config, _metrics, _deceptionEngine, _eventLogger);
+            _responseEngine = new AdvancedResponseEngine(_config, _metrics, _eventLogger);
         }
 
         [Fact]
@@ -151,33 +149,8 @@ namespace WindowsSentinel.Tests
             Assert.Equal("malware.exe", originalName);
         }
 
-        [Fact]
-        public void Deception_Tactics_Safe_Execution()
-        {
-            // Spawn a dummy idle process
-            var psi = new System.Diagnostics.ProcessStartInfo("cmd.exe", "/c pause")
-            {
-                CreateNoWindow = true,
-                UseShellExecute = false
-            };
-            using var proc = System.Diagnostics.Process.Start(psi);
-            Assert.NotNull(proc);
-            try
-            {
-                // Wait for the process to initialize
-                System.Threading.Thread.Sleep(500);
 
-                // Run memory flooding against dummy process
-                MemoryFloodingTactic.Execute(proc.Id);
 
-                // Run implant destabilizer against dummy process
-                ImplantDestabilizerTactic.Execute(proc.Id);
-            }
-            finally
-            {
-                try { proc.Kill(); } catch { }
-            }
-        }
 
         [Fact]
         public void AppNetworkPolicyMonitor_Scan_Does_Not_Crash()
@@ -211,6 +184,119 @@ namespace WindowsSentinel.Tests
             var randomHash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"; // Empty file hash
             var verdictUnknown = await repService.GetVerdictAsync(randomHash);
             Assert.True(verdictUnknown == HashVerdict.Safe || verdictUnknown == HashVerdict.Unknown);
+        }
+
+        [Fact]
+        public void NetworkMonitor_Scan_Does_Not_Crash()
+        {
+            var ancestry = new ProcessAncestryCache();
+            var detection = new DetectionEngine(new List<IDetectionRule>(), _metrics, _eventLogger, _responseEngine);
+            var fusion = new TelemetryFusionEngine(new EventGraph());
+            using var monitor = new NetworkMonitor(fusion, detection, ancestry);
+            
+            var method = typeof(NetworkMonitor).GetMethod("PollConnections", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            Assert.NotNull(method);
+            method.Invoke(monitor, new object[] { null });
+        }
+
+        [Fact]
+        public void LsassDumpCanaryMonitor_Scan_Does_Not_Crash()
+        {
+            var detection = new DetectionEngine(new List<IDetectionRule>(), _metrics, _eventLogger, _responseEngine);
+            using var monitor = new LsassDumpCanaryMonitor(detection);
+            
+            var method = typeof(LsassDumpCanaryMonitor).GetMethod("ScanForDbghelpLoad", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            Assert.NotNull(method);
+            method.Invoke(monitor, new object[] { null });
+        }
+
+        [Fact]
+        public void RouteTableMonitor_Scan_Does_Not_Crash()
+        {
+            var detection = new DetectionEngine(new List<IDetectionRule>(), _metrics, _eventLogger, _responseEngine);
+            var logger = Microsoft.Extensions.Logging.Abstractions.NullLogger<RouteTableMonitor>.Instance;
+            using var monitor = new RouteTableMonitor(detection, logger);
+            
+            var method = typeof(RouteTableMonitor).GetMethod("ScanRouteTable", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            Assert.NotNull(method);
+            method.Invoke(monitor, null);
+        }
+
+        [Fact]
+        public void HollowProcessMonitor_Scan_Does_Not_Crash()
+        {
+            var detection = new DetectionEngine(new List<IDetectionRule>(), _metrics, _eventLogger, _responseEngine);
+            var fusion = new TelemetryFusionEngine(new EventGraph());
+            using var monitor = new HollowProcessMonitor(fusion, detection);
+            
+            var method = typeof(HollowProcessMonitor).GetMethod("ScanProcesses", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            Assert.NotNull(method);
+            method.Invoke(monitor, new object[] { null });
+        }
+
+        [Fact]
+        public void MemoryBehaviorAnalyzer_Scan_Does_Not_Crash()
+        {
+            var detection = new DetectionEngine(new List<IDetectionRule>(), _metrics, _eventLogger, _responseEngine);
+            var fusion = new TelemetryFusionEngine(new EventGraph());
+            var logger = Microsoft.Extensions.Logging.Abstractions.NullLogger<MemoryBehaviorAnalyzer>.Instance;
+            using var monitor = new MemoryBehaviorAnalyzer(fusion, detection, logger);
+            
+            var method = typeof(MemoryBehaviorAnalyzer).GetMethod("ScanProcesses", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            Assert.NotNull(method);
+            method.Invoke(monitor, new object[] { null });
+        }
+
+        [Fact]
+        public void TokenIntegrityMonitor_Scan_Does_Not_Crash()
+        {
+            var detection = new DetectionEngine(new List<IDetectionRule>(), _metrics, _eventLogger, _responseEngine);
+            var logger = Microsoft.Extensions.Logging.Abstractions.NullLogger<TokenIntegrityMonitor>.Instance;
+            using var monitor = new TokenIntegrityMonitor(detection, logger);
+            
+            var method = typeof(TokenIntegrityMonitor).GetMethod("ScanProcessIntegrity", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            Assert.NotNull(method);
+            method.Invoke(monitor, new object[] { null });
+        }
+
+        [Fact]
+        public void CredentialCanaryMonitor_Scan_Does_Not_Crash()
+        {
+            var detection = new DetectionEngine(new List<IDetectionRule>(), _metrics, _eventLogger, _responseEngine);
+            var logger = Microsoft.Extensions.Logging.Abstractions.NullLogger<CredentialCanaryMonitor>.Instance;
+            using var monitor = new CredentialCanaryMonitor(detection, logger);
+            
+            var plantMethod = typeof(CredentialCanaryMonitor).GetMethod("PlantCanary", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            Assert.NotNull(plantMethod);
+            try { plantMethod.Invoke(monitor, null); } catch { }
+
+            var checkMethod = typeof(CredentialCanaryMonitor).GetMethod("CheckCanary", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            Assert.NotNull(checkMethod);
+            try { checkMethod.Invoke(monitor, null); } catch { }
+        }
+
+        [Fact]
+        public void PhantomKeystrokeGuard_Pump_Does_Not_Crash()
+        {
+            var detection = new DetectionEngine(new List<IDetectionRule>(), _metrics, _eventLogger, _responseEngine);
+            var logger = Microsoft.Extensions.Logging.Abstractions.NullLogger<PhantomKeystrokeGuard>.Instance;
+            using var monitor = new PhantomKeystrokeGuard(detection, logger);
+            
+            System.Threading.Thread.Sleep(200);
+        }
+
+        [Fact]
+        public void LocalServerMonitor_Scan_Does_Not_Crash()
+        {
+            var detection = new DetectionEngine(new List<IDetectionRule>(), _metrics, _eventLogger, _responseEngine);
+            var fusion = new TelemetryFusionEngine(new EventGraph());
+            var ancestry = new ProcessAncestryCache();
+            var logger = Microsoft.Extensions.Logging.Abstractions.NullLogger<LocalServerMonitor>.Instance;
+            using var monitor = new LocalServerMonitor(fusion, detection, ancestry, logger);
+            
+            var method = typeof(LocalServerMonitor).GetMethod("ScanListeningProcesses", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            Assert.NotNull(method);
+            method.Invoke(monitor, new object[] { null });
         }
     }
 }

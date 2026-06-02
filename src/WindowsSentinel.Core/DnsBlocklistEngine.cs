@@ -12,7 +12,6 @@ namespace WindowsSentinel.Core
         public DnsBlocklistEngine(DetectionEngine detectionEngine)
         {
             _detectionEngine = detectionEngine;
-            // Baseline some known domains
             _maliciousDomains.Add("c2.malicious-domain.com");
             _maliciousDomains.Add("malware-exfil.xyz");
         }
@@ -29,17 +28,55 @@ namespace WindowsSentinel.Core
                     ProcessName = processName,
                     ProcessId = pid,
                     Confidence = 0.90,
-                    Tier = DetectionTier.Tier1Behavioral, // President's Law can kill on DNS blocklist / campaign
+                    Tier = DetectionTier.Tier1Behavioral,
                     Evidence = $"Process '{processName}' resolved a known malicious domain: {domain}",
                     Reasoning = "Outbound DNS query matches threat intelligence blocklist for active malware or C2 infrastructure.",
-                    Metadata = new Dictionary<string, string>
-                    {
-                        { "Domain", domain }
-                    }
+                    Metadata = new Dictionary<string, string> { { "Domain", domain } }
                 };
 
                 await _detectionEngine.EmitAsync(detection);
             }
         }
+
+        /// <summary>2-arg synchronous check — used internally.</summary>
+        public bool IsBlocked(string domain, out BlocklistCategory category)
+        {
+            category = BlocklistCategory.Malware;
+            if (string.IsNullOrWhiteSpace(domain)) return false;
+            if (_maliciousDomains.Contains(domain))
+            {
+                category = BlocklistCategory.Malware;
+                return true;
+            }
+            return false;
+        }
+
+        /// <summary>3-arg overload — used by DnsQueryMonitor (includes blockReason).</summary>
+        public bool IsBlocked(string domain, out BlocklistCategory category, out string blockReason)
+        {
+            blockReason = string.Empty;
+            category = BlocklistCategory.Malware;
+            if (string.IsNullOrWhiteSpace(domain)) return false;
+            if (_maliciousDomains.Contains(domain))
+            {
+                category = BlocklistCategory.Malware;
+                blockReason = "Matched internal malicious domain list";
+                return true;
+            }
+            return false;
+        }
+
+        /// <summary>Adds a domain to the runtime blocklist.</summary>
+        public void AddDomain(string domain) => _maliciousDomains.Add(domain);
+    }
+
+    /// <summary>Category of a blocked domain.</summary>
+    public enum BlocklistCategory
+    {
+        Malware,
+        Phishing,
+        C2,
+        Adware,
+        Tracking
     }
 }

@@ -1,8 +1,8 @@
 # Windows Sentinel
 
-**Userland EDR for Windows — Behavioral Detection, Automated Response & Aggressive Deception**
+**Userland EDR for Windows — Behavioral Detection, Automated Response & Local Threat Reporting**
 
-> Version: 5.2.0 | Author: [Gorstak](https://gorstak.eu) | [GitHub](https://github.com/CroatiaSecurity/Sentinel) | License: MIT
+> Version: 5.3.0 | Author: [Gorstak](https://gorstak.eu) | [GitHub](https://github.com/CroatiaSecurity/Sentinel) | License: MIT
 
 ---
 
@@ -18,8 +18,7 @@ Designed for personal endpoint protection, blue-team education, behavioral analy
 
 - **Detects** malicious behavior across 50+ monitors: process injection, credential dumping, ransomware, C2 beaconing, overlay phishing, lateral movement, phantom keystrokes, and more
 - **Responds** by killing the process tree, quarantining binaries, removing persistence, and blocking attacker IPs
-- **Deceives** attackers before the kill: poisons exfiltrated data, floods C2 servers with fake sessions, deploys filesystem traps, and corrupts implant memory
-- **Reports** confirmed threat hashes and IPs to community threat intel platforms (MalwareBazaar, AbuseIPDB, URLhaus)
+- **Reports** all detections and responses to local JSONL event log (`events.jsonl`) and optionally to community threat intel platforms (MalwareBazaar, AbuseIPDB, URLhaus)
 
 ---
 
@@ -28,7 +27,7 @@ Designed for personal endpoint protection, blue-team education, behavioral analy
 Run the installer as Administrator:
 
 ```powershell
-.\WindowsSentinelSetup-5.2.0.exe
+.\WindowsSentinelSetup-5.3.0.exe
 ```
 
 Installs to `%ProgramFiles%\WindowsSentinel`, creates a Windows Service (SYSTEM), and launches the Agent into the user session with a system tray icon.
@@ -56,7 +55,7 @@ Installs to `%ProgramFiles%\WindowsSentinel`, creates a Windows Service (SYSTEM)
 }
 ```
 
-- `ActiveResponse: false` — switches to monitor-only mode (no kills)
+- `ActiveResponse: false` â€” switches to monitor-only mode (no kills)
 - AbuseIPDB/URLhaus reporting requires free API keys from their respective sites
 
 ---
@@ -78,10 +77,10 @@ cd installer
 
 ## Limitations
 
-- No kernel driver — cannot prevent BYOVD, direct syscalls, or kernel-level attacks
-- Local admin wins — an attacker with admin rights can kill the service
-- Not a replacement for Windows Defender or commercial EDR — run alongside them
-- Single-machine scope — no central management or fleet telemetry
+- No kernel driver â€” cannot prevent BYOVD, direct syscalls, or kernel-level attacks
+- Local admin wins â€” an attacker with admin rights can kill the service
+- Not a replacement for Windows Defender or commercial EDR â€” run alongside them
+- Single-machine scope â€” no central management or fleet telemetry
 
 ---
 
@@ -94,10 +93,9 @@ The author(s) accept no liability for any damage, data loss, system instability,
 - Termination of legitimate processes incorrectly identified as threats
 - Quarantine or deletion of files
 - Network blocks applied to legitimate hosts
-- Deception tactics affecting system state
 - Conflicts with antivirus, EDR, or other security software
 
-**The aggressive response and deception features (process termination, DLL unloading, firewall rules, memory manipulation, file operations) are powerful and operate automatically. You are responsible for understanding what this software does before deploying it.**
+**The aggressive response features (process termination, firewall rules, file quarantine) are powerful and operate automatically. You are responsible for understanding what this software does before deploying it.**
 
 This software is intended for use on systems you own or have explicit written authorization to monitor and protect. Use on systems without authorization may violate computer fraud and abuse laws in your jurisdiction.
 
@@ -105,4 +103,4 @@ By using this software, you agree that the author(s) bear no responsibility for 
 
 ---
 
-MIT License — see [LICENSE](LICENSE) for full terms.
+MIT License â€” see [LICENSE](LICENSE) for full terms.

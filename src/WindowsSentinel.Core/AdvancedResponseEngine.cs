@@ -9,7 +9,6 @@ namespace WindowsSentinel.Core
     {
         private readonly SentinelConfig _config;
         private readonly SentinelMetrics _metrics;
-        private readonly DeceptionEngine _deceptionEngine;
         private readonly JsonlEventLogger _eventLogger;
 
         // President's Law fragments
@@ -38,12 +37,10 @@ namespace WindowsSentinel.Core
         public AdvancedResponseEngine(
             SentinelConfig config,
             SentinelMetrics metrics,
-            DeceptionEngine deceptionEngine,
             JsonlEventLogger eventLogger)
         {
             _config = config;
             _metrics = metrics;
-            _deceptionEngine = deceptionEngine;
             _eventLogger = eventLogger;
         }
 
@@ -82,10 +79,7 @@ namespace WindowsSentinel.Core
 
             if (shouldKill && detection.ProcessId > 4)
             {
-                // 1. Run Pre-Kill Deception
-                await _deceptionEngine.ExecutePreKillDeceptionAsync(detection.ProcessId, detection.RuleName, detection.Reasoning);
-
-                // 2. Terminate Process Tree
+                // Terminate Process Tree
                 HardeningModule.SafeKillProcessTree(detection.ProcessId);
 
                 // Record response metric

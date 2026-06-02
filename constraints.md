@@ -1,10 +1,10 @@
-# Windows Sentinel — Constraints
+﻿# Windows Sentinel â€” Constraints
 
-**Version: 5.2.0**
+**Version: 5.3.0**
 
 ---
 
-## Hard Rules — Never Violate
+## Hard Rules â€” Never Violate
 
 | Constraint | Rationale |
 |-----------|-----------|
@@ -12,11 +12,11 @@
 | No direct syscalls | Maintains standard Windows API contract; no bypass of security boundaries |
 | No persistence mechanisms | The tool must not survive reboots unless the user explicitly installs it as a service |
 | No self-hiding behavior | Must be visible in process list, task manager, and event logs |
-| No string-built JSON | All JSON output via `System.Text.Json` serialization only — no concatenation |
+| No string-built JSON | All JSON output via `System.Text.Json` serialization only â€” no concatenation |
 | No `Thread.Sleep` without cancellation | All waits must respect `CancellationToken` |
 | No static mutable state | All shared state via `ConcurrentDictionary`, `Channel<T>`, or `SemaphoreSlim` |
 | No shelling out to system tools | No `Process.Start("cmd.exe", ...)` for detection or response logic |
-| Tier2 can never trigger action | Enforced unconditionally in `AdvancedResponseEngine.HandleAsync` — no exceptions, no config override |
+| Tier2 can never trigger action | Enforced unconditionally in `AdvancedResponseEngine.HandleAsync` â€” no exceptions, no config override |
 | Active response on by default | Ships in killing mode. President's Law rules fire immediately. |
 
 ---
@@ -37,18 +37,18 @@
 
 - Must not hide itself from the process list, task manager, or ETW
 - Must not self-replicate or copy itself to other locations
-- Must be fully user-controlled — no autonomous behavior beyond what is configured
+- Must be fully user-controlled â€” no autonomous behavior beyond what is configured
 - All actions taken (including process kills) must be logged before execution
 
 ---
 
 ## Code Quality Constraints
 
-- **Dependency Injection** required for all services — no service locator, no `new` for injected dependencies
+- **Dependency Injection** required for all services â€” no service locator, no `new` for injected dependencies
 - **CancellationToken** must be threaded through every async method
 - **All disposable objects** must implement `IAsyncDisposable` and be disposed in `StopAsync` / `DisposeAsync`
-- **No silent exception swallowing** — every `catch` block must log the exception (debug level minimum)
-- **Graceful degradation** — if a monitor fails to start, log the error and continue; do not crash the host
+- **No silent exception swallowing** â€” every `catch` block must log the exception (debug level minimum)
+- **Graceful degradation** â€” if a monitor fails to start, log the error and continue; do not crash the host
 
 ---
 
@@ -68,8 +68,8 @@
 |-----------|-----------|
 | Deception time budget: 2 seconds maximum | Kill must never be significantly delayed by deception. Attacker is still active during deception window. |
 | Deception failure never prevents kill | Deception is a bonus, not a gate. All tactic failures are caught and logged; kill proceeds unconditionally. |
-| Never deceive own PID or PID ≤ 4 | Self-protection and system stability. Deception targets only confirmed malicious processes. |
-| No deception on Tier2 detections | Deception only fires on President's Law kills. Tier2 is log-only — no action of any kind. |
+| Never deceive own PID or PID â‰¤ 4 | Self-protection and system stability. Deception targets only confirmed malicious processes. |
+| No deception on Tier2 detections | Deception only fires on President's Law kills. Tier2 is log-only â€” no action of any kind. |
 | Beacon flooding only targets public IPs | Never flood private/loopback addresses. Prevents accidental DoS of local services. |
 | All deception actions logged before execution | Full forensic trail. User can review exactly what was done and revert if needed. |
 | Environment poisoning is HKCU-scoped only | Never modify HKLM (system-wide). Limits blast radius to the compromised user session. |
@@ -87,7 +87,7 @@
 - Must target `net8.0-windows`
 - Must function as a standard user (reduced capability, no crash)
 - Must function as an elevated user (full capability)
-- Log files must not grow unbounded — rotation required (50 MB / 5 files)
-- Detection deduplication required — same signal must not flood the log
+- Log files must not grow unbounded â€” rotation required (50 MB / 5 files)
+- Detection deduplication required â€” same signal must not flood the log
 
 
