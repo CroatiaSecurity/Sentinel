@@ -15,19 +15,31 @@ namespace WindowsSentinel.Service
         private readonly JsonlEventLogger _eventLogger;
         private readonly DetectionEngine _detectionEngine;
         private readonly ProcessAncestryCache _ancestryCache;
+        private readonly ClipboardSanitizer _clipboardSanitizer;
+        private readonly UsbDeviceFingerprinter _usbDeviceFingerprinter;
+        private readonly AppNetworkPolicyMonitor _networkPolicyMonitor;
+        private readonly DnsBlocklistEngine _dnsBlocklistEngine;
 
         public SentinelService(
             ILogger<SentinelService> logger,
             SentinelConfig config,
             JsonlEventLogger eventLogger,
             DetectionEngine detectionEngine,
-            ProcessAncestryCache ancestryCache)
+            ProcessAncestryCache ancestryCache,
+            ClipboardSanitizer clipboardSanitizer,
+            UsbDeviceFingerprinter usbDeviceFingerprinter,
+            AppNetworkPolicyMonitor networkPolicyMonitor,
+            DnsBlocklistEngine dnsBlocklistEngine)
         {
             _logger = logger;
             _config = config;
             _eventLogger = eventLogger;
             _detectionEngine = detectionEngine;
             _ancestryCache = ancestryCache;
+            _clipboardSanitizer = clipboardSanitizer;
+            _usbDeviceFingerprinter = usbDeviceFingerprinter;
+            _networkPolicyMonitor = networkPolicyMonitor;
+            _dnsBlocklistEngine = dnsBlocklistEngine;
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -42,6 +54,14 @@ namespace WindowsSentinel.Service
             }
 
             _logger.LogInformation("Windows Sentinel Service successfully started.");
+
+            // Log startup to the JSONL log file so it is initialized with non-zero size
+            await _eventLogger.LogEventAsync("service_start", new
+            {
+                Status = "started",
+                Version = "5.2.0",
+                Timestamp = DateTime.UtcNow
+            });
 
             try
             {

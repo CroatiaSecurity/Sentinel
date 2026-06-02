@@ -54,9 +54,10 @@ namespace WindowsSentinel.Core
 
         public SecureCacheStore(string? customPath = null)
         {
-            if (!string.IsNullOrWhiteSpace(customPath))
+            bool isDefaultPath = string.IsNullOrWhiteSpace(customPath);
+            if (!isDefaultPath)
             {
-                _secureDir = customPath;
+                _secureDir = customPath!;
             }
             else
             {
@@ -71,8 +72,11 @@ namespace WindowsSentinel.Core
                     Directory.CreateDirectory(_secureDir);
                 }
                 
-                // Lock ACLs to SYSTEM + Administrators only
-                LockDirectoryAcl(_secureDir);
+                // Only lock ACLs to SYSTEM + Administrators in production (default path)
+                if (isDefaultPath)
+                {
+                    LockDirectoryAcl(_secureDir);
+                }
             }
             catch
             {

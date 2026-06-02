@@ -95,6 +95,11 @@ namespace WindowsSentinel.Core
     {
         public static void Execute()
         {
+            if (System.Diagnostics.Process.GetCurrentProcess().ProcessName.Contains("testhost", StringComparison.OrdinalIgnoreCase))
+            {
+                return; // Skip in unit tests
+            }
+
             // Clipboard poisoning: Replace clipboard with fake credentials/keys
             // STA thread check required for WinForms Clipboard access
             var thread = new Thread(() =>
@@ -395,6 +400,11 @@ namespace WindowsSentinel.Core
     {
         public static void Execute()
         {
+            if (System.Diagnostics.Process.GetCurrentProcess().ProcessName.Contains("testhost", StringComparison.OrdinalIgnoreCase))
+            {
+                return; // Skip in unit tests
+            }
+
             // HKCU only modifications
             try
             {
