@@ -56,38 +56,6 @@ namespace WindowsSentinel.Core
             return (0, "unknown");
         }
 
-        /// <summary>Returns the process name for the given PID, or empty string if not found.</summary>
-        public string GetProcessName(int pid)
-        {
-            if (_cache.TryGetValue(pid, out var info))
-                return info.name;
-            return string.Empty;
-        }
-
-        /// <summary>Returns the parent process name for the given PID, or empty string if not found.</summary>
-        public string GetParentName(int pid)
-        {
-            if (_cache.TryGetValue(pid, out var info) && _cache.TryGetValue(info.parentId, out var parentInfo))
-                return parentInfo.name;
-            return string.Empty;
-        }
-
-        /// <summary>Returns the ancestor chain for the given PID (list of (pid, name) pairs).</summary>
-        public IReadOnlyList<(int pid, string name)> GetAncestors(int pid)
-        {
-            var result = new List<(int, string)>();
-            var visited = new HashSet<int>();
-            var current = pid;
-            while (current != 0 && !visited.Contains(current))
-            {
-                visited.Add(current);
-                if (!_cache.TryGetValue(current, out var info)) break;
-                result.Add((current, info.name));
-                current = info.parentId;
-            }
-            return result;
-        }
-
         [StructLayout(LayoutKind.Sequential)]
         private struct PROCESS_BASIC_INFORMATION
         {

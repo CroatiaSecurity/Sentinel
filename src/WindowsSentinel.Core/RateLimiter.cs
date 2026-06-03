@@ -1,31 +1,23 @@
 using System;
-using System.Threading.Tasks;
 
 namespace WindowsSentinel.Core
 {
-    public class RateLimiter : IDisposable
+    public class RateLimiter
     {
         private readonly int _limit;
         private readonly TimeSpan _window;
         private readonly object _lock = new();
         private int _count;
         private DateTime _windowStart;
-        private bool _disposed;
 
-        // Old API (name: limit, window)
-        public RateLimiter(int maxRequests, TimeSpan timeWindow)
+        public RateLimiter(int limit, TimeSpan window)
         {
-            _limit = maxRequests;
-            _window = timeWindow;
+            _limit = limit;
+            _window = window;
             _windowStart = DateTime.UtcNow;
         }
 
-        // Compatibility overload used by DllUnloadEngine (maxRequests, timeWindow)
-        public RateLimiter(int maxRequests, TimeSpan timeWindow, bool dummy) : this(maxRequests, timeWindow) { }
-
-        public bool AllowRequest() => TryAcquire();
-
-        public bool TryAcquire()
+        public bool AllowRequest()
         {
             lock (_lock)
             {
@@ -44,106 +36,41 @@ namespace WindowsSentinel.Core
                 return false;
             }
         }
-
-        public (int Current, int Max, TimeSpan Remaining) GetStatus()
-        {
-            lock (_lock)
-            {
-                var remaining = _window - (DateTime.UtcNow - _windowStart);
-                if (remaining < TimeSpan.Zero) remaining = TimeSpan.Zero;
-                return (_count, _limit, remaining);
-            }
-        }
-
-        public void Dispose()
-        {
-            _disposed = true;
-            GC.SuppressFinalize(this);
-        }
     }
 
-    public class BurstRateLimiter : IDisposable
+    public class BurstRateLimiter
     {
-        private readonly int _sustainedRate;
-        private readonly TimeSpan _sustainedWindow;
-        private readonly int _burstCapacity;
+        private readonly double _limitPerSecond;
+        private readonly double _maxBurst;
         private readonly object _lock = new();
-        private int _sustainedCount;
-        private int _burstTokens;
-        private DateTime _windowStart;
-        private DateTime _lastBurstRefill;
-        private bool _disposed;
+        private double _tokens;
+        private DateTime _lastRefill;
 
-        // Old simple API
         public BurstRateLimiter(double limitPerSecond, double maxBurst)
         {
-            _sustainedRate = (int)limitPerSecond;
-            _sustainedWindow = TimeSpan.FromSeconds(1);
-            _burstCapacity = (int)maxBurst;
-            _burstTokens = _burstCapacity;
-            _windowStart = DateTime.UtcNow;
-            _lastBurstRefill = DateTime.UtcNow;
+            _limitPerSecond = limitPerSecond;
+            _maxBurst = maxBurst;
+            _tokens = maxBurst;
+            _lastRefill = DateTime.UtcNow;
         }
 
-        // Full API matching DllUnloadEngine
-        public BurstRateLimiter(int sustainedRate, TimeSpan sustainedWindow, int burstCapacity, TimeSpan burstRechargeTime)
-        {
-            _sustainedRate = sustainedRate;
-            _sustainedWindow = sustainedWindow;
-            _burstCapacity = burstCapacity;
-            _burstTokens = burstCapacity;
-            _windowStart = DateTime.UtcNow;
-            _lastBurstRefill = DateTime.UtcNow;
-        }
-
-        public bool AllowRequest() => TryAcquireAsync().GetAwaiter().GetResult();
-
-        public Task<bool> TryAcquireAsync()
+        public bool AllowRequest()
         {
             lock (_lock)
             {
                 var now = DateTime.UtcNow;
-                // Refill burst tokens
-                if (now - _lastBurstRefill > _sustainedWindow)
-                {
-                    _burstTokens = Math.Min(_burstCapacity, _burstTokens + _sustainedRate);
-                    _lastBurstRefill = now;
-                }
-                // Check sustained rate
-                if (now - _windowStart >= _sustainedWindow)
-                {
-                    _sustainedCount = 0;
-                    _windowStart = now;
-                }
-                if (_sustainedCount < _sustainedRate)
-                {
-                    _sustainedCount++;
-                    return Task.FromResult(true);
-                }
-                // Fall back to burst
-                if (_burstTokens > 0)
-                {
-                    _burstTokens--;
-                    return Task.FromResult(true);
-                }
-                return Task.FromResult(false);
-            }
-        }
+                var elapsed = (now - _lastRefill).TotalSeconds;
+                _lastRefill = now;
 
-        public (int AvailableBurst, int BurstCapacity, (int Current, int Max, TimeSpan Remaining) Sustained) GetStatus()
-        {
-            lock (_lock)
-            {
-                var remaining = _sustainedWindow - (DateTime.UtcNow - _windowStart);
-                if (remaining < TimeSpan.Zero) remaining = TimeSpan.Zero;
-                return (_burstTokens, _burstCapacity, (_sustainedCount, _sustainedRate, remaining));
-            }
-        }
+                _tokens = Math.Min(_maxBurst, _tokens + elapsed * _limitPerSecond);
 
-        public void Dispose()
-        {
-            _disposed = true;
-            GC.SuppressFinalize(this);
+                if (_tokens >= 1.0)
+                {
+                    _tokens -= 1.0;
+                    return true;
+                }
+                return false;
+            }
         }
     }
 }

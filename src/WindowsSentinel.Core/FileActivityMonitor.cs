@@ -131,14 +131,6 @@ namespace WindowsSentinel.Core
                     paths.Add(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
                 }
             }
-
-            // Always watch Sentinel's own installation folder to prevent tampering
-            var appDir = AppContext.BaseDirectory.TrimEnd('\\');
-            if (Directory.Exists(appDir) && !paths.Contains(appDir))
-            {
-                paths.Add(appDir);
-            }
-
             return paths;
         }
 
@@ -219,203 +211,13 @@ namespace WindowsSentinel.Core
         private void OnFileEvent(object sender, FileSystemEventArgs e)
         {
             var processInfo = GetProcessUsingFile(e.FullPath);
-
-            if (IsSentinelTampering(e.FullPath, processInfo.pid, processInfo.name, out var tamperReason))
-            {
-                TryDeleteFile(e.FullPath);
-                SubmitTamperAlert(e.FullPath, processInfo.pid, processInfo.name, tamperReason!);
-                return;
-            }
-
-            if (IsSuspiciousDbghelpDrop(e.FullPath, out var dropReason))
-            {
-                if (!IsWriterTrusted(processInfo.pid, processInfo.name))
-                {
-                    TryDeleteFile(e.FullPath);
-                    SubmitSideloadAlert(e.FullPath, processInfo.pid, processInfo.name, dropReason!);
-                    return;
-                }
-            }
-
             SubmitEvent(e.FullPath, e.ChangeType.ToString().ToUpperInvariant(), null, processInfo.pid, processInfo.name);
         }
 
         private void OnFileRenamed(object sender, RenamedEventArgs e)
         {
             var processInfo = GetProcessUsingFile(e.FullPath);
-
-            if (IsSentinelTampering(e.FullPath, processInfo.pid, processInfo.name, out var tamperReason))
-            {
-                TryDeleteFile(e.FullPath);
-                SubmitTamperAlert(e.FullPath, processInfo.pid, processInfo.name, tamperReason!);
-                return;
-            }
-
-            if (IsSuspiciousDbghelpDrop(e.FullPath, out var dropReason))
-            {
-                if (!IsWriterTrusted(processInfo.pid, processInfo.name))
-                {
-                    TryDeleteFile(e.FullPath);
-                    SubmitSideloadAlert(e.FullPath, processInfo.pid, processInfo.name, dropReason!);
-                    return;
-                }
-            }
-
             SubmitEvent(e.OldFullPath, "RENAME", e.FullPath, processInfo.pid, processInfo.name);
-        }
-
-        private static bool IsWriterTrusted(int pid, string name)
-        {
-            if (pid <= 4) return true;
-
-            var lowerName = name.ToLowerInvariant();
-            if (lowerName == "svchost" || lowerName == "services" || lowerName == "wininit" ||
-                lowerName == "msmpeng" || lowerName == "sentinelservice" || lowerName == "sentinelagent" ||
-                lowerName == "trustedinstaller" || lowerName == "tiworker" || lowerName == "msiexec")
-            {
-                return true;
-            }
-
-            try
-            {
-                using var p = Process.GetProcessById(pid);
-                string? path = p.MainModule?.FileName;
-                if (string.IsNullOrEmpty(path)) return false;
-
-                var pathLower = path.ToLowerInvariant();
-                if (pathLower.Contains(@"\windows\") ||
-                    pathLower.Contains(@"\program files\") ||
-                    pathLower.Contains(@"\program files (x86)\") ||
-                    pathLower.Contains(@"\steamapps\") ||
-                    pathLower.Contains(@"\steam\") ||
-                    pathLower.Contains(@"\epic games\") ||
-                    pathLower.Contains(@"\gog galaxy\") ||
-                    pathLower.Contains(@"\riot games\") ||
-                    pathLower.Contains(@"\battle.net\") ||
-                    pathLower.Contains(@"\ubisoft\") ||
-                    pathLower.Contains(@"\ea games\") ||
-                    pathLower.Contains(@"\origin\"))
-                {
-                    return true;
-                }
-
-                // Check signature
-                using var cert = new System.Security.Cryptography.X509Certificates.X509Certificate2(
-                    System.Security.Cryptography.X509Certificates.X509Certificate.CreateFromSignedFile(path));
-                return true;
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
-        private static bool IsSuspiciousDbghelpDrop(string filePath, out string? reason)
-        {
-            reason = null;
-            if (string.IsNullOrWhiteSpace(filePath)) return false;
-
-            var fileName = Path.GetFileName(filePath);
-            if (!string.Equals(fileName, "dbghelp.dll", StringComparison.OrdinalIgnoreCase) &&
-                !string.Equals(fileName, "dbgcore.dll", StringComparison.OrdinalIgnoreCase))
-            {
-                return false;
-            }
-
-            var pathLower = filePath.ToLowerInvariant();
-            if (pathLower.Contains(@"\windows\system32\") ||
-                pathLower.Contains(@"\windows\syswow64\") ||
-                pathLower.Contains(@"\windows\winsxs\") ||
-                pathLower.Contains(@"\windows\systemapps\"))
-            {
-                return false;
-            }
-
-            reason = $"System DLL '{fileName}' was written to a non-system path: {filePath}";
-            return true;
-        }
-
-        private static bool IsSentinelTampering(string filePath, int pid, string processName, out string? reason)
-        {
-            reason = null;
-            if (string.IsNullOrWhiteSpace(filePath)) return false;
-
-            var appDir = AppContext.BaseDirectory.ToLowerInvariant().TrimEnd('\\') + "\\";
-            var pathLower = filePath.ToLowerInvariant();
-            if (!pathLower.StartsWith(appDir)) return false;
-
-            // Allow Sentinel's own components and Windows installer
-            var lowerName = processName.ToLowerInvariant();
-            if (lowerName == "sentinelservice" || lowerName == "sentinelagent" ||
-                lowerName == "trustedinstaller" || lowerName == "tiworker" || lowerName == "msiexec")
-            {
-                return false;
-            }
-
-            reason = $"Unauthorized process '{processName}' (PID {pid}) attempted to write file '{Path.GetFileName(filePath)}' inside Sentinel's directory.";
-            return true;
-        }
-
-        private static bool TryDeleteFile(string path)
-        {
-            for (int i = 0; i < 3; i++)
-            {
-                try
-                {
-                    if (File.Exists(path))
-                    {
-                        File.Delete(path);
-                        return true;
-                    }
-                }
-                catch
-                {
-                    Thread.Sleep(50);
-                }
-            }
-            return false;
-        }
-
-        private void SubmitTamperAlert(string filePath, int pid, string processName, string reason)
-        {
-            _ = _detectionEngine.EmitAsync(new DetectionEvent
-            {
-                RuleName = "Anti-Tamper: Unauthorized Write to Sentinel Directory",
-                ProcessName = processName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? processName : processName + ".exe",
-                ProcessId = pid,
-                Confidence = 0.99,
-                Tier = DetectionTier.Tier1Behavioral,
-                Evidence = reason,
-                Reasoning = "An unauthorized process attempted to create, modify, or drop files inside the Sentinel EDR installation directory. This is an anti-tamper violation (T1562.001) targeting EDR components. The file was immediately deleted, and the process was flagged for active response termination.",
-                Timestamp = DateTime.UtcNow,
-                Metadata = new Dictionary<string, string>
-                {
-                    { "technique", "T1562.001 - Impair Defenses: Disable or Modify Tools" },
-                    { "file_path", filePath },
-                    { "tamper_target", "Sentinel installation folder" }
-                }
-            });
-        }
-
-        private void SubmitSideloadAlert(string filePath, int pid, string processName, string reason)
-        {
-            _ = _detectionEngine.EmitAsync(new DetectionEvent
-            {
-                RuleName = "DLL Sideloading: Suspicious System DLL Dropped",
-                ProcessName = processName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? processName : processName + ".exe",
-                ProcessId = pid,
-                Confidence = 0.95,
-                Tier = DetectionTier.Tier1Behavioral,
-                Evidence = $"Process '{processName}' dropped system DLL '{Path.GetFileName(filePath)}' at '{filePath}'. File was deleted by Sentinel to prevent sideloading.",
-                Reasoning = "Untrusted process attempted to write a critical system DLL to a user-writable path. This is a characteristic indicator of DLL sideloading/hijacking (T1574.002) which targets legitimate executables. The file was immediately deleted to prevent successful execution, and the writing process is flagged for active response termination.",
-                Timestamp = DateTime.UtcNow,
-                Metadata = new Dictionary<string, string>
-                {
-                    { "technique", "T1574.002 - DLL Side-Loading" },
-                    { "file_path", filePath },
-                    { "dll_name", Path.GetFileName(filePath) }
-                }
-            });
         }
 
         private void SubmitEvent(string path, string operation, string? targetPath, int pid, string name)
@@ -445,25 +247,6 @@ namespace WindowsSentinel.Core
         private static (int pid, string name) GetProcessUsingFile(string filePath)
         {
             if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath))
-            {
-                return (0, "unknown");
-            }
-
-            // Exclude common gaming directories to prevent Restart Manager lock contention on game saves/simulations
-            if (filePath.Contains(@"\My Games\", StringComparison.OrdinalIgnoreCase) ||
-                filePath.Contains(@"\Saved Games\", StringComparison.OrdinalIgnoreCase) ||
-                filePath.Contains(@"\Sports Interactive\", StringComparison.OrdinalIgnoreCase) ||
-                filePath.Contains(@"\Football Manager\", StringComparison.OrdinalIgnoreCase) ||
-                filePath.Contains(@"\Paradox Interactive\", StringComparison.OrdinalIgnoreCase) ||
-                filePath.Contains(@"\Steam\", StringComparison.OrdinalIgnoreCase) ||
-                filePath.Contains(@"\steamapps\", StringComparison.OrdinalIgnoreCase) ||
-                filePath.Contains(@"\Epic Games\", StringComparison.OrdinalIgnoreCase) ||
-                filePath.Contains(@"\Origin\", StringComparison.OrdinalIgnoreCase) ||
-                filePath.Contains(@"\Battle.net\", StringComparison.OrdinalIgnoreCase) ||
-                filePath.Contains(@"\GOG Galaxy\", StringComparison.OrdinalIgnoreCase) ||
-                filePath.Contains(@"\Ubisoft\", StringComparison.OrdinalIgnoreCase) ||
-                filePath.Contains(@"\Electronic Arts\", StringComparison.OrdinalIgnoreCase) ||
-                filePath.Contains(@"\BioWare\", StringComparison.OrdinalIgnoreCase))
             {
                 return (0, "unknown");
             }

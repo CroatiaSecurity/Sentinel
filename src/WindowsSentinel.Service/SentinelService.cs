@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -18,7 +18,6 @@ namespace WindowsSentinel.Service
         private readonly ClipboardSanitizer _clipboardSanitizer;
         private readonly UsbDeviceFingerprinter _usbDeviceFingerprinter;
         private readonly AppNetworkPolicyMonitor _networkPolicyMonitor;
-        private readonly DnsBlocklistEngine _dnsBlocklistEngine;
         private readonly WmiProcessMonitor _wmiProcessMonitor;
         private readonly FileActivityMonitor _fileActivityMonitor;
         private readonly NetworkMonitor _networkMonitor;
@@ -28,7 +27,6 @@ namespace WindowsSentinel.Service
         private readonly MemoryBehaviorAnalyzer _memoryBehaviorAnalyzer;
         private readonly TokenIntegrityMonitor _tokenIntegrityMonitor;
         private readonly CredentialCanaryMonitor _credentialCanaryMonitor;
-        private readonly PhantomKeystrokeGuard _phantomKeystrokeGuard;
         private readonly LocalServerMonitor _localServerMonitor;
 
         public SentinelService(
@@ -40,7 +38,6 @@ namespace WindowsSentinel.Service
             ClipboardSanitizer clipboardSanitizer,
             UsbDeviceFingerprinter usbDeviceFingerprinter,
             AppNetworkPolicyMonitor networkPolicyMonitor,
-            DnsBlocklistEngine dnsBlocklistEngine,
             WmiProcessMonitor wmiProcessMonitor,
             FileActivityMonitor fileActivityMonitor,
             NetworkMonitor networkMonitor,
@@ -50,7 +47,6 @@ namespace WindowsSentinel.Service
             MemoryBehaviorAnalyzer memoryBehaviorAnalyzer,
             TokenIntegrityMonitor tokenIntegrityMonitor,
             CredentialCanaryMonitor credentialCanaryMonitor,
-            PhantomKeystrokeGuard phantomKeystrokeGuard,
             LocalServerMonitor localServerMonitor)
         {
             _logger = logger;
@@ -61,7 +57,6 @@ namespace WindowsSentinel.Service
             _clipboardSanitizer = clipboardSanitizer;
             _usbDeviceFingerprinter = usbDeviceFingerprinter;
             _networkPolicyMonitor = networkPolicyMonitor;
-            _dnsBlocklistEngine = dnsBlocklistEngine;
             _wmiProcessMonitor = wmiProcessMonitor;
             _fileActivityMonitor = fileActivityMonitor;
             _networkMonitor = networkMonitor;
@@ -71,7 +66,6 @@ namespace WindowsSentinel.Service
             _memoryBehaviorAnalyzer = memoryBehaviorAnalyzer;
             _tokenIntegrityMonitor = tokenIntegrityMonitor;
             _credentialCanaryMonitor = credentialCanaryMonitor;
-            _phantomKeystrokeGuard = phantomKeystrokeGuard;
             _localServerMonitor = localServerMonitor;
         }
 
@@ -92,7 +86,7 @@ namespace WindowsSentinel.Service
             await _eventLogger.LogEventAsync("service_start", new
             {
                 Status = "started",
-                Version = "5.5.0",
+                Version = "5.6.0",
                 Timestamp = DateTime.UtcNow
             });
 
@@ -162,3 +156,4 @@ namespace WindowsSentinel.Service
         }
     }
 }
+

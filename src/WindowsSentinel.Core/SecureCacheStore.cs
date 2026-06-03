@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -51,12 +51,6 @@ namespace WindowsSentinel.Core
             ref DATA_BLOB pDataOut);
 
         private const int CRYPTPROTECT_UI_FORBIDDEN = 0x1;
-
-        /// <summary>2-arg constructor used by IoCScanner (logger ignored in new impl).</summary>
-        public SecureCacheStore(Microsoft.Extensions.Logging.ILogger logger, string cacheKey)
-            : this(System.IO.Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-                "WindowsSentinel", "cache", cacheKey)) { }
 
         public SecureCacheStore(string? customPath = null)
         {
@@ -291,94 +285,8 @@ namespace WindowsSentinel.Core
             }
             catch
             {
-                // Best effort â€” may fail if process is not elevated
+                // Best effort — may fail if process is not elevated
             }
-        }
-        /// <summary>Loads a cached object of type T (returns null on miss or error).</summary>
-        public T? TryLoad<T>() where T : class
-        {
-            try
-            {
-                var files = System.IO.Directory.GetFiles(_secureDir, "*.cache");
-                foreach (var f in files)
-                {
-                    var bytes = TryReadProtected(f);
-                    if (bytes == null) continue;
-                    var json = System.Text.Encoding.UTF8.GetString(bytes);
-                    return System.Text.Json.JsonSerializer.Deserialize<T>(json);
-                }
-            }
-            catch { }
-            return null;
-        }
-
-        /// <summary>Saves a cached object of type T (returns false on error).</summary>
-        public bool TrySave<T>(T value) where T : class
-        {
-            try
-            {
-                if (!System.IO.Directory.Exists(_secureDir))
-                    System.IO.Directory.CreateDirectory(_secureDir);
-                var json = System.Text.Json.JsonSerializer.Serialize(value);
-                var bytes = System.Text.Encoding.UTF8.GetBytes(json);
-                var protected_ = TryWriteProtected(bytes);
-                if (protected_ == null) return false;
-                var path = System.IO.Path.Combine(_secureDir, "data.cache");
-                System.IO.File.WriteAllBytes(path, protected_);
-                return true;
-            }
-            catch { return false; }
-        }
-
-        private byte[]? TryReadProtected(string path)
-        {
-            try
-            {
-                var data = System.IO.File.ReadAllBytes(path);
-                // Strip HMAC (last 32 bytes) and try to decrypt
-                if (data.Length < 32) return null;
-                var payload = data[..^32];
-                return TryDecryptDpapi(payload);
-            }
-            catch { return null; }
-        }
-
-        private byte[]? TryWriteProtected(byte[] data)
-        {
-            try
-            {
-                var encrypted = TryEncryptDpapi(data);
-                if (encrypted == null) return null;
-                var hmac = ComputeHmac(encrypted);
-                return encrypted.Concat(hmac).ToArray();
-            }
-            catch { return null; }
-        }
-
-        private byte[]? TryDecryptDpapi(byte[] data)
-        {
-            try
-            {
-                return System.Security.Cryptography.ProtectedData.Unprotect(
-                    data, null, System.Security.Cryptography.DataProtectionScope.LocalMachine);
-            }
-            catch { return null; }
-        }
-
-        private static byte[]? TryEncryptDpapi(byte[] data)
-        {
-            try
-            {
-                return System.Security.Cryptography.ProtectedData.Protect(
-                    data, null, System.Security.Cryptography.DataProtectionScope.LocalMachine);
-            }
-            catch { return null; }
-        }
-
-        private byte[] ComputeHmac(byte[] data)
-        {
-            using var hmac = new System.Security.Cryptography.HMACSHA256(_hmacKey);
-            return hmac.ComputeHash(data);
         }
     }
 }

@@ -1,6 +1,6 @@
-[Setup]
+﻿[Setup]
 AppName=Windows Sentinel
-AppVersion=5.5.0
+AppVersion=5.6.0
 AppPublisher=Gorstak
 AppPublisherURL=https://gorstak.eu
 SourceDir=.
@@ -11,7 +11,7 @@ UninstallDisplayIcon={app}\Sentinel.ico
 Compression=lzma2
 SolidCompression=yes
 OutputDir=.
-OutputBaseFilename=WindowsSentinelSetup-5.5.0
+OutputBaseFilename=WindowsSentinelSetup-5.6.0
 PrivilegesRequired=admin
 
 [Files]
@@ -42,3 +42,4 @@ Filename: "{app}\WindowsSentinel.Agent.exe"; Flags: nowait postinstall runasorig
 ; Stop and delete the service
 Filename: "{sys}\sc.exe"; Parameters: "stop ""Windows Sentinel"""; Flags: runhidden
 Filename: "{sys}\sc.exe"; Parameters: "delete ""Windows Sentinel"""; Flags: runhidden
+

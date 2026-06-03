@@ -55,7 +55,14 @@ namespace WindowsSentinel.Service
                     services.AddSingleton<SecureCacheStore>();
                     services.AddSingleton<HashReputationService>();
                     services.AddSingleton<QuarantineManager>();
-                    
+
+                    // Utility services
+                    services.AddSingleton<ClipboardSanitizer>();
+                    services.AddSingleton<UsbDeviceFingerprinter>();
+                    services.AddSingleton<PhantomKeystrokeGuard>();
+                    services.AddSingleton<IoCScanner>();
+                    services.AddSingleton<ParentPidSpoofDetector>();
+
                     // Engines
                     services.AddSingleton<TelemetryFusionEngine>();
                     services.AddSingleton<AdvancedResponseEngine>();
@@ -70,13 +77,14 @@ namespace WindowsSentinel.Service
                     // Detection Engine
                     services.AddSingleton<DetectionEngine>();
 
-                    // Monitors/Background items
+                    // IMonitor implementations (started by SentinelService)
+                    services.AddSingleton<DnsQueryMonitor>();
+                    services.AddSingleton<EtwProcessMonitor>();
+                    services.AddSingleton<EtwThreatIntelMonitor>();
+
+                    // Monitors injected into SentinelService
                     services.AddSingleton<WmiProcessMonitor>();
                     services.AddSingleton<FileActivityMonitor>();
-                    services.AddSingleton<ClipboardSanitizer>();
-                    services.AddSingleton<UsbDeviceFingerprinter>();
-                    services.AddSingleton<AppNetworkPolicyMonitor>();
-                    services.AddSingleton<DnsBlocklistEngine>();
                     services.AddSingleton<NetworkMonitor>();
                     services.AddSingleton<LsassDumpCanaryMonitor>();
                     services.AddSingleton<RouteTableMonitor>();
@@ -84,11 +92,42 @@ namespace WindowsSentinel.Service
                     services.AddSingleton<MemoryBehaviorAnalyzer>();
                     services.AddSingleton<TokenIntegrityMonitor>();
                     services.AddSingleton<CredentialCanaryMonitor>();
-                    services.AddSingleton<PhantomKeystrokeGuard>();
                     services.AddSingleton<LocalServerMonitor>();
-                    // Service Background Worker
+                    services.AddSingleton<AppNetworkPolicyMonitor>();
+
+                    // BackgroundService monitors
                     services.AddHostedService<SentinelService>();
                     services.AddHostedService<AntiTamperGuard>();
+                    services.AddHostedService<ArpSpoofMonitor>();
+                    services.AddHostedService<BluetoothMonitor>();
+                    services.AddHostedService<CanaryFileMonitor>();
+                    services.AddHostedService<ChromeCredentialGuardMonitor>();
+                    services.AddHostedService<ChromeSessionGuardMonitor>();
+                    services.AddHostedService<DataExfiltrationMonitor>();
+                    services.AddHostedService<DeviceInstallMonitor>();
+                    services.AddHostedService<DiskWideDllScanner>();
+                    services.AddHostedService<DllEntropyAnalyzer>();
+                    services.AddHostedService<DllLoadFailureMonitor>();
+                    services.AddHostedService<DnsResponseValidationMonitor>();
+                    services.AddHostedService<FirefoxCredentialGuardMonitor>();
+                    services.AddHostedService<FirewallIntegrityMonitor>();
+                    services.AddHostedService<GatewayFingerprintMonitor>();
+                    services.AddHostedService<MicrosoftAccountGuardMonitor>();
+                    services.AddHostedService<ModuleValidationMonitor>();
+                    services.AddHostedService<PublicIpMonitor>();
+                    services.AddHostedService<RansomwareIoMonitor>();
+                    services.AddHostedService<RemoteAccessMonitor>();
+                    services.AddHostedService<RuntimeModuleIntegrityMonitor>();
+                    services.AddHostedService<ScheduledTaskMonitor>();
+                    services.AddHostedService<SecureBootIntegrityMonitor>();
+                    services.AddHostedService<SyscallStubMonitor>();
+                    services.AddHostedService<TlsCertificateMonitor>();
+                    services.AddHostedService<UacBypassSurfaceMonitor>();
+                    services.AddHostedService<WifiSecurityMonitor>();
+                    services.AddHostedService<WindowsUpdateIntegrityMonitor>();
+                    services.AddHostedService<WmiPersistenceMonitor>();
+                    services.AddHostedService<WorkFoldersExfilMonitor>();
+                    services.AddHostedService<AdsDataStagingMonitor>();
                 });
     }
 }

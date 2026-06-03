@@ -1,12 +1,12 @@
-namespace WindowsSentinel.Core;
+using System.Threading;
+using System.Threading.Tasks;
 
-/// <summary>
-/// Extended monitor interface for monitors that manage their own lifecycle
-/// (ETW session-based monitors, pipe monitors, etc.) rather than using BackgroundService.
-/// </summary>
-public interface IMonitor : IAsyncDisposable
+namespace WindowsSentinel.Core
 {
-    string Name { get; }
-    Task StartAsync(CancellationToken cancellationToken);
-    Task StopAsync(CancellationToken cancellationToken);
+    public interface IMonitor
+    {
+        string Name { get; }
+        Task StartAsync(CancellationToken ct);
+        Task StopAsync();
+    }
 }

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Diagnostics;
 using System.IO;
 using System.Threading;
@@ -74,7 +74,7 @@ namespace WindowsSentinel.Agent
             {
                 Icon = appIcon ?? System.Drawing.SystemIcons.Shield,
                 ContextMenuStrip = _contextMenu,
-                Text = "Windows Sentinel v5.5.0 — Protection Active",
+                Text = "Windows Sentinel v5.6.0 â€” Protection Active",
                 Visible = true
             };
 
@@ -149,7 +149,7 @@ namespace WindowsSentinel.Agent
         {
             _config.ActiveResponse = !_config.ActiveResponse;
             var status = _config.ActiveResponse ? "Active" : "Disabled";
-            _notifyIcon!.Text = $"Windows Sentinel v5.5.0 — Protection {status}";
+            _notifyIcon!.Text = $"Windows Sentinel v5.6.0 â€” Protection {status}";
             _notifyIcon.ShowBalloonTip(2000, "Windows Sentinel", $"Protection mode set to {status}.", ToolTipIcon.Warning);
         }
 
@@ -187,13 +187,29 @@ namespace WindowsSentinel.Agent
             }
             catch { }
 
-            using var rateLimiter = new RateLimiter(3, TimeSpan.FromSeconds(5));
+            var rateLimiter = new RateLimiter(3, TimeSpan.FromSeconds(5));
             bool isSilenced = false;
+            var shownCache = new System.Collections.Generic.Dictionary<string, DateTime>();
 
             while (!cancellationToken.IsCancellationRequested)
             {
                 try
                 {
+                    // Clean up shownCache occasionally (entries older than 30s)
+                    var now = DateTime.UtcNow;
+                    var keysToRemove = new System.Collections.Generic.List<string>();
+                    foreach (var kvp in shownCache)
+                    {
+                        if (now - kvp.Value > TimeSpan.FromSeconds(30))
+                        {
+                            keysToRemove.Add(kvp.Key);
+                        }
+                    }
+                    foreach (var k in keysToRemove)
+                    {
+                        shownCache.Remove(k);
+                    }
+
                     if (File.Exists(logFile))
                     {
                         using var fs = new FileStream(logFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
@@ -220,13 +236,51 @@ namespace WindowsSentinel.Agent
                                         var confidence = data.GetProperty("Confidence").GetDouble();
                                         var evidence = data.GetProperty("Evidence").GetString() ?? "";
 
+                                        int tierVal = 1; // default to Tier2
+                                        if (data.TryGetProperty("Tier", out var tierProp))
+                                        {
+                                            tierVal = tierProp.GetInt32();
+                                        }
+
+                                        // Deduplication check
+                                        var cacheKey = $"{ruleName}:{processName}";
+                                        if (shownCache.TryGetValue(cacheKey, out var lastShown))
+                                        {
+                                            if (DateTime.UtcNow - lastShown < TimeSpan.FromSeconds(30))
+                                            {
+                                                continue; // Skip duplicate notification
+                                            }
+                                        }
+                                        shownCache[cacheKey] = DateTime.UtcNow;
+
+                                        string title;
+                                        string statusText;
+                                        if (tierVal == 0) // Tier1Behavioral
+                                        {
+                                            if (_config.ActiveResponse)
+                                            {
+                                                title = $"Threat Terminated: {ruleName}";
+                                                statusText = "Terminated (Active Response Blocked)";
+                                            }
+                                            else
+                                            {
+                                                title = $"Threat Detected: {ruleName}";
+                                                statusText = "Log Only (Active Response Off)";
+                                            }
+                                        }
+                                        else // Tier2Indicator
+                                        {
+                                            title = $"Suspicious Activity: {ruleName}";
+                                            statusText = "Logged (No Terminate Action)";
+                                        }
+
                                         if (rateLimiter.AllowRequest())
                                         {
                                             isSilenced = false;
                                             _notifyIcon?.ShowBalloonTip(
                                                 5000,
-                                                $"Threat Blocked: {ruleName}",
-                                                $"Process: {processName} (Confidence: {confidence:P0})\n{evidence}",
+                                                title,
+                                                $"Process: {processName} ({statusText})\nConfidence: {confidence:P0}\n{evidence}",
                                                 ToolTipIcon.Warning
                                             );
                                         }
@@ -255,3 +309,4 @@ namespace WindowsSentinel.Agent
         }
     }
 }
+

@@ -38,7 +38,40 @@ namespace WindowsSentinel.Agent
                     var config = new SentinelConfig();
                     hostContext.Configuration.GetSection("Sentinel").Bind(config);
                     services.AddSingleton(config);
+
+                    // Infrastructure required by monitors
+                    services.AddSingleton<SentinelMetrics>();
+                    services.AddSingleton<JsonlEventLogger>(_ => new JsonlEventLogger(config.LogPath));
+                    services.AddSingleton<EventGraph>();
+                    services.AddSingleton<ProcessAncestryCache>();
+                    services.AddSingleton<SecureCacheStore>();
+                    services.AddSingleton<HashReputationService>();
+                    services.AddSingleton<QuarantineManager>();
+                    services.AddSingleton<DetectionEngine>();
+                    services.AddSingleton<TelemetryFusionEngine>();
+                    services.AddSingleton<AdvancedResponseEngine>();
+                    services.AddSingleton<BehavioralCorrelationEngine>();
+
+                    // Rules
+                    services.AddTransient<IDetectionRule, LsassAccessRule>();
+                    services.AddTransient<IDetectionRule, RansomwareDetectionRule>();
+                    services.AddTransient<IDetectionRule, ReverseShellRule>();
+                    services.AddTransient<IDetectionRule, UnsignedBinaryRule>();
+
+                    // Tray Icon
                     services.AddHostedService<TrayIconService>();
+
+                    // User-session monitors
+                    services.AddHostedService<ScreenCaptureMonitor>();
+                    services.AddHostedService<WebcamMicMonitor>();
+                    services.AddHostedService<AudioHijackMonitor>();
+                    services.AddHostedService<MicSessionMonitor>();
+                    services.AddHostedService<NeuroBehaviorVisualMonitor>();
+                    services.AddHostedService<BrowserExtensionMonitor>();
+
+                    // Utility services
+                    services.AddSingleton<ClipboardSanitizer>();
+                    services.AddSingleton<PhantomKeystrokeGuard>();
                 });
     }
 }
