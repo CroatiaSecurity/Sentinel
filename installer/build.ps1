@@ -1,4 +1,4 @@
-﻿# Windows Sentinel Installer Build Script
+# Windows Sentinel Installer Build Script
 # Usage: .\build.ps1
 
 $ErrorActionPreference = "Stop"
@@ -17,7 +17,7 @@ if (Test-Path $PublishDir) {
 # 2. Build and Publish Service (win-x64 self-contained single-file)
 Write-Host "Publishing Sentinel Service (win-x64 self-contained)..." -ForegroundColor Yellow
 $ServiceProj = Join-Path $PSScriptRoot "..\src\WindowsSentinel.Service\WindowsSentinel.Service.csproj"
-& "C:\Program Files\dotnet\dotnet.exe" publish $ServiceProj -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -p:PublishReadyToRun=true -o (Join-Path $PublishDir "service")
+& "C:\Program Files\dotnet\dotnet.exe" publish $ServiceProj -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -p:PublishReadyToRun=false -o (Join-Path $PublishDir "service")
 
 # 3. Build and Publish Agent (win-x64 self-contained single-file)
 Write-Host "Publishing Sentinel Agent (win-x64 self-contained)..." -ForegroundColor Yellow
@@ -65,5 +65,5 @@ $SetupScript = Join-Path $PSScriptRoot "setup.iss"
 
 Write-Host "==============================================" -ForegroundColor Green
 Write-Host "Build completed successfully!" -ForegroundColor Green
-Write-Host "Installer output: installer\WindowsSentinelSetup-5.3.0.exe" -ForegroundColor Green
+Write-Host "Installer output: installer\WindowsSentinelSetup-5.4.0.exe" -ForegroundColor Green
 Write-Host "==============================================" -ForegroundColor Green

@@ -186,7 +186,7 @@ namespace WindowsSentinel.Core
                 ProcessName = name,
                 ProcessId = pid,
                 Confidence = confidence,
-                Tier = DetectionTier.Tier1Behavioral,
+                Tier = confidence >= 0.80 ? DetectionTier.Tier1Behavioral : DetectionTier.Tier2Indicator,
                 Evidence = evidence,
                 Reasoning = "The execution file backing the process main module does not match the image path registered in the process table. This is a primary indicator of process hollowing or module stomping, commonly used by advanced implants to masquerade as trusted system utilities.",
                 Timestamp = DateTime.UtcNow,

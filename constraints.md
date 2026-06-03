@@ -1,6 +1,6 @@
-﻿# Windows Sentinel â€” Constraints
+# Windows Sentinel â€” Constraints
 
-**Version: 5.3.0**
+**Version: 5.4.0**
 
 ---
 

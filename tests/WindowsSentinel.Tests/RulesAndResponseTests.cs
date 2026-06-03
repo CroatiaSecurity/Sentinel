@@ -298,5 +298,46 @@ namespace WindowsSentinel.Tests
             Assert.NotNull(method);
             method.Invoke(monitor, new object[] { null });
         }
+
+        [Fact]
+        public async Task HollowProcessMonitor_Tiers_Resolve_Based_On_Confidence()
+        {
+            var tempLog = Path.Combine(Path.GetTempPath(), $"sentinel_hollow_test_{Guid.NewGuid():N}.jsonl");
+            
+            await using (var eventLogger = new JsonlEventLogger(tempLog))
+            {
+                var detectionEngine = new DetectionEngine(new List<IDetectionRule>(), _metrics, eventLogger, _responseEngine);
+                var fusion = new TelemetryFusionEngine(new EventGraph());
+                using var monitor = new HollowProcessMonitor(fusion, detectionEngine);
+
+                var method = typeof(HollowProcessMonitor).GetMethod("FireDetection", 
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                Assert.NotNull(method);
+
+                // Trigger detection with confidence = 0.75 (UNMAPPED_BASE)
+                method.Invoke(monitor, new object[] { 1234, "test_game", "C:\\games\\test_game.exe", "UNMAPPED_BASE", "unmapped base address", 0.75 });
+                
+                // Trigger detection with confidence = 0.92 (HOLLOWED)
+                method.Invoke(monitor, new object[] { 5678, "malware", "C:\\Windows\\System32\\svchost.exe", "HOLLOWED", "hollowed process", 0.92 });
+
+                // Allow the async tasks to complete writing to the log
+                await Task.Delay(200);
+            }
+
+            // Read and parse the log file after disposal closes the handle
+            var lines = await File.ReadAllLinesAsync(tempLog);
+            Assert.Equal(2, lines.Length);
+
+            // First event: UNMAPPED_BASE, confidence = 0.75, Tier should be Tier2Indicator (value 1)
+            Assert.Contains("\"Tier\":1", lines[0]);
+            Assert.Contains("\"Confidence\":0.75", lines[0]);
+
+            // Second event: HOLLOWED, confidence = 0.92, Tier should be Tier1Behavioral (value 0)
+            Assert.Contains("\"Tier\":0", lines[1]);
+            Assert.Contains("\"Confidence\":0.92", lines[1]);
+
+            // Clean up
+            try { File.Delete(tempLog); } catch {}
+        }
     }
 }

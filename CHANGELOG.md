@@ -2,6 +2,17 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [5.4.0] - 2026-06-03
+
+### Fixed
+- **HollowProcessMonitor False Positive Kill** — Resolved false positives where legitimate games (which unmap or decrypt PE headers in memory or use packers like VMProtect/Themida) were terminated by Sentinel. The monitor now dynamically resolves the alert tier based on detection confidence:
+  - Heuristics with confidence < 0.80 (such as `UNMAPPED_BASE` with confidence `0.75`) are downgraded to `DetectionTier.Tier2Indicator` (which is LogOnly and never triggers a process kill).
+  - High-confidence process hollowing detections (`HOLLOWED` with confidence `0.92`) continue to resolve to `DetectionTier.Tier1Behavioral` and will be terminated.
+
+### Added
+- Unit tests to verify that alert tiers correctly resolve based on confidence scores.
+
+
 ## [5.3.0] - 2026-06-02
 
 ### Added — Monitor Migration from SentinelOld

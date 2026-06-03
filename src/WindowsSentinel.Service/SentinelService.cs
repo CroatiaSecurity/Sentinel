@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -92,7 +92,7 @@ namespace WindowsSentinel.Service
             await _eventLogger.LogEventAsync("service_start", new
             {
                 Status = "started",
-                Version = "5.3.0",
+                Version = "5.4.0",
                 Timestamp = DateTime.UtcNow
             });
 

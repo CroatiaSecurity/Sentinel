@@ -1,6 +1,6 @@
-﻿# Windows Sentinel â€” Design Document
+# Windows Sentinel â€” Design Document
 
-**Version: 5.3.0**
+**Version: 5.4.0**
 
 ---
 
