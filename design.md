@@ -380,7 +380,7 @@ Composite detections are emitted as Tier1 `DetectionEvent`s directly into the de
 
 | Component | Purpose |
 |-----------|---------|
-| `FileActivityMonitor` fix | Excluded `\Sports Interactive\` and `\Football Manager\` directories from Restart Manager handle queries to prevent file lock contention and sharing violations for Football Manager match simulation. |
+| `FileActivityMonitor` fix | Excluded common game directories, launchers, and publisher folders (Steam, Epic, My Games, Sports Interactive, etc.) from Restart Manager handle queries to generally prevent file lock contention and sharing violations for all games. |
 | `RansomwareIoMonitor` whitelist | Added `fm` and `fm.exe` to the process whitelist to prevent false behavioral ransomware alerts during high match simulation and save activity. |
 
 ## Added in 4.5.0

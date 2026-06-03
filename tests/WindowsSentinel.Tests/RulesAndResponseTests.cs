@@ -363,5 +363,43 @@ namespace WindowsSentinel.Tests
             var result4 = (bool)method.Invoke(null, new object[] { "svchost", null! })!;
             Assert.True(result4);
         }
+
+        [Fact]
+        public void FileActivityMonitor_GetProcessUsingFile_Excludes_Game_Directories()
+        {
+            var method = typeof(FileActivityMonitor).GetMethod("GetProcessUsingFile", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+            Assert.NotNull(method);
+
+            // Create a dummy file to pass File.Exists check
+            var tempFile = Path.GetTempFileName();
+            try
+            {
+                // Without exclusions, it should try to run Restart Manager
+                var resultNormal = (ValueTuple<int, string>)method.Invoke(null, new object[] { tempFile })!;
+                Assert.Equal(0, resultNormal.Item1);
+                Assert.Equal("unknown", resultNormal.Item2);
+
+                // Create a mock game directory inside temp path
+                var myGamesDir = Path.Combine(Path.GetTempPath(), "My Games", "TestGame");
+                Directory.CreateDirectory(myGamesDir);
+                var gameTempFile = Path.Combine(myGamesDir, "save.dat");
+                File.WriteAllText(gameTempFile, "test");
+                try
+                {
+                    var resultExcluded = (ValueTuple<int, string>)method.Invoke(null, new object[] { gameTempFile })!;
+                    Assert.Equal(0, resultExcluded.Item1);
+                    Assert.Equal("unknown", resultExcluded.Item2);
+                }
+                finally
+                {
+                    try { File.Delete(gameTempFile); Directory.Delete(myGamesDir, true); } catch {}
+                }
+            }
+            finally
+            {
+                try { File.Delete(tempFile); } catch {}
+            }
+        }
     }
 }

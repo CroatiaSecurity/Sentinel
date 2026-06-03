@@ -251,9 +251,21 @@ namespace WindowsSentinel.Core
                 return (0, "unknown");
             }
 
-            // Exclude directories related to Football Manager to prevent Restart Manager lock contention
-            if (filePath.Contains(@"\Sports Interactive\", StringComparison.OrdinalIgnoreCase) ||
-                filePath.Contains(@"\Football Manager\", StringComparison.OrdinalIgnoreCase))
+            // Exclude common gaming directories to prevent Restart Manager lock contention on game saves/simulations
+            if (filePath.Contains(@"\My Games\", StringComparison.OrdinalIgnoreCase) ||
+                filePath.Contains(@"\Saved Games\", StringComparison.OrdinalIgnoreCase) ||
+                filePath.Contains(@"\Sports Interactive\", StringComparison.OrdinalIgnoreCase) ||
+                filePath.Contains(@"\Football Manager\", StringComparison.OrdinalIgnoreCase) ||
+                filePath.Contains(@"\Paradox Interactive\", StringComparison.OrdinalIgnoreCase) ||
+                filePath.Contains(@"\Steam\", StringComparison.OrdinalIgnoreCase) ||
+                filePath.Contains(@"\steamapps\", StringComparison.OrdinalIgnoreCase) ||
+                filePath.Contains(@"\Epic Games\", StringComparison.OrdinalIgnoreCase) ||
+                filePath.Contains(@"\Origin\", StringComparison.OrdinalIgnoreCase) ||
+                filePath.Contains(@"\Battle.net\", StringComparison.OrdinalIgnoreCase) ||
+                filePath.Contains(@"\GOG Galaxy\", StringComparison.OrdinalIgnoreCase) ||
+                filePath.Contains(@"\Ubisoft\", StringComparison.OrdinalIgnoreCase) ||
+                filePath.Contains(@"\Electronic Arts\", StringComparison.OrdinalIgnoreCase) ||
+                filePath.Contains(@"\BioWare\", StringComparison.OrdinalIgnoreCase))
             {
                 return (0, "unknown");
             }
