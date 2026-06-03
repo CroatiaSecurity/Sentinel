@@ -11,6 +11,12 @@ namespace WindowsSentinel.Service
     {
         public static void Main(string[] args)
         {
+            // Apply DLL search path hardening early
+            HardeningModule.ApplyOrFail();
+
+            // Secure Sentinel's installation directory permissions
+            HardeningModule.SecureInstallationDirectory();
+
             CreateHostBuilder(args).Build().Run();
         }
 
@@ -80,9 +86,9 @@ namespace WindowsSentinel.Service
                     services.AddSingleton<CredentialCanaryMonitor>();
                     services.AddSingleton<PhantomKeystrokeGuard>();
                     services.AddSingleton<LocalServerMonitor>();
-
                     // Service Background Worker
                     services.AddHostedService<SentinelService>();
+                    services.AddHostedService<AntiTamperGuard>();
                 });
     }
 }

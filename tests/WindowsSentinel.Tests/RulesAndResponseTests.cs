@@ -401,5 +401,50 @@ namespace WindowsSentinel.Tests
                 try { File.Delete(tempFile); } catch {}
             }
         }
+
+        [Fact]
+        public void FileActivityMonitor_Detects_Suspicious_Dbghelp_Drop()
+        {
+            var method = typeof(FileActivityMonitor).GetMethod("IsSuspiciousDbghelpDrop", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+            Assert.NotNull(method);
+
+            // 1. Non-sideload file -> should return false
+            var result1 = (bool)method.Invoke(null, new object[] { "C:\\temp\\normal.dll", null! })!;
+            Assert.False(result1);
+
+            // 2. dbghelp.dll in system path -> should return false
+            var result2 = (bool)method.Invoke(null, new object[] { "C:\\windows\\system32\\dbghelp.dll", null! })!;
+            Assert.False(result2);
+
+            // 3. dbghelp.dll in non-system path -> should return true
+            string? reason = null;
+            var parameters = new object[] { "C:\\Users\\Public\\dbghelp.dll", reason! };
+            var result3 = (bool)method.Invoke(null, parameters)!;
+            Assert.True(result3);
+            Assert.Contains("non-system path", (string)parameters[1]);
+        }
+
+        [Fact]
+        public void FileActivityMonitor_Detects_Sentinel_Tampering()
+        {
+            var method = typeof(FileActivityMonitor).GetMethod("IsSentinelTampering", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+            Assert.NotNull(method);
+
+            var appDir = AppContext.BaseDirectory.TrimEnd('\\');
+            var targetFile = Path.Combine(appDir, "some_injected.dll");
+
+            // 1. Authorized Sentinel component writing -> should return false
+            var result1 = (bool)method.Invoke(null, new object[] { targetFile, 1234, "sentinelservice", null! })!;
+            Assert.False(result1);
+
+            // 2. Unauthorized process writing -> should return true
+            string? reason = null;
+            var parameters = new object[] { targetFile, 5678, "hacker_process", reason! };
+            var result2 = (bool)method.Invoke(null, parameters)!;
+            Assert.True(result2);
+            Assert.Contains("Unauthorized process", (string)parameters[3]);
+        }
     }
 }

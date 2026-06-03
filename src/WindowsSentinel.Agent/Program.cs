@@ -15,6 +15,9 @@ namespace WindowsSentinel.Agent
         [STAThread]
         public static void Main(string[] args)
         {
+            // Apply DLL search path hardening early
+            HardeningModule.ApplyOrFail();
+
             // FreeConsole on startup to detach from parent CLI window
             try
             {

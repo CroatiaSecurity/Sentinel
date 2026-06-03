@@ -4,6 +4,7 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using System.Text.Json;
 using Microsoft.Extensions.Hosting;
 using WindowsSentinel.Core;
 
@@ -81,6 +82,9 @@ namespace WindowsSentinel.Agent
 
             // Show initial balloon tip
             _notifyIcon.ShowBalloonTip(3000, "Windows Sentinel", "Protection has started.", ToolTipIcon.Info);
+
+            // Start watching log file for new detections
+            _ = WatchLogFileAsync(_cts.Token);
 
             Application.Run();
         }
@@ -160,6 +164,94 @@ namespace WindowsSentinel.Agent
             _contextMenu?.Dispose();
             _cts.Dispose();
             GC.SuppressFinalize(this);
+        }
+
+        private async Task WatchLogFileAsync(CancellationToken cancellationToken)
+        {
+            var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
+            var logFile = Path.Combine(programData, "WindowsSentinel", "events.jsonl");
+
+            while (!File.Exists(logFile) && !cancellationToken.IsCancellationRequested)
+            {
+                try { await Task.Delay(1000, cancellationToken); } catch { break; }
+            }
+
+            long lastOffset = 0;
+            try
+            {
+                if (File.Exists(logFile))
+                {
+                    using var fs = new FileStream(logFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                    lastOffset = fs.Length;
+                }
+            }
+            catch { }
+
+            using var rateLimiter = new RateLimiter(3, TimeSpan.FromSeconds(5));
+            bool isSilenced = false;
+
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                try
+                {
+                    if (File.Exists(logFile))
+                    {
+                        using var fs = new FileStream(logFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                        if (fs.Length < lastOffset)
+                        {
+                            lastOffset = 0;
+                        }
+
+                        if (fs.Length > lastOffset)
+                        {
+                            fs.Seek(lastOffset, SeekOrigin.Begin);
+                            using var reader = new StreamReader(fs, System.Text.Encoding.UTF8, false, 4096, true);
+                            string? line;
+                            while ((line = await reader.ReadLineAsync(cancellationToken)) != null)
+                            {
+                                if (line.Contains("\"type\":\"detection\"", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    try
+                                    {
+                                        using var doc = JsonDocument.Parse(line);
+                                        var data = doc.RootElement.GetProperty("data");
+                                        var ruleName = data.GetProperty("RuleName").GetString() ?? "Threat Detected";
+                                        var processName = data.GetProperty("ProcessName").GetString() ?? "unknown";
+                                        var confidence = data.GetProperty("Confidence").GetDouble();
+                                        var evidence = data.GetProperty("Evidence").GetString() ?? "";
+
+                                        if (rateLimiter.AllowRequest())
+                                        {
+                                            isSilenced = false;
+                                            _notifyIcon?.ShowBalloonTip(
+                                                5000,
+                                                $"Threat Blocked: {ruleName}",
+                                                $"Process: {processName} (Confidence: {confidence:P0})\n{evidence}",
+                                                ToolTipIcon.Warning
+                                            );
+                                        }
+                                        else if (!isSilenced)
+                                        {
+                                            isSilenced = true;
+                                            _notifyIcon?.ShowBalloonTip(
+                                                3000,
+                                                "Notifications Silenced",
+                                                "Multiple alerts received in a short time. Alerts are suppressed to prevent spam. Check console or events.jsonl for complete logs.",
+                                                ToolTipIcon.Info
+                                            );
+                                        }
+                                    }
+                                    catch { }
+                                }
+                            }
+                            lastOffset = fs.Position;
+                        }
+                    }
+                }
+                catch { }
+
+                try { await Task.Delay(1000, cancellationToken); } catch { break; }
+            }
         }
     }
 }
