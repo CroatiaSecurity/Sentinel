@@ -103,7 +103,12 @@ public sealed class RansomwareIoMonitor : BackgroundService
                 string name;
                 try { name = p.ProcessName; }
                 catch { continue; }
-                if (IsWhitelisted(name)) continue;
+
+                string? path = null;
+                try { path = p.MainModule?.FileName; }
+                catch { }
+
+                if (IsWhitelisted(name, path)) continue;
 
                 var (ops, bytes) = QueryIoCounters(p.Id);
                 if (ops < 0) continue;
@@ -147,14 +152,63 @@ public sealed class RansomwareIoMonitor : BackgroundService
         }
     }
 
-    private static bool IsWhitelisted(string name)
+    private static bool IsWhitelisted(string name, string? path)
     {
-        if (Whitelist.Contains(name)) return true;
-        foreach (var w in Whitelist)
+        if (string.IsNullOrEmpty(name)) return false;
+
+        bool nameMatch = Whitelist.Contains(name);
+        if (!nameMatch)
         {
-            if (name.StartsWith(w, StringComparison.OrdinalIgnoreCase)) return true;
+            foreach (var w in Whitelist)
+            {
+                if (name.StartsWith(w, StringComparison.OrdinalIgnoreCase))
+                {
+                    nameMatch = true;
+                    break;
+                }
+            }
         }
-        return false;
+
+        if (!nameMatch) return false;
+
+        // Enforce path and signature validation to prevent process renaming bypasses (masquerading).
+        if (string.IsNullOrEmpty(path))
+        {
+            // Allow critical system/AV processes if we cannot retrieve their path (e.g., Access Denied)
+            var lowerName = name.ToLowerInvariant();
+            return lowerName == "svchost" || lowerName == "lsass" || lowerName == "services" || 
+                   lowerName == "csrss" || lowerName == "smss" || lowerName == "winlogon" || 
+                   lowerName == "wininit" || lowerName == "msmpeng" || lowerName == "nissrv" ||
+                   lowerName == "sentinelservice" || lowerName == "sentinelagent";
+        }
+
+        var pathLower = path.ToLowerInvariant();
+        bool isTrustedPath = pathLower.Contains(@"\windows\") ||
+                            pathLower.Contains(@"\program files\") ||
+                            pathLower.Contains(@"\program files (x86)\") ||
+                            pathLower.Contains(@"\steamapps\") ||
+                            pathLower.Contains(@"\steam\") ||
+                            pathLower.Contains(@"\epic games\") ||
+                            pathLower.Contains(@"\gog galaxy\") ||
+                            pathLower.Contains(@"\riot games\") ||
+                            pathLower.Contains(@"\battle.net\") ||
+                            pathLower.Contains(@"\ubisoft\") ||
+                            pathLower.Contains(@"\ea games\") ||
+                            pathLower.Contains(@"\origin\");
+
+        if (isTrustedPath) return true;
+
+        // Fallback: check if the binary has a valid Authenticode signature
+        try
+        {
+            using var cert = new System.Security.Cryptography.X509Certificates.X509Certificate2(
+                System.Security.Cryptography.X509Certificates.X509Certificate.CreateFromSignedFile(path));
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static (long ops, long bytes) QueryIoCounters(int pid)

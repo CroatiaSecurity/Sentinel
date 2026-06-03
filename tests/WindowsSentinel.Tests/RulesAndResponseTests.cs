@@ -339,5 +339,29 @@ namespace WindowsSentinel.Tests
             // Clean up
             try { File.Delete(tempLog); } catch {}
         }
+
+        [Fact]
+        public void RansomwareIoMonitor_IsWhitelisted_Verifies_Paths_And_Signatures()
+        {
+            var method = typeof(RansomwareIoMonitor).GetMethod("IsWhitelisted", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+            Assert.NotNull(method);
+
+            // 1. Non-whitelisted process name -> should return false
+            var result1 = (bool)method.Invoke(null, new object[] { "malware.exe", "C:\\temp\\malware.exe" })!;
+            Assert.False(result1);
+
+            // 2. Whitelisted process name in trusted path -> should return true
+            var result2 = (bool)method.Invoke(null, new object[] { "fm", "C:\\Program Files (x86)\\Steam\\steamapps\\common\\Football Manager\\fm.exe" })!;
+            Assert.True(result2);
+
+            // 3. Whitelisted process name in untrusted path (unsigned) -> should return false
+            var result3 = (bool)method.Invoke(null, new object[] { "fm", "C:\\Users\\Public\\fm.exe" })!;
+            Assert.False(result3);
+
+            // 4. Critical system process with null path (inaccessible) -> should return true
+            var result4 = (bool)method.Invoke(null, new object[] { "svchost", null! })!;
+            Assert.True(result4);
+        }
     }
 }
