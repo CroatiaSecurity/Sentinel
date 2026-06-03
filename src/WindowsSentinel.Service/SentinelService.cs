@@ -92,7 +92,7 @@ namespace WindowsSentinel.Service
             await _eventLogger.LogEventAsync("service_start", new
             {
                 Status = "started",
-                Version = "5.4.0",
+                Version = "5.5.0",
                 Timestamp = DateTime.UtcNow
             });
 

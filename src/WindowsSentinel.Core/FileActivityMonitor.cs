@@ -251,6 +251,13 @@ namespace WindowsSentinel.Core
                 return (0, "unknown");
             }
 
+            // Exclude directories related to Football Manager to prevent Restart Manager lock contention
+            if (filePath.Contains(@"\Sports Interactive\", StringComparison.OrdinalIgnoreCase) ||
+                filePath.Contains(@"\Football Manager\", StringComparison.OrdinalIgnoreCase))
+            {
+                return (0, "unknown");
+            }
+
             string sessionKey = Guid.NewGuid().ToString();
             int res = RmStartSession(out uint sessionHandle, 0, sessionKey);
             if (res != 0) return (0, "unknown");

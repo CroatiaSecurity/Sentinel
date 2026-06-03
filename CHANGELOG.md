@@ -2,6 +2,13 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [5.5.0] - 2026-06-03
+
+### Fixed
+- **Football Manager File Lock Contention** — Excluded `\Sports Interactive\` and `\Football Manager\` directories from Restart Manager handle queries inside `FileActivityMonitor.cs` to prevent file lock contention and sharing violations for Football Manager matches.
+- **Football Manager Ransomware Whitelist** — Added `"fm"` and `"fm.exe"` to the process whitelist in `RansomwareIoMonitor.cs` to prevent false behavioral ransomware alerts during high match simulation and save activity.
+
+
 ## [5.4.0] - 2026-06-03
 
 ### Fixed

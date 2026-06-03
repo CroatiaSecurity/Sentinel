@@ -1,4 +1,4 @@
-﻿using System.Collections.Concurrent;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Management;
 using Microsoft.Extensions.Hosting;
@@ -52,6 +52,8 @@ public sealed class RansomwareIoMonitor : BackgroundService
         // v4.2.0: Browsers (cache writes, IndexedDB, service workers â€” sustained high I/O is normal)
         "msedge", "chrome", "firefox", "brave", "opera", "vivaldi",
         "msedgewebview2",
+        // Games (Football Manager has heavy write I/O during matches/saves)
+        "fm", "fm.exe",
     };
 
     private readonly DetectionEngine _engine;

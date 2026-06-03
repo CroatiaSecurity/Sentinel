@@ -1,6 +1,6 @@
-# Windows Sentinel â€” Design Document
+# Windows Sentinel — Design Document
 
-**Version: 5.4.0**
+**Version: 5.5.0**
 
 ---
 
@@ -375,6 +375,13 @@ Composite detections are emitted as Tier1 `DetectionEvent`s directly into the de
 | `FirewallIntegrityMonitor` | Windows Firewall integrity via netsh advfirewall. Detects profile disabled, bulk inbound rule additions, firewall service stopped. |
 | `ScheduledTaskMonitor` | Scheduled task persistence detection via schtasks. Detects malicious task creation with multi-indicator analysis (suspicious paths, encoded commands, SYSTEM from user paths, script execution). |
 | `WindowsUpdateIntegrityMonitor` | Update service integrity monitoring. Detects WU/BITS service stopped, automatic updates disabled via registry/GPO, Defender definitions stale (>7 days). |
+
+## Added in 5.5.0
+
+| Component | Purpose |
+|-----------|---------|
+| `FileActivityMonitor` fix | Excluded `\Sports Interactive\` and `\Football Manager\` directories from Restart Manager handle queries to prevent file lock contention and sharing violations for Football Manager match simulation. |
+| `RansomwareIoMonitor` whitelist | Added `fm` and `fm.exe` to the process whitelist to prevent false behavioral ransomware alerts during high match simulation and save activity. |
 
 ## Added in 4.5.0
 

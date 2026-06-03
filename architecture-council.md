@@ -3,7 +3,7 @@
 **Status:** Architecture spec. Extends, does not replace, `requirements.md`,
 `design.md`, `constraints.md` (all v0.9.0).
 
-**Last updated:** v5.4.0 (June 2026) — Process Injection and DLL Hijacking Active Response Kills added to President's Law.
+**Last updated:** v5.5.0 (June 2026) — Football Manager path lock and ransomware whitelist fixes.
 
 ---
 
