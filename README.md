@@ -2,7 +2,7 @@
 
 **Userland EDR for Windows — Behavioral Detection & Automated Response**
 
-> Version: 5.7.0 | Author: [Gorstak](https://gorstak.eu) | [GitHub](https://github.com/CroatiaSecurity/Sentinel) | License: MIT
+> Version: 5.8.0 | Author: [Gorstak](https://gorstak.eu) | [GitHub](https://github.com/CroatiaSecurity/Sentinel) | License: MIT
 
 ---
 
@@ -27,7 +27,7 @@ Designed for personal endpoint protection, blue-team education, behavioral analy
 Run the installer as Administrator:
 
 ```powershell
-.\WindowsSentinelSetup-5.7.0.exe
+.\WindowsSentinelSetup-5.8.0.exe
 ```
 
 Installs to `%ProgramFiles%\WindowsSentinel`, creates a Windows Service (SYSTEM), and launches the Agent into the user session with a system tray icon.
@@ -125,6 +125,7 @@ Installs to `%ProgramFiles%\WindowsSentinel`, creates a Windows Service (SYSTEM)
 - **BehavioralBaselineService** — Learns normal process/path/network patterns, persisted across restarts
 - **DllUnloadEngine** — Detects DLL sideloading (system DLL loaded from app directory); unloads the DLL instead of killing the host process
 - **CampaignDetectionRule** — Matches known campaign indicators (CobaltStrike, QBot, Emotet, TrickBot) using exact filename matching to avoid false positives
+- **PhantomDeviceMonitor** — Scans ARP table for unauthorized network devices, probes suspicious ports (Cast/ADB/DevTools), identifies manufacturer via OUI lookup, blocks rogue devices via firewall + ARP flush + connection kill + mDNS/SSDP discovery block
 - **AntiTamperGuard** — Protects Sentinel's own binaries and hardens installation directory ACLs
 
 ### Security

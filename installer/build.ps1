@@ -67,6 +67,6 @@ $SetupScript = Join-Path $PSScriptRoot "setup.iss"
 
 Write-Host "==============================================" -ForegroundColor Green
 Write-Host "Build completed successfully!" -ForegroundColor Green
-Write-Host "Installer output: installer\WindowsSentinelSetup-5.7.0.exe" -ForegroundColor Green
+Write-Host "Installer output: installer\WindowsSentinelSetup-5.8.0.exe" -ForegroundColor Green
 Write-Host "==============================================" -ForegroundColor Green
 

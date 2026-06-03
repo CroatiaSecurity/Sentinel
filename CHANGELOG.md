@@ -2,6 +2,24 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [5.8.0] - 2026-06-04
+
+### Added — Phantom Device Monitor
+- **PhantomDeviceMonitor** — Detects unauthorized devices on the local network by scanning the ARP table every 45 seconds. Baselines all devices at startup and alerts on any new MAC address. Probes new devices for suspicious open ports (8009 Google Cast, 5555 ADB, 9222 Chrome DevTools, 8008/8443 HTTP-Alt, 2323 Telnet-Alt, 5353 mDNS, 4443 Pharos). Identifies device manufacturer via OUI prefix lookup (Google, TP-Link, Raspberry Pi, VMware, VirtualBox).
+- **Active response (4-step isolation):**
+  1. Firewall block — inbound + outbound via `netsh advfirewall`
+  2. ARP cache flush — immediately stops routing to the rogue device
+  3. TCP connection kill — terminates all existing connections to the device
+  4. mDNS/SSDP discovery block — prevents Edge/Chrome from rediscovering fake Cast/UPnP devices
+- Auto-cleanup: firewall rules removed after 10 minutes if device departs the network.
+
+### Fixed — False Positive Reduction
+- **DeviceInstallMonitor** — Fixed broken path check that flagged 86 inbox Windows kernel drivers (e.g. `system32\drivers\pacer.sys`, `\SystemRoot\System32\drivers\tdx.sys`) as "Non-Windows Kernel Driver". Now correctly recognizes `\SystemRoot\`, relative `system32\`, `\DriverStore\`, and `\Program Files` paths.
+- **RuntimeModuleIntegrityMonitor** — Added Windows Defender's `MpOav.dll` path (`\Microsoft\Windows Defender\`) as trusted. Defender injects this on-access scanning DLL into every process; it is not an attack.
+- **MemoryBehaviorAnalyzer** — Expanded JIT process exclusion list with Chromium/Electron apps: msedge, chrome, firefox, brave, opera, vivaldi, Devin, code, cursor, Kiro, electron, slack, discord, teams, spotify, steamwebhelper. V8 JIT naturally creates RWX memory regions.
+
+---
+
 ## [5.7.0] - 2026-06-03
 
 ### Added — Restored Components from Git History
