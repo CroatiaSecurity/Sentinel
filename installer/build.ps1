@@ -7,10 +7,12 @@ Write-Host "==============================================" -ForegroundColor Cya
 Write-Host "   Windows Sentinel - Building Installer      " -ForegroundColor Cyan
 Write-Host "==============================================" -ForegroundColor Cyan
 
-# 1. Clean previous publish folder
+# 1. Clean previous build artifacts and publish folder
 $PublishDir = Join-Path $PSScriptRoot "..\publish"
+$SrcDir = Join-Path $PSScriptRoot "..\src"
+Write-Host "Cleaning bin/obj and publish outputs..." -ForegroundColor Yellow
+Get-ChildItem -Path $SrcDir -Include bin,obj -Directory -Recurse | Remove-Item -Recurse -Force
 if (Test-Path $PublishDir) {
-    Write-Host "Cleaning previous publish outputs..." -ForegroundColor Yellow
     Remove-Item -Path $PublishDir -Recurse -Force
 }
 
