@@ -118,6 +118,23 @@ namespace WindowsSentinel.Core
     {
         public string Name => "UnsignedBinaryRule";
 
+        // Standard user-mode install paths that are NOT suspicious
+        private static readonly string[] TrustedAppDataPaths = new[]
+        {
+            "\\appdata\\local\\programs\\",
+            "\\appdata\\local\\microsoft\\",
+            "\\appdata\\local\\google\\",
+            "\\appdata\\local\\mozilla\\",
+            "\\appdata\\local\\slack\\",
+            "\\appdata\\local\\discord\\",
+            "\\appdata\\local\\spotify\\",
+            "\\appdata\\local\\steam\\",
+            "\\appdata\\local\\brave software\\",
+            "\\appdata\\local\\1password\\",
+            "\\appdata\\local\\gitkraken\\",
+            "\\appdata\\local\\postman\\",
+        };
+
         public DetectionEvent? Evaluate(FusedTelemetryContext context)
         {
             if (context.TriggeringEvent is ProcessTelemetry pt)
@@ -126,8 +143,25 @@ namespace WindowsSentinel.Core
                 if (!pt.ImagePath.Contains('\\')) return null;
 
                 var path = pt.ImagePath.ToLowerInvariant();
-                // Flag unsigned processes running outside trusted directories (Temp / AppData / Downloads)
-                if (path.Contains("\\temp\\") || path.Contains("\\appdata\\") || path.Contains("\\downloads\\"))
+
+                // Only flag truly suspicious locations (Temp, Downloads, raw AppData outside program installs)
+                bool isSuspicious = path.Contains("\\temp\\") || path.Contains("\\downloads\\");
+
+                if (!isSuspicious && path.Contains("\\appdata\\"))
+                {
+                    // AppData is suspicious UNLESS it's a known app install path
+                    isSuspicious = true;
+                    foreach (var trusted in TrustedAppDataPaths)
+                    {
+                        if (path.Contains(trusted))
+                        {
+                            isSuspicious = false;
+                            break;
+                        }
+                    }
+                }
+
+                if (isSuspicious)
                 {
                     return new DetectionEvent
                     {
