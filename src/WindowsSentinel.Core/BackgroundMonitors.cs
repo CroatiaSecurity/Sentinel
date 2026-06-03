@@ -338,6 +338,23 @@ namespace WindowsSentinel.Core
 
         public DeviceInstallMonitor(DetectionEngine de, ILogger<DeviceInstallMonitor> l) { _detectionEngine = de; _logger = l; }
 
+        private static bool IsWindowsDriverPath(string imagePath)
+        {
+            // Normalize: many driver ImagePaths use \SystemRoot\, system32\, or relative paths
+            var normalized = imagePath.TrimStart('\\');
+            // Absolute Windows paths
+            if (imagePath.Contains(@"\Windows\", StringComparison.OrdinalIgnoreCase)) return true;
+            // \SystemRoot\ prefix (kernel notation for %SystemRoot%)
+            if (normalized.StartsWith("SystemRoot\\", StringComparison.OrdinalIgnoreCase)) return true;
+            // Relative system32 paths like "system32\drivers\pacer.sys" or "System32\DRIVERS\tdx.sys"
+            if (normalized.StartsWith("system32\\", StringComparison.OrdinalIgnoreCase)) return true;
+            // DriverStore path (inbox/WHQL drivers)
+            if (imagePath.Contains(@"\DriverStore\", StringComparison.OrdinalIgnoreCase)) return true;
+            // Program Files (legitimate third-party drivers like GPU, antivirus)
+            if (imagePath.Contains(@"\Program Files", StringComparison.OrdinalIgnoreCase)) return true;
+            return false;
+        }
+
         protected override async Task ExecuteAsync(CancellationToken ct)
         {
             _logger.LogInformation("[DeviceInstallMonitor] Started");
@@ -361,7 +378,7 @@ namespace WindowsSentinel.Core
                             if (startVal is int start && typeVal is int type && start == 1 && type == 1)
                             {
                                 var imagePath = svc.GetValue("ImagePath")?.ToString() ?? "";
-                                if (!string.IsNullOrEmpty(imagePath) && !imagePath.Contains(@"\Windows\", StringComparison.OrdinalIgnoreCase))
+                                if (!string.IsNullOrEmpty(imagePath) && !IsWindowsDriverPath(imagePath))
                                 {
                                     await _detectionEngine.EmitAsync(new DetectionEvent
                                     {
@@ -1025,7 +1042,8 @@ namespace WindowsSentinel.Core
                             if (!modPath.Contains(@"\Windows\", StringComparison.OrdinalIgnoreCase) &&
                                 !modPath.Contains(AppContext.BaseDirectory, StringComparison.OrdinalIgnoreCase) &&
                                 !modPath.Contains(@"\dotnet\", StringComparison.OrdinalIgnoreCase) &&
-                                !modPath.Contains(@"\Program Files", StringComparison.OrdinalIgnoreCase))
+                                !modPath.Contains(@"\Program Files", StringComparison.OrdinalIgnoreCase) &&
+                                !modPath.Contains(@"\Microsoft\Windows Defender\", StringComparison.OrdinalIgnoreCase))
                             {
                                 await _detectionEngine.EmitAsync(new DetectionEvent
                                 {

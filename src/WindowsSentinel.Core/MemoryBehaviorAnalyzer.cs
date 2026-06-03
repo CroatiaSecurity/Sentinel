@@ -41,6 +41,11 @@ namespace WindowsSentinel.Core
             "java.exe", "javaw.exe", "node.exe", "python.exe", "python3.exe",
             "ruby.exe", "dotnet.exe", "pwsh.exe", "powershell.exe",
             "deno.exe", "bun.exe",
+            // Chromium/Electron apps use V8 JIT → RWX is normal
+            "msedge.exe", "chrome.exe", "firefox.exe", "brave.exe", "opera.exe", "vivaldi.exe",
+            "msedgewebview2.exe", "Devin.exe", "code.exe", "cursor.exe", "Kiro.exe",
+            "electron.exe", "slack.exe", "discord.exe", "teams.exe", "spotify.exe",
+            "steamwebhelper.exe", "cefsharp.browsersubprocess.exe",
         };
 
         public MemoryBehaviorAnalyzer(
