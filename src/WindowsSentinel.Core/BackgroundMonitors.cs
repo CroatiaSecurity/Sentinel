@@ -1631,15 +1631,21 @@ namespace WindowsSentinel.Core
                 if (_blockedIps.ContainsKey(ip)) return;
                 var ruleName = $"Sentinel-Block-PhantomDevice-{ip.Replace('.', '_')}";
 
-                var psiOut = new ProcessStartInfo("netsh",
-                    $"advfirewall firewall add rule name=\"{ruleName}-OUT\" dir=out action=block remoteip={ip} enable=yes")
-                { CreateNoWindow = true, UseShellExecute = false };
-                Process.Start(psiOut)?.WaitForExit(5000);
+                // 1. Firewall block — prevent all traffic to/from this IP
+                RunHidden("netsh", $"advfirewall firewall add rule name=\"{ruleName}-OUT\" dir=out action=block remoteip={ip} enable=yes");
+                RunHidden("netsh", $"advfirewall firewall add rule name=\"{ruleName}-IN\" dir=in action=block remoteip={ip} enable=yes");
 
-                var psiIn = new ProcessStartInfo("netsh",
-                    $"advfirewall firewall add rule name=\"{ruleName}-IN\" dir=in action=block remoteip={ip} enable=yes")
-                { CreateNoWindow = true, UseShellExecute = false };
-                Process.Start(psiIn)?.WaitForExit(5000);
+                // 2. Flush ARP entry — force our PC to stop talking to it immediately
+                RunHidden("netsh", $"interface ip delete arpcache");
+                RunHidden("arp", $"-d {ip}");
+
+                // 3. Kill any existing TCP connections to the rogue device
+                KillConnectionsTo(ip);
+
+                // 4. Disable mDNS/SSDP discovery responses to prevent auto-reconnection
+                //    (Edge/Chrome auto-discover Cast devices via mDNS on 224.0.0.251:5353)
+                RunHidden("netsh", $"advfirewall firewall add rule name=\"{ruleName}-MDNS\" dir=out action=block remoteip=224.0.0.251 remoteport=5353 protocol=udp enable=yes");
+                RunHidden("netsh", $"advfirewall firewall add rule name=\"{ruleName}-SSDP\" dir=out action=block remoteip=239.255.255.250 remoteport=1900 protocol=udp enable=yes");
 
                 _blockedIps[ip] = DateTime.UtcNow;
 
@@ -1647,16 +1653,39 @@ namespace WindowsSentinel.Core
                 {
                     ProcessId = 0,
                     ProcessName = "PhantomDeviceMonitor",
-                    ActionTaken = "FIREWALL_BLOCK",
+                    ActionTaken = "FIREWALL_BLOCK+ARP_FLUSH+CONN_KILL+DISCOVERY_BLOCK",
                     Reason = $"Blocked phantom device IP={ip} MAC={mac} Manufacturer={manufacturer} SuspiciousPort={suspiciousService ?? "none"}"
                 });
 
-                _logger.LogWarning("[PhantomDeviceMonitor] BLOCKED device IP={Ip} MAC={Mac} Manufacturer={Mfg}", ip, mac, manufacturer);
+                _logger.LogWarning("[PhantomDeviceMonitor] BLOCKED+ISOLATED device IP={Ip} MAC={Mac} Manufacturer={Mfg}", ip, mac, manufacturer);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "[PhantomDeviceMonitor] Failed to block device {Ip}", ip);
             }
+        }
+
+        private static void KillConnectionsTo(string ip)
+        {
+            // Kill all TCP connections to the rogue device by finding and terminating
+            // the owning processes' connections via netstat + established filter
+            try
+            {
+                var psi = new ProcessStartInfo("powershell", $"-NoProfile -Command \"Get-NetTCPConnection -RemoteAddress '{ip}' -ErrorAction SilentlyContinue | ForEach-Object {{ $_.OwningProcess }} | Sort-Object -Unique | ForEach-Object {{ Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }}\"")
+                { CreateNoWindow = true, UseShellExecute = false };
+                Process.Start(psi)?.WaitForExit(10000);
+            }
+            catch { }
+        }
+
+        private static void RunHidden(string exe, string args)
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo(exe, args)
+                { CreateNoWindow = true, UseShellExecute = false })?.WaitForExit(5000);
+            }
+            catch { }
         }
 
         private Task CleanupDepartedBlocks(List<NetworkDevice> currentDevices)
@@ -1670,12 +1699,10 @@ namespace WindowsSentinel.Core
                     try
                     {
                         var ruleName = $"Sentinel-Block-PhantomDevice-{kvp.Key.Replace('.', '_')}";
-                        Process.Start(new ProcessStartInfo("netsh",
-                            $"advfirewall firewall delete rule name=\"{ruleName}-OUT\"")
-                        { CreateNoWindow = true, UseShellExecute = false })?.WaitForExit(5000);
-                        Process.Start(new ProcessStartInfo("netsh",
-                            $"advfirewall firewall delete rule name=\"{ruleName}-IN\"")
-                        { CreateNoWindow = true, UseShellExecute = false })?.WaitForExit(5000);
+                        RunHidden("netsh", $"advfirewall firewall delete rule name=\"{ruleName}-OUT\"");
+                        RunHidden("netsh", $"advfirewall firewall delete rule name=\"{ruleName}-IN\"");
+                        RunHidden("netsh", $"advfirewall firewall delete rule name=\"{ruleName}-MDNS\"");
+                        RunHidden("netsh", $"advfirewall firewall delete rule name=\"{ruleName}-SSDP\"");
                         toRemove.Add(kvp.Key);
                         _logger.LogInformation("[PhantomDeviceMonitor] Removed block for departed device {Ip}", kvp.Key);
                     }
