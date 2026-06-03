@@ -55,74 +55,90 @@ Installs to `%ProgramFiles%\WindowsSentinel`, creates a Windows Service (SYSTEM)
 
 ---
 
-## Version History
+## How it Works
 
-| Version | Date | Summary |
-|---------|------|---------|
-| 5.7.0 | 2026-06-03 | Restored BeaconingDetector, AllowlistService, ScoringEngine, BehavioralBaselineService, CampaignDetectionRule, ChainTracer, DllUnloadEngine (unload-only fix); installer upgrade/uninstall hardening; 196 tests |
-| 5.6.0 | 2026-06-03 | .NET 10 upgrade, YARA/static-analysis removal, restored DllUnload/ModuleValidation/ChainTracer/BeaconingDetector/26 rules with dbghelp.dll fix |
-| 5.5.0 | 2026-06-03 | AntiTamperGuard, RansomwareIo whitelist hardening, game path exclusions |
-| 5.4.0 | 2026-06-03 | HollowProcessMonitor game false positive fix |
-| 5.3.0 | 2026-06-02 | Import 42+ monitors from SentinelOld, remove DeceptionEngine/BrowserDllMonitor |
-| 5.2.0 | 2026-06-02 | Complete codebase rebuild from design specs, flat namespace, modern DI |
-| 5.1.0 | 2026-06-02 | Active response hardening, expanded kill-authorization fragments |
-| 5.0.0 | 2026-06-01 | PhantomKeystrokeGuard, SecureCacheStore salt fix, DeceptionEngine hang fix |
-| 4.8.1 | 2026-05-30 | Performance optimization: 25% CPU -> 3-5%, 3GB -> 200-400MB RAM |
-| 4.8.0 | 2026-05-30 | Overlay detection game false positive fix (path+signature validation) |
-| 4.7.0 | 2026-05-30 | Aggressive RAM optimization: all retention windows tightened |
-| 4.6.0 | 2026-05-30 | BrowserDllMonitor removed, unified C2 detection, false positive reduction III |
-| 4.5.0 | 2026-05-30 | ClipboardSanitizer, AppNetworkPolicyMonitor, UsbDeviceFingerprinter |
-| 4.4.0 | 2026-05-29 | False positive reduction II (games, system services, hardware utilities) |
-| 4.3.0 | 2026-05-29 | System tray icon, toast/balloon notifications, real-time UI |
-| 4.2.0 | 2026-05-28 | Device installation security, Bluetooth/WiFi/TLS monitors |
-| 4.1.0 | 2026-05-27 | Critical false positive fixes (browsers, system services, Defender) |
-| 4.0.0 | 2026-05-26 | Anti-tamper, route remediation, secure boot integrity |
-| 3.9.0 | 2026-05-25 | Deception cleanup, auto-reporting to threat intel platforms |
-| 3.8.0 | 2026-05-25 | Campaign detection false positive fix (exact filename matching) |
-| 3.7.0 | 2026-05-24 | Hardening & testing (367 tests), DLL entropy analyzer |
-| 3.6.0 | 2026-05-24 | Ransomware I/O monitor, data exfiltration monitor, screen capture monitor |
-| 3.5.0 | 2026-05-23 | Chrome credential/session guards, browser extension monitor |
-| 3.4.0 | 2026-05-23 | ADS data staging, work folders exfil, named pipe monitor |
-| 3.3.0 | 2026-05-23 | Token integrity, syscall stub, parent PID spoof detection |
-| 3.2.0 | 2026-05-22 | Memory behavior analyzer, LSASS dump canary, credential canary |
-| 3.1.0 | 2026-05-21 | Detection rules framework (26 rules), tiered response system |
-| 3.0.0 | 2026-05-20 | Chain tracer, scoring engine, behavioral baseline service |
-| 2.8.1 | 2026-05-15 | Fix HealthCheckService blocking GC, EventGraph memory fix |
-| 2.8.0 | 2026-05-10 | Module validation, DLL unload engine, process validator |
-| 2.5.0 | 2026-04-28 | Beaconing detector, campaign IoC/detection rules |
-| 2.3.0 | 2026-04-20 | Allowlist service, false positive tracker, reputation cache |
-| 2.1.0 | 2026-04-10 | ETW Threat Intelligence provider integration |
-| 2.0.0 | 2026-04-01 | DLL analysis & active response (DLL unload, entropy analyzer) |
-| 1.9.0 | 2026-02-20 | WMI persistence monitor, scheduled task monitor |
-| 1.8.0 | 2026-03-15 | Remote access monitor, public IP monitor |
-| 1.7.0 | 2026-03-01 | Deception engine (pre-kill attacker disruption) |
-| 1.6.0 | 2026-02-25 | Webcam/mic monitor, audio hijack detection |
-| 1.5.0 | 2026-02-22 | PowerShell threat monitor, ETW tampering detection |
-| 1.4.0 | 2026-02-18 | Network monitor, DNS blocklist engine |
-| 1.3.0 | 2026-02-12 | File activity monitor, quarantine manager |
-| 1.2.0 | 2026-02-08 | Event graph, telemetry fusion engine |
-| 1.1.0 | 2026-02-01 | Hollow process detection, process injection rule |
-| 1.0.0 | 2026-01-20 | Persistence rule, privilege escalation detection |
-| 0.9.0 | 2026-01-15 | Behavioral correlation engine, composite rules |
-| 0.7.0 | 2026-01-13 | Scoring engine, IoC scanner, hash reputation |
-| 0.6.0 | 2026-01-12 | WMI process monitor, process ancestry cache, circuit breaker |
-| 0.5.0 | 2026-01-11 | Ransomware behavior rule, account manipulation detection |
-| 0.4.0 | 2026-01-10 | Module validation, DLL sideloading detection |
-| 0.3.0 | 2026-01-08 | ETW process monitor, firewall integrity monitor |
-| 0.2.0 | 2026-01-07 | Detection engine, JSONL event logger, secure cache store |
-| 0.1.0 | 2026-01-05 | Initial release: core architecture, service host, basic detection |
+### Architecture
 
-See [CHANGELOG.md](CHANGELOG.md) for full details.
+```
+┌──────────────────────────────────────────────────────────────┐
+│  Windows Service (SYSTEM session)                            │
+│  ┌────────────────┐  ┌──────────────────┐  ┌──────────────┐ │
+│  │ ETW Monitors   │  │ WMI Process      │  │ File Activity │ │
+│  │ (Process,      │  │ Monitor          │  │ Monitor      │ │
+│  │  ThreatIntel)  │  │ (fallback)       │  │ (FSWatcher)  │ │
+│  └───────┬────────┘  └────────┬─────────┘  └──────┬───────┘ │
+│          └──────────┬─────────┴────────────────────┘         │
+│              ┌──────▼──────────┐                             │
+│              │ Telemetry Fusion│                             │
+│              │ Engine          │                             │
+│              └──────┬──────────┘                             │
+│              ┌──────▼──────────┐   ┌───────────────────────┐ │
+│              │ Detection Engine│──▶│ Rules (5+):           │ │
+│              │ (dedup, emit)   │   │ LsassAccess, Ransom,  │ │
+│              └──────┬──────────┘   │ ReverseShell, Campaign│ │
+│                     │              │ UnsignedBinary         │ │
+│              ┌──────▼──────────┐   └───────────────────────┘ │
+│              │ Response Engine │                             │
+│              │ (structured     │   ┌───────────────────────┐ │
+│              │  verdicts)      │──▶│ ChainTracer           │ │
+│              └──────┬──────────┘   │ (kill, quarantine,    │ │
+│                     │              │  remove persistence)  │ │
+│              ┌──────▼──────────┐   └───────────────────────┘ │
+│              │ JSONL Logger    │                             │
+│              └─────────────────┘                             │
+│                                                              │
+│  + 50 BackgroundService monitors running in parallel         │
+│  + ScoringEngine, AllowlistService, BehavioralBaseline       │
+│  + BeaconingDetector, DllUnloadEngine, AntiTamperGuard       │
+└──────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────┐
+│  User Agent (user session)                                   │
+│  ┌──────────────┐  ┌──────────────┐  ┌────────────────────┐ │
+│  │ Tray Icon    │  │ Clipboard    │  │ Phantom Keystroke  │ │
+│  │ + Balloon    │  │ Sanitizer    │  │ Guard (LLKH)       │ │
+│  │   Alerts     │  │ (STA thread) │  │                    │ │
+│  └──────────────┘  └──────────────┘  └────────────────────┘ │
+└──────────────────────────────────────────────────────────────┘
+```
+
+### Detection Pipeline
+
+1. **Telemetry collection** — ETW kernel events, WMI process creation, FileSystemWatcher, network connections
+2. **Fusion** — `TelemetryFusionEngine` aggregates events per-process into `FusedTelemetryContext` with flags (network activity, file writes, suspicious APIs)
+3. **Rule evaluation** — `DetectionEngine` runs all `IDetectionRule` implementations against fused context
+4. **Scoring** — `ScoringEngine` aggregates multiple detections per-process, applies corroboration boosts and allowlist reductions, produces a `Verdict` (Clean/Suspicious/Malicious/Critical)
+5. **Response** — `AdvancedResponseEngine` acts on structured verdicts (`ResponseAction` enum). Only Tier1 detections with `KillAuthorized=true` trigger active response
+6. **Chain tracing** — `ChainTracer` walks the process ancestry, kills malicious processes, quarantines binaries, removes Run/RunOnce persistence
+
+### Response Tiers
+
+| Tier | Confidence | Action | Example |
+|------|-----------|--------|---------|
+| **Tier1Behavioral** | ≥ 0.80 | Kill process tree, quarantine, remove persistence | LSASS dump, ransomware shadow copy deletion, encoded PowerShell |
+| **Tier2Indicator** | 0.40–0.79 | Log only, feed correlation engine | Binary from Temp dir, unusual network destination |
+
+### Key Subsystems
+
+- **AllowlistService** — Suppresses false positives for dev tools, games, trusted publishers. Never suppresses "President's Law" rules (LSASS access, ransomware, credential theft)
+- **BeaconingDetector** — Statistical C2 detection via coefficient of variation of inter-connection intervals
+- **BehavioralBaselineService** — Learns normal process/path/network patterns, persisted across restarts
+- **DllUnloadEngine** — Detects DLL sideloading (system DLL loaded from app directory); unloads the DLL instead of killing the host process
+- **CampaignDetectionRule** — Matches known campaign indicators (CobaltStrike, QBot, Emotet, TrickBot) using exact filename matching to avoid false positives
+- **AntiTamperGuard** — Protects Sentinel's own binaries and hardens installation directory ACLs
+
+### Security
+
+- **DPAPI-encrypted cache** — AllowlistService, BehavioralBaseline, and IoC data encrypted at rest via `SecureCacheStore`
+- **Authenticode validation** — Quarantine and trusted path checks use code signing verification
+- **Anti-tamper** — Installation directory locked with restrictive ACLs; self-monitoring for binary integrity
+- **Input validation** — `SecurityValidation` class provides path traversal prevention, filename safety, IP classification
 
 ---
 
-## Architecture
+## Changelog
 
-- **Runtime** — .NET 10, Windows Service (SYSTEM) + User Agent (tray icon)
-- **Detection** — 50+ BackgroundService monitors, ETW kernel/ThreatIntel providers, WMI fallback, campaign IOC detection, beaconing analysis, behavioral baseline profiling
-- **Response** — Tiered via structured verdicts: Tier1 (kill-authorized), Tier2 (advisory/log-only), chain tracing with quarantine and persistence removal
-- **Logging** — JSONL structured event log, Windows Event Log
-- **Security** — DPAPI-encrypted cache, Authenticode-validated quarantine, anti-tamper
+See [CHANGELOG.md](CHANGELOG.md) for full version history.
 
 ---
 
