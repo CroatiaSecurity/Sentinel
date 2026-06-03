@@ -2,7 +2,7 @@
 
 **Userland EDR for Windows — Behavioral Detection & Automated Response**
 
-> Version: 5.6.0 | Author: [Gorstak](https://gorstak.eu) | [GitHub](https://github.com/CroatiaSecurity/Sentinel) | License: MIT
+> Version: 5.7.0 | Author: [Gorstak](https://gorstak.eu) | [GitHub](https://github.com/CroatiaSecurity/Sentinel) | License: MIT
 
 ---
 
@@ -27,7 +27,7 @@ Designed for personal endpoint protection, blue-team education, behavioral analy
 Run the installer as Administrator:
 
 ```powershell
-.\WindowsSentinelSetup-5.6.0.exe
+.\WindowsSentinelSetup-5.7.0.exe
 ```
 
 Installs to `%ProgramFiles%\WindowsSentinel`, creates a Windows Service (SYSTEM), and launches the Agent into the user session with a system tray icon.
@@ -59,6 +59,7 @@ Installs to `%ProgramFiles%\WindowsSentinel`, creates a Windows Service (SYSTEM)
 
 | Version | Date | Summary |
 |---------|------|---------|
+| 5.7.0 | 2026-06-03 | Restored BeaconingDetector, AllowlistService, ScoringEngine, BehavioralBaselineService, CampaignDetectionRule, ChainTracer, DllUnloadEngine (unload-only fix); installer upgrade/uninstall hardening; 196 tests |
 | 5.6.0 | 2026-06-03 | .NET 10 upgrade, YARA/static-analysis removal, restored DllUnload/ModuleValidation/ChainTracer/BeaconingDetector/26 rules with dbghelp.dll fix |
 | 5.5.0 | 2026-06-03 | AntiTamperGuard, RansomwareIo whitelist hardening, game path exclusions |
 | 5.4.0 | 2026-06-03 | HollowProcessMonitor game false positive fix |
@@ -118,8 +119,8 @@ See [CHANGELOG.md](CHANGELOG.md) for full details.
 ## Architecture
 
 - **Runtime** — .NET 10, Windows Service (SYSTEM) + User Agent (tray icon)
-- **Detection** — 50+ BackgroundService monitors, ETW kernel/ThreatIntel providers, WMI fallback
-- **Response** — Tiered: Tier1 (kill-authorized), Tier2 (advisory/log-only)
+- **Detection** — 50+ BackgroundService monitors, ETW kernel/ThreatIntel providers, WMI fallback, campaign IOC detection, beaconing analysis, behavioral baseline profiling
+- **Response** — Tiered via structured verdicts: Tier1 (kill-authorized), Tier2 (advisory/log-only), chain tracing with quarantine and persistence removal
 - **Logging** — JSONL structured event log, Windows Event Log
 - **Security** — DPAPI-encrypted cache, Authenticode-validated quarantine, anti-tamper
 

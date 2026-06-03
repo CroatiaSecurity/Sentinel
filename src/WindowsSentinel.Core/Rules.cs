@@ -25,6 +25,7 @@ namespace WindowsSentinel.Core
                         ProcessId = pt.ProcessId,
                         Confidence = 0.90,
                         Tier = DetectionTier.Tier1Behavioral,
+                        AuthorizedResponse = ResponseAction.KillProcessTree,
                         Evidence = $"LSASS dumping command pattern: {cmd}",
                         Reasoning = "Process invoked utility targeting the Local Security Authority Subsystem Service (LSASS) memory space."
                     };
@@ -54,6 +55,7 @@ namespace WindowsSentinel.Core
                         ProcessId = pt.ProcessId,
                         Confidence = 0.98,
                         Tier = DetectionTier.Tier1Behavioral,
+                        AuthorizedResponse = ResponseAction.KillProcessTree,
                         Evidence = $"Volume shadow copy deletion command: {cmd}",
                         Reasoning = "Process attempted to delete volume shadow copies, which is a classic ransomware technique to prevent file recovery."
                     };
@@ -74,6 +76,7 @@ namespace WindowsSentinel.Core
                             ProcessId = ft.ProcessId,
                             Confidence = 0.95,
                             Tier = DetectionTier.Tier1Behavioral,
+                            AuthorizedResponse = ResponseAction.KillProcessTree,
                             Evidence = $"File renamed to suspected ransomware extension: {ft.TargetPath}",
                             Reasoning = "Process renamed a file to an extension associated with cryptographic locker ransomware."
                         };
@@ -105,6 +108,7 @@ namespace WindowsSentinel.Core
                         ProcessId = pt.ProcessId,
                         Confidence = 0.85,
                         Tier = DetectionTier.Tier1Behavioral,
+                        AuthorizedResponse = ResponseAction.KillProcessTree,
                         Evidence = $"Encoded PowerShell execution command: {cmd}",
                         Reasoning = "Process launched an obfuscated PowerShell session, commonly used to execute downloader cradles or C2 shell callbacks."
                     };

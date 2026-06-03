@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Threading;
@@ -31,6 +33,22 @@ namespace WindowsSentinel.Core
             _timer = new System.Threading.Timer(ScanTokens, null, ScanInterval, ScanInterval);
         }
 
+        [DllImport("advapi32.dll", SetLastError = true)]
+        private static extern bool OpenProcessToken(IntPtr ProcessHandle, uint DesiredAccess, out IntPtr TokenHandle);
+
+        [DllImport("advapi32.dll", SetLastError = true)]
+        private static extern bool GetTokenInformation(IntPtr TokenHandle, int TokenInformationClass,
+            IntPtr TokenInformation, int TokenInformationLength, out int ReturnLength);
+
+        [DllImport("kernel32.dll")]
+        private static extern bool CloseHandle(IntPtr handle);
+
+        private const uint TOKEN_QUERY = 0x0008;
+        private const int TokenElevation = 20;
+        private const int TokenIntegrityLevel = 25;
+
+        private readonly HashSet<int> _alertedPids = new();
+
         private void ScanTokens(object? state)
         {
             try
@@ -40,15 +58,60 @@ namespace WindowsSentinel.Core
                     try
                     {
                         if (proc.Id <= 4) continue;
-                        // Token integrity checking requires OpenProcessToken + GetTokenInformation
-                        // Full implementation queries TOKEN_ELEVATION and TOKEN_INTEGRITY_LEVEL
+                        if (_alertedPids.Contains(proc.Id)) continue;
+
+                        if (!OpenProcessToken(proc.Handle, TOKEN_QUERY, out var tokenHandle))
+                            continue;
+
+                        try
+                        {
+                            // Check TOKEN_ELEVATION
+                            var elevBuffer = Marshal.AllocHGlobal(4);
+                            try
+                            {
+                                if (GetTokenInformation(tokenHandle, TokenElevation, elevBuffer, 4, out _))
+                                {
+                                    int elevated = Marshal.ReadInt32(elevBuffer);
+                                    if (elevated != 0)
+                                    {
+                                        // Elevated process — check if it's from a user-writable path
+                                        string? imagePath = null;
+                                        try { imagePath = proc.MainModule?.FileName; } catch { }
+
+                                        if (imagePath != null &&
+                                            (imagePath.Contains(@"\Temp\", StringComparison.OrdinalIgnoreCase) ||
+                                             imagePath.Contains(@"\Downloads\", StringComparison.OrdinalIgnoreCase) ||
+                                             imagePath.Contains(@"\AppData\", StringComparison.OrdinalIgnoreCase)))
+                                        {
+                                            _ = _detectionEngine.EmitAsync(new DetectionEvent
+                                            {
+                                                RuleName = "Privilege Escalation: Elevated Process from User Path",
+                                                Evidence = $"Elevated process '{proc.ProcessName}' (PID {proc.Id}) running from '{imagePath}'",
+                                                Reasoning = "An elevated (admin) process is running from a user-writable directory, suggesting a privilege escalation or UAC bypass.",
+                                                Confidence = 0.80, Tier = DetectionTier.Tier1Behavioral,
+                                                AuthorizedResponse = ResponseAction.LogOnly,
+                                                ProcessName = proc.ProcessName, ProcessId = proc.Id
+                                            });
+                                            _alertedPids.Add(proc.Id);
+                                        }
+                                    }
+                                }
+                            }
+                            finally { Marshal.FreeHGlobal(elevBuffer); }
+                        }
+                        finally { CloseHandle(tokenHandle); }
                     }
+                    catch (InvalidOperationException) { }
+                    catch (System.ComponentModel.Win32Exception) { }
                     catch { }
                     finally
                     {
                         proc.Dispose();
                     }
                 }
+
+                // Prune old PIDs
+                if (_alertedPids.Count > 500) _alertedPids.Clear();
             }
             catch (Exception ex)
             {

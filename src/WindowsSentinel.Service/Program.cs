@@ -56,10 +56,8 @@ namespace WindowsSentinel.Service
                     services.AddSingleton<HashReputationService>();
                     services.AddSingleton<QuarantineManager>();
 
-                    // Utility services
-                    services.AddSingleton<ClipboardSanitizer>();
+                    // Utility services (SYSTEM-session safe only)
                     services.AddSingleton<UsbDeviceFingerprinter>();
-                    services.AddSingleton<PhantomKeystrokeGuard>();
                     services.AddSingleton<IoCScanner>();
                     services.AddSingleton<ParentPidSpoofDetector>();
 
@@ -67,20 +65,25 @@ namespace WindowsSentinel.Service
                     services.AddSingleton<TelemetryFusionEngine>();
                     services.AddSingleton<AdvancedResponseEngine>();
                     services.AddSingleton<BehavioralCorrelationEngine>();
+                    services.AddSingleton<AllowlistService>();
+                    services.AddSingleton<ScoringEngine>();
+                    services.AddSingleton<ChainTracer>();
+                    services.AddSingleton<DllUnloadEngine>();
 
                     // Rules
                     services.AddTransient<IDetectionRule, LsassAccessRule>();
                     services.AddTransient<IDetectionRule, RansomwareDetectionRule>();
                     services.AddTransient<IDetectionRule, ReverseShellRule>();
                     services.AddTransient<IDetectionRule, UnsignedBinaryRule>();
+                    services.AddTransient<IDetectionRule, CampaignDetectionRule>();
 
                     // Detection Engine
                     services.AddSingleton<DetectionEngine>();
 
                     // IMonitor implementations (started by SentinelService)
-                    services.AddSingleton<DnsQueryMonitor>();
-                    services.AddSingleton<EtwProcessMonitor>();
-                    services.AddSingleton<EtwThreatIntelMonitor>();
+                    services.AddSingleton<IMonitor, DnsQueryMonitor>();
+                    services.AddSingleton<IMonitor, EtwProcessMonitor>();
+                    services.AddSingleton<IMonitor, EtwThreatIntelMonitor>();
 
                     // Monitors injected into SentinelService
                     services.AddSingleton<WmiProcessMonitor>();
@@ -98,6 +101,7 @@ namespace WindowsSentinel.Service
                     // BackgroundService monitors
                     services.AddHostedService<SentinelService>();
                     services.AddHostedService<AntiTamperGuard>();
+                    services.AddHostedService<RansomwareIoMonitor>();
                     services.AddHostedService<ArpSpoofMonitor>();
                     services.AddHostedService<BluetoothMonitor>();
                     services.AddHostedService<CanaryFileMonitor>();
@@ -115,7 +119,6 @@ namespace WindowsSentinel.Service
                     services.AddHostedService<MicrosoftAccountGuardMonitor>();
                     services.AddHostedService<ModuleValidationMonitor>();
                     services.AddHostedService<PublicIpMonitor>();
-                    services.AddHostedService<RansomwareIoMonitor>();
                     services.AddHostedService<RemoteAccessMonitor>();
                     services.AddHostedService<RuntimeModuleIntegrityMonitor>();
                     services.AddHostedService<ScheduledTaskMonitor>();
@@ -128,6 +131,8 @@ namespace WindowsSentinel.Service
                     services.AddHostedService<WmiPersistenceMonitor>();
                     services.AddHostedService<WorkFoldersExfilMonitor>();
                     services.AddHostedService<AdsDataStagingMonitor>();
+                    services.AddHostedService<BeaconingDetector>();
+                    services.AddHostedService<BehavioralBaselineService>();
                 });
     }
 }

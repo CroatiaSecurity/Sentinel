@@ -2,6 +2,49 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [5.7.0] - 2026-06-03
+
+### Added — Restored Components from Git History
+- **BeaconingDetector** — Statistical C2 beaconing detection via inter-arrival coefficient of variation analysis. BackgroundService monitoring network connections for periodic callback patterns (5s–30min intervals, CV ≤ 0.40).
+- **AllowlistService** — Manages user, development, gaming, and trusted publisher allowlists. Suppresses false positives for known-good processes while never suppressing President's Law rules (LSASS, ransomware). Persistent user allowlist via SecureCacheStore.
+- **ScoringEngine** — Multi-signal per-process threat scoring with category corroboration boosts, allowlist confidence reductions, and verdict classification (Clean/Suspicious/Malicious/Critical).
+- **BehavioralBaselineService** — BackgroundService building baseline profiles of normal process, path, parent-child, and network activity. Persisted via SecureCacheStore for cross-restart continuity.
+- **CampaignDetectionRule** — Campaign IOC detection matching CobaltStrike, QBot, Emotet, TrickBot indicators via exact filename matching (v3.8.0 fix) and regex command line patterns.
+- **ChainTracer** — Attack chain walking: kills non-critical processes in chain, quarantines non-system binaries, removes Run/RunOnce persistence, logs full chain trace evidence.
+- **DllUnloadEngine** — DLL sideloading detection with **unload-only response** (the v5.3.0 removal was due to the kill response causing false positive cascades when dbghelp.dll was dropped into app folders; now the sideloaded DLL is unloaded via CreateRemoteThread+FreeLibrary instead of killing the host process).
+
+### Added — Security Validation Methods
+- `SecurityValidation.IsSafeFilename()` — Validates filenames against path traversal, null bytes, dangerous characters, and Windows reserved names.
+- `SecurityValidation.IsPathWithinDirectory()` — Directory containment check preventing path traversal.
+- `SecurityValidation.IsPrivateIpAddress()` — RFC1918/loopback/link-local classification.
+- `SecurityValidation.IsValidProcessId()`, `IsValidPort()`, `IsValidTimestamp()`, `IsSafeString()` — Input validation utilities.
+
+### Added — Tests (14 → 196)
+- **SecurityValidationTests** (22) — Filename safety, path containment, IP classification, PID/port/timestamp validation, secure compare.
+- **RulesTests** (29) — LsassAccessRule, RansomwareDetectionRule, ReverseShellRule, UnsignedBinaryRule with positive, negative, and edge case coverage.
+- **CampaignDetectionRuleTests** (16) — Campaign IOC detection for CobaltStrike, QBot, Emotet, TrickBot; v3.8.0 exact filename fix verification.
+- **AllowlistServiceTests** (18) — Suppression logic, confidence reduction, President's Law immunity, dev/gaming/publisher recognition, user allowlist CRUD.
+- **ScoringEngineTests** (10) — Multi-signal scoring, corroboration, allowlist reduction, verdict classification.
+- **ModelsTests** (22) — DetectionEvent structured verdicts, ResponseAction ordering, ThreatScore verdicts, ConnectionHistory.
+- **EventGraphTests** (5) — Node/edge storage, edge caps, pruning.
+- **IoCScannerTests** (5) — Hash loading, matching, clearing, case insensitivity.
+
+### Changed — Installer Hardening
+- **Upgrade handling** — `PrepareToInstall` stops existing service, kills Agent/Service processes, resets antitamper ACLs via `icacls /reset` before overwriting files.
+- **Uninstall cleanup** — Stops service, deletes SCM entry, removes `HKLM\...\Run` registry key, removes `Program Files (x86)` leftovers from legacy installs.
+- **ProgramData preserved** — `C:\ProgramData\WindowsSentinel` logs intentionally NOT deleted on uninstall for forensic retention.
+
+### Changed — DI Wiring
+- Service `Program.cs` registers AllowlistService, ScoringEngine, ChainTracer, DllUnloadEngine as singletons; CampaignDetectionRule as IDetectionRule; BeaconingDetector and BehavioralBaselineService as hosted services.
+
+### Version Bumped
+- All `.csproj` files: 5.6.0 → 5.7.0
+- `setup.iss`: 5.6.0 → 5.7.0
+- `build.ps1`: 5.6.0 → 5.7.0
+- TrayIconService version string: 5.6.0 → 5.7.0
+
+---
+
 ## [5.6.0] - 2026-06-03
 
 ### Changed — Core Rewrite (Defender-Clean)

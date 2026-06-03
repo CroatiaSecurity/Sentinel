@@ -9,6 +9,14 @@ namespace WindowsSentinel.Core
         Tier2Indicator
     }
 
+    public enum ResponseAction
+    {
+        LogOnly,
+        KillProcess,
+        KillProcessTree,
+        Quarantine
+    }
+
     public class SentinelConfig
     {
         public bool ActiveResponse { get; set; } = true;
@@ -76,6 +84,8 @@ namespace WindowsSentinel.Core
         public int ProcessId { get; set; }
         public Dictionary<string, string> Metadata { get; set; } = new();
         public DateTime Timestamp { get; set; } = DateTime.UtcNow;
+        public ResponseAction AuthorizedResponse { get; set; } = ResponseAction.LogOnly;
+        public bool KillAuthorized => AuthorizedResponse >= ResponseAction.KillProcess;
     }
 
     public class ResponseEvent

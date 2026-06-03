@@ -46,8 +46,25 @@ namespace WindowsSentinel.Core
 
         private static readonly HashSet<string> NetworkAllowlist = new(StringComparer.OrdinalIgnoreCase)
         {
+            // Browsers
             "chrome", "msedge", "firefox", "brave", "opera", "vivaldi", "msedgewebview2",
-            "svchost", "lsass", "sihost", "taskhostw", "RuntimeBroker", "SystemSettings"
+            // Windows system
+            "svchost", "lsass", "sihost", "taskhostw", "RuntimeBroker", "SystemSettings",
+            "SearchHost", "backgroundTaskHost", "usocoreworker", "System",
+            "StartMenuExperienceHost", "ShellExperienceHost", "WidgetService", "widgets",
+            // Microsoft services
+            "MsMpEng", "MpDefenderCoreService", "NisSrv", "SgrmBroker",
+            "OneDrive", "OneDriveStandaloneUpdater",
+            "MicrosoftStartFeedProvider",
+            // Dev tools & Electron apps
+            "code", "cursor", "Devin", "kiro",
+            "Slack", "Discord", "Teams", "Spotify",
+            "steamwebhelper", "steam",
+            // Hardware / GPU
+            "NVDisplay.Container", "nvcontainer",
+            "RazerCentralService", "CorsairService",
+            // Windows Sentinel itself
+            "WindowsSentinel.Service", "WindowsSentinel.Agent"
         };
 
         public AppNetworkPolicyMonitor(DetectionEngine detectionEngine, ProcessAncestryCache ancestryCache)

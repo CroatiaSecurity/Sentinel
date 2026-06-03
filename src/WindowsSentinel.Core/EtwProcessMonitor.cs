@@ -1,7 +1,8 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
-using Microsoft.Extensions.Hosting;
+using Microsoft.Diagnostics.Tracing;
+using Microsoft.Diagnostics.Tracing.Session;
 using Microsoft.Extensions.Logging;
 
 namespace WindowsSentinel.Core
@@ -16,11 +17,15 @@ namespace WindowsSentinel.Core
     {
         public string Name => "EtwProcessMonitor";
 
+        private const string SessionName = "SentinelKernelProcess";
+        private const string KernelProcessProvider = "Microsoft-Windows-Kernel-Process";
+
         private readonly DetectionEngine _detectionEngine;
         private readonly TelemetryFusionEngine _fusionEngine;
         private readonly ProcessAncestryCache _ancestryCache;
         private readonly ILogger<EtwProcessMonitor> _logger;
         private CancellationTokenSource? _cts;
+        private TraceEventSession? _session;
         private Task? _monitorTask;
 
         public EtwProcessMonitor(
@@ -43,30 +48,79 @@ namespace WindowsSentinel.Core
             return Task.CompletedTask;
         }
 
-        private async Task MonitorLoop(CancellationToken ct)
+        private void MonitorLoop(CancellationToken ct)
         {
-            // ETW session for Microsoft-Windows-Kernel-Process
-            // In production this uses TraceEvent library; here we poll WMI as fallback
-            while (!ct.IsCancellationRequested)
+            try
             {
-                try
+                // Kill any stale session from previous crash
+                TraceEventSession.GetActiveSession(SessionName)?.Stop(noThrow: true);
+
+                _session = new TraceEventSession(SessionName);
+                _session.EnableProvider(KernelProcessProvider, TraceEventLevel.Informational, 0x10); // ProcessStart keyword
+
+                ct.Register(() =>
                 {
-                    await Task.Delay(2000, ct);
-                    // Process creation events are fed via WmiProcessMonitor integration
-                    // This monitor handles the ETW real-time path when available
-                }
-                catch (OperationCanceledException) { break; }
-                catch (Exception ex)
+                    _session?.Stop();
+                    _session?.Dispose();
+                });
+
+                _session.Source.Dynamic.All += data =>
                 {
-                    _logger.LogError(ex, "[{Monitor}] Error in monitor loop", Name);
-                    await Task.Delay(5000, ct);
-                }
+                    if (ct.IsCancellationRequested) return;
+
+                    try
+                    {
+                        if (data.EventName == "ProcessStart" || data.EventName == "ProcessStart/Start")
+                        {
+                            var pid = (int)data.PayloadByName("ProcessID");
+                            var imagePath = data.PayloadStringByName("ImageFileName") ?? string.Empty;
+                            var cmdLine = data.PayloadStringByName("CommandLine") ?? string.Empty;
+                            var parentPid = (int)data.PayloadByName("ParentProcessID");
+
+                            var processName = System.IO.Path.GetFileNameWithoutExtension(imagePath);
+
+                            _ancestryCache.RecordProcessStart(pid, parentPid, processName, imagePath);
+
+                            var telemetry = new ProcessTelemetry
+                            {
+                                Type = "ProcessStart",
+                                ProcessId = pid,
+                                ProcessName = processName,
+                                ImagePath = imagePath,
+                                CommandLine = cmdLine,
+                                ParentProcessId = parentPid,
+                                Timestamp = data.TimeStamp.ToUniversalTime()
+                            };
+
+                            var context = _fusionEngine.FeedEvent(telemetry);
+                            _detectionEngine.SubmitTelemetry(context);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug(ex, "[{Monitor}] Error processing event {Event}", Name, data.EventName);
+                    }
+                };
+
+                _logger.LogInformation("[{Monitor}] ETW session '{Session}' processing events", Name, SessionName);
+                _session.Source.Process(); // Blocks until session stops
+            }
+            catch (UnauthorizedAccessException)
+            {
+                _logger.LogWarning("[{Monitor}] ETW session requires admin/SYSTEM. Process telemetry via WMI fallback only.", Name);
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                _logger.LogError(ex, "[{Monitor}] ETW session failed", Name);
             }
         }
 
         public Task StopAsync()
         {
             _cts?.Cancel();
+            _session?.Stop(noThrow: true);
+            _session?.Dispose();
+            _session = null;
             _logger.LogInformation("[{Monitor}] Stopped", Name);
             return Task.CompletedTask;
         }

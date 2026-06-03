@@ -61,16 +61,16 @@ namespace WindowsSentinel.Agent
                     // Tray Icon
                     services.AddHostedService<TrayIconService>();
 
-                    // User-session monitors
+                    // User-session utility services (Clipboard needs STA/user session)
+                    services.AddSingleton<ClipboardSanitizer>();
+
+                    // User-session monitors (require user desktop/registry hive)
                     services.AddHostedService<ScreenCaptureMonitor>();
                     services.AddHostedService<WebcamMicMonitor>();
                     services.AddHostedService<AudioHijackMonitor>();
                     services.AddHostedService<MicSessionMonitor>();
                     services.AddHostedService<NeuroBehaviorVisualMonitor>();
                     services.AddHostedService<BrowserExtensionMonitor>();
-
-                    // Utility services
-                    services.AddSingleton<ClipboardSanitizer>();
                     services.AddSingleton<PhantomKeystrokeGuard>();
                 });
     }

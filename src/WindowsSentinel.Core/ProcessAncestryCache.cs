@@ -47,6 +47,14 @@ namespace WindowsSentinel.Core
             }
         }
 
+        public void RecordProcessStart(int pid, int parentPid, string processName, string imagePath)
+        {
+            // Inject ETW-sourced process data between periodic refreshes
+            var dict = new Dictionary<int, (int, string)>((Dictionary<int, (int, string)>)_cache);
+            dict[pid] = (parentPid, processName);
+            _cache = dict;
+        }
+
         public (int parentId, string name) GetParent(int pid)
         {
             if (_cache.TryGetValue(pid, out var info))

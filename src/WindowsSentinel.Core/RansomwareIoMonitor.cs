@@ -47,6 +47,7 @@ namespace WindowsSentinel.Core
                                 Reasoning = "A process is performing mass file renames at a rate consistent with file encryption ransomware.",
                                 Confidence = 0.95,
                                 Tier = DetectionTier.Tier1Behavioral,
+                                AuthorizedResponse = ResponseAction.KillProcessTree,
                                 ProcessId = kvp.Key,
                                 Timestamp = DateTime.UtcNow
                             });

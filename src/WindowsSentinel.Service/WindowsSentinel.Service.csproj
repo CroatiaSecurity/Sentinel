@@ -4,7 +4,7 @@
     <TargetFramework>net10.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <Version>5.6.0</Version>
+    <Version>5.7.0</Version>
     <Platforms>AnyCPU;x64;ARM64</Platforms>
     <ApplicationIcon>..\..\installer\assets\Sentinel.ico</ApplicationIcon>
   </PropertyGroup>

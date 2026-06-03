@@ -13,8 +13,15 @@ namespace WindowsSentinel.Core
 
         private static readonly HashSet<string> ElectronAndJitApps = new(StringComparer.OrdinalIgnoreCase)
         {
-            "code", "cursor", "discord", "slack", "teams", "steamwebhelper",
-            "spotify", "brave", "chrome", "msedge", "fm", "kiro"
+            // Electron / JIT apps with legitimate RWX + network
+            "code", "cursor", "Devin", "discord", "slack", "teams", "steamwebhelper",
+            "spotify", "brave", "chrome", "msedge", "fm", "kiro",
+            // Windows system processes
+            "svchost", "sppsvc", "WmiPrvSE", "MsMpEng", "MpDefenderCoreService",
+            "NisSrv", "SgrmBroker", "OneDrive",
+            "MicrosoftStartFeedProvider", "backgroundTaskHost", "widgets",
+            "GameBarPresenceWriter", "sihost", "taskhostw",
+            "SearchHost", "StartMenuExperienceHost", "explorer"
         };
 
         private const int MaxSignalsPerBuffer = 50;
@@ -119,6 +126,7 @@ namespace WindowsSentinel.Core
                 ProcessName = name,
                 Confidence = confidence,
                 Tier = DetectionTier.Tier1Behavioral,
+                AuthorizedResponse = ResponseAction.KillProcessTree,
                 Evidence = $"[COMPOSITE] {evidence} (PID {pid})",
                 Reasoning = reasoning,
                 Timestamp = DateTime.UtcNow

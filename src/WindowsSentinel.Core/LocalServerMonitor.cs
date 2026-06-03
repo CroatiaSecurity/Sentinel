@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Net.NetworkInformation;
 using System.Threading;
 using System.Threading.Tasks;
@@ -30,13 +31,44 @@ namespace WindowsSentinel.Core
             _timer = new System.Threading.Timer(ScanListeners, null, ScanInterval, ScanInterval);
         }
 
+        private readonly HashSet<string> _baselineListeners = new();
+        private bool _baselined;
+
         private void ScanListeners(object? state)
         {
             try
             {
                 var properties = IPGlobalProperties.GetIPGlobalProperties();
                 var listeners = properties.GetActiveTcpListeners();
-                // Compare against known baseline; alert on new unexpected listeners
+                var current = new HashSet<string>();
+
+                foreach (var ep in listeners)
+                {
+                    current.Add($"{ep.Address}:{ep.Port}");
+                }
+
+                if (!_baselined)
+                {
+                    foreach (var l in current) _baselineListeners.Add(l);
+                    _baselined = true;
+                    return;
+                }
+
+                foreach (var listener in current)
+                {
+                    if (_baselineListeners.Contains(listener)) continue;
+
+                    // New listener appeared
+                    _ = _detectionEngine.EmitAsync(new DetectionEvent
+                    {
+                        RuleName = "Network: New Local TCP Listener",
+                        Evidence = $"New TCP listener detected: {listener}",
+                        Reasoning = "A new TCP listener appeared that was not present at service startup. This could indicate a reverse shell listener, unauthorized web server, or C2 agent.",
+                        Confidence = 0.65, Tier = DetectionTier.Tier2Indicator,
+                        ProcessName = "SYSTEM", ProcessId = 0
+                    });
+                    _baselineListeners.Add(listener);
+                }
             }
             catch (Exception ex)
             {

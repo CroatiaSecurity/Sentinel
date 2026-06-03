@@ -1,6 +1,6 @@
 ﻿[Setup]
 AppName=Windows Sentinel
-AppVersion=5.6.0
+AppVersion=5.7.0
 AppPublisher=Gorstak
 AppPublisherURL=https://gorstak.eu
 SourceDir=.
@@ -11,8 +11,10 @@ UninstallDisplayIcon={app}\Sentinel.ico
 Compression=lzma2
 SolidCompression=yes
 OutputDir=.
-OutputBaseFilename=WindowsSentinelSetup-5.6.0
+OutputBaseFilename=WindowsSentinelSetup-5.7.0
 PrivilegesRequired=admin
+; Allow upgrading over existing install
+UsePreviousAppDir=yes
 
 [Files]
 Source: "assets\Sentinel.ico"; DestDir: "{app}"; Flags: ignoreversion
@@ -42,4 +44,63 @@ Filename: "{app}\WindowsSentinel.Agent.exe"; Flags: nowait postinstall runasorig
 ; Stop and delete the service
 Filename: "{sys}\sc.exe"; Parameters: "stop ""Windows Sentinel"""; Flags: runhidden
 Filename: "{sys}\sc.exe"; Parameters: "delete ""Windows Sentinel"""; Flags: runhidden
+
+[UninstallDelete]
+; Remove application directory (but NOT ProgramData logs)
+Type: filesandordirs; Name: "{app}"
+; Remove Program Files (x86) leftovers if previous install was there
+Type: filesandordirs; Name: "{pf32}\WindowsSentinel"
+
+[Code]
+// Pascal Script for upgrade/uninstall logic
+
+procedure StopExistingService();
+var
+  ResultCode: Integer;
+begin
+  // Stop the service before upgrading — handles antitamper ACL-locked files
+  Exec(ExpandConstant('{sys}\sc.exe'), 'stop "Windows Sentinel"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  // Wait for service to stop
+  Sleep(2000);
+  // Kill any remaining agent processes
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM WindowsSentinel.Agent.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM WindowsSentinel.Service.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Sleep(1000);
+  // Reset directory ACLs so installer can overwrite files (antitamper hardens ACLs)
+  Exec(ExpandConstant('{sys}\icacls.exe'),
+    ExpandConstant('"{app}" /reset /T /C /Q'),
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  Result := '';
+  // If upgrading, stop existing service and reset ACLs
+  if RegValueExists(HKLM, 'SOFTWARE\Microsoft\Windows\CurrentVersion\Run', 'WindowsSentinelAgent') then
+  begin
+    StopExistingService();
+  end;
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  ResultCode: Integer;
+begin
+  if CurUninstallStep = usUninstall then
+  begin
+    // Stop service before uninstall
+    StopExistingService();
+
+    // Remove Sentinel registry keys
+    RegDeleteValue(HKLM, 'SOFTWARE\Microsoft\Windows\CurrentVersion\Run', 'WindowsSentinelAgent');
+
+    // Delete service via SCM
+    Exec(ExpandConstant('{sys}\sc.exe'), 'delete "Windows Sentinel"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+    // Remove Program Files (x86) folder if exists (legacy installs)
+    DelTree(ExpandConstant('{pf32}\WindowsSentinel'), True, True, True);
+
+    // NOTE: ProgramData\WindowsSentinel logs are intentionally PRESERVED
+  end;
+end;
 

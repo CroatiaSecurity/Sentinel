@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -15,7 +16,9 @@ namespace WindowsSentinel.Service
         private readonly JsonlEventLogger _eventLogger;
         private readonly DetectionEngine _detectionEngine;
         private readonly ProcessAncestryCache _ancestryCache;
-        private readonly ClipboardSanitizer _clipboardSanitizer;
+        private readonly IEnumerable<IMonitor> _monitors;
+
+        // Constructor-injected singletons that self-start
         private readonly UsbDeviceFingerprinter _usbDeviceFingerprinter;
         private readonly AppNetworkPolicyMonitor _networkPolicyMonitor;
         private readonly WmiProcessMonitor _wmiProcessMonitor;
@@ -35,7 +38,7 @@ namespace WindowsSentinel.Service
             JsonlEventLogger eventLogger,
             DetectionEngine detectionEngine,
             ProcessAncestryCache ancestryCache,
-            ClipboardSanitizer clipboardSanitizer,
+            IEnumerable<IMonitor> monitors,
             UsbDeviceFingerprinter usbDeviceFingerprinter,
             AppNetworkPolicyMonitor networkPolicyMonitor,
             WmiProcessMonitor wmiProcessMonitor,
@@ -54,7 +57,7 @@ namespace WindowsSentinel.Service
             _eventLogger = eventLogger;
             _detectionEngine = detectionEngine;
             _ancestryCache = ancestryCache;
-            _clipboardSanitizer = clipboardSanitizer;
+            _monitors = monitors;
             _usbDeviceFingerprinter = usbDeviceFingerprinter;
             _networkPolicyMonitor = networkPolicyMonitor;
             _wmiProcessMonitor = wmiProcessMonitor;
@@ -80,13 +83,26 @@ namespace WindowsSentinel.Service
                 return;
             }
 
+            // Start all IMonitor implementations (ETW sessions, DNS monitor, etc.)
+            foreach (var monitor in _monitors)
+            {
+                try
+                {
+                    await monitor.StartAsync(stoppingToken);
+                    _logger.LogInformation("Started monitor: {Monitor}", monitor.Name);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to start monitor: {Monitor}", monitor.Name);
+                }
+            }
+
             _logger.LogInformation("Windows Sentinel Service successfully started.");
 
-            // Log startup to the JSONL log file so it is initialized with non-zero size
             await _eventLogger.LogEventAsync("service_start", new
             {
                 Status = "started",
-                Version = "5.6.0",
+                Version = "5.7.0",
                 Timestamp = DateTime.UtcNow
             });
 
@@ -94,7 +110,6 @@ namespace WindowsSentinel.Service
             {
                 while (!stoppingToken.IsCancellationRequested)
                 {
-                    // Monitor loop / heartbeat
                     await Task.Delay(5000, stoppingToken);
                 }
             }
@@ -105,6 +120,14 @@ namespace WindowsSentinel.Service
             finally
             {
                 _logger.LogInformation("Windows Sentinel Service stopping...");
+
+                // Stop IMonitors
+                foreach (var monitor in _monitors)
+                {
+                    try { await monitor.StopAsync(); }
+                    catch (Exception ex) { _logger.LogError(ex, "Error stopping monitor: {Monitor}", monitor.Name); }
+                }
+
                 _ancestryCache.Stop();
                 _detectionEngine.Stop();
             }
