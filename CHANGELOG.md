@@ -4,6 +4,13 @@ All notable changes to Windows Sentinel are documented in this file.
 
 ## [5.5.0] - 2026-06-03
 
+### Added
+- **Anti-Tamper Self-Protection (AntiTamperGuard)** — A new background watchdog service protecting Windows Sentinel components from process termination (denying `PROCESS_TERMINATE` to non-SYSTEM handles), process suspension (NtSuspendProcess), service registry modifications, and agent auto-start Run key removal.
+- **System-Wide DLL Sideloading Prevention** — Intercepts writes/drops of critical system DLLs like `dbghelp.dll` or `dbgcore.dll` in non-system directories by untrusted processes, immediately deleting/quarantining them and terminating the writer process. This blocks DLL hijacking while allowing legitimate apps to run cleanly via default system DLLs.
+- **Folder ACL Lockdown** — Automatically enforces NTFS ACL permissions on Sentinel's installation folder to restrict modification access solely to SYSTEM and Administrators, ensuring standard users cannot drop files or modify binaries.
+- **Sentinel Directory Tamper Protection** — Monitors the Sentinel directory; any unauthorized creation or modification of files is immediately blocked, the file deleted, and the responsible process terminated.
+- **Rate-Limited Balloon Notifications** — Integrates rate limiting for tray notifications (maximum 3 balloon alerts per 5 seconds) to prevent toast flooding and UI denial-of-service, showing a summary notice when alerts are temporarily silenced.
+
 ### Fixed
 - **Game File Lock Contention** — Excluded common game directories, launchers, and publisher folders (Steam, Epic, My Games, Sports Interactive, etc.) from Restart Manager handle queries inside `FileActivityMonitor.cs` to prevent file lock contention and sharing violations for all games.
 - **Football Manager Ransomware Whitelist** — Added `"fm"` and `"fm.exe"` to the process whitelist in `RansomwareIoMonitor.cs` to prevent false behavioral ransomware alerts during high match simulation and save activity.

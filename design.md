@@ -382,6 +382,11 @@ Composite detections are emitted as Tier1 `DetectionEvent`s directly into the de
 |-----------|---------|
 | `FileActivityMonitor` fix | Excluded common game directories, launchers, and publisher folders (Steam, Epic, My Games, Sports Interactive, etc.) from Restart Manager handle queries to generally prevent file lock contention and sharing violations for all games. |
 | `RansomwareIoMonitor` whitelist | Added `fm` and `fm.exe` to the process whitelist to prevent false behavioral ransomware alerts during high match simulation and save activity. |
+| `AntiTamperGuard` | **New background watchdog service.** Prevents EDR process termination (denies `PROCESS_TERMINATE` to non-SYSTEM handles), detects process suspension gaps (NtSuspendProcess), auto-heals SCM registry service entries/paths, and enforces agent login Run key persistence. |
+| `FileActivityMonitor` DLL block | **Global DLL Sideloading Block.** Intercepts writes of `dbghelp.dll`/`dbgcore.dll` in non-system paths by untrusted processes, deleting the file and killing the writer immediately to prevent successful sideload execution without causing target application crashes. |
+| Native ACL folder lockdown | Enforces NTFS folder permissions on `C:\Program Files\WindowsSentinel` natively using DirectorySecurity to allow only SYSTEM/Administrators modification access and Users read/execute access, blocking icacls LOLBin command executions. |
+| Sentinel Folder Watch | Recursively monitors Sentinel's own directory. Any unauthorized creation or modification of files is immediately blocked, the file deleted, and the responsible process terminated. |
+| `TrayIconService` alerts | Tails `events.jsonl` in the user session to display balloon tips for detections with integrated `RateLimiter` protection (max 3 alerts per 5s) to prevent notification flooding/spam. |
 
 ## Added in 4.5.0
 

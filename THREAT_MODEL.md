@@ -292,4 +292,24 @@ The attacker could theoretically:
 **Mitigation:** Replaced the subtractive boot time extraction (using TickCount64) with direct querying of the System process (PID 4) start time via `Process.GetProcessById(4).StartTime`, establishing a tamper-resistant boot session anchor.
 **Residual risk:** LOW. Safe fallback to local clock remains in place.
 
+---
+
+### B17: DLL sideloading/hijacking of Sentinel itself
+**Attack:** Attacker drops a malicious DLL into Sentinel's installation directory to hijack the Service or Agent when launched.
+**Mitigation (v5.5.0):**
+- **DLL Search Hardening:** Call `HardeningModule.ApplyOrFail()` at the absolute start of both the Service and Agent processes to restrict dynamic DLL loading solely to `%SystemRoot%\System32`.
+- **NTFS ACL Lockdown:** Enforces strict NTFS permissions on Sentinel's installation folder to deny modify access to standard users and restrict write access to `SYSTEM` and `Administrators`.
+- **Sentinel Directory Watcher:** Recurse-watches the Sentinel folder. If any unauthorized process attempts to write or drop files, Sentinel immediately deletes the file, flags a Tier 1 event, and terminates the writer.
+**Residual risk:** LOW. Standard users cannot write to the folder, and any attempt by other processes to tamper with it is immediately contained.
+
+---
+
+### B18: Evading EDR via dbghelp.dll sideloading / crashing target application
+**Attack:** Attacker drops a malicious `dbghelp.dll` in the target application's directory to hijack execution or dump LSASS memory, causing target application crashes when the EDR terminates it.
+**Mitigation (v5.5.0):**
+- **Pre-emptive DLL Deletion:** Intercepts writes of critical system DLLs (`dbghelp.dll`/`dbgcore.dll`) in non-system paths.
+- **Trusted Writer Verification:** If the writing process is untrusted, Sentinel immediately deletes the file and terminates the writer process.
+- **Containment without Crashing:** Since the malicious DLL is deleted before the target application is executed, the target application runs cleanly by falling back to the system's DLL in `System32` (no crash or hijack).
+**Residual risk:** LOW. Untrusted droppers are blocked, and target applications remain uncompromised and operational.
+
 
