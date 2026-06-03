@@ -133,6 +133,7 @@ namespace WindowsSentinel.Service
                     services.AddHostedService<AdsDataStagingMonitor>();
                     services.AddHostedService<BeaconingDetector>();
                     services.AddHostedService<BehavioralBaselineService>();
+                    services.AddHostedService<PhantomDeviceMonitor>();
                 });
     }
 }

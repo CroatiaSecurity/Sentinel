@@ -1522,5 +1522,258 @@ namespace WindowsSentinel.Core
             }
         }
     }
+
+    // ──────────────────────────────────────────────
+    // Phantom Device Monitor — detects & blocks unauthorized network devices
+    // ──────────────────────────────────────────────
+    public sealed class PhantomDeviceMonitor : BackgroundService
+    {
+        private readonly DetectionEngine _detectionEngine;
+        private readonly SentinelConfig _config;
+        private readonly JsonlEventLogger _eventLogger;
+        private readonly ILogger<PhantomDeviceMonitor> _logger;
+        private readonly ConcurrentDictionary<string, NetworkDevice> _knownDevices = new(StringComparer.OrdinalIgnoreCase);
+        private readonly ConcurrentDictionary<string, DateTime> _blockedIps = new(StringComparer.OrdinalIgnoreCase);
+
+        private static readonly int[] SuspiciousPorts = { 8008, 8009, 8443, 5555, 5353, 9222, 2323, 4443 };
+
+        private static readonly Dictionary<string, string> OuiLookup = new(StringComparer.OrdinalIgnoreCase)
+        {
+            { "B0-B3-69", "Google" }, { "F4-F5-D8", "Google" }, { "54-60-09", "Google" },
+            { "A4-77-33", "Google" }, { "30-FD-38", "Google" }, { "48-D6-D5", "Google" },
+            { "E8-DE-27", "TP-Link" }, { "50-C7-BF", "TP-Link" },
+            { "DC-A6-32", "Raspberry Pi" }, { "B8-27-EB", "Raspberry Pi" }, { "E4-5F-01", "Raspberry Pi" },
+            { "00-0C-29", "VMware" }, { "00-50-56", "VMware" },
+            { "08-00-27", "VirtualBox" },
+        };
+
+        public PhantomDeviceMonitor(
+            DetectionEngine de, SentinelConfig config, JsonlEventLogger logger,
+            ILogger<PhantomDeviceMonitor> l)
+        {
+            _detectionEngine = de; _config = config; _eventLogger = logger; _logger = l;
+        }
+
+        [DllImport("iphlpapi.dll")]
+        private static extern int GetIpNetTable(IntPtr pIpNetTable, ref int pdwSize, bool bOrder);
+
+        protected override async Task ExecuteAsync(CancellationToken ct)
+        {
+            _logger.LogInformation("[PhantomDeviceMonitor] Started");
+
+            var initial = GetArpTable();
+            foreach (var dev in initial)
+                _knownDevices[dev.Mac] = dev;
+            _logger.LogInformation("[PhantomDeviceMonitor] Baseline: {Count} devices", _knownDevices.Count);
+
+            while (!ct.IsCancellationRequested)
+            {
+                try
+                {
+                    await Task.Delay(45000, ct);
+
+                    var current = GetArpTable();
+                    foreach (var dev in current)
+                    {
+                        if (dev.Mac == "FF-FF-FF-FF-FF-FF") continue;
+                        if (dev.Mac.StartsWith("01-00-5E", StringComparison.OrdinalIgnoreCase)) continue;
+                        if (dev.Mac.StartsWith("33-33-", StringComparison.OrdinalIgnoreCase)) continue;
+
+                        if (!_knownDevices.ContainsKey(dev.Mac))
+                        {
+                            _knownDevices[dev.Mac] = dev;
+
+                            var manufacturer = LookupManufacturer(dev.Mac);
+                            var suspiciousService = await ProbeSuspiciousPorts(dev.Ip, ct);
+
+                            var confidence = 0.75;
+                            var tier = DetectionTier.Tier1Behavioral;
+                            var reasoning = $"A new network device appeared that was not present at Sentinel startup. Manufacturer: {manufacturer}.";
+
+                            if (suspiciousService != null)
+                            {
+                                confidence = 0.90;
+                                reasoning += $" Device has an open {suspiciousService} port, which is commonly used for screen casting, debugging, or remote access.";
+                            }
+
+                            await _detectionEngine.EmitAsync(new DetectionEvent
+                            {
+                                RuleName = "Phantom Device: New Unauthorized Network Device",
+                                Evidence = $"New device: IP={dev.Ip}, MAC={dev.Mac}, Manufacturer={manufacturer}{(suspiciousService != null ? $", Open={suspiciousService}" : "")}",
+                                Reasoning = reasoning,
+                                Confidence = confidence, Tier = tier,
+                                AuthorizedResponse = ResponseAction.LogOnly,
+                                ProcessName = "SYSTEM", ProcessId = 0
+                            });
+
+                            if (_config.ActiveResponse && confidence >= 0.85)
+                                await BlockDevice(dev.Ip, dev.Mac, manufacturer, suspiciousService);
+                        }
+                        else
+                        {
+                            var known = _knownDevices[dev.Mac];
+                            if (known.Ip != dev.Ip)
+                                _knownDevices[dev.Mac] = dev;
+                        }
+                    }
+
+                    await CleanupDepartedBlocks(current);
+                }
+                catch (OperationCanceledException) { break; }
+                catch (Exception ex) { _logger.LogDebug(ex, "[PhantomDeviceMonitor] Error"); }
+            }
+        }
+
+        private async Task BlockDevice(string ip, string mac, string manufacturer, string? suspiciousService)
+        {
+            try
+            {
+                if (_blockedIps.ContainsKey(ip)) return;
+                var ruleName = $"Sentinel-Block-PhantomDevice-{ip.Replace('.', '_')}";
+
+                var psiOut = new ProcessStartInfo("netsh",
+                    $"advfirewall firewall add rule name=\"{ruleName}-OUT\" dir=out action=block remoteip={ip} enable=yes")
+                { CreateNoWindow = true, UseShellExecute = false };
+                Process.Start(psiOut)?.WaitForExit(5000);
+
+                var psiIn = new ProcessStartInfo("netsh",
+                    $"advfirewall firewall add rule name=\"{ruleName}-IN\" dir=in action=block remoteip={ip} enable=yes")
+                { CreateNoWindow = true, UseShellExecute = false };
+                Process.Start(psiIn)?.WaitForExit(5000);
+
+                _blockedIps[ip] = DateTime.UtcNow;
+
+                await _eventLogger.LogEventAsync("response", new ResponseEvent
+                {
+                    ProcessId = 0,
+                    ProcessName = "PhantomDeviceMonitor",
+                    ActionTaken = "FIREWALL_BLOCK",
+                    Reason = $"Blocked phantom device IP={ip} MAC={mac} Manufacturer={manufacturer} SuspiciousPort={suspiciousService ?? "none"}"
+                });
+
+                _logger.LogWarning("[PhantomDeviceMonitor] BLOCKED device IP={Ip} MAC={Mac} Manufacturer={Mfg}", ip, mac, manufacturer);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[PhantomDeviceMonitor] Failed to block device {Ip}", ip);
+            }
+        }
+
+        private Task CleanupDepartedBlocks(List<NetworkDevice> currentDevices)
+        {
+            var currentIps = new HashSet<string>(currentDevices.Select(d => d.Ip));
+            var toRemove = new List<string>();
+            foreach (var kvp in _blockedIps)
+            {
+                if (!currentIps.Contains(kvp.Key) && DateTime.UtcNow - kvp.Value > TimeSpan.FromMinutes(10))
+                {
+                    try
+                    {
+                        var ruleName = $"Sentinel-Block-PhantomDevice-{kvp.Key.Replace('.', '_')}";
+                        Process.Start(new ProcessStartInfo("netsh",
+                            $"advfirewall firewall delete rule name=\"{ruleName}-OUT\"")
+                        { CreateNoWindow = true, UseShellExecute = false })?.WaitForExit(5000);
+                        Process.Start(new ProcessStartInfo("netsh",
+                            $"advfirewall firewall delete rule name=\"{ruleName}-IN\"")
+                        { CreateNoWindow = true, UseShellExecute = false })?.WaitForExit(5000);
+                        toRemove.Add(kvp.Key);
+                        _logger.LogInformation("[PhantomDeviceMonitor] Removed block for departed device {Ip}", kvp.Key);
+                    }
+                    catch { }
+                }
+            }
+            foreach (var ip in toRemove) _blockedIps.TryRemove(ip, out _);
+            return Task.CompletedTask;
+        }
+
+        private static async Task<string?> ProbeSuspiciousPorts(string ip, CancellationToken ct)
+        {
+            foreach (var port in SuspiciousPorts)
+            {
+                try
+                {
+                    using var client = new System.Net.Sockets.TcpClient();
+                    using var timeout = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
+                    using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
+                    await client.ConnectAsync(IPAddress.Parse(ip), port, linked.Token);
+                    var serviceName = port switch
+                    {
+                        8008 => "HTTP-Alt (Cast discovery)",
+                        8009 => "Google Cast",
+                        8443 => "HTTPS-Alt",
+                        5555 => "ADB (Android Debug Bridge)",
+                        5353 => "mDNS",
+                        9222 => "Chrome DevTools Protocol",
+                        2323 => "Telnet-Alt",
+                        4443 => "Pharos",
+                        _ => $"Port {port}"
+                    };
+                    return $"{serviceName} (port {port})";
+                }
+                catch { }
+            }
+            return null;
+        }
+
+        private static string LookupManufacturer(string mac)
+        {
+            if (mac.Length >= 8)
+            {
+                var prefix = mac[..8];
+                if (OuiLookup.TryGetValue(prefix, out var mfg))
+                    return mfg;
+            }
+            return "Unknown";
+        }
+
+        private static List<NetworkDevice> GetArpTable()
+        {
+            var devices = new List<NetworkDevice>();
+            try
+            {
+                int size = 0;
+                GetIpNetTable(IntPtr.Zero, ref size, false);
+                var buffer = Marshal.AllocHGlobal(size);
+                try
+                {
+                    if (GetIpNetTable(buffer, ref size, false) == 0)
+                    {
+                        int entries = Marshal.ReadInt32(buffer);
+                        var entryPtr = buffer + 4;
+                        int entrySize = Marshal.SizeOf<MIB_IPNETROW>();
+                        for (int i = 0; i < entries; i++)
+                        {
+                            var row = Marshal.PtrToStructure<MIB_IPNETROW>(entryPtr + (i * entrySize));
+                            if (row.dwType == 2) continue;
+                            var ip = new IPAddress(BitConverter.GetBytes(row.dwAddr)).ToString();
+                            var mac = $"{row.mac0:X2}-{row.mac1:X2}-{row.mac2:X2}-{row.mac3:X2}-{row.mac4:X2}-{row.mac5:X2}";
+                            if (mac != "00-00-00-00-00-00")
+                                devices.Add(new NetworkDevice { Ip = ip, Mac = mac, EntryType = row.dwType });
+                        }
+                    }
+                }
+                finally { Marshal.FreeHGlobal(buffer); }
+            }
+            catch { }
+            return devices;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct MIB_IPNETROW
+        {
+            public int dwIndex;
+            public int dwPhysAddrLen;
+            public byte mac0, mac1, mac2, mac3, mac4, mac5, mac6, mac7;
+            public int dwAddr;
+            public int dwType;
+        }
+
+        internal class NetworkDevice
+        {
+            public string Ip { get; set; } = "";
+            public string Mac { get; set; } = "";
+            public int EntryType { get; set; }
+        }
+    }
 }
 
