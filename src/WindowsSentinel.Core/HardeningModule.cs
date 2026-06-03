@@ -49,8 +49,9 @@ namespace WindowsSentinel.Core
 
         public static void SecureInstallationDirectory()
         {
-            // Ensure the installation directory has restricted ACLs
-            // Best-effort; non-fatal if it fails (e.g., running non-elevated)
+            // Harden installation directory: remove write for non-admin users
+            // but preserve read/execute for Administrators and Users (needed by Agent)
+            // Best-effort; non-fatal if it fails
             try
             {
                 var exeDir = AppContext.BaseDirectory;
@@ -60,7 +61,23 @@ namespace WindowsSentinel.Core
                 if (!dirInfo.Exists) return;
 
                 var security = dirInfo.GetAccessControl();
-                security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+
+                // Keep inheritance — do NOT call SetAccessRuleProtection(true, false)
+                // which strips all inherited ACEs and locks out non-SYSTEM users.
+                // Instead, add a deny-write rule for regular Users to prevent tampering
+                // while keeping read+execute intact.
+                var usersIdentity = new System.Security.Principal.SecurityIdentifier(
+                    System.Security.Principal.WellKnownSidType.BuiltinUsersSid, null);
+                security.AddAccessRule(new System.Security.AccessControl.FileSystemAccessRule(
+                    usersIdentity,
+                    System.Security.AccessControl.FileSystemRights.Write |
+                    System.Security.AccessControl.FileSystemRights.Delete |
+                    System.Security.AccessControl.FileSystemRights.DeleteSubdirectoriesAndFiles,
+                    System.Security.AccessControl.InheritanceFlags.ContainerInherit |
+                    System.Security.AccessControl.InheritanceFlags.ObjectInherit,
+                    System.Security.AccessControl.PropagationFlags.None,
+                    System.Security.AccessControl.AccessControlType.Deny));
+
                 dirInfo.SetAccessControl(security);
             }
             catch
