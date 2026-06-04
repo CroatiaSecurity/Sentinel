@@ -2,6 +2,34 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [6.0.0] - 2026-06-04
+
+### Added — Detection Rules
+- **ThreatIntelInjectionRule** — Detects kernel-observed injection APIs (VirtualAllocEx, WriteProcessMemory, QueueUserAPC, CreateRemoteThread, etc.) from EtwThreatIntelMonitor. Tier1 kill-authorized.
+- **PrivilegeEscalationRule** — Detects UAC bypass vectors (fodhelper, sdclt, eventvwr, cmstp), token manipulation tools (tokenvator, incognito, getsystem), named pipe impersonation, DLL hijacking. Tier1 kill-authorized.
+- **AttackToolsRule** — Detects C2 frameworks (CobaltStrike, Metasploit, Sliver, Havoc), credential tools (Mimikatz, LaZagne, Rubeus), AD tools (BloodHound, CrackMapExec, Impacket), LOLBin abuse (certutil, bitsadmin, mshta, regsvr32, wmic). Tier1 kill-authorized.
+- **CampaignIocRule** — Known malicious filenames (typo-squatted system binaries) and C2 exfiltration endpoints (pastebin raw, Discord webhooks, tor2web). Tier1/Tier2.
+
+### Added — Services
+- **IncidentResponseService** — Forensic evidence collection before kill: module inventory, network connections, process tree, binary quarantine. Evidence stored in `%ProgramData%\WindowsSentinel\Evidence\`.
+- **StartupSelfTest** — Pre-flight checks on startup: log directory, quarantine directory, DPAPI cache, rule loading, event logger.
+- **SentinelHealthCheck** — Periodic health reporting (every 5 min): memory, handles, threads, log size, quarantine count, thread pool, uptime, detection/response totals.
+
+### Added — Monitors Registered
+- **ScreenCaptureMonitor** — Detects DXGI desktop duplication (screen capture) by non-standard processes.
+- **WebcamMicMonitor** — Monitors Windows ConsentStore for webcam/microphone access by new applications.
+- **AudioHijackMonitor** — Detects audio routing hijacks and unauthorized audio endpoint registration.
+- **NeuroBehaviorVisualMonitor** — Detects large transparent topmost overlay windows (phishing overlays).
+- **BrowserExtensionMonitor** — Monitors Chrome/Edge/Brave extension directories for new installs.
+- **PhantomKeystrokeGuard** — Keystroke injection anomaly detection via HID input tracking.
+
+### Changed
+- MicSessionMonitor NOT registered (unified into WebcamMicMonitor to eliminate overlap).
+- AdvancedResponseEngine now calls IncidentResponseService to collect forensic evidence before killing.
+- DetectionEngine exposes `RuleCount` property for startup verification.
+
+---
+
 ## [5.9.2] - 2026-06-04
 
 ### Fixed — Critical: DNS Poisoning False Positive blocking GitHub/Microsoft

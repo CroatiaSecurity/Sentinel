@@ -69,11 +69,16 @@ namespace WindowsSentinel.Service
                     services.AddSingleton<ScoringEngine>();
                     services.AddSingleton<ChainTracer>();
                     services.AddSingleton<DllUnloadEngine>();
+                    services.AddSingleton<IncidentResponseService>();
 
                     // Rules
                     services.AddTransient<IDetectionRule, LsassAccessRule>();
                     services.AddTransient<IDetectionRule, RansomwareDetectionRule>();
                     services.AddTransient<IDetectionRule, ReverseShellRule>();
+                    services.AddTransient<IDetectionRule, ThreatIntelInjectionRule>();
+                    services.AddTransient<IDetectionRule, PrivilegeEscalationRule>();
+                    services.AddTransient<IDetectionRule, AttackToolsRule>();
+                    services.AddTransient<IDetectionRule, CampaignIocRule>();
                     services.AddTransient<IDetectionRule, UnsignedBinaryRule>();
                     services.AddTransient<IDetectionRule, CampaignDetectionRule>();
 
@@ -97,6 +102,10 @@ namespace WindowsSentinel.Service
                     services.AddSingleton<CredentialCanaryMonitor>();
                     services.AddSingleton<LocalServerMonitor>();
                     services.AddSingleton<AppNetworkPolicyMonitor>();
+
+                    // Startup & Health
+                    services.AddHostedService<StartupSelfTest>();
+                    services.AddHostedService<SentinelHealthCheck>();
 
                     // BackgroundService monitors
                     services.AddHostedService<SentinelService>();
@@ -134,6 +143,14 @@ namespace WindowsSentinel.Service
                     services.AddHostedService<BeaconingDetector>();
                     services.AddHostedService<BehavioralBaselineService>();
                     services.AddHostedService<PhantomDeviceMonitor>();
+
+                    // User-session monitors (privacy, UI, browser)
+                    services.AddHostedService<ScreenCaptureMonitor>();
+                    services.AddHostedService<WebcamMicMonitor>();
+                    services.AddHostedService<AudioHijackMonitor>();
+                    services.AddHostedService<NeuroBehaviorVisualMonitor>();
+                    services.AddHostedService<BrowserExtensionMonitor>();
+                    services.AddSingleton<PhantomKeystrokeGuard>();
                 });
     }
 }

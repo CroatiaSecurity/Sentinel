@@ -50,8 +50,13 @@ namespace WindowsSentinel.Service
             MemoryBehaviorAnalyzer memoryBehaviorAnalyzer,
             TokenIntegrityMonitor tokenIntegrityMonitor,
             CredentialCanaryMonitor credentialCanaryMonitor,
-            LocalServerMonitor localServerMonitor)
+            LocalServerMonitor localServerMonitor,
+            AdvancedResponseEngine responseEngine,
+            IncidentResponseService incidentResponseService)
         {
+            // Wire incident response into response engine (late binding to avoid circular DI)
+            responseEngine.SetIncidentResponseService(incidentResponseService);
+
             _logger = logger;
             _config = config;
             _eventLogger = eventLogger;
@@ -71,6 +76,7 @@ namespace WindowsSentinel.Service
             _credentialCanaryMonitor = credentialCanaryMonitor;
             _localServerMonitor = localServerMonitor;
         }
+
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {

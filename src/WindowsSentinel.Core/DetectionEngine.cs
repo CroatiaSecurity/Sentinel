@@ -16,6 +16,7 @@ namespace WindowsSentinel.Core
     public class DetectionEngine
     {
         private readonly List<IDetectionRule> _rules = new();
+        public int RuleCount => _rules.Count;
         private readonly Channel<FusedTelemetryContext> _telemetryChannel = Channel.CreateUnbounded<FusedTelemetryContext>();
         private readonly ConcurrentDictionary<(string, int), DateTime> _dedupCache = new();
         private readonly SentinelMetrics _metrics;

@@ -118,6 +118,222 @@ namespace WindowsSentinel.Core
         }
     }
 
+    public class ThreatIntelInjectionRule : IDetectionRule
+    {
+        public string Name => "ThreatIntelInjectionRule";
+
+        // Suspicious API patterns from EtwThreatIntelMonitor kernel callbacks
+        private static readonly string[] InjectionAPIs = new[]
+        {
+            "NtAllocateVirtualMemory", "VirtualAllocEx", "NtWriteVirtualMemory",
+            "WriteProcessMemory", "NtMapViewOfSection", "MapViewOfSection",
+            "QueueUserAPC", "NtQueueApcThread", "SetThreadContext",
+            "NtSetContextThread", "RtlCreateUserThread", "CreateRemoteThread"
+        };
+
+        public DetectionEvent? Evaluate(FusedTelemetryContext context)
+        {
+            if (context.TriggeringEvent is ProcessTelemetry pt && context.HasSuspiciousAPIs)
+            {
+                var cmd = pt.CommandLine;
+                foreach (var api in InjectionAPIs)
+                {
+                    if (cmd.Contains(api, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return new DetectionEvent
+                        {
+                            RuleName = Name,
+                            ProcessName = pt.ProcessName,
+                            ProcessId = pt.ProcessId,
+                            Confidence = 0.90,
+                            Tier = DetectionTier.Tier1Behavioral,
+                            AuthorizedResponse = ResponseAction.KillProcessTree,
+                            Evidence = $"Injection API invoked: {api} by {pt.ProcessName} (PID {pt.ProcessId})",
+                            Reasoning = "Process invoked a kernel-observed memory injection API targeting another process, indicating code injection (T1055)."
+                        };
+                    }
+                }
+            }
+            return null;
+        }
+    }
+
+    public class PrivilegeEscalationRule : IDetectionRule
+    {
+        public string Name => "PrivilegeEscalationRule";
+
+        private static readonly string[] UacBypassPatterns = new[]
+        {
+            "fodhelper.exe", "computerdefaults.exe", "sdclt.exe",
+            "eventvwr.exe", "slui.exe", "cmstp.exe",
+            // Token manipulation
+            "tokenvator", "incognito", "getsystem",
+            // Named pipe impersonation
+            "\\pipe\\", "ImpersonateNamedPipeClient",
+            // DLL hijack indicators
+            "\\syswow64\\version.dll", "\\temp\\version.dll", "\\temp\\winmm.dll"
+        };
+
+        public DetectionEvent? Evaluate(FusedTelemetryContext context)
+        {
+            if (context.TriggeringEvent is ProcessTelemetry pt)
+            {
+                var cmd = pt.CommandLine.ToLowerInvariant();
+                var image = pt.ImagePath.ToLowerInvariant();
+
+                foreach (var pattern in UacBypassPatterns)
+                {
+                    if (cmd.Contains(pattern, StringComparison.OrdinalIgnoreCase) ||
+                        image.Contains(pattern, StringComparison.OrdinalIgnoreCase))
+                    {
+                        // Skip legitimate uses — these only trigger when spawned by non-explorer parents
+                        if (pattern.EndsWith(".exe") && pt.ParentProcessName?.Equals("explorer", StringComparison.OrdinalIgnoreCase) == true)
+                            continue;
+
+                        return new DetectionEvent
+                        {
+                            RuleName = Name,
+                            ProcessName = pt.ProcessName,
+                            ProcessId = pt.ProcessId,
+                            Confidence = 0.85,
+                            Tier = DetectionTier.Tier1Behavioral,
+                            AuthorizedResponse = ResponseAction.KillProcessTree,
+                            Evidence = $"Privilege escalation pattern detected: '{pattern}' in {pt.ProcessName} (PID {pt.ProcessId}) cmd: {pt.CommandLine}",
+                            Reasoning = "Process matches a known UAC bypass vector, token manipulation tool, or DLL hijacking pattern indicating privilege escalation."
+                        };
+                    }
+                }
+            }
+            return null;
+        }
+    }
+
+    public class AttackToolsRule : IDetectionRule
+    {
+        public string Name => "AttackToolsRule";
+
+        private static readonly (string Pattern, string Category)[] ToolSignatures = new[]
+        {
+            // C2 frameworks
+            ("cobalt", "CobaltStrike"), ("cobeacon", "CobaltStrike"), ("beacon.dll", "CobaltStrike"),
+            ("meterpreter", "Metasploit"), ("msfvenom", "Metasploit"), ("msfconsole", "Metasploit"),
+            ("sliver", "Sliver"), ("havoc", "Havoc"),
+
+            // Credential tools
+            ("mimikatz", "Mimikatz"), ("sekurlsa", "Mimikatz"), ("kerberos::list", "Mimikatz"),
+            ("lazagne", "LaZagne"), ("pypykatz", "Pypykatz"),
+            ("rubeus", "Rubeus"), ("asreproast", "Rubeus"), ("kerberoast", "Rubeus"),
+
+            // AD attack tools
+            ("bloodhound", "BloodHound"), ("sharphound", "BloodHound"),
+            ("crackmapexec", "CrackMapExec"), ("impacket", "Impacket"),
+            ("psexec", "PsExec"), ("wmiexec", "WMIExec"),
+
+            // LOLBin abuse patterns
+            ("certutil -urlcache", "LOLBin"), ("certutil -decode", "LOLBin"),
+            ("bitsadmin /transfer", "LOLBin"), ("mshta vbscript", "LOLBin"),
+            ("regsvr32 /s /n /u /i:", "LOLBin"), ("rundll32 javascript:", "LOLBin"),
+            ("wmic process call create", "LOLBin"),
+        };
+
+        public DetectionEvent? Evaluate(FusedTelemetryContext context)
+        {
+            if (context.TriggeringEvent is ProcessTelemetry pt)
+            {
+                var cmd = pt.CommandLine;
+                var image = pt.ImagePath;
+
+                foreach (var (pattern, category) in ToolSignatures)
+                {
+                    if (cmd.Contains(pattern, StringComparison.OrdinalIgnoreCase) ||
+                        image.Contains(pattern, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return new DetectionEvent
+                        {
+                            RuleName = Name,
+                            ProcessName = pt.ProcessName,
+                            ProcessId = pt.ProcessId,
+                            Confidence = 0.95,
+                            Tier = DetectionTier.Tier1Behavioral,
+                            AuthorizedResponse = ResponseAction.KillProcessTree,
+                            Evidence = $"Attack tool detected: {category} (pattern: '{pattern}') in {pt.ProcessName} (PID {pt.ProcessId})",
+                            Reasoning = $"Process command line or image path matches a known offensive security tool ({category}). Kill authorized."
+                        };
+                    }
+                }
+            }
+            return null;
+        }
+    }
+
+    public class CampaignIocRule : IDetectionRule
+    {
+        public string Name => "CampaignIocRule";
+
+        // Known malicious filename patterns from tracked campaigns
+        private static readonly string[] MaliciousFilenames = new[]
+        {
+            "svchosts.exe", "svchost.exe.exe", "csrss.exe.exe",
+            "lsass.exe.exe", "explorer.exe.exe",
+            "windowsupdate.exe", "windowsdefender.exe",
+            "chrome_update.exe", "firefox_update.exe",
+            "system32.exe", "kernel32.exe",
+        };
+
+        // Known C2 domain substrings
+        private static readonly string[] MaliciousDomainPatterns = new[]
+        {
+            "pastebin.com/raw", "hastebin.com/raw",
+            "discord.com/api/webhooks", "telegram-bot",
+            ".onion.", ".tor2web.",
+        };
+
+        public DetectionEvent? Evaluate(FusedTelemetryContext context)
+        {
+            if (context.TriggeringEvent is ProcessTelemetry pt)
+            {
+                var filename = Path.GetFileName(pt.ImagePath).ToLowerInvariant();
+
+                foreach (var mal in MaliciousFilenames)
+                {
+                    if (filename.Equals(mal, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return new DetectionEvent
+                        {
+                            RuleName = Name,
+                            ProcessName = pt.ProcessName,
+                            ProcessId = pt.ProcessId,
+                            Confidence = 0.80,
+                            Tier = DetectionTier.Tier2Indicator,
+                            Evidence = $"Known malicious filename executed: {pt.ImagePath}",
+                            Reasoning = $"Process filename '{filename}' matches a known IoC from tracked malware campaigns."
+                        };
+                    }
+                }
+
+                var cmd = pt.CommandLine;
+                foreach (var domain in MaliciousDomainPatterns)
+                {
+                    if (cmd.Contains(domain, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return new DetectionEvent
+                        {
+                            RuleName = Name,
+                            ProcessName = pt.ProcessName,
+                            ProcessId = pt.ProcessId,
+                            Confidence = 0.85,
+                            Tier = DetectionTier.Tier1Behavioral,
+                            AuthorizedResponse = ResponseAction.KillProcessTree,
+                            Evidence = $"Known malicious C2 domain in command line: {domain}",
+                            Reasoning = $"Command line contains a known C2 exfiltration endpoint ({domain}), indicating active malware communication."
+                        };
+                    }
+                }
+            }
+            return null;
+        }
+    }
+
     public class UnsignedBinaryRule : IDetectionRule
     {
         public string Name => "UnsignedBinaryRule";

@@ -2,7 +2,7 @@
 
 **Userland EDR for Windows � Behavioral Detection & Automated Response**
 
-> Version: 5.9.2 | Author: [Gorstak](https://gorstak.eu) | [GitHub](https://github.com/CroatiaSecurity/Sentinel) | License: MIT
+> Version: 6.0.0 | Author: [Gorstak](https://gorstak.eu) | [GitHub](https://github.com/CroatiaSecurity/Sentinel) | License: MIT
 
 ---
 
@@ -27,7 +27,7 @@ Designed for personal endpoint protection, blue-team education, behavioral analy
 Run the installer as Administrator:
 
 ```powershell
-.\WindowsSentinelSetup-5.9.2.exe
+.\WindowsSentinelSetup-6.0.0.exe
 ```
 
 Installs to `%ProgramFiles%\WindowsSentinel`, creates a Windows Service (SYSTEM), and launches the Agent into the user session with a system tray icon.
@@ -144,6 +144,13 @@ Installs to `%ProgramFiles%\WindowsSentinel`, creates a Windows Service (SYSTEM)
 - **DllUnloadEngine** � Detects DLL sideloading (system DLL loaded from app directory); unloads the DLL instead of killing the host process
 - **CampaignDetectionRule** � Matches known campaign indicators (CobaltStrike, QBot, Emotet, TrickBot) using exact filename matching to avoid false positives
 - **PhantomDeviceMonitor** � Scans ARP table for unauthorized network devices, probes suspicious ports (Cast/ADB/DevTools), identifies manufacturer via OUI lookup, blocks rogue devices via firewall + ARP flush + connection kill + mDNS/SSDP discovery block
+- **ThreatIntelInjectionRule** — Kernel-observed injection API detection (VirtualAllocEx, WriteProcessMemory, QueueUserAPC, CreateRemoteThread). Tier1 kill.
+- **PrivilegeEscalationRule** — UAC bypass vectors, token manipulation, named pipe impersonation, DLL hijacking. Tier1 kill.
+- **AttackToolsRule** — C2 frameworks (CobaltStrike, Metasploit, Sliver), credential tools (Mimikatz, Rubeus), AD tools, LOLBin abuse. Tier1 kill.
+- **CampaignIocRule** — Known malicious filenames and C2 exfiltration endpoints. Tier1/Tier2.
+- **IncidentResponseService** — Forensic evidence collection (modules, network, process tree) before kill.
+- **StartupSelfTest** — Pre-flight subsystem verification on service start.
+- **SentinelHealthCheck** — Periodic health monitoring and resource alerting.
 - **AntiTamperGuard** � Protects Sentinel's own binaries and hardens installation directory ACLs
 
 ### Security
@@ -189,5 +196,6 @@ By using this software, you agree that the author(s) bear no responsibility for 
 ---
 
 MIT License � see [LICENSE](LICENSE) for full terms.
+
 
 

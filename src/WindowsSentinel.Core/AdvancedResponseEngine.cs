@@ -11,6 +11,7 @@ namespace WindowsSentinel.Core
         private readonly SentinelConfig _config;
         private readonly SentinelMetrics _metrics;
         private readonly JsonlEventLogger _eventLogger;
+        private IncidentResponseService? _incidentResponse;
 
         public AdvancedResponseEngine(
             SentinelConfig config,
@@ -21,6 +22,8 @@ namespace WindowsSentinel.Core
             _metrics = metrics;
             _eventLogger = eventLogger;
         }
+
+        public void SetIncidentResponseService(IncidentResponseService irs) => _incidentResponse = irs;
 
         public async Task HandleAsync(DetectionEvent detection)
         {
@@ -90,6 +93,9 @@ namespace WindowsSentinel.Core
             }
             else if (shouldKill && detection.ProcessId > 4)
             {
+                // Collect forensic evidence before killing
+                try { if (_incidentResponse != null) _ = _incidentResponse.CollectEvidenceAsync(detection); } catch { }
+
                 HardeningModule.SafeKillProcessTree(detection.ProcessId);
 
                 stopwatch.Stop();
