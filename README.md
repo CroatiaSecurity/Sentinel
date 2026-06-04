@@ -1,6 +1,6 @@
-# Windows Sentinel
+ï»¿# Windows Sentinel
 
-**Userland EDR for Windows — Behavioral Detection & Automated Response**
+**Userland EDR for Windows ï¿½ Behavioral Detection & Automated Response**
 
 > Version: 5.9.0 | Author: [Gorstak](https://gorstak.eu) | [GitHub](https://github.com/CroatiaSecurity/Sentinel) | License: MIT
 
@@ -61,79 +61,97 @@ Installs to `%ProgramFiles%\WindowsSentinel`, creates a Windows Service (SYSTEM)
 
 ```
 +--------------------------------------------------------------+
-¦  Windows Service (SYSTEM session)                            ¦
-¦  +----------------+  +------------------+  +--------------+ ¦
-¦  ¦ ETW Monitors   ¦  ¦ WMI Process      ¦  ¦ File Activity ¦ ¦
-¦  ¦ (Process,      ¦  ¦ Monitor          ¦  ¦ Monitor      ¦ ¦
-¦  ¦  ThreatIntel)  ¦  ¦ (fallback)       ¦  ¦ (FSWatcher)  ¦ ¦
-¦  +----------------+  +------------------+  +--------------+ ¦
-¦          +-----------------------------------------+         ¦
-¦              +------?----------+                             ¦
-¦              ¦ Telemetry Fusion¦                             ¦
-¦              ¦ Engine          ¦                             ¦
-¦              +-----------------+                             ¦
-¦              +------?----------+   +-----------------------+ ¦
-¦              ¦ Detection Engine¦--?¦ Rules (5+):           ¦ ¦
-¦              ¦ (dedup, emit)   ¦   ¦ LsassAccess, Ransom,  ¦ ¦
-¦              +-----------------+   ¦ ReverseShell, Campaign¦ ¦
-¦                     ¦              ¦ UnsignedBinary         ¦ ¦
-¦              +------?----------+   +-----------------------+ ¦
-¦              ¦ Response Engine ¦                             ¦
-¦              ¦ (structured     ¦   +-----------------------+ ¦
-¦              ¦  verdicts)      ¦--?¦ ChainTracer           ¦ ¦
-¦              +-----------------+   ¦ (kill, quarantine,    ¦ ¦
-¦                     ¦              ¦  remove persistence)  ¦ ¦
-¦              +------?----------+   +-----------------------+ ¦
-¦              ¦ JSONL Logger    ¦                             ¦
-¦              +-----------------+                             ¦
-¦                                                              ¦
-¦  + 50 BackgroundService monitors running in parallel         ¦
-¦  + ScoringEngine, AllowlistService, BehavioralBaseline       ¦
-¦  + BeaconingDetector, DllUnloadEngine, AntiTamperGuard       ¦
+ï¿½  Windows Service (SYSTEM session)                            ï¿½
+ï¿½  +----------------+  +------------------+  +--------------+ ï¿½
+ï¿½  ï¿½ ETW Monitors   ï¿½  ï¿½ WMI Process      ï¿½  ï¿½ File Activity ï¿½ ï¿½
+ï¿½  ï¿½ (Process,      ï¿½  ï¿½ Monitor          ï¿½  ï¿½ Monitor      ï¿½ ï¿½
+ï¿½  ï¿½  ThreatIntel)  ï¿½  ï¿½ (fallback)       ï¿½  ï¿½ (FSWatcher)  ï¿½ ï¿½
+ï¿½  +----------------+  +------------------+  +--------------+ ï¿½
+ï¿½          +-----------------------------------------+         ï¿½
+ï¿½              +------?----------+                             ï¿½
+ï¿½              ï¿½ Telemetry Fusionï¿½                             ï¿½
+ï¿½              ï¿½ Engine          ï¿½                             ï¿½
+ï¿½              +-----------------+                             ï¿½
+ï¿½              +------?----------+   +-----------------------+ ï¿½
+ï¿½              ï¿½ Detection Engineï¿½--?ï¿½ Rules (5+):           ï¿½ ï¿½
+ï¿½              ï¿½ (dedup, emit)   ï¿½   ï¿½ LsassAccess, Ransom,  ï¿½ ï¿½
+ï¿½              +-----------------+   ï¿½ ReverseShell, Campaignï¿½ ï¿½
+ï¿½                     ï¿½              ï¿½ UnsignedBinary         ï¿½ ï¿½
+ï¿½              +------?----------+   +-----------------------+ ï¿½
+ï¿½              ï¿½ Response Engine ï¿½                             ï¿½
+ï¿½              ï¿½ (structured     ï¿½   +-----------------------+ ï¿½
+ï¿½              ï¿½  verdicts)      ï¿½--?ï¿½ ChainTracer           ï¿½ ï¿½
+ï¿½              +-----------------+   ï¿½ (kill, quarantine,    ï¿½ ï¿½
+ï¿½                     ï¿½              ï¿½  remove persistence)  ï¿½ ï¿½
+ï¿½              +------?----------+   +-----------------------+ ï¿½
+ï¿½              ï¿½ JSONL Logger    ï¿½                             ï¿½
+ï¿½              +-----------------+                             ï¿½
+ï¿½                                                              ï¿½
+ï¿½  + 50 BackgroundService monitors running in parallel         ï¿½
+ï¿½  + ScoringEngine, AllowlistService, BehavioralBaseline       ï¿½
+ï¿½  + BeaconingDetector, DllUnloadEngine, AntiTamperGuard       ï¿½
 +--------------------------------------------------------------+
 
 +--------------------------------------------------------------+
-¦  User Agent (user session)                                   ¦
-¦  +--------------+  +--------------+  +--------------------+ ¦
-¦  ¦ Tray Icon    ¦  ¦ Clipboard    ¦  ¦ Phantom Keystroke  ¦ ¦
-¦  ¦ + Balloon    ¦  ¦ Sanitizer    ¦  ¦ Guard (LLKH)       ¦ ¦
-¦  ¦   Alerts     ¦  ¦ (STA thread) ¦  ¦                    ¦ ¦
-¦  +--------------+  +--------------+  +--------------------+ ¦
+ï¿½  User Agent (user session)                                   ï¿½
+ï¿½  +--------------+  +--------------+  +--------------------+ ï¿½
+ï¿½  ï¿½ Tray Icon    ï¿½  ï¿½ Clipboard    ï¿½  ï¿½ Phantom Keystroke  ï¿½ ï¿½
+ï¿½  ï¿½ + Balloon    ï¿½  ï¿½ Sanitizer    ï¿½  ï¿½ Guard (LLKH)       ï¿½ ï¿½
+ï¿½  ï¿½   Alerts     ï¿½  ï¿½ (STA thread) ï¿½  ï¿½                    ï¿½ ï¿½
+ï¿½  +--------------+  +--------------+  +--------------------+ ï¿½
 +--------------------------------------------------------------+
 ```
 
 ### Detection Pipeline
 
-1. **Telemetry collection** — ETW kernel events, WMI process creation, FileSystemWatcher, network connections
-2. **Fusion** — `TelemetryFusionEngine` aggregates events per-process into `FusedTelemetryContext` with flags (network activity, file writes, suspicious APIs)
-3. **Rule evaluation** — `DetectionEngine` runs all `IDetectionRule` implementations against fused context
-4. **Scoring** — `ScoringEngine` aggregates multiple detections per-process, applies corroboration boosts and allowlist reductions, produces a `Verdict` (Clean/Suspicious/Malicious/Critical)
-5. **Response** — `AdvancedResponseEngine` acts on structured verdicts (`ResponseAction` enum). Only Tier1 detections with `KillAuthorized=true` trigger active response
-6. **Chain tracing** — `ChainTracer` walks the process ancestry, kills malicious processes, quarantines binaries, removes Run/RunOnce persistence
+1. **Telemetry collection** ï¿½ ETW kernel events, WMI process creation, FileSystemWatcher, network connections
+2. **Fusion** ï¿½ `TelemetryFusionEngine` aggregates events per-process into `FusedTelemetryContext` with flags (network activity, file writes, suspicious APIs)
+3. **Rule evaluation** ï¿½ `DetectionEngine` runs all `IDetectionRule` implementations against fused context
+4. **Scoring** ï¿½ `ScoringEngine` aggregates multiple detections per-process, applies corroboration boosts and allowlist reductions, produces a `Verdict` (Clean/Suspicious/Malicious/Critical)
+5. **Response** ï¿½ `AdvancedResponseEngine` acts on structured verdicts (`ResponseAction` enum). Only Tier1 detections with `KillAuthorized=true` trigger active response
+6. **Chain tracing** ï¿½ `ChainTracer` walks the process ancestry, kills malicious processes, quarantines binaries, removes Run/RunOnce persistence
 
 ### Response Tiers
 
 | Tier | Confidence | Action | Example |
 |------|-----------|--------|---------|
 | **Tier1Behavioral** | = 0.80 | Kill process tree, quarantine, remove persistence | LSASS dump, ransomware shadow copy deletion, encoded PowerShell |
-| **Tier2Indicator** | 0.40–0.79 | Log only, feed correlation engine | Binary from Temp dir, unusual network destination |
+| **Tier2Indicator** | 0.40ï¿½0.79 | Log only, feed correlation engine | Binary from Temp dir, unusual network destination |
 
+
+### Active Response Matrix
+
+| Detection | Response | Details |
+|---|---|---|
+| LSASS dump, ransomware, encoded PowerShell, campaign malware | KillProcessTree | Kill + quarantine binary + remove persistence |
+| Process hollowing, shellcode injection | KillProcessTree | Kill injected process tree |
+| PPID spoofing (T1134.004) | KillProcess | Kill the spoofed process |
+| Privilege escalation (elevated from user-writable dir) | KillProcess | Kill |
+| DNS poisoning (critical domain IP swap) | NetworkIsolate | Block IP + flush ARP + flush DNS |
+| ARP spoof (gateway MAC change) | NetworkIsolate | Block spoofed gateway |
+| Default gateway hijack | NetworkIsolate | Block rogue gateway IP |
+| C2 beaconing (statistical CV analysis) | NetworkIsolate | Block C2 server IP |
+| Data exfiltration spike | NetworkIsolate | Block outbound destination |
+| Canary file deleted | KillProcessTree | Ransomware response |
+| Credential canary deleted | KillProcessTree | Credential harvester response |
+| Phantom rogue network device | Full isolation | Firewall + ARP flush + conn kill + mDNS/SSDP block |
+| DLL sideloading | Unload DLL only | FreeLibrary via remote thread (no kill) |
 ### Key Subsystems
 
-- **AllowlistService** — Suppresses false positives for dev tools, games, trusted publishers. Never suppresses "President's Law" rules (LSASS access, ransomware, credential theft)
-- **BeaconingDetector** — Statistical C2 detection via coefficient of variation of inter-connection intervals
-- **BehavioralBaselineService** — Learns normal process/path/network patterns, persisted across restarts
-- **DllUnloadEngine** — Detects DLL sideloading (system DLL loaded from app directory); unloads the DLL instead of killing the host process
-- **CampaignDetectionRule** — Matches known campaign indicators (CobaltStrike, QBot, Emotet, TrickBot) using exact filename matching to avoid false positives
-- **PhantomDeviceMonitor** — Scans ARP table for unauthorized network devices, probes suspicious ports (Cast/ADB/DevTools), identifies manufacturer via OUI lookup, blocks rogue devices via firewall + ARP flush + connection kill + mDNS/SSDP discovery block
-- **AntiTamperGuard** — Protects Sentinel's own binaries and hardens installation directory ACLs
+- **AllowlistService** ï¿½ Suppresses false positives for dev tools, games, trusted publishers. Never suppresses "President's Law" rules (LSASS access, ransomware, credential theft)
+- **BeaconingDetector** ï¿½ Statistical C2 detection via coefficient of variation of inter-connection intervals
+- **BehavioralBaselineService** ï¿½ Learns normal process/path/network patterns, persisted across restarts
+- **DllUnloadEngine** ï¿½ Detects DLL sideloading (system DLL loaded from app directory); unloads the DLL instead of killing the host process
+- **CampaignDetectionRule** ï¿½ Matches known campaign indicators (CobaltStrike, QBot, Emotet, TrickBot) using exact filename matching to avoid false positives
+- **PhantomDeviceMonitor** ï¿½ Scans ARP table for unauthorized network devices, probes suspicious ports (Cast/ADB/DevTools), identifies manufacturer via OUI lookup, blocks rogue devices via firewall + ARP flush + connection kill + mDNS/SSDP discovery block
+- **AntiTamperGuard** ï¿½ Protects Sentinel's own binaries and hardens installation directory ACLs
 
 ### Security
 
-- **DPAPI-encrypted cache** — AllowlistService, BehavioralBaseline, and IoC data encrypted at rest via `SecureCacheStore`
-- **Authenticode validation** — Quarantine and trusted path checks use code signing verification
-- **Anti-tamper** — Installation directory locked with restrictive ACLs; self-monitoring for binary integrity
-- **Input validation** — `SecurityValidation` class provides path traversal prevention, filename safety, IP classification
+- **DPAPI-encrypted cache** ï¿½ AllowlistService, BehavioralBaseline, and IoC data encrypted at rest via `SecureCacheStore`
+- **Authenticode validation** ï¿½ Quarantine and trusted path checks use code signing verification
+- **Anti-tamper** ï¿½ Installation directory locked with restrictive ACLs; self-monitoring for binary integrity
+- **Input validation** ï¿½ `SecurityValidation` class provides path traversal prevention, filename safety, IP classification
 
 ---
 
@@ -145,9 +163,9 @@ See [CHANGELOG.md](CHANGELOG.md) for full version history.
 
 ## Limitations
 
-- Userland only — no kernel driver, limited by standard user/admin access
-- Windows only — no cross-platform support
-- Single-machine scope — no central management or fleet telemetry
+- Userland only ï¿½ no kernel driver, limited by standard user/admin access
+- Windows only ï¿½ no cross-platform support
+- Single-machine scope ï¿½ no central management or fleet telemetry
 
 ---
 
@@ -170,4 +188,4 @@ By using this software, you agree that the author(s) bear no responsibility for 
 
 ---
 
-MIT License — see [LICENSE](LICENSE) for full terms.
+MIT License ï¿½ see [LICENSE](LICENSE) for full terms.

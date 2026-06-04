@@ -12,6 +12,16 @@ All notable changes to Windows Sentinel are documented in this file.
 - `AdvancedResponseEngine` now handles `ResponseAction.NetworkIsolate` alongside `KillProcess`/`KillProcessTree`
 - DNS Poisoning detection (`DnsResponseValidationMonitor`) upgraded from `LogOnly` to `NetworkIsolate` with `TargetIP` metadata
 
+### Changed — All Active Responses Enabled
+- **ParentPidSpoofDetector** — `LogOnly` → `KillProcess`. PPID spoofing (T1134.004) is always malicious.
+- **TokenIntegrityMonitor** — `LogOnly` → `KillProcess`. Elevated process from Temp/Downloads/AppData = privilege escalation.
+- **ArpSpoofMonitor** — `LogOnly` → `NetworkIsolate`. Gateway MAC change = ARP spoofing/MitM.
+- **RouteTableMonitor** (gateway change) — `LogOnly` → `NetworkIsolate`. Gateway hijack = network redirect.
+- **BeaconingDetector** — `LogOnly` → `NetworkIsolate`. C2 beaconing destination gets firewall-blocked.
+- **DataExfiltrationMonitor** — `LogOnly` → `NetworkIsolate`. Outbound volume spike = exfil in progress.
+- **CanaryFileMonitor** — `LogOnly` → `KillProcessTree`. Canary deletion = ransomware.
+- **CredentialCanaryMonitor** — `LogOnly` → `KillProcessTree`. Canary credential deletion = credential harvester.
+
 ### Fixed — False Positive Elimination
 - **DnsQueryMonitor DGA detection** — Raised entropy threshold from 3.8→4.0 and minimum subdomain length from 12→14. Added trusted base domain allowlist (Steam, Microsoft, CDNs, IDE tooling, gaming) that bypasses both DGA and rapid-query-volume checks. Stops alerting on `p2p-fra1.discovery.steamserver.net`, `codeium.com`, `agentclientprotocol.com`, etc.
 - **LocalServerMonitor** — Now ignores localhost (`127.0.0.1`/`::1`) listeners on ephemeral ports (≥49152). IDE language servers, debug adapters, and dev servers no longer generate alerts.
