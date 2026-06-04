@@ -74,7 +74,7 @@ namespace WindowsSentinel.Agent
             {
                 Icon = appIcon ?? System.Drawing.SystemIcons.Shield,
                 ContextMenuStrip = _contextMenu,
-                Text = "Windows Sentinel v5.9.1 — Protection Active",
+                Text = "Windows Sentinel v5.9.2 — Protection Active",
                 Visible = true
             };
 
@@ -149,7 +149,7 @@ namespace WindowsSentinel.Agent
         {
             _config.ActiveResponse = !_config.ActiveResponse;
             var status = _config.ActiveResponse ? "Active" : "Disabled";
-            _notifyIcon!.Text = $"Windows Sentinel v5.9.1 — Protection {status}";
+            _notifyIcon!.Text = $"Windows Sentinel v5.9.2 — Protection {status}";
             _notifyIcon.ShowBalloonTip(2000, "Windows Sentinel", $"Protection mode set to {status}.", ToolTipIcon.Warning);
         }
 

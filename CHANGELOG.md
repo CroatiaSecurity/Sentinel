@@ -2,6 +2,19 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [5.9.2] - 2026-06-04
+
+### Fixed — Critical: DNS Poisoning False Positive blocking GitHub/Microsoft
+- **DnsResponseValidationMonitor** was treating normal CDN IP rotation as DNS poisoning, causing `NETWORK_ISOLATE` to firewall-block GitHub (140.82.121.x) and Microsoft login (20.190.x.x) IPs
+- Root cause: single-shot baseline at startup didn't account for anycast/CDN services rotating IPs across the same /16 subnets
+- Fix: 3-phase detection with /16 subnet learning:
+  1. Multi-round baseline (3 resolutions over ~2 min at startup)
+  2. Accumulates known /16 subnets per domain across all CDN rotations
+  3. Only alerts when IPs jump to a **completely different subnet** (actual poisoning)
+- Confidence raised to 0.90 (fewer but higher-confidence alerts)
+
+---
+
 ## [5.9.1] - 2026-06-04
 
 ### Changed — Anti-Tamper Responses Enabled

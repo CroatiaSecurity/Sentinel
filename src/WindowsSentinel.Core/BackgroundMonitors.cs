@@ -593,13 +593,33 @@ namespace WindowsSentinel.Core
 
         public DnsResponseValidationMonitor(DetectionEngine de, ILogger<DnsResponseValidationMonitor> l) { _detectionEngine = de; _logger = l; }
 
+        // Accumulates all known-good IPs per domain across CDN rotations
+        private readonly ConcurrentDictionary<string, HashSet<string>> _knownSubnets = new();
+
         protected override async Task ExecuteAsync(CancellationToken ct)
         {
             _logger.LogInformation("[DnsResponseValidationMonitor] Started");
             var watchDomains = new[] { "login.microsoftonline.com", "accounts.google.com", "github.com" };
-            foreach (var d in watchDomains)
+
+            // Resolve each domain multiple times over 2 minutes to build a robust baseline
+            // CDN/anycast services rotate IPs frequently — single-shot baselines cause false positives
+            for (int round = 0; round < 3; round++)
             {
-                try { _baselineResolutions[d] = await Dns.GetHostAddressesAsync(d, ct); } catch { }
+                foreach (var d in watchDomains)
+                {
+                    try
+                    {
+                        var addrs = await Dns.GetHostAddressesAsync(d, ct);
+                        _baselineResolutions[d] = addrs;
+                        var subnets = _knownSubnets.GetOrAdd(d, _ => new HashSet<string>());
+                        foreach (var a in addrs)
+                        {
+                            subnets.Add(GetSubnet(a.ToString()));
+                        }
+                    }
+                    catch { }
+                }
+                if (round < 2) await Task.Delay(40000, ct);
             }
 
             while (!ct.IsCancellationRequested)
@@ -616,28 +636,49 @@ namespace WindowsSentinel.Core
                             {
                                 var currentSet = new HashSet<string>(current.Select(a => a.ToString()));
                                 var baselineSet = new HashSet<string>(baseline.Select(a => a.ToString()));
-                                if (!currentSet.Overlaps(baselineSet))
-                                {
-                                    // Identify the suspicious new IPs to feed to response engine
-                                    var suspiciousIps = currentSet.Except(baselineSet).ToList();
-                                    var metadata = new Dictionary<string, string>
-                                    {
-                                        { "Domain", domain },
-                                        { "TargetIP", suspiciousIps.FirstOrDefault() ?? "" },
-                                        { "AllNewIPs", string.Join(";", suspiciousIps) }
-                                    };
 
-                                    await _detectionEngine.EmitAsync(new DetectionEvent
-                                    {
-                                        RuleName = "DNS Poisoning: Critical Domain Resolution Changed",
-                                        Evidence = $"Domain '{domain}' resolved to {string.Join(",", currentSet)} (baseline: {string.Join(",", baselineSet)})",
-                                        Reasoning = "A critical authentication domain resolved to a completely different IP set, indicating possible DNS poisoning.",
-                                        Confidence = 0.85, Tier = DetectionTier.Tier1Behavioral,
-                                        AuthorizedResponse = ResponseAction.NetworkIsolate,
-                                        ProcessName = "SYSTEM", ProcessId = 0,
-                                        Metadata = metadata
-                                    });
+                                // Phase 1: Check exact IP overlap (normal case)
+                                if (currentSet.Overlaps(baselineSet))
+                                {
+                                    // IPs overlap — normal CDN rotation, update baseline
+                                    _baselineResolutions[domain] = current;
+                                    var subnets = _knownSubnets.GetOrAdd(domain, _ => new HashSet<string>());
+                                    foreach (var a in current) subnets.Add(GetSubnet(a.ToString()));
+                                    continue;
                                 }
+
+                                // Phase 2: No exact overlap — check if new IPs are in known subnets
+                                var knownNets = _knownSubnets.GetOrAdd(domain, _ => new HashSet<string>());
+                                var newSubnets = current.Select(a => GetSubnet(a.ToString())).ToHashSet();
+                                bool allInKnownSubnets = newSubnets.All(s => knownNets.Contains(s));
+
+                                if (allInKnownSubnets)
+                                {
+                                    // Same /16 subnets — CDN rotation, not poisoning
+                                    _baselineResolutions[domain] = current;
+                                    foreach (var a in current) knownNets.Add(GetSubnet(a.ToString()));
+                                    continue;
+                                }
+
+                                // Phase 3: IPs moved to a completely different subnet — likely poisoning
+                                var suspiciousIps = currentSet.Except(baselineSet).ToList();
+                                var metadata = new Dictionary<string, string>
+                                {
+                                    { "Domain", domain },
+                                    { "TargetIP", suspiciousIps.FirstOrDefault() ?? "" },
+                                    { "AllNewIPs", string.Join(";", suspiciousIps) }
+                                };
+
+                                await _detectionEngine.EmitAsync(new DetectionEvent
+                                {
+                                    RuleName = "DNS Poisoning: Critical Domain Resolution Changed",
+                                    Evidence = $"Domain '{domain}' resolved to {string.Join(",", currentSet)} (baseline: {string.Join(",", baselineSet)}, known subnets: {string.Join(",", knownNets)})",
+                                    Reasoning = "A critical authentication domain resolved to IPs in completely different subnets from all previously observed addresses, indicating possible DNS poisoning.",
+                                    Confidence = 0.90, Tier = DetectionTier.Tier1Behavioral,
+                                    AuthorizedResponse = ResponseAction.NetworkIsolate,
+                                    ProcessName = "SYSTEM", ProcessId = 0,
+                                    Metadata = metadata
+                                });
                             }
                             _baselineResolutions[domain] = current;
                         }
@@ -647,6 +688,13 @@ namespace WindowsSentinel.Core
                 catch (OperationCanceledException) { break; }
                 catch (Exception ex) { _logger.LogDebug(ex, "[DnsResponseValidationMonitor] Error"); }
             }
+        }
+
+        /// <summary>Extract /16 subnet prefix (first two octets) for CDN rotation tolerance.</summary>
+        private static string GetSubnet(string ip)
+        {
+            var parts = ip.Split('.');
+            return parts.Length >= 2 ? $"{parts[0]}.{parts[1]}" : ip;
         }
     }
 
