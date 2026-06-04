@@ -794,8 +794,9 @@ namespace WindowsSentinel.Core
                             Evidence = $"Gateway changed from {_baselineGateway} to {current}",
                             Reasoning = "The default network gateway changed at runtime, possibly indicating a rogue access point or network hijack.",
                             Confidence = 0.75, Tier = DetectionTier.Tier1Behavioral,
-                            AuthorizedResponse = ResponseAction.LogOnly,
-                            ProcessName = "SYSTEM", ProcessId = 0
+                            AuthorizedResponse = ResponseAction.NetworkIsolate,
+                            ProcessName = "SYSTEM", ProcessId = 0,
+                            Metadata = new Dictionary<string, string> { { "TargetIP", current ?? "" } }
                         });
                         _baselineGateway = current;
                     }
@@ -898,7 +899,7 @@ namespace WindowsSentinel.Core
                                 Evidence = $"Module was deleted: {path}",
                                 Reasoning = "A Sentinel runtime module was removed from disk, indicating active tampering.",
                                 Confidence = 0.95, Tier = DetectionTier.Tier1Behavioral,
-                                AuthorizedResponse = ResponseAction.LogOnly,
+                                AuthorizedResponse = ResponseAction.KillProcessTree,
                                 ProcessName = "SYSTEM", ProcessId = 0
                             });
                             continue;
@@ -912,7 +913,7 @@ namespace WindowsSentinel.Core
                                 Evidence = $"Module hash mismatch: {path} (expected {expectedHash}, got {currentHash})",
                                 Reasoning = "A Sentinel runtime module was modified on disk, indicating active tampering or DLL replacement.",
                                 Confidence = 0.95, Tier = DetectionTier.Tier1Behavioral,
-                                AuthorizedResponse = ResponseAction.LogOnly,
+                                AuthorizedResponse = ResponseAction.KillProcessTree,
                                 ProcessName = "SYSTEM", ProcessId = 0
                             });
                             _baselineHashes[path] = currentHash;
@@ -1062,7 +1063,7 @@ namespace WindowsSentinel.Core
                                     Evidence = $"Unexpected module loaded into Sentinel process: {modPath}",
                                     Reasoning = "A module from an untrusted path was loaded into the Sentinel service process, indicating possible DLL injection.",
                                     Confidence = 0.85, Tier = DetectionTier.Tier1Behavioral,
-                                    AuthorizedResponse = ResponseAction.LogOnly,
+                                    AuthorizedResponse = ResponseAction.KillProcessTree,
                                     ProcessName = "WindowsSentinel.Service", ProcessId = Environment.ProcessId
                                 });
                             }
@@ -1211,7 +1212,7 @@ namespace WindowsSentinel.Core
                             Evidence = $"ntdll.dll hash changed from {Convert.ToHexString(_baselineNtdllHash)} to {Convert.ToHexString(currentHash)}",
                             Reasoning = "The on-disk ntdll.dll hash changed, which should never happen during normal operation.",
                             Confidence = 0.95, Tier = DetectionTier.Tier1Behavioral,
-                            AuthorizedResponse = ResponseAction.LogOnly,
+                            AuthorizedResponse = ResponseAction.KillProcessTree,
                             ProcessName = "SYSTEM", ProcessId = 0
                         });
                         _baselineNtdllHash = currentHash;
