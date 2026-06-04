@@ -47,6 +47,11 @@ namespace WindowsSentinel.Agent
                     services.AddSingleton<SecureCacheStore>();
                     services.AddSingleton<HashReputationService>();
                     services.AddSingleton<QuarantineManager>();
+                    services.AddSingleton<IoCScanner>();
+                    services.AddSingleton<AllowlistService>();
+                    services.AddSingleton<ScoringEngine>();
+                    services.AddSingleton<ChainTracer>();
+                    services.AddSingleton<DllUnloadEngine>();
                     services.AddSingleton<DetectionEngine>();
                     services.AddSingleton<TelemetryFusionEngine>();
                     services.AddSingleton<AdvancedResponseEngine>();

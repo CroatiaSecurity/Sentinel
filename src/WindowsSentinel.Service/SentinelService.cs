@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading;
@@ -31,6 +31,8 @@ namespace WindowsSentinel.Service
         private readonly TokenIntegrityMonitor _tokenIntegrityMonitor;
         private readonly CredentialCanaryMonitor _credentialCanaryMonitor;
         private readonly LocalServerMonitor _localServerMonitor;
+        private readonly ParentPidSpoofDetector _parentPidSpoofDetector;
+        private readonly ChainTracer _chainTracer;
 
         public SentinelService(
             ILogger<SentinelService> logger,
@@ -52,10 +54,15 @@ namespace WindowsSentinel.Service
             CredentialCanaryMonitor credentialCanaryMonitor,
             LocalServerMonitor localServerMonitor,
             AdvancedResponseEngine responseEngine,
-            IncidentResponseService incidentResponseService)
+            IncidentResponseService incidentResponseService,
+            DllUnloadEngine dllUnloadEngine,
+            ParentPidSpoofDetector parentPidSpoofDetector,
+            ChainTracer chainTracer)
         {
             // Wire incident response into response engine (late binding to avoid circular DI)
             responseEngine.SetIncidentResponseService(incidentResponseService);
+            responseEngine.SetDllUnloadEngine(dllUnloadEngine);
+            responseEngine.SetChainTracer(chainTracer);
 
             _logger = logger;
             _config = config;
@@ -75,6 +82,8 @@ namespace WindowsSentinel.Service
             _tokenIntegrityMonitor = tokenIntegrityMonitor;
             _credentialCanaryMonitor = credentialCanaryMonitor;
             _localServerMonitor = localServerMonitor;
+            _parentPidSpoofDetector = parentPidSpoofDetector;
+            _chainTracer = chainTracer;
         }
 
 
@@ -108,7 +117,7 @@ namespace WindowsSentinel.Service
             await _eventLogger.LogEventAsync("service_start", new
             {
                 Status = "started",
-                Version = "5.7.0",
+                Version = "6.2.0",
                 Timestamp = DateTime.UtcNow
             });
 

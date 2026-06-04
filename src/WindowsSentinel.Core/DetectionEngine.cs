@@ -22,18 +22,33 @@ namespace WindowsSentinel.Core
         private readonly SentinelMetrics _metrics;
         private readonly JsonlEventLogger _eventLogger;
         private readonly AdvancedResponseEngine _responseEngine;
+        private readonly IoCScanner _iocScanner;
+        private readonly HashReputationService _reputationService;
+        private readonly BehavioralCorrelationEngine _correlationEngine;
+        private readonly ScoringEngine _scoringEngine;
         private readonly CancellationTokenSource _cts = new();
 
         public DetectionEngine(
             IEnumerable<IDetectionRule> rules,
             SentinelMetrics metrics,
             JsonlEventLogger eventLogger,
-            AdvancedResponseEngine responseEngine)
+            AdvancedResponseEngine responseEngine,
+            IoCScanner iocScanner,
+            HashReputationService reputationService,
+            BehavioralCorrelationEngine correlationEngine,
+            ScoringEngine scoringEngine)
         {
             _rules.AddRange(rules);
             _metrics = metrics;
             _eventLogger = eventLogger;
             _responseEngine = responseEngine;
+            _iocScanner = iocScanner;
+            _reputationService = reputationService;
+            _correlationEngine = correlationEngine;
+            _scoringEngine = scoringEngine;
+
+            // Wire up the correlation engine callback
+            _correlationEngine.Initialize(this.EmitAsync);
 
             // Start background processing
             Task.Run(ProcessTelemetryQueueAsync);
@@ -57,6 +72,51 @@ namespace WindowsSentinel.Core
             {
                 while (reader.TryRead(out var context))
                 {
+                    // If it is a process start, calculate process image hash and check reputations/IoCs asynchronously
+                    if (context.TriggeringEvent is ProcessTelemetry pt)
+                    {
+                        _ = Task.Run(async () =>
+                        {
+                            try
+                            {
+                                var imagePath = pt.ImagePath;
+                                if (!string.IsNullOrEmpty(imagePath) && System.IO.File.Exists(imagePath))
+                                {
+                                    string hash = string.Empty;
+                                    using (var sha = System.Security.Cryptography.SHA256.Create())
+                                    await using (var fs = System.IO.File.OpenRead(imagePath))
+                                    {
+                                        var hashBytes = await sha.ComputeHashAsync(fs);
+                                        hash = Convert.ToHexString(hashBytes).ToLowerInvariant();
+                                    }
+
+                                    if (!string.IsNullOrEmpty(hash))
+                                    {
+                                        bool isIoC = _iocScanner.IsKnownBadHash(hash);
+                                        var apiVerdict = await _reputationService.GetVerdictAsync(hash);
+
+                                        if (isIoC || apiVerdict == HashVerdict.Unsafe)
+                                        {
+                                            var reputationEvent = new DetectionEvent
+                                            {
+                                                RuleName = "IoC Scanner: Known Malicious File Hash",
+                                                Evidence = $"Process '{pt.ProcessName}' (PID {pt.ProcessId}) image file hash matches known malicious reputation signature: {hash}",
+                                                Reasoning = "The executed process's file hash matches a known malicious signature in the local threat intelligence IoC cache or the online reputation lookup service.",
+                                                Confidence = 0.95,
+                                                Tier = DetectionTier.Tier2Indicator,
+                                                ProcessName = pt.ProcessName,
+                                                ProcessId = pt.ProcessId,
+                                                Metadata = new Dictionary<string, string> { { "SHA256", hash } }
+                                            };
+                                            await ProcessDetectionAsync(reputationEvent);
+                                        }
+                                    }
+                                }
+                            }
+                            catch { }
+                        });
+                    }
+
                     foreach (var rule in _rules)
                     {
                         try
@@ -96,7 +156,28 @@ namespace WindowsSentinel.Core
 
             _dedupCache[key] = now;
 
+            // Apply threat scoring
+            var scoreProfile = _scoringEngine.Score(detection);
+            detection.Metadata["ThreatScore"] = scoreProfile.Score.ToString();
+            detection.Metadata["ThreatVerdict"] = scoreProfile.Verdict.ToString();
+            
+            // Adjust tier if verdict is Critical
+            if (scoreProfile.Verdict == Verdict.Critical)
+            {
+                detection.Tier = DetectionTier.Tier1Behavioral;
+                if (detection.AuthorizedResponse < ResponseAction.KillProcessTree)
+                {
+                    detection.AuthorizedResponse = ResponseAction.KillProcessTree;
+                }
+            }
+
             await HandleDetectionEventAsync(detection);
+
+            // Feed to correlation engine for composite evaluations
+            if (detection.Tier == DetectionTier.Tier2Indicator)
+            {
+                await _correlationEngine.RegisterSignalAsync(detection);
+            }
         }
 
         private async Task HandleDetectionEventAsync(DetectionEvent detection)

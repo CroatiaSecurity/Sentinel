@@ -415,5 +415,43 @@ namespace WindowsSentinel.Tests
             var result = rule.Evaluate(ctx);
             Assert.Null(result);
         }
+
+        private static FusedTelemetryContext MakeThreatIntelContext(string processName, int pid,
+            int targetPid, string apiName)
+        {
+            return new FusedTelemetryContext
+            {
+                ProcessId = pid,
+                ProcessName = processName,
+                TriggeringEvent = new ThreatIntelTelemetry
+                {
+                    ProcessName = processName,
+                    ProcessId = pid,
+                    TargetProcessId = targetPid,
+                    ApiName = apiName
+                }
+            };
+        }
+
+        [Fact]
+        public void ThreatIntelInjectionRule_Fires_OnCreateRemoteThread()
+        {
+            var rule = new ThreatIntelInjectionRule();
+            var ctx = MakeThreatIntelContext("evil.exe", 1000, 2000, "CreateRemoteThread");
+            var result = rule.Evaluate(ctx);
+            Assert.NotNull(result);
+            Assert.Equal("ThreatIntelInjectionRule", result!.RuleName);
+            Assert.Equal(ResponseAction.UnloadDllAndKillOwner, result.AuthorizedResponse);
+            Assert.Equal("2000", result.Metadata["TargetProcessId"]);
+        }
+
+        [Fact]
+        public void ThreatIntelInjectionRule_DoesNotFire_OnUnrelatedApi()
+        {
+            var rule = new ThreatIntelInjectionRule();
+            var ctx = MakeThreatIntelContext("evil.exe", 1000, 2000, "NtQueryInformationProcess");
+            var result = rule.Evaluate(ctx);
+            Assert.Null(result);
+        }
     }
 }

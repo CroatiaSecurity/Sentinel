@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 
@@ -133,23 +134,27 @@ namespace WindowsSentinel.Core
 
         public DetectionEvent? Evaluate(FusedTelemetryContext context)
         {
-            if (context.TriggeringEvent is ProcessTelemetry pt && context.HasSuspiciousAPIs)
+            if (context.TriggeringEvent is ThreatIntelTelemetry tit)
             {
-                var cmd = pt.CommandLine;
                 foreach (var api in InjectionAPIs)
                 {
-                    if (cmd.Contains(api, StringComparison.OrdinalIgnoreCase))
+                    if (tit.ApiName.Contains(api, StringComparison.OrdinalIgnoreCase))
                     {
                         return new DetectionEvent
                         {
                             RuleName = Name,
-                            ProcessName = pt.ProcessName,
-                            ProcessId = pt.ProcessId,
+                            ProcessName = tit.ProcessName,
+                            ProcessId = tit.ProcessId,
                             Confidence = 0.90,
                             Tier = DetectionTier.Tier1Behavioral,
-                            AuthorizedResponse = ResponseAction.KillProcessTree,
-                            Evidence = $"Injection API invoked: {api} by {pt.ProcessName} (PID {pt.ProcessId})",
-                            Reasoning = "Process invoked a kernel-observed memory injection API targeting another process, indicating code injection (T1055)."
+                            AuthorizedResponse = ResponseAction.UnloadDllAndKillOwner,
+                            Evidence = $"Injection API invoked: {tit.ApiName} by {tit.ProcessName} (PID {tit.ProcessId}) targeting process PID {tit.TargetProcessId}",
+                            Reasoning = "Process invoked a kernel-observed memory injection API targeting another process, indicating code injection (T1055).",
+                            Metadata = new Dictionary<string, string>
+                            {
+                                { "TargetProcessId", tit.TargetProcessId.ToString() },
+                                { "ApiName", tit.ApiName }
+                            }
                         };
                     }
                 }

@@ -2,7 +2,19 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [6.2.0] - 2026-06-05
+
+### Added
+- Implemented `DllUnloadEngine` active response action (`UnloadDllAndKillOwner`) to unload injected DLLs using `CreateRemoteThread` + `FreeLibrary` from target processes while keeping them functioning.
+- Integrated `ChainTracer` into the `AdvancedResponseEngine` to trace and terminate attack trees cleanly on kill responses.
+
+### Changed
+- Rewired all orphaned core engines and services (`ScoringEngine`, `AllowlistService`, `ParentPidSpoofDetector`, `IoCScanner`, `HashReputationService`, `BehavioralCorrelationEngine`) into `DetectionEngine` and `SentinelService`.
+- Registered required core services in the Agent's dependency injection container.
+- Updated `ThreatIntelInjectionRule` to correctly evaluate `ThreatIntelTelemetry`.
+
 ## [6.1.0] - 2026-06-05
+
 
 ### Changed
 - Demoted TokenIntegrityMonitor to Tier 2 (LogOnly) and relaxed scanning interval to 45s.

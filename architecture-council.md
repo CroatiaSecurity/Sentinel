@@ -3,7 +3,7 @@
 **Status:** Architecture spec. Extends, does not replace, `requirements.md`,
 `design.md`, `constraints.md` (all v0.9.0).
 
-**Last updated:** v6.1.0 (June 2026) — LSASS handle access monitor and hosted service fixes.
+**Last updated:** v6.2.0 (June 2026) — Active response DLL unloading and core engines rewiring.
 
 ---
 

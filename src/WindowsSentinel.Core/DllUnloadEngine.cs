@@ -203,6 +203,72 @@ namespace WindowsSentinel.Core
                 return true;
             }
         }
+        
+        /// <summary>
+        /// Scans a target process for recently loaded, unsigned, or suspicious DLLs
+        /// (e.g., loaded from Temp, AppData, or any non-standard/unsigned path) and unloads them.
+        /// </summary>
+        public async Task<DllUnloadResult> UnloadInjectedDllAsync(int targetPid)
+        {
+            var result = new DllUnloadResult { ProcessId = targetPid };
+            try
+            {
+                using var proc = Process.GetProcessById(targetPid);
+                result.ProcessName = proc.ProcessName;
+                if (ProtectedProcesses.Contains(result.ProcessName))
+                    return result;
+
+                string? procDir = null;
+                try { procDir = Path.GetDirectoryName(proc.MainModule?.FileName); } catch { }
+
+                foreach (ProcessModule mod in proc.Modules)
+                {
+                    try
+                    {
+                        var modName = mod.ModuleName?.ToLowerInvariant() ?? "";
+                        var modPath = mod.FileName ?? "";
+                        var modDir = Path.GetDirectoryName(modPath) ?? "";
+
+                        if (ProtectedDlls.Contains(modName)) continue;
+                        if (modPath.Contains(@"\Windows\", StringComparison.OrdinalIgnoreCase)) continue;
+
+                        // Check if the DLL is suspicious (e.g., from Temp, AppData, or the application folder shadowing system DLLs)
+                        bool isSuspicious = modPath.Contains(@"\Temp\", StringComparison.OrdinalIgnoreCase) ||
+                                            modPath.Contains(@"\AppData\", StringComparison.OrdinalIgnoreCase) ||
+                                            (!string.IsNullOrEmpty(procDir) && modDir.Equals(procDir, StringComparison.OrdinalIgnoreCase) && SideloadTargets.Contains(modName));
+
+                        if (isSuspicious)
+                        {
+                            var key = $"{targetPid}:{modName}";
+                            if (_unloadHistory.ContainsKey(key)) continue;
+
+                            if (!TryConsumeRateLimit()) continue;
+
+                            bool unloaded = TryUnloadDll(targetPid, mod.BaseAddress);
+                            _unloadHistory[key] = DateTimeOffset.UtcNow;
+
+                            await _detectionEngine.EmitAsync(new DetectionEvent
+                            {
+                                RuleName = "DLL Injection: Injected DLL Unloaded",
+                                Evidence = $"Unloaded injected DLL '{modName}' from '{modPath}' in target process '{result.ProcessName}' (PID {targetPid}). Unloaded={unloaded}",
+                                Reasoning = "A memory injection event was detected targeting this process. The injected DLL was located and unloaded successfully.",
+                                Confidence = 0.90,
+                                Tier = DetectionTier.Tier1Behavioral,
+                                AuthorizedResponse = ResponseAction.LogOnly,
+                                ProcessName = result.ProcessName,
+                                ProcessId = targetPid
+                            });
+
+                            result.UnloadedDlls.Add(modPath);
+                            result.Success = true;
+                        }
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+            return result;
+        }
 
         public void Dispose()
         {

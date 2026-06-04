@@ -15,7 +15,8 @@ namespace WindowsSentinel.Core
         NetworkIsolate,
         KillProcess,
         KillProcessTree,
-        Quarantine
+        Quarantine,
+        UnloadDllAndKillOwner
     }
 
     public class SentinelConfig
