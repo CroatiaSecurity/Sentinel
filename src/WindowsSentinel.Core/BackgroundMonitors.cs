@@ -54,8 +54,9 @@ namespace WindowsSentinel.Core
                             Evidence = $"Gateway {_gatewayIp} MAC changed from {_baselineGatewayMac} to {currentMac}",
                             Reasoning = "The default gateway MAC address changed at runtime, indicating a possible ARP spoofing or MitM attack on the local network.",
                             Confidence = 0.85, Tier = DetectionTier.Tier1Behavioral,
-                            AuthorizedResponse = ResponseAction.LogOnly,
-                            ProcessName = "SYSTEM", ProcessId = 0
+                            AuthorizedResponse = ResponseAction.NetworkIsolate,
+                            ProcessName = "SYSTEM", ProcessId = 0,
+                            Metadata = new Dictionary<string, string> { { "TargetIP", _gatewayIp ?? "" } }
                         });
                         _baselineGatewayMac = currentMac;
                     }
@@ -182,7 +183,7 @@ namespace WindowsSentinel.Core
                                 Evidence = $"Canary file was deleted: {path}",
                                 Reasoning = "A honeypot canary file planted in a sensitive directory was deleted, indicating possible ransomware or unauthorized file manipulation.",
                                 Confidence = 0.90, Tier = DetectionTier.Tier1Behavioral,
-                                AuthorizedResponse = ResponseAction.LogOnly,
+                                AuthorizedResponse = ResponseAction.KillProcessTree,
                                 ProcessName = "SYSTEM", ProcessId = 0
                             });
                             _canaryPaths.Remove(path);

@@ -76,8 +76,9 @@ namespace WindowsSentinel.Core
                         Evidence = $"Default gateway changed from {_baselineGateway} to {currentGateway}",
                         Reasoning = "The default gateway was modified at runtime, which could indicate a network hijack or rogue DHCP server.",
                         Confidence = 0.80, Tier = DetectionTier.Tier1Behavioral,
-                        AuthorizedResponse = ResponseAction.LogOnly,
-                        ProcessName = "SYSTEM", ProcessId = 0
+                        AuthorizedResponse = ResponseAction.NetworkIsolate,
+                        ProcessName = "SYSTEM", ProcessId = 0,
+                        Metadata = new Dictionary<string, string> { { "TargetIP", currentGateway ?? "" } }
                     });
                 }
 

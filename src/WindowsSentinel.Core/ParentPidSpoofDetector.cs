@@ -78,7 +78,7 @@ namespace WindowsSentinel.Core
                                 Evidence = $"Process '{proc.ProcessName}' (PID {proc.Id}) kernel parent PID={kernelParentPid}, cached parent PID={cachedParentPid}",
                                 Reasoning = "The process's kernel-reported parent PID does not match the parent recorded via ETW process creation events, indicating PPID spoofing (T1134.004).",
                                 Confidence = 0.85, Tier = DetectionTier.Tier1Behavioral,
-                                AuthorizedResponse = ResponseAction.LogOnly,
+                                AuthorizedResponse = ResponseAction.KillProcess,
                                 ProcessName = proc.ProcessName, ProcessId = proc.Id
                             });
                             _alertedPids.Add(proc.Id);

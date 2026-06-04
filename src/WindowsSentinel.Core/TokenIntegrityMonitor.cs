@@ -89,7 +89,7 @@ namespace WindowsSentinel.Core
                                                 Evidence = $"Elevated process '{proc.ProcessName}' (PID {proc.Id}) running from '{imagePath}'",
                                                 Reasoning = "An elevated (admin) process is running from a user-writable directory, suggesting a privilege escalation or UAC bypass.",
                                                 Confidence = 0.80, Tier = DetectionTier.Tier1Behavioral,
-                                                AuthorizedResponse = ResponseAction.LogOnly,
+                                                AuthorizedResponse = ResponseAction.KillProcess,
                                                 ProcessName = proc.ProcessName, ProcessId = proc.Id
                                             });
                                             _alertedPids.Add(proc.Id);

@@ -133,11 +133,12 @@ namespace WindowsSentinel.Core
                                 "This detection is signature-independent.",
                     Confidence = confidence,
                     Tier = DetectionTier.Tier1Behavioral,
-                    AuthorizedResponse = ResponseAction.LogOnly,
+                    AuthorizedResponse = ResponseAction.NetworkIsolate,
                     ProcessName = history.ProcessName,
                     ProcessId = history.ProcessId,
                     Metadata = new()
                     {
+                        ["TargetIP"] = history.RemoteAddress,
                         ["RemoteAddress"] = history.RemoteAddress,
                         ["RemotePort"] = history.RemotePort.ToString(),
                         ["MeanIntervalSec"] = mean.ToString("F2"),

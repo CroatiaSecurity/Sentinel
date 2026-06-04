@@ -70,7 +70,7 @@ namespace WindowsSentinel.Core
                             Evidence = $"Outbound data spike: {delta / 1024}KB in {Interval.TotalSeconds}s (baseline: {_baselineRate / 1024}KB)",
                             Reasoning = "A sudden spike in outbound network transfer volume was detected, significantly exceeding the established baseline. This pattern is consistent with data exfiltration.",
                             Confidence = 0.75, Tier = DetectionTier.Tier1Behavioral,
-                            AuthorizedResponse = ResponseAction.LogOnly,
+                            AuthorizedResponse = ResponseAction.NetworkIsolate,
                             ProcessName = "SYSTEM", ProcessId = 0
                         });
                     }
