@@ -30,9 +30,30 @@ namespace WindowsSentinel.Core
         private readonly ConcurrentDictionary<string, int> _queryStats = new();
         private DateTime _lastPrune = DateTime.UtcNow;
 
-        private const double DgaEntropyThreshold = 3.8;
-        private const int DgaMinLength = 12;
+        private const double DgaEntropyThreshold = 4.0;
+        private const int DgaMinLength = 14;
         private const int RapidQueryThreshold = 50; // queries per base domain per window
+
+        // Domains with naturally high-entropy subdomains or high query volumes
+        private static readonly HashSet<string> TrustedBaseDomains = new(StringComparer.OrdinalIgnoreCase)
+        {
+            // CDN / Cloud
+            "akamaiedge.net", "akamai.net", "cloudfront.net", "cloudflare.com",
+            "azureedge.net", "azure.com", "msedge.net", "trafficmanager.net",
+            "googleapis.com", "gstatic.com", "googlevideo.com",
+            // Microsoft
+            "microsoft.com", "microsoftonline.com", "windows.net", "office.com", "live.com",
+            "msidentity.com", "windowsupdate.com", "windowsupdate.org",
+            // Gaming
+            "steamserver.net", "steamcontent.com", "steampowered.com", "valve.net",
+            "epicgames.com", "unrealengine.com",
+            // IDE / Dev tooling
+            "codeium.com", "agentclientprotocol.com", "github.com", "github.io",
+            "githubusercontent.com", "npmjs.org", "nuget.org",
+            "visualstudio.com", "vsassets.io",
+            // Other common
+            "spotify.com", "scdn.co", "discord.gg", "discordapp.com",
+        };
         private const string SessionName = "SentinelDnsMonitor";
         private static readonly Guid DnsClientProvider = new("1C95126E-7EEA-49A9-A3FE-A378B03DDB4D");
 
@@ -107,7 +128,7 @@ namespace WindowsSentinel.Core
             _queryStats.AddOrUpdate(baseDomain, 1, (_, c) => c + 1);
 
             // Check for DGA-like patterns on subdomain portion
-            if (labels.Length > 2)
+            if (labels.Length > 2 && !TrustedBaseDomains.Contains(baseDomain))
             {
                 var subdomain = string.Join(".", labels.Take(labels.Length - 2));
                 if (subdomain.Length >= DgaMinLength)
@@ -129,7 +150,7 @@ namespace WindowsSentinel.Core
             }
 
             // Check for rapid unique queries to same base domain (DNS tunneling / beaconing)
-            if (_queryStats.TryGetValue(baseDomain, out var count) && count == RapidQueryThreshold)
+            if (_queryStats.TryGetValue(baseDomain, out var count) && count == RapidQueryThreshold && !TrustedBaseDomains.Contains(baseDomain))
             {
                 _ = _detectionEngine.EmitAsync(new DetectionEvent
                 {

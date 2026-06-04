@@ -617,14 +617,24 @@ namespace WindowsSentinel.Core
                                 var baselineSet = new HashSet<string>(baseline.Select(a => a.ToString()));
                                 if (!currentSet.Overlaps(baselineSet))
                                 {
+                                    // Identify the suspicious new IPs to feed to response engine
+                                    var suspiciousIps = currentSet.Except(baselineSet).ToList();
+                                    var metadata = new Dictionary<string, string>
+                                    {
+                                        { "Domain", domain },
+                                        { "TargetIP", suspiciousIps.FirstOrDefault() ?? "" },
+                                        { "AllNewIPs", string.Join(";", suspiciousIps) }
+                                    };
+
                                     await _detectionEngine.EmitAsync(new DetectionEvent
                                     {
                                         RuleName = "DNS Poisoning: Critical Domain Resolution Changed",
                                         Evidence = $"Domain '{domain}' resolved to {string.Join(",", currentSet)} (baseline: {string.Join(",", baselineSet)})",
                                         Reasoning = "A critical authentication domain resolved to a completely different IP set, indicating possible DNS poisoning.",
-                                        Confidence = 0.80, Tier = DetectionTier.Tier1Behavioral,
-                                        AuthorizedResponse = ResponseAction.LogOnly,
-                                        ProcessName = "SYSTEM", ProcessId = 0
+                                        Confidence = 0.85, Tier = DetectionTier.Tier1Behavioral,
+                                        AuthorizedResponse = ResponseAction.NetworkIsolate,
+                                        ProcessName = "SYSTEM", ProcessId = 0,
+                                        Metadata = metadata
                                     });
                                 }
                             }

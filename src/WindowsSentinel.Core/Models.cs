@@ -12,6 +12,7 @@ namespace WindowsSentinel.Core
     public enum ResponseAction
     {
         LogOnly,
+        NetworkIsolate,
         KillProcess,
         KillProcessTree,
         Quarantine

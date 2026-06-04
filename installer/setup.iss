@@ -1,6 +1,6 @@
-﻿[Setup]
+[Setup]
 AppName=Windows Sentinel
-AppVersion=5.8.0
+AppVersion=5.9.0
 AppPublisher=Gorstak
 AppPublisherURL=https://gorstak.eu
 SourceDir=.
@@ -11,7 +11,7 @@ UninstallDisplayIcon={app}\Sentinel.ico
 Compression=lzma2
 SolidCompression=yes
 OutputDir=.
-OutputBaseFilename=WindowsSentinelSetup-5.8.0
+OutputBaseFilename=WindowsSentinelSetup-5.9.0
 PrivilegesRequired=admin
 ; Allow upgrading over existing install
 UsePreviousAppDir=yes
@@ -58,7 +58,7 @@ procedure StopExistingService();
 var
   ResultCode: Integer;
 begin
-  // Stop the service before upgrading — handles antitamper ACL-locked files
+  // Stop the service before upgrading � handles antitamper ACL-locked files
   Exec(ExpandConstant('{sys}\sc.exe'), 'stop "Windows Sentinel"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   // Wait for service to stop
   Sleep(2000);

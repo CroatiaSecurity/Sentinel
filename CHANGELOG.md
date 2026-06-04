@@ -2,6 +2,22 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [5.9.0] - 2026-06-04
+
+### Added — Network Isolation Response
+- **NetworkIsolate response action** — New response type for network-layer threats where there's no local process to kill. When DNS poisoning is detected, Sentinel now:
+  1. Blocks the suspicious IP via Windows Firewall (inbound + outbound)
+  2. Flushes the ARP cache entry for that IP
+  3. Flushes the DNS resolver cache (`ipconfig /flushdns`) to clear poisoned records
+- `AdvancedResponseEngine` now handles `ResponseAction.NetworkIsolate` alongside `KillProcess`/`KillProcessTree`
+- DNS Poisoning detection (`DnsResponseValidationMonitor`) upgraded from `LogOnly` to `NetworkIsolate` with `TargetIP` metadata
+
+### Fixed — False Positive Elimination
+- **DnsQueryMonitor DGA detection** — Raised entropy threshold from 3.8→4.0 and minimum subdomain length from 12→14. Added trusted base domain allowlist (Steam, Microsoft, CDNs, IDE tooling, gaming) that bypasses both DGA and rapid-query-volume checks. Stops alerting on `p2p-fra1.discovery.steamserver.net`, `codeium.com`, `agentclientprotocol.com`, etc.
+- **LocalServerMonitor** — Now ignores localhost (`127.0.0.1`/`::1`) listeners on ephemeral ports (≥49152). IDE language servers, debug adapters, and dev servers no longer generate alerts.
+
+---
+
 ## [5.8.0] - 2026-06-04
 
 ### Added — Phantom Device Monitor

@@ -58,6 +58,21 @@ namespace WindowsSentinel.Core
                 {
                     if (_baselineListeners.Contains(listener)) continue;
 
+                    // Skip localhost listeners on ephemeral ports (IDE language servers, debug adapters, dev servers)
+                    var parts = listener.Split(':');
+                    if (parts.Length == 2)
+                    {
+                        var addr = parts[0];
+                        if (int.TryParse(parts[1], out var port))
+                        {
+                            if ((addr == "127.0.0.1" || addr == "::1") && port >= 49152)
+                            {
+                                _baselineListeners.Add(listener);
+                                continue;
+                            }
+                        }
+                    }
+
                     // New listener appeared
                     _ = _detectionEngine.EmitAsync(new DetectionEvent
                     {
