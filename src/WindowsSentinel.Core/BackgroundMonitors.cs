@@ -240,7 +240,7 @@ namespace WindowsSentinel.Core
             {
                 try
                 {
-                    await Task.Delay(15000, ct);
+                    await Task.Delay(30000, ct);
                     if (loginDataPath == null || !File.Exists(loginDataPath)) continue;
                     var current = File.GetLastWriteTimeUtc(loginDataPath);
                     if (_lastModified != default && current != _lastModified)
@@ -293,7 +293,7 @@ namespace WindowsSentinel.Core
             {
                 try
                 {
-                    await Task.Delay(15000, ct);
+                    await Task.Delay(30000, ct);
                     if (cookiePath == null || !File.Exists(cookiePath)) continue;
                     var current = File.GetLastWriteTimeUtc(cookiePath);
                     if (_lastModified != default && current != _lastModified)
@@ -601,6 +601,19 @@ namespace WindowsSentinel.Core
             _logger.LogInformation("[DnsResponseValidationMonitor] Started");
             var watchDomains = new[] { "login.microsoftonline.com", "accounts.google.com", "github.com" };
 
+            // Pre-populate known Microsoft, Google, and GitHub subnets to prevent false positives from global CDNs
+            var msSubnets = _knownSubnets.GetOrAdd("login.microsoftonline.com", _ => new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+            foreach (var net in new[] { "20.190", "40.126", "20.20", "20.231", "20.150", "20.50", "52.150", "52.160", "2603:1036", "2603:1026", "2603:1046" })
+                msSubnets.Add(net);
+
+            var googleSubnets = _knownSubnets.GetOrAdd("accounts.google.com", _ => new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+            foreach (var net in new[] { "172.217", "142.250", "142.251", "216.58", "74.125", "172.253", "108.177", "64.233", "2607:f8b0" })
+                googleSubnets.Add(net);
+
+            var githubSubnets = _knownSubnets.GetOrAdd("github.com", _ => new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+            foreach (var net in new[] { "140.82", "192.30", "185.199", "20.200", "20.201", "20.205", "4.225", "143.204", "2600:9000", "2a04:4e42" })
+                githubSubnets.Add(net);
+
             // Resolve each domain multiple times over 2 minutes to build a robust baseline
             // CDN/anycast services rotate IPs frequently — single-shot baselines cause false positives
             for (int round = 0; round < 3; round++)
@@ -611,7 +624,7 @@ namespace WindowsSentinel.Core
                     {
                         var addrs = await Dns.GetHostAddressesAsync(d, ct);
                         _baselineResolutions[d] = addrs;
-                        var subnets = _knownSubnets.GetOrAdd(d, _ => new HashSet<string>());
+                        var subnets = _knownSubnets.GetOrAdd(d, _ => new HashSet<string>(StringComparer.OrdinalIgnoreCase));
                         foreach (var a in addrs)
                         {
                             subnets.Add(GetSubnet(a.ToString()));
@@ -642,19 +655,19 @@ namespace WindowsSentinel.Core
                                 {
                                     // IPs overlap — normal CDN rotation, update baseline
                                     _baselineResolutions[domain] = current;
-                                    var subnets = _knownSubnets.GetOrAdd(domain, _ => new HashSet<string>());
+                                    var subnets = _knownSubnets.GetOrAdd(domain, _ => new HashSet<string>(StringComparer.OrdinalIgnoreCase));
                                     foreach (var a in current) subnets.Add(GetSubnet(a.ToString()));
                                     continue;
                                 }
 
                                 // Phase 2: No exact overlap — check if new IPs are in known subnets
-                                var knownNets = _knownSubnets.GetOrAdd(domain, _ => new HashSet<string>());
+                                var knownNets = _knownSubnets.GetOrAdd(domain, _ => new HashSet<string>(StringComparer.OrdinalIgnoreCase));
                                 var newSubnets = current.Select(a => GetSubnet(a.ToString())).ToHashSet();
                                 bool allInKnownSubnets = newSubnets.All(s => knownNets.Contains(s));
 
                                 if (allInKnownSubnets)
                                 {
-                                    // Same /16 subnets — CDN rotation, not poisoning
+                                    // Same /16 or /32 subnets — CDN rotation, not poisoning
                                     _baselineResolutions[domain] = current;
                                     foreach (var a in current) knownNets.Add(GetSubnet(a.ToString()));
                                     continue;
@@ -690,11 +703,19 @@ namespace WindowsSentinel.Core
             }
         }
 
-        /// <summary>Extract /16 subnet prefix (first two octets) for CDN rotation tolerance.</summary>
+        /// <summary>Extract subnet prefix (first two octets for IPv4 /16, or first two segments for IPv6 /32) for CDN rotation tolerance.</summary>
         private static string GetSubnet(string ip)
         {
-            var parts = ip.Split('.');
-            return parts.Length >= 2 ? $"{parts[0]}.{parts[1]}" : ip;
+            if (ip.Contains(':'))
+            {
+                var parts = ip.Split(':');
+                return parts.Length >= 2 ? $"{parts[0]}:{parts[1]}" : ip;
+            }
+            else
+            {
+                var parts = ip.Split('.');
+                return parts.Length >= 2 ? $"{parts[0]}.{parts[1]}" : ip;
+            }
         }
     }
 
@@ -728,7 +749,7 @@ namespace WindowsSentinel.Core
             {
                 try
                 {
-                    await Task.Delay(15000, ct);
+                    await Task.Delay(30000, ct);
                     if (!Directory.Exists(profilesDir)) continue;
                     foreach (var prof in Directory.GetDirectories(profilesDir))
                     {
@@ -780,7 +801,7 @@ namespace WindowsSentinel.Core
             {
                 try
                 {
-                    await Task.Delay(30000, ct);
+                    await Task.Delay(60000, ct);
                     var current = CountFirewallRules();
                     if (_baselineRuleCount > 0 && current > _baselineRuleCount + 5)
                     {
@@ -1045,7 +1066,7 @@ namespace WindowsSentinel.Core
             {
                 try
                 {
-                    await Task.Delay(15000, ct);
+                    await Task.Delay(60000, ct);
                     foreach (var proc in Process.GetProcesses())
                     {
                         try
@@ -1145,7 +1166,7 @@ namespace WindowsSentinel.Core
             {
                 try
                 {
-                    await Task.Delay(30000, ct);
+                    await Task.Delay(60000, ct);
                     var current = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                     SnapshotTasks(current);
                     foreach (var task in current.Except(_baselineTasks))

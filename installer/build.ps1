@@ -1,4 +1,4 @@
-﻿# Windows Sentinel Installer Build Script
+# Windows Sentinel Installer Build Script
 # Usage: .\build.ps1
 
 $ErrorActionPreference = "Stop"
@@ -67,6 +67,6 @@ $SetupScript = Join-Path $PSScriptRoot "setup.iss"
 
 Write-Host "==============================================" -ForegroundColor Green
 Write-Host "Build completed successfully!" -ForegroundColor Green
-Write-Host "Installer output: installer\WindowsSentinelSetup-6.0.0.exe" -ForegroundColor Green
+Write-Host "Installer output: installer\WindowsSentinelSetup-6.1.0.exe" -ForegroundColor Green
 Write-Host "==============================================" -ForegroundColor Green
 

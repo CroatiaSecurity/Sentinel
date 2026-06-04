@@ -117,7 +117,7 @@ namespace WindowsSentinel.Core
             {
                 try
                 {
-                    await Task.Delay(5000, ct);
+                    await Task.Delay(20000, ct);
                     var currentWebcam = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                     var currentMic = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                     SnapshotCapabilityApps("webcam", currentWebcam);
@@ -460,11 +460,11 @@ namespace WindowsSentinel.Core
     /// Detects phantom keystrokes — keypress injection from non-HID sources
     /// by comparing keyboard input rate against actual physical key events.
     /// </summary>
-    public sealed class PhantomKeystrokeGuard : IDisposable
+    public sealed class PhantomKeystrokeGuard : IHostedService, IDisposable
     {
         private readonly DetectionEngine _detectionEngine;
         private readonly ILogger<PhantomKeystrokeGuard> _logger;
-        private readonly System.Threading.Timer _timer;
+        private System.Threading.Timer? _timer;
 
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
@@ -483,7 +483,18 @@ namespace WindowsSentinel.Core
         {
             _detectionEngine = de;
             _logger = l;
+        }
+
+        public Task StartAsync(CancellationToken cancellationToken)
+        {
             _timer = new System.Threading.Timer(Check, null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
+            return Task.CompletedTask;
+        }
+
+        public Task StopAsync(CancellationToken cancellationToken)
+        {
+            _timer?.Change(Timeout.Infinite, Timeout.Infinite);
+            return Task.CompletedTask;
         }
 
         private void Check(object? state)
@@ -501,7 +512,7 @@ namespace WindowsSentinel.Core
             catch { }
         }
 
-        public void Dispose() => _timer.Dispose();
+        public void Dispose() => _timer?.Dispose();
     }
 }
 

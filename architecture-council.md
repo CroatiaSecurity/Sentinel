@@ -3,7 +3,7 @@
 **Status:** Architecture spec. Extends, does not replace, `requirements.md`,
 `design.md`, `constraints.md` (all v0.9.0).
 
-**Last updated:** v5.5.0 (June 2026) — Football Manager path lock and ransomware whitelist fixes.
+**Last updated:** v6.1.0 (June 2026) — LSASS handle access monitor and hosted service fixes.
 
 ---
 

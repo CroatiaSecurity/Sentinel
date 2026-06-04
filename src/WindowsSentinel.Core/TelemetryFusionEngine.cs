@@ -77,11 +77,27 @@ namespace WindowsSentinel.Core
             {
                 lock (chain)
                 {
-                    var recent = chain.Where(e => DateTime.UtcNow - e.Timestamp < TimeSpan.FromSeconds(60)).ToList();
-                    context.EventCount60s = recent.Count;
-                    context.HasNetworkActivity = recent.Any(e => e is NetworkTelemetry);
-                    context.HasFileWrites = recent.Any(e => e is FileActivityTelemetry fat && fat.OperationType == "WRITE");
-                    context.HasSuspiciousAPIs = recent.Any(e => e is ThreatIntelTelemetry);
+                    int count = 0;
+                    bool hasNet = false;
+                    bool hasFile = false;
+                    bool hasApi = false;
+                    var cutoff = DateTime.UtcNow - TimeSpan.FromSeconds(60);
+
+                    foreach (var e in chain)
+                    {
+                        if (e.Timestamp >= cutoff)
+                        {
+                            count++;
+                            if (e is NetworkTelemetry) hasNet = true;
+                            else if (e is FileActivityTelemetry fat && fat.OperationType == "WRITE") hasFile = true;
+                            else if (e is ThreatIntelTelemetry) hasApi = true;
+                        }
+                    }
+
+                    context.EventCount60s = count;
+                    context.HasNetworkActivity = hasNet;
+                    context.HasFileWrites = hasFile;
+                    context.HasSuspiciousAPIs = hasApi;
                 }
             }
 

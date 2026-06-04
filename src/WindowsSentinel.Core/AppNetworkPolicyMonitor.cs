@@ -147,6 +147,8 @@ namespace WindowsSentinel.Core
             if (string.IsNullOrWhiteSpace(remoteAddress)) return;
 
             var stem = processName.Replace(".exe", "", StringComparison.OrdinalIgnoreCase);
+            if (string.IsNullOrWhiteSpace(stem) || stem.Equals("unknown", StringComparison.OrdinalIgnoreCase)) return;
+
             if (NetworkAllowlist.Contains(stem)) return;
 
             // Determine /24 subnet

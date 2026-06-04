@@ -342,5 +342,78 @@ namespace WindowsSentinel.Tests
             Assert.NotNull(result);
             Assert.False(result!.KillAuthorized);
         }
+
+        // ═══════════════════════════════════════════════════════════════════
+        // PrivilegeEscalationRule tests
+        // ═══════════════════════════════════════════════════════════════════
+
+        [Fact]
+        public void PrivilegeEscalationRule_Fires_OnUacBypass()
+        {
+            var rule = new PrivilegeEscalationRule();
+            var ctx = MakeProcessContext("fodhelper.exe", 1001,
+                commandLine: "fodhelper.exe",
+                imagePath: @"C:\Windows\System32\fodhelper.exe");
+            var result = rule.Evaluate(ctx);
+            Assert.NotNull(result);
+            Assert.Equal("PrivilegeEscalationRule", result!.RuleName);
+            Assert.True(result.KillAuthorized);
+        }
+
+        [Fact]
+        public void PrivilegeEscalationRule_Fires_OnGetSystem()
+        {
+            var rule = new PrivilegeEscalationRule();
+            var ctx = MakeProcessContext("evil.exe", 1002,
+                commandLine: "evil.exe -getsystem",
+                imagePath: @"C:\Users\Admin\Downloads\evil.exe");
+            var result = rule.Evaluate(ctx);
+            Assert.NotNull(result);
+            Assert.True(result!.Confidence >= 0.85);
+        }
+
+        [Fact]
+        public void PrivilegeEscalationRule_Fires_OnNamedPipeImpersonation_CmdRedirection()
+        {
+            var rule = new PrivilegeEscalationRule();
+            var ctx = MakeProcessContext("cmd.exe", 1003,
+                commandLine: @"cmd.exe /c echo hello > \\.\pipe\test",
+                imagePath: @"C:\Windows\System32\cmd.exe");
+            var result = rule.Evaluate(ctx);
+            Assert.NotNull(result);
+            Assert.True(result!.KillAuthorized);
+        }
+
+        [Fact]
+        public void PrivilegeEscalationRule_DoesNotFire_OnLegitimateLanguageServerPipe()
+        {
+            var rule = new PrivilegeEscalationRule();
+            var ctx = MakeProcessContext("language_server_windows_x64.exe", 1004,
+                commandLine: @"c:\Users\Admin\AppData\Local\Programs\Antigravity IDE\resources\app\extensions\antigravity\bin\language_server_windows_x64.exe --enable_lsp --parent_pipe_path \\.\pipe\server_12345",
+                imagePath: @"c:\Users\Admin\AppData\Local\Programs\Antigravity IDE\resources\app\extensions\antigravity\bin\language_server_windows_x64.exe");
+            var result = rule.Evaluate(ctx);
+            Assert.Null(result);
+        }
+
+        [Fact]
+        public void PrivilegeEscalationRule_DoesNotFire_OnExplorerSpawnedFodhelper()
+        {
+            var rule = new PrivilegeEscalationRule();
+            var ctx = new FusedTelemetryContext
+            {
+                ProcessId = 1005,
+                ProcessName = "fodhelper.exe",
+                TriggeringEvent = new ProcessTelemetry
+                {
+                    ProcessName = "fodhelper.exe",
+                    ProcessId = 1005,
+                    CommandLine = "fodhelper.exe",
+                    ImagePath = @"C:\Windows\System32\fodhelper.exe",
+                    ParentProcessName = "explorer"
+                }
+            };
+            var result = rule.Evaluate(ctx);
+            Assert.Null(result);
+        }
     }
 }

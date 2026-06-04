@@ -118,7 +118,6 @@ namespace WindowsSentinel.Service
                     services.AddHostedService<ChromeSessionGuardMonitor>();
                     services.AddHostedService<DataExfiltrationMonitor>();
                     services.AddHostedService<DeviceInstallMonitor>();
-                    services.AddHostedService<DiskWideDllScanner>();
                     services.AddHostedService<DllEntropyAnalyzer>();
                     services.AddHostedService<DllLoadFailureMonitor>();
                     services.AddHostedService<DnsResponseValidationMonitor>();
@@ -126,7 +125,6 @@ namespace WindowsSentinel.Service
                     services.AddHostedService<FirewallIntegrityMonitor>();
                     services.AddHostedService<GatewayFingerprintMonitor>();
                     services.AddHostedService<MicrosoftAccountGuardMonitor>();
-                    services.AddHostedService<ModuleValidationMonitor>();
                     services.AddHostedService<PublicIpMonitor>();
                     services.AddHostedService<RemoteAccessMonitor>();
                     services.AddHostedService<RuntimeModuleIntegrityMonitor>();
@@ -143,14 +141,6 @@ namespace WindowsSentinel.Service
                     services.AddHostedService<BeaconingDetector>();
                     services.AddHostedService<BehavioralBaselineService>();
                     services.AddHostedService<PhantomDeviceMonitor>();
-
-                    // User-session monitors (privacy, UI, browser)
-                    services.AddHostedService<ScreenCaptureMonitor>();
-                    services.AddHostedService<WebcamMicMonitor>();
-                    services.AddHostedService<AudioHijackMonitor>();
-                    services.AddHostedService<NeuroBehaviorVisualMonitor>();
-                    services.AddHostedService<BrowserExtensionMonitor>();
-                    services.AddSingleton<PhantomKeystrokeGuard>();
                 });
     }
 }

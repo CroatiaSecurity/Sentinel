@@ -1,19 +1,28 @@
-using System;
-using System.Threading;
-using System.Threading.Tasks;
+using Microsoft.Extensions.Hosting;
 
 namespace WindowsSentinel.Core
 {
-    public class ClipboardSanitizer : IDisposable
+    public class ClipboardSanitizer : IHostedService, IDisposable
     {
-        private readonly System.Threading.Timer _timer;
+        private System.Threading.Timer? _timer;
         private readonly DetectionEngine _detectionEngine;
 
         public ClipboardSanitizer(DetectionEngine detectionEngine)
         {
             _detectionEngine = detectionEngine;
+        }
+
+        public Task StartAsync(CancellationToken cancellationToken)
+        {
             // Run every 10s (as per v4.8.1 optimization)
             _timer = new System.Threading.Timer(PollClipboard, null, TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(10));
+            return Task.CompletedTask;
+        }
+
+        public Task StopAsync(CancellationToken cancellationToken)
+        {
+            _timer?.Change(Timeout.Infinite, Timeout.Infinite);
+            return Task.CompletedTask;
         }
 
         private void PollClipboard(object? state)

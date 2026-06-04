@@ -1,8 +1,8 @@
-﻿# Windows Sentinel
+# Windows Sentinel
 
 **Userland EDR for Windows � Behavioral Detection & Automated Response**
 
-> Version: 6.0.0 | Author: [Gorstak](https://gorstak.eu) | [GitHub](https://github.com/CroatiaSecurity/Sentinel) | License: MIT
+> Version: 6.1.0 | Author: [Gorstak](https://gorstak.eu) | [GitHub](https://github.com/CroatiaSecurity/Sentinel) | License: MIT
 
 ---
 
@@ -27,7 +27,7 @@ Designed for personal endpoint protection, blue-team education, behavioral analy
 Run the installer as Administrator:
 
 ```powershell
-.\WindowsSentinelSetup-6.0.0.exe
+.\WindowsSentinelSetup-6.1.0.exe
 ```
 
 Installs to `%ProgramFiles%\WindowsSentinel`, creates a Windows Service (SYSTEM), and launches the Agent into the user session with a system tray icon.

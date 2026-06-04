@@ -22,7 +22,7 @@ namespace WindowsSentinel.Core
         private readonly ILogger<TokenIntegrityMonitor> _logger;
         private readonly System.Threading.Timer _timer;
 
-        private static readonly TimeSpan ScanInterval = TimeSpan.FromSeconds(30);
+        private static readonly TimeSpan ScanInterval = TimeSpan.FromSeconds(45);
 
         public TokenIntegrityMonitor(
             DetectionEngine detectionEngine,
@@ -75,25 +75,29 @@ namespace WindowsSentinel.Core
                                     if (elevated != 0)
                                     {
                                         // Elevated process — check if it's from a user-writable path
-                                        string? imagePath = null;
-                                        try { imagePath = proc.MainModule?.FileName; } catch { }
+                                         string? imagePath = null;
+                                         try { imagePath = proc.MainModule?.FileName; } catch { }
 
-                                        if (imagePath != null &&
-                                            (imagePath.Contains(@"\Temp\", StringComparison.OrdinalIgnoreCase) ||
-                                             imagePath.Contains(@"\Downloads\", StringComparison.OrdinalIgnoreCase) ||
-                                             imagePath.Contains(@"\AppData\", StringComparison.OrdinalIgnoreCase)))
-                                        {
-                                            _ = _detectionEngine.EmitAsync(new DetectionEvent
-                                            {
-                                                RuleName = "Privilege Escalation: Elevated Process from User Path",
-                                                Evidence = $"Elevated process '{proc.ProcessName}' (PID {proc.Id}) running from '{imagePath}'",
-                                                Reasoning = "An elevated (admin) process is running from a user-writable directory, suggesting a privilege escalation or UAC bypass.",
-                                                Confidence = 0.80, Tier = DetectionTier.Tier1Behavioral,
-                                                AuthorizedResponse = ResponseAction.KillProcess,
-                                                ProcessName = proc.ProcessName, ProcessId = proc.Id
-                                            });
-                                            _alertedPids.Add(proc.Id);
-                                        }
+                                         if (imagePath != null)
+                                         {
+                                             bool inUserPath = imagePath.Contains(@"\Temp\", StringComparison.OrdinalIgnoreCase) ||
+                                                               imagePath.Contains(@"\Downloads\", StringComparison.OrdinalIgnoreCase) ||
+                                                               imagePath.Contains(@"\AppData\", StringComparison.OrdinalIgnoreCase);
+
+                                             if (inUserPath)
+                                             {
+                                                 _ = _detectionEngine.EmitAsync(new DetectionEvent
+                                                 {
+                                                     RuleName = "Privilege Escalation: Elevated Process from User Path",
+                                                     Evidence = $"Elevated process '{proc.ProcessName}' (PID {proc.Id}) running from '{imagePath}'",
+                                                     Reasoning = "An elevated (admin) process is running from a user-writable directory, suggesting a privilege escalation or UAC bypass.",
+                                                     Confidence = 0.80, Tier = DetectionTier.Tier2Indicator,
+                                                     AuthorizedResponse = ResponseAction.LogOnly,
+                                                     ProcessName = proc.ProcessName, ProcessId = proc.Id
+                                                 });
+                                                 _alertedPids.Add(proc.Id);
+                                             }
+                                         }
                                     }
                                 }
                             }

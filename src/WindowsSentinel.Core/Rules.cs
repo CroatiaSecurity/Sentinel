@@ -190,6 +190,21 @@ namespace WindowsSentinel.Core
                         if (pattern.EndsWith(".exe") && pt.ParentProcessName?.Equals("explorer", StringComparison.OrdinalIgnoreCase) == true)
                             continue;
 
+                        // Skip false positives on legitimate named pipes used for IPC by development/IDE tools or other applications
+                        if (pattern.Equals("\\pipe\\", StringComparison.OrdinalIgnoreCase))
+                        {
+                            var procName = pt.ProcessName.ToLowerInvariant();
+                            bool isShell = procName == "cmd" || procName == "cmd.exe" ||
+                                           procName == "powershell" || procName == "powershell.exe" ||
+                                           procName == "pwsh" || procName == "pwsh.exe";
+                            if (!isShell)
+                                continue;
+
+                            // Exclude common IPC parameters to prevent false positives on shell IPC
+                            if (cmd.Contains("parent_pipe") || cmd.Contains("parent-pipe") || cmd.Contains("pipe-name") || cmd.Contains("chrome-signaling"))
+                                continue;
+                        }
+
                         return new DetectionEvent
                         {
                             RuleName = Name,

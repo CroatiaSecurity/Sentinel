@@ -1,6 +1,20 @@
-﻿# Changelog
+# Changelog
 
 All notable changes to Windows Sentinel are documented in this file.
+
+## [6.1.0] - 2026-06-05
+
+### Changed
+- Demoted TokenIntegrityMonitor to Tier 2 (LogOnly) and relaxed scanning interval to 45s.
+- Relaxed background monitor polling intervals (ChromeSessionGuard, FirewallIntegrity, RemoteAccess, ScheduledTask, ChromeCredentialGuard, FirefoxCredentialGuard) to optimize resource usage.
+
+### Added
+- Implemented complete high-performance LSASS handle access monitor using native P/Invokes (DuplicateHandle, GetProcessId) to detect credential dumping attempts.
+- Registered ClipboardSanitizer and PhantomKeystrokeGuard as hosted services in the Agent, resolving a silent startup bug.
+
+### Removed
+- Removed redundant/disabled monitors (ModuleValidationMonitor, DiskWideDllScanner) and user-session monitors from service registrations.
+- Removed MicSessionMonitor from agent registrations (unified into WebcamMicMonitor).
 
 ## [6.0.0] - 2026-06-04
 

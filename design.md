@@ -1,6 +1,6 @@
 # Windows Sentinel — Design Document
 
-**Version: 5.5.0**
+**Version: 6.1.0**
 
 ---
 
@@ -57,7 +57,7 @@ The fusion layer is PASSIVE â€” it never blocks, kills, or modifies telemet
 | `MemoryBehaviorAnalyzer` | `VirtualQueryEx` + `ReadProcessMemory`, scans every 45s | No (own integrity level) |
 | `SyscallStubMonitor` | Compares ntdll/amsi function prologues against startup baseline every 10s | No (own process only) |
 | `TokenIntegrityMonitor` | `GetTokenInformation(TokenIntegrityLevel)` scans every 20s | No (PROCESS_QUERY_LIMITED_INFORMATION) |
-| `LsassDumpCanaryMonitor` | `EnumProcessModulesEx` checking for dbghelp.dll every 15s | No (PROCESS_QUERY_INFORMATION) |
+| `LsassDumpCanaryMonitor` | Scans system-wide process handles for unauthorized lsass.exe read access every 45s | Yes (PROCESS_DUP_HANDLE) |
 | `CredentialCanaryMonitor` | Windows Credential Manager canary via `CredWrite`/`CredRead` | No |
 | `ParentPidSpoofDetector` | Compares ETW-reported parent PID vs snapshot-reported parent | Yes (requires ETW) |
 | `FileActivityMonitor` | `FileSystemWatcher` on user profile (or configured path) | No |
@@ -112,6 +112,7 @@ Only rules whose name matches a President's Law fragment can trigger kills. All 
 | Rule | Key Signals | Confidence Range | Notes (v1.1.0) |
 |------|-------------|-----------------|----------------|
 | `LsassAccessRule` | LSASS-targeting cmdline tokens, dump file names | 0.85â€“0.92 | Behavioral only. Placeholder hashes removed. |
+| `LsassDumpCanaryMonitor` | Active process handles holding read rights to lsass.exe | 0.90 | NEW. Tier1 Behavioral, kill-authorized. |
 | `ReverseShellRule` | Encoded PowerShell, LOLBins, C2 ports, C2 framework strings | 0.80â€“0.93 | |
 | `ProcessInjectionRule` | Injection API names in cmdline | 0.78â€“0.92 | Tool-name matching demoted to metadata. Parent-child is Tier2. |
 | `RansomwareDetectionRule` | Shadow copy deletion, bulk renames, I/O rate, 100+ extensions | 0.68â€“0.99 | Multi-signal weighted scoring. |
@@ -134,7 +135,6 @@ These never kill independently. Multiple Tier2 signals on the same PID within 12
 | `DnsQueryMonitor` | DGA domains (entropy > 3.8), DNS tunneling (>30 qpm) | 0.60â€“0.90 | NEW. |
 | `ParentPidSpoofDetector` | ETW parent â‰  snapshot parent | 0.95 | NEW. Near-zero FP. |
 | `TokenIntegrityMonitor` | Mediumâ†’High integrity without consent.exe | 0.93 | NEW. |
-| `LsassDumpCanaryMonitor` | dbghelp.dll in non-debugger process | 0.85 | NEW. |
 | `CredentialCanaryMonitor` | Honeypot credential accessed/deleted | 0.98â€“0.99 | NEW. Zero-FP, no PID. |
 | `UnsignedBinaryRule` | Unsigned binary outside system paths, staging path boost | 0.50â€“0.68 | |
 | `HighEntropyRule` | Shannon entropy > 4.2 on process name stem, GUID exclusion | 0.30â€“0.85 | |
