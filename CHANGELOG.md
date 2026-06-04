@@ -2,6 +2,17 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [5.9.1] - 2026-06-04
+
+### Changed — Anti-Tamper Responses Enabled
+- **ModuleValidationMonitor** (module deleted) — `LogOnly` → `KillProcessTree`. Sentinel's own DLLs being deleted = active attacker.
+- **ModuleValidationMonitor** (module tampered) — `LogOnly` → `KillProcessTree`. Sentinel's binaries modified on disk = DLL replacement attack.
+- **RuntimeModuleIntegrityMonitor** (unexpected DLL in Sentinel) — `LogOnly` → `KillProcessTree`. DLL injection into Sentinel process.
+- **SyscallStubMonitor** (ntdll.dll hash changed) — `LogOnly` → `KillProcessTree`. On-disk ntdll modification = rootkit/unhooking.
+- **GatewayFingerprintMonitor** — `LogOnly` → `NetworkIsolate`. Gateway change = network hijack.
+
+---
+
 ## [5.9.0] - 2026-06-04
 
 ### Added — Network Isolation Response

@@ -2,7 +2,7 @@
 
 **Userland EDR for Windows � Behavioral Detection & Automated Response**
 
-> Version: 5.9.0 | Author: [Gorstak](https://gorstak.eu) | [GitHub](https://github.com/CroatiaSecurity/Sentinel) | License: MIT
+> Version: 5.9.1 | Author: [Gorstak](https://gorstak.eu) | [GitHub](https://github.com/CroatiaSecurity/Sentinel) | License: MIT
 
 ---
 
@@ -27,7 +27,7 @@ Designed for personal endpoint protection, blue-team education, behavioral analy
 Run the installer as Administrator:
 
 ```powershell
-.\WindowsSentinelSetup-5.9.0.exe
+.\WindowsSentinelSetup-5.9.1.exe
 ```
 
 Installs to `%ProgramFiles%\WindowsSentinel`, creates a Windows Service (SYSTEM), and launches the Agent into the user session with a system tray icon.
@@ -189,3 +189,4 @@ By using this software, you agree that the author(s) bear no responsibility for 
 ---
 
 MIT License � see [LICENSE](LICENSE) for full terms.
+
