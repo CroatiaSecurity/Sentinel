@@ -111,6 +111,19 @@ namespace WindowsSentinel.Core
             return lower.Contains(@"\temp\") || lower.Contains(@"\downloads\");
         }
 
+        private static bool IsKnownBrowser(string? processName)
+        {
+            if (string.IsNullOrEmpty(processName)) return false;
+            var lower = processName.ToLowerInvariant();
+            return lower == "chrome" || lower == "chrome.exe" ||
+                   lower == "msedge" || lower == "msedge.exe" ||
+                   lower == "firefox" || lower == "firefox.exe" ||
+                   lower == "brave" || lower == "brave.exe" ||
+                   lower == "opera" || lower == "opera.exe" ||
+                   lower == "vivaldi" || lower == "vivaldi.exe" ||
+                   lower == "safari" || lower == "safari.exe";
+        }
+
         private static string? GetProcessImagePath(int pid)
         {
             try
@@ -218,8 +231,9 @@ namespace WindowsSentinel.Core
                             }
 
                             // B. Outbound connection from temp/downloads path
+                            // SAFETY: Don't kill known browsers - users legitimately run portable browsers from Downloads
                             var imagePath = GetProcessImagePath((int)row.owningPid);
-                            if (IsSuspiciousPath(imagePath))
+                            if (IsSuspiciousPath(imagePath) && !IsKnownBrowser(processName))
                             {
                                 _ = _detectionEngine.EmitAsync(new DetectionEvent
                                 {
