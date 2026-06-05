@@ -132,10 +132,22 @@ namespace WindowsSentinel.Core
             "NtSetContextThread", "RtlCreateUserThread", "CreateRemoteThread"
         };
 
+        // Browsers legitimately use cross-process memory APIs for their sandbox model
+        // (broker process allocates memory in renderer/tab processes). Skip to avoid FP kills.
+        private static readonly HashSet<string> KnownBrowserProcesses = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "chrome", "msedge", "firefox", "brave", "opera", "vivaldi", "iexplore",
+            "msedgewebview2", "electron"
+        };
+
         public DetectionEvent? Evaluate(FusedTelemetryContext context)
         {
             if (context.TriggeringEvent is ThreatIntelTelemetry tit)
             {
+                // Skip browsers — they legitimately use injection APIs for sandboxing
+                if (KnownBrowserProcesses.Contains(tit.ProcessName))
+                    return null;
+
                 foreach (var api in InjectionAPIs)
                 {
                     if (tit.ApiName.Contains(api, StringComparison.OrdinalIgnoreCase))
