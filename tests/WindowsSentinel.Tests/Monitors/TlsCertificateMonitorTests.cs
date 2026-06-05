@@ -120,24 +120,16 @@ namespace WindowsSentinel.Tests.Monitors
         // ── ResponseAction integration tests ────────────────────────────────
 
         [Fact]
-        public void HighConfidenceCert_GetsRemoveCertAction()
+        public void HighConfidenceCert_GetsLogOnlyAction()
         {
-            // A Tier2 cert with confidence >= 0.95 should get RemoveCert (no process kill)
+            // High-confidence certs are still scored high for visibility,
+            // but the cert monitor never authorizes removal — always LogOnly
             // 0.40 base + 0.15 short + 0.10 very-short + 0.15 no-CRL + 0.15 hex-CN = 0.95
             using var cert = CreateTestCert("CN=a1b2c3d4e5f6", "CN=a1b2c3d4e5f6", 30);
             var result = TlsCertificateMonitor.AnalyzeCert(cert);
 
             Assert.True(result.Confidence >= 0.95);
             Assert.Equal(DetectionTier.Tier2Indicator, result.Tier);
-
-            // Verify the authorized response logic matches what the monitor would set
-            var authorizedResponse = result.Confidence >= 0.95 && result.Tier == DetectionTier.Tier2Indicator
-                ? ResponseAction.RemoveCert
-                : ResponseAction.LogOnly;
-            Assert.Equal(ResponseAction.RemoveCert, authorizedResponse);
-
-            // RemoveCert must never authorize terminating a process
-            Assert.False(new DetectionEvent { AuthorizedResponse = ResponseAction.RemoveCert }.KillAuthorized);
         }
 
         [Fact]
@@ -147,12 +139,7 @@ namespace WindowsSentinel.Tests.Monitors
             var result = TlsCertificateMonitor.AnalyzeCert(cert);
 
             Assert.Equal(DetectionTier.Tier2Indicator, result.Tier);
-
-            // Enterprise/dev-tool CAs: confidence is capped below 0.95, so LogOnly
-            var authorizedResponse = result.Confidence >= 0.95 && result.Tier == DetectionTier.Tier2Indicator
-                ? ResponseAction.RemoveCert
-                : ResponseAction.LogOnly;
-            Assert.Equal(ResponseAction.LogOnly, authorizedResponse);
+            Assert.True(result.Confidence <= 0.65, $"Enterprise CA confidence should be capped at 0.65, got {result.Confidence}");
         }
 
         [Fact]

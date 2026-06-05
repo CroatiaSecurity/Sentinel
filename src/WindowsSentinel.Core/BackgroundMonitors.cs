@@ -1294,9 +1294,10 @@ namespace WindowsSentinel.Core
     }
 
     // ──────────────────────────────────────────────
-    // TLS Certificate Monitor — deep analysis of root certificate store
-    // Detects untrusted/suspicious root certs at startup and at runtime.
-    // Active response: removes suspicious certs and kills the adder process.
+    // TLS Certificate Monitor — detects NEW root certificates added after baseline.
+    // Startup: silently baselines all existing certs. Never alerts or removes.
+    // Runtime: detects new certs not in baseline. Emits Tier2 log-only alerts.
+    // Never auto-removes any certificate — alerts only for admin review.
     // ──────────────────────────────────────────────
     public sealed class TlsCertificateMonitor : BackgroundService
     {
@@ -1360,8 +1361,8 @@ namespace WindowsSentinel.Core
         }
 
         /// <summary>
-        /// Scans every cert in the Root store, scores each one, actions suspicious ones,
-        /// and baselines only the certs that pass.
+        /// Scans every cert in the Root store and silently baselines all existing certs.
+        /// No detections are emitted and no certs are removed during startup.
         /// </summary>
         private async Task ScanAndBaselineStoreAsync(CancellationToken ct)
         {
@@ -1373,35 +1374,15 @@ namespace WindowsSentinel.Core
             foreach (var cert in store.Certificates)
             {
                 if (ct.IsCancellationRequested) break;
-
-                var analysis = AnalyzeCert(cert);
-
-                if (analysis.Confidence >= 0.95)
-                {
-                    // Suspicious cert — emit detection and action if active response enabled
-                    var adderInfo = TraceAdderProcess(cert.Thumbprint);
-
-                    await EmitCertDetectionAsync(cert, analysis, adderInfo, isStartupScan: true);
-
-                    if (_config.ActiveResponse)
-                    {
-                        await RemoveCertAsync(cert, adderInfo, analysis);
-                        // Do NOT baseline this cert — it was removed
-                        continue;
-                    }
-                }
-                else if (analysis.Confidence >= 0.55 && analysis.Tier == DetectionTier.Tier2Indicator)
-                {
-                    // Known enterprise/dev tool CA — log as Tier2 for visibility, but baseline it
-                    await EmitCertDetectionAsync(cert, analysis, adderInfo: null, isStartupScan: true);
-                }
-
                 _baselineThumbprints.Add(cert.Thumbprint);
             }
+
+            _logger.LogInformation("[TlsCertificateMonitor] Baselined {Count} existing root certs silently", _baselineThumbprints.Count);
         }
 
         /// <summary>
         /// Polls the Root store for new certs that weren't in the baseline.
+        /// Emits log-only detections for new certs; never removes anything.
         /// </summary>
         private async Task PollForNewCertsAsync(CancellationToken ct)
         {
@@ -1418,6 +1399,8 @@ namespace WindowsSentinel.Core
                 // New cert detected — analyze it
                 var analysis = AnalyzeCert(cert);
                 var adderInfo = TraceAdderProcess(cert.Thumbprint);
+
+                // Known public root CAs: baseline silently (no alert)
                 if (analysis.IsPublicRootCa && analysis.Confidence <= 0.50)
                 {
                     _baselineThumbprints.Add(cert.Thumbprint);
@@ -1427,18 +1410,11 @@ namespace WindowsSentinel.Core
                 _logger.LogWarning("[TlsCertificateMonitor] New root cert detected: Subject={Subject}, Thumbprint={Thumb}, Confidence={Conf:F2}",
                     cert.Subject, cert.Thumbprint, analysis.Confidence);
 
+                // Emit detection for the newly added cert (log-only, never auto-remove)
                 await EmitCertDetectionAsync(cert, analysis, adderInfo, isStartupScan: false);
 
-                if (_config.ActiveResponse && analysis.Confidence >= 0.95)
-                {
-                    await RemoveCertAsync(cert, adderInfo, analysis);
-                    // Do NOT baseline — it was removed
-                }
-                else
-                {
-                    // Baseline it so we don't re-alert every 60s
-                    _baselineThumbprints.Add(cert.Thumbprint);
-                }
+                // Baseline after first alert so we don't spam
+                _baselineThumbprints.Add(cert.Thumbprint);
             }
         }
 
@@ -1740,12 +1716,9 @@ namespace WindowsSentinel.Core
                 evidence += $", Adder='{adderInfo.ProcessName}' PID={adderInfo.ProcessId} at {adderInfo.EventTimestamp:u}";
             }
 
-            var reasoning = analysis.IsSelfSigned
-                ? $"A self-signed root certificate '{cn}' was found in the machine trust store. "
-                : $"A root certificate '{cn}' was found in the machine trust store. ";
-
-            reasoning += "This enables potential TLS interception of all HTTPS traffic. ";
-            reasoning += $"Suspicion signals: {reasonsList}.";
+            var reasoning = $"A new root certificate '{cn}' was added to the machine trust store. ";
+            reasoning += "If unauthorized, this could enable TLS interception of HTTPS traffic. ";
+            reasoning += $"Assessment signals: {reasonsList}.";
 
             var metadata = new Dictionary<string, string>
             {
@@ -1767,9 +1740,7 @@ namespace WindowsSentinel.Core
                 metadata["AdderProcessName"] = adderInfo.ProcessName;
             }
 
-            var authorizedResponse = analysis.Confidence >= 0.95 && analysis.Tier == DetectionTier.Tier2Indicator
-                ? ResponseAction.RemoveCert
-                : ResponseAction.LogOnly;
+            var authorizedResponse = ResponseAction.LogOnly;
 
             await _detectionEngine.EmitAsync(new DetectionEvent
             {
@@ -1785,45 +1756,6 @@ namespace WindowsSentinel.Core
             });
         }
 
-        /// <summary>
-        /// Removes a suspicious cert from the Root store.
-        /// Does NOT kill any process — the adder (if traced) is recorded for forensics only.
-        /// Killing was removed because browsers and the OS crypto service legitimately
-        /// trigger cert-store registry writes and were being misattributed/terminated.
-        /// </summary>
-        private async Task RemoveCertAsync(
-            System.Security.Cryptography.X509Certificates.X509Certificate2 cert,
-            AdderProcessInfo? adderInfo,
-            CertAnalysisResult analysis)
-        {
-            try
-            {
-                // Remove the cert from the store (native .NET API — no shelling out)
-                using var store = new System.Security.Cryptography.X509Certificates.X509Store(
-                    System.Security.Cryptography.X509Certificates.StoreName.Root,
-                    System.Security.Cryptography.X509Certificates.StoreLocation.LocalMachine);
-                store.Open(System.Security.Cryptography.X509Certificates.OpenFlags.ReadWrite);
-                store.Remove(cert);
-
-                _logger.LogWarning("[TlsCertificateMonitor] REMOVED suspicious root cert: Subject={Subject}, Thumbprint={Thumb}",
-                    cert.Subject, cert.Thumbprint);
-
-                // Log the response (cert removal only — no process is terminated)
-                await _eventLogger.LogEventAsync("response", new ResponseEvent
-                {
-                    ProcessId = adderInfo?.ProcessId ?? 0,
-                    ProcessName = adderInfo?.ProcessName ?? "Unknown",
-                    ActionTaken = "REMOVE_CERT",
-                    Reason = $"Removed root cert Subject='{cert.Subject}' Thumbprint={cert.Thumbprint} " +
-                             $"Confidence={analysis.Confidence:F2} Signals=[{string.Join("; ", analysis.Reasons)}]" +
-                             (adderInfo != null ? $" Adder (not killed) PID={adderInfo.ProcessId} Name={adderInfo.ProcessName}" : " Adder not traced")
-                });
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "[TlsCertificateMonitor] Failed to remove cert {Thumb}", cert.Thumbprint);
-            }
-        }
 
         /// <summary>Result of analyzing a single certificate.</summary>
         internal class CertAnalysisResult

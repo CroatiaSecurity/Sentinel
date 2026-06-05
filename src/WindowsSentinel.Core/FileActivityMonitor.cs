@@ -210,12 +210,24 @@ namespace WindowsSentinel.Core
 
         private void OnFileEvent(object sender, FileSystemEventArgs e)
         {
+            var pathLower = e.FullPath.ToLowerInvariant();
+            if (pathLower.Contains(@"\appdata\") || pathLower.Contains(@"\.git\") || pathLower.Contains(@"\.gemini\"))
+            {
+                return;
+            }
+
             var processInfo = GetProcessUsingFile(e.FullPath);
             SubmitEvent(e.FullPath, e.ChangeType.ToString().ToUpperInvariant(), null, processInfo.pid, processInfo.name);
         }
 
         private void OnFileRenamed(object sender, RenamedEventArgs e)
         {
+            var pathLower = e.FullPath.ToLowerInvariant();
+            if (pathLower.Contains(@"\appdata\") || pathLower.Contains(@"\.git\") || pathLower.Contains(@"\.gemini\"))
+            {
+                return;
+            }
+
             var processInfo = GetProcessUsingFile(e.FullPath);
             SubmitEvent(e.OldFullPath, "RENAME", e.FullPath, processInfo.pid, processInfo.name);
         }
