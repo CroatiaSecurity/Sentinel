@@ -26,6 +26,9 @@ All notable changes to Windows Sentinel are documented in this file.
 - Fixed `CampaignDetectionRule` failing to match any real-world process telemetry due to `.exe` suffix mismatch.
 - Fixed `TlsCertificateMonitor` falsely flagging legitimate root CAs as suspicious. Self-signed is normal for root CAs; removed the confidence penalty. Added `KnownPublicRootCAs` allowlist (70+ trusted CAs: DigiCert, Let's Encrypt, GlobalSign, etc.) to prevent false positive removal of legitimate certificates.
 - Fixed `FileVerdictScanner` interfering with active file operations (downloads, UUP extraction, NTLite). Now excludes temp/download/work directories, waits 2 seconds for files to stabilize, checks file hasn't been modified in 1 second before scanning, and gracefully abandons scan after retries instead of blocking.
+- Fixed `TlsCertificateMonitor` — two overbroad patterns (`"ROOT"` and `"Root CA"`) in `KnownPublicRootCAs` case-insensitively matched the word "Root" in any certificate subject (e.g. `"CN=Zscaler Root CA"`), causing enterprise CA detections to be misclassified as public root CAs with the wrong reason string.
+- Fixed `TlsCertificateMonitor` — suspicious certs (confidence ≥ 0.85) are now classified as `Tier2Indicator` instead of `Tier1Behavioral`. Cert removal (`RemoveCert`) never authorizes process kill; the actual `RemoveCertAsync` call path is unaffected — only the `DetectionEvent` tier label is corrected.
+- Fixed `AdvancedResponseEngine` — `RemoveCert` and `RemoveCertAndKillAdder` response branches now gate on `Tier2Indicator` instead of `Tier1Behavioral`, keeping cert detections fully outside the kill-authorization flow.
 
 ### Version Bumped
 - All `.csproj` files: 6.2.0 → 6.3.0

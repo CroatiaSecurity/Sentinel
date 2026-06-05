@@ -13,6 +13,7 @@ namespace WindowsSentinel.Core
     {
         LogOnly,
         NetworkIsolate,
+        RemoveCert,
         KillProcess,
         KillProcessTree,
         Quarantine,

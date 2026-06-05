@@ -108,7 +108,7 @@ namespace WindowsSentinel.Core
                     reason = "LogOnly (ActiveResponse disabled)";
                 }
             }
-            else if (effectiveResponse == ResponseAction.RemoveCertAndKillAdder && effectiveTier == DetectionTier.Tier1Behavioral)
+            else if (effectiveResponse == ResponseAction.RemoveCertAndKillAdder && effectiveTier == DetectionTier.Tier2Indicator)
             {
                 if (_config.ActiveResponse)
                 {
@@ -119,6 +119,14 @@ namespace WindowsSentinel.Core
                 {
                     reason = "LogOnly (ActiveResponse disabled)";
                 }
+            }
+            else if (effectiveResponse == ResponseAction.RemoveCert && effectiveTier == DetectionTier.Tier2Indicator)
+            {
+                // Cert removal is handled directly by TlsCertificateMonitor (native X509Store.Remove).
+                // No process is terminated. The response engine just records the action.
+                reason = _config.ActiveResponse
+                    ? $"RemoveCert (AuthorizedResponse={effectiveResponse}, no process terminated)"
+                    : "LogOnly (ActiveResponse disabled)";
             }
             else if (effectiveResponse == ResponseAction.NetworkIsolate && effectiveTier == DetectionTier.Tier1Behavioral)
             {

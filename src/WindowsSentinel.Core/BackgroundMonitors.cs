@@ -1447,7 +1447,7 @@ namespace WindowsSentinel.Core
             "AffirmTrust", "Amazon Root", "Apple Root", "Microsoft Root",
             "Chunghwa Telecom", "Hongkong Post", "Japan Registry", "WISeKey",
             "Buypass", "D-TRUST", "Telia", "Telekom", "Deutsche Telekom",
-            "Staat der", "Government", "eID", "ROOT", "Root CA", "Network Solutions",
+            "Staat der", "Government", "eID", "Network Solutions",
             "AddTrust", "USERTrust", "SECOM", "Unizeto", "TÜRKTRUST", "AC RAIZ",
             "Autoridad de Certificacion", "Certigna", "Certinomis", "ACCV",
             "ANF", "A-Trust", "BGC", "BNA", "CFCA", "China Internet", "CNNIC",
@@ -1465,7 +1465,7 @@ namespace WindowsSentinel.Core
         {
             // Start with LOW base confidence — require MULTIPLE strong indicators to reach action threshold
             double confidence = 0.40;
-            var tier = DetectionTier.Tier1Behavioral;
+            var tier = DetectionTier.Tier2Indicator;
             var reasons = new List<string>();
 
             var subject = cert.Subject ?? string.Empty;
@@ -1761,8 +1761,8 @@ namespace WindowsSentinel.Core
                 metadata["AdderProcessName"] = adderInfo.ProcessName;
             }
 
-            var authorizedResponse = analysis.Confidence >= 0.85 && analysis.Tier == DetectionTier.Tier1Behavioral
-                ? ResponseAction.RemoveCertAndKillAdder
+            var authorizedResponse = analysis.Confidence >= 0.85 && analysis.Tier == DetectionTier.Tier2Indicator
+                ? ResponseAction.RemoveCert
                 : ResponseAction.LogOnly;
 
             await _detectionEngine.EmitAsync(new DetectionEvent
@@ -1780,7 +1780,10 @@ namespace WindowsSentinel.Core
         }
 
         /// <summary>
-        /// Removes a suspicious cert from the Root store and kills the adder process.
+        /// Removes a suspicious cert from the Root store.
+        /// Does NOT kill any process — the adder (if traced) is recorded for forensics only.
+        /// Killing was removed because browsers and the OS crypto service legitimately
+        /// trigger cert-store registry writes and were being misattributed/terminated.
         /// </summary>
         private async Task RemoveCertAsync(
             System.Security.Cryptography.X509Certificates.X509Certificate2 cert,
@@ -1789,7 +1792,7 @@ namespace WindowsSentinel.Core
         {
             try
             {
-                // 1. Remove the cert from the store (native .NET API — no shelling out)
+                // Remove the cert from the store (native .NET API — no shelling out)
                 using var store = new System.Security.Cryptography.X509Certificates.X509Store(
                     System.Security.Cryptography.X509Certificates.StoreName.Root,
                     System.Security.Cryptography.X509Certificates.StoreLocation.LocalMachine);
@@ -1799,52 +1802,15 @@ namespace WindowsSentinel.Core
                 _logger.LogWarning("[TlsCertificateMonitor] REMOVED suspicious root cert: Subject={Subject}, Thumbprint={Thumb}",
                     cert.Subject, cert.Thumbprint);
 
-                // 2. Kill the adder process if traced (with safety checks)
-                if (adderInfo != null && adderInfo.ProcessId > 4)
-                {
-                    // Safety check 1: Verify process still exists and name matches
-                    try
-                    {
-                        using var proc = System.Diagnostics.Process.GetProcessById(adderInfo.ProcessId);
-                        var actualName = proc.ProcessName;
-                        if (!actualName.Equals(adderInfo.ProcessName, StringComparison.OrdinalIgnoreCase))
-                        {
-                            _logger.LogWarning("[TlsCertificateMonitor] Process name mismatch - expected {Expected}, found {Actual}. Not killing.",
-                                adderInfo.ProcessName, actualName);
-                            adderInfo = null; // Don't kill - PID recycled
-                        }
-                    }
-                    catch (ArgumentException)
-                    {
-                        _logger.LogWarning("[TlsCertificateMonitor] Process PID {Pid} no longer exists. Not killing.", adderInfo.ProcessId);
-                        adderInfo = null; // Process exited
-                    }
-
-                    // Safety check 2: Only kill if event is very recent (within 60 seconds)
-                    if (adderInfo != null && DateTime.UtcNow - adderInfo.EventTimestamp > TimeSpan.FromSeconds(60))
-                    {
-                        _logger.LogWarning("[TlsCertificateMonitor] Cert add event is stale ({Timestamp}). Not killing.",
-                            adderInfo.EventTimestamp);
-                        adderInfo = null;
-                    }
-
-                    if (adderInfo != null)
-                    {
-                        HardeningModule.SafeKillProcessTree(adderInfo.ProcessId);
-                        _logger.LogWarning("[TlsCertificateMonitor] KILLED adder process: {Name} PID={Pid}",
-                            adderInfo.ProcessName, adderInfo.ProcessId);
-                    }
-                }
-
-                // 3. Log the response
+                // Log the response (cert removal only — no process is terminated)
                 await _eventLogger.LogEventAsync("response", new ResponseEvent
                 {
                     ProcessId = adderInfo?.ProcessId ?? 0,
                     ProcessName = adderInfo?.ProcessName ?? "Unknown",
-                    ActionTaken = "REMOVE_CERT_AND_KILL_ADDER",
+                    ActionTaken = "REMOVE_CERT",
                     Reason = $"Removed root cert Subject='{cert.Subject}' Thumbprint={cert.Thumbprint} " +
                              $"Confidence={analysis.Confidence:F2} Signals=[{string.Join("; ", analysis.Reasons)}]" +
-                             (adderInfo != null ? $" Killed adder PID={adderInfo.ProcessId}" : " Adder not traced")
+                             (adderInfo != null ? $" Adder (not killed) PID={adderInfo.ProcessId} Name={adderInfo.ProcessName}" : " Adder not traced")
                 });
             }
             catch (Exception ex)

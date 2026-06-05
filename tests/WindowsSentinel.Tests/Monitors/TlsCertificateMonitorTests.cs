@@ -76,7 +76,7 @@ namespace WindowsSentinel.Tests.Monitors
             var result = TlsCertificateMonitor.AnalyzeCert(cert);
 
             Assert.True(result.Confidence >= 0.85, $"Multi-signal attack cert should be >= 0.85, got {result.Confidence}");
-            Assert.Equal(DetectionTier.Tier1Behavioral, result.Tier);
+            Assert.Equal(DetectionTier.Tier2Indicator, result.Tier);
             Assert.Contains(result.Reasons, r => r.Contains("Short validity"));
             Assert.Contains(result.Reasons, r => r.Contains("No CRL/OCSP"));
             Assert.Contains(result.Reasons, r => r.Contains("hex-like"));
@@ -122,18 +122,21 @@ namespace WindowsSentinel.Tests.Monitors
         [Fact]
         public void HighConfidenceCert_GetsRemoveCertAction()
         {
-            // A Tier1 cert with confidence >= 0.85 should get RemoveCertAndKillAdder
+            // A Tier2 cert with confidence >= 0.85 should get RemoveCert (no process kill)
             using var cert = CreateTestCert("CN=MyCA", "CN=MyCA", 30);
             var result = TlsCertificateMonitor.AnalyzeCert(cert);
 
             Assert.True(result.Confidence >= 0.85);
-            Assert.Equal(DetectionTier.Tier1Behavioral, result.Tier);
+            Assert.Equal(DetectionTier.Tier2Indicator, result.Tier);
 
             // Verify the authorized response logic matches what the monitor would set
-            var authorizedResponse = result.Confidence >= 0.85 && result.Tier == DetectionTier.Tier1Behavioral
-                ? ResponseAction.RemoveCertAndKillAdder
+            var authorizedResponse = result.Confidence >= 0.85 && result.Tier == DetectionTier.Tier2Indicator
+                ? ResponseAction.RemoveCert
                 : ResponseAction.LogOnly;
-            Assert.Equal(ResponseAction.RemoveCertAndKillAdder, authorizedResponse);
+            Assert.Equal(ResponseAction.RemoveCert, authorizedResponse);
+
+            // RemoveCert must never authorize terminating a process
+            Assert.False(new DetectionEvent { AuthorizedResponse = ResponseAction.RemoveCert }.KillAuthorized);
         }
 
         [Fact]
@@ -144,9 +147,9 @@ namespace WindowsSentinel.Tests.Monitors
 
             Assert.Equal(DetectionTier.Tier2Indicator, result.Tier);
 
-            // Tier2 should always be LogOnly regardless of confidence
-            var authorizedResponse = result.Confidence >= 0.85 && result.Tier == DetectionTier.Tier1Behavioral
-                ? ResponseAction.RemoveCertAndKillAdder
+            // Enterprise/dev-tool CAs: confidence is capped below 0.85, so LogOnly
+            var authorizedResponse = result.Confidence >= 0.85 && result.Tier == DetectionTier.Tier2Indicator
+                ? ResponseAction.RemoveCert
                 : ResponseAction.LogOnly;
             Assert.Equal(ResponseAction.LogOnly, authorizedResponse);
         }
