@@ -1444,7 +1444,7 @@ namespace WindowsSentinel.Core
             "GoDaddy", "Thawte", "Comodo", "Sectigo", "Starfield", "Let's Encrypt",
             "ISRG Root", "IdenTrust", "Baltimore", "CyberTrust", "QuoVadis",
             "Trustwave", "GTS Root", "GlobalTrust", "SwissSign", "Certum",
-            "AffirmTrust", "Amazon Root", "Apple Root", "Microsoft Root",
+            "AffirmTrust", "Amazon Root", "Apple Root", "Microsoft Root", "Microsoft Corporation",
             "Chunghwa Telecom", "Hongkong Post", "Japan Registry", "WISeKey",
             "Buypass", "D-TRUST", "Telia", "Telekom", "Deutsche Telekom",
             "Staat der", "Government", "eID", "Network Solutions",

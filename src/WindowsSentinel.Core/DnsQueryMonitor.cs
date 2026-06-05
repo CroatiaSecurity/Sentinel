@@ -55,6 +55,8 @@ namespace WindowsSentinel.Core
             "abuse.ch", "lencr.org",
             // Other common
             "spotify.com", "scdn.co", "discord.gg", "discordapp.com",
+            // Windows internals — high-volume by design, not C2
+            "wpad", "local", "localdomain",
         };
         private const string SessionName = "SentinelDnsMonitor";
         private static readonly Guid DnsClientProvider = new("1C95126E-7EEA-49A9-A3FE-A378B03DDB4D");
