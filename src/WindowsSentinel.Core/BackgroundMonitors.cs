@@ -1799,12 +1799,41 @@ namespace WindowsSentinel.Core
                 _logger.LogWarning("[TlsCertificateMonitor] REMOVED suspicious root cert: Subject={Subject}, Thumbprint={Thumb}",
                     cert.Subject, cert.Thumbprint);
 
-                // 2. Kill the adder process if traced (only if definitively traced to this cert)
+                // 2. Kill the adder process if traced (with safety checks)
                 if (adderInfo != null && adderInfo.ProcessId > 4)
                 {
-                    HardeningModule.SafeKillProcessTree(adderInfo.ProcessId);
-                    _logger.LogWarning("[TlsCertificateMonitor] KILLED adder process: {Name} PID={Pid}",
-                        adderInfo.ProcessName, adderInfo.ProcessId);
+                    // Safety check 1: Verify process still exists and name matches
+                    try
+                    {
+                        using var proc = System.Diagnostics.Process.GetProcessById(adderInfo.ProcessId);
+                        var actualName = proc.ProcessName;
+                        if (!actualName.Equals(adderInfo.ProcessName, StringComparison.OrdinalIgnoreCase))
+                        {
+                            _logger.LogWarning("[TlsCertificateMonitor] Process name mismatch - expected {Expected}, found {Actual}. Not killing.",
+                                adderInfo.ProcessName, actualName);
+                            adderInfo = null; // Don't kill - PID recycled
+                        }
+                    }
+                    catch (ArgumentException)
+                    {
+                        _logger.LogWarning("[TlsCertificateMonitor] Process PID {Pid} no longer exists. Not killing.", adderInfo.ProcessId);
+                        adderInfo = null; // Process exited
+                    }
+
+                    // Safety check 2: Only kill if event is very recent (within 60 seconds)
+                    if (adderInfo != null && DateTime.UtcNow - adderInfo.EventTimestamp > TimeSpan.FromSeconds(60))
+                    {
+                        _logger.LogWarning("[TlsCertificateMonitor] Cert add event is stale ({Timestamp}). Not killing.",
+                            adderInfo.EventTimestamp);
+                        adderInfo = null;
+                    }
+
+                    if (adderInfo != null)
+                    {
+                        HardeningModule.SafeKillProcessTree(adderInfo.ProcessId);
+                        _logger.LogWarning("[TlsCertificateMonitor] KILLED adder process: {Name} PID={Pid}",
+                            adderInfo.ProcessName, adderInfo.ProcessId);
+                    }
                 }
 
                 // 3. Log the response
