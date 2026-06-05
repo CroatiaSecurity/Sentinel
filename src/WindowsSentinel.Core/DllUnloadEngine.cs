@@ -58,7 +58,12 @@ namespace WindowsSentinel.Core
         {
             "system", "smss", "csrss", "wininit", "services", "lsass", "svchost",
             "explorer", "dwm", "winlogon", "MsMpEng", "NisSrv",
-            "WindowsSentinel.Service", "WindowsSentinel.Agent"
+            "WindowsSentinel.Service", "WindowsSentinel.Agent",
+            // Browsers — install in AppData/Program Files, DLL unloading will crash them
+            "chrome", "msedge", "firefox", "brave", "opera", "vivaldi", "iexplore",
+            // Common AppData-resident apps
+            "spotify", "discord", "slack", "teams", "onedrive", "dropbox",
+            "code", "cursor", "windsurf", "rider", "webstorm", "idea"
         };
 
         private static readonly HashSet<string> ProtectedDlls = new(StringComparer.OrdinalIgnoreCase)
@@ -232,9 +237,10 @@ namespace WindowsSentinel.Core
                         if (ProtectedDlls.Contains(modName)) continue;
                         if (modPath.Contains(@"\Windows\", StringComparison.OrdinalIgnoreCase)) continue;
 
-                        // Check if the DLL is suspicious (e.g., from Temp, AppData, or the application folder shadowing system DLLs)
+                        // Only flag DLLs from Temp paths — AppData is a legitimate install location
+                        // for browsers, Spotify, Discord, etc. Never unload from there.
                         bool isSuspicious = modPath.Contains(@"\Temp\", StringComparison.OrdinalIgnoreCase) ||
-                                            modPath.Contains(@"\AppData\", StringComparison.OrdinalIgnoreCase) ||
+                                            modPath.Contains(@"\AppData\Local\Temp\", StringComparison.OrdinalIgnoreCase) ||
                                             (!string.IsNullOrEmpty(procDir) && modDir.Equals(procDir, StringComparison.OrdinalIgnoreCase) && SideloadTargets.Contains(modName));
 
                         if (isSuspicious)
