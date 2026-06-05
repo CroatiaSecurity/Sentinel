@@ -24,6 +24,8 @@ All notable changes to Windows Sentinel are documented in this file.
 - Fixed `NetworkMonitor` being a no-op stub that logged "starting" but performed no actual network monitoring.
 - Fixed `ProcessAncestryCache` silently losing ETW parent PID data on every 5-second refresh cycle.
 - Fixed `CampaignDetectionRule` failing to match any real-world process telemetry due to `.exe` suffix mismatch.
+- Fixed `TlsCertificateMonitor` falsely flagging legitimate root CAs as suspicious. Self-signed is normal for root CAs; removed the confidence penalty. Added `KnownPublicRootCAs` allowlist (70+ trusted CAs: DigiCert, Let's Encrypt, GlobalSign, etc.) to prevent false positive removal of legitimate certificates.
+- Fixed `FileVerdictScanner` interfering with active file operations (downloads, UUP extraction, NTLite). Now excludes temp/download/work directories, waits 2 seconds for files to stabilize, checks file hasn't been modified in 1 second before scanning, and gracefully abandons scan after retries instead of blocking.
 
 ### Version Bumped
 - All `.csproj` files: 6.2.0 → 6.3.0
