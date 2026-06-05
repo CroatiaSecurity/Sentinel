@@ -39,6 +39,10 @@ namespace WindowsSentinel.Agent
                     hostContext.Configuration.GetSection("Sentinel").Bind(config);
                     services.AddSingleton(config);
 
+                    var threatReportingConfig = new ThreatReportingConfig();
+                    hostContext.Configuration.GetSection("ThreatReporting").Bind(threatReportingConfig);
+                    services.AddSingleton(threatReportingConfig);
+
                     // Infrastructure required by monitors
                     services.AddSingleton<SentinelMetrics>();
                     services.AddSingleton<JsonlEventLogger>(_ => new JsonlEventLogger(config.LogPath));
@@ -47,6 +51,8 @@ namespace WindowsSentinel.Agent
                     services.AddSingleton<SecureCacheStore>();
                     services.AddSingleton<HashReputationService>();
                     services.AddSingleton<QuarantineManager>();
+                    services.AddSingleton<SafeProcessExemptionRegistry>();
+                    services.AddSingleton<FileVerdictAds>();
                     services.AddSingleton<IoCScanner>();
                     services.AddSingleton<AllowlistService>();
                     services.AddSingleton<ScoringEngine>();
@@ -62,6 +68,7 @@ namespace WindowsSentinel.Agent
                     services.AddTransient<IDetectionRule, RansomwareDetectionRule>();
                     services.AddTransient<IDetectionRule, ReverseShellRule>();
                     services.AddTransient<IDetectionRule, UnsignedBinaryRule>();
+                    services.AddTransient<IDetectionRule, VerdictGateRule>();
 
                     // Tray Icon
                     services.AddHostedService<TrayIconService>();
@@ -71,9 +78,14 @@ namespace WindowsSentinel.Agent
                     services.AddHostedService<ScreenCaptureMonitor>();
                     services.AddHostedService<WebcamMicMonitor>();
                     services.AddHostedService<AudioHijackMonitor>();
+                    services.AddHostedService<MicSessionMonitor>();
+                    services.AddHostedService<DiskWideDllScanner>();
                     services.AddHostedService<NeuroBehaviorVisualMonitor>();
                     services.AddHostedService<BrowserExtensionMonitor>();
                     services.AddHostedService<PhantomKeystrokeGuard>();
+                    services.AddHostedService<FileVerdictScanner>();
+                    services.AddHostedService<WebcamHijackMonitor>();
+                    services.AddHostedService<ConsultantSignalIngestor>();
                 });
     }
 }

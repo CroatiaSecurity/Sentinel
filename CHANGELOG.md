@@ -2,6 +2,36 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [6.3.0] - 2026-06-05
+
+### Added
+- Wired `DiskWideDllScanner` as a hosted service in the SYSTEM Service — re-enabled disk-wide unsigned DLL scanning that was previously disabled in v4.8.1 for performance. Now runs at relaxed intervals suitable for production.
+- Wired `ModuleValidationMonitor` as a hosted service in the SYSTEM Service — re-enabled module integrity validation that was removed in v6.1.0. Provides baseline-and-detect scanning of critical process modules for unsigned/tampered DLLs.
+- Wired `MicSessionMonitor` as a hosted service in the User Agent — re-enabled standalone microphone session monitoring alongside the unified WebcamMicMonitor for defense-in-depth audio surveillance detection.
+- Wired `BeaconingDetector` as a hosted service in the SYSTEM Service — ensures statistical C2 beaconing detection is active at the service level (was previously only registered in v5.7.0 DI but had been dropped during v6.x rewrites).
+
+### Changed
+- **NetworkMonitor** — Complete rewrite from stub to production-ready P/Invoke implementation using `GetExtendedTcpTable` (`TCP_TABLE_OWNER_PID_ALL`). Correlates active TCP connections with owning PIDs and detects reverse shell patterns (cmd/powershell with established connections) and suspicious process network activity (processes from Temp/AppData/Downloads paths).
+- **ProcessAncestryCache** — Refactored periodic refresh to preserve ETW-captured parent PIDs. Previously, the snapshot-based refresh would overwrite high-fidelity ETW truth with potentially stale `CreateToolhelp32Snapshot` data. Now, ETW-sourced parent PIDs are retained during refresh cycles, preventing PPID spoofing detection regressions.
+- **President's Law synchronization** — Expanded and unified the "never demote" keyword list across `AdvancedResponseEngine`, `ScoringEngine`, and `AllowlistService` to include: ransomware, lsass, credential, injection, hollow, reverse shell, c2, beacon, ppid spoof, privilege escalation, dll hijack, fileless, memory implant, exfiltration, canary, tamper, and rootkit. All three components now share an identical closed list.
+- **CampaignDetectionRule** — Fixed process pattern matching to strip `.exe` suffixes from captured process names before comparison. Real-world ETW telemetry delivers process names without the `.exe` extension; the patterns were failing to match.
+- Updated `architecture-council.md` to reflect v6.3.0 changes.
+
+### Fixed
+- Fixed `BeaconingDetector` not running due to missing DI registration in the Service's `Program.cs`.
+- Fixed `DiskWideDllScanner` and `ModuleValidationMonitor` being permanently disabled since v4.8.1/v6.1.0 — both are now active with appropriate production intervals.
+- Fixed `MicSessionMonitor` being unregistered since v6.1.0 when it was incorrectly removed under the assumption that WebcamMicMonitor fully subsumed it.
+- Fixed `NetworkMonitor` being a no-op stub that logged "starting" but performed no actual network monitoring.
+- Fixed `ProcessAncestryCache` silently losing ETW parent PID data on every 5-second refresh cycle.
+- Fixed `CampaignDetectionRule` failing to match any real-world process telemetry due to `.exe` suffix mismatch.
+
+### Version Bumped
+- All `.csproj` files: 6.2.0 → 6.3.0
+- `TrayIconService.cs` tooltip: 6.2.0 → 6.3.0
+- All documentation files (README, THREAT_MODEL, requirements, design, constraints): 6.2.0 → 6.3.0
+
+---
+
 ## [6.2.0] - 2026-06-05
 
 ### Added

@@ -57,7 +57,7 @@ namespace WindowsSentinel.Core
             "OneDrive", "OneDriveStandaloneUpdater",
             "MicrosoftStartFeedProvider",
             // Dev tools & Electron apps
-            "code", "cursor", "Devin", "kiro",
+            "code", "cursor", "Devin", "kiro", "Antigravity IDE",
             "Slack", "Discord", "Teams", "Spotify",
             "steamwebhelper", "steam",
             // Hardware / GPU

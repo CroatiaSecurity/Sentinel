@@ -61,13 +61,6 @@ namespace WindowsSentinel.Tests
             Assert.Equal(0.0, reduction);
         }
 
-        [Fact]
-        public void GetConfidenceReduction_ReducesForTrustedPublisher()
-        {
-            var svc = CreateService();
-            double reduction = svc.GetConfidenceReduction("chrome", null, "Google LLC", "UnsignedBinaryRule");
-            Assert.True(reduction >= 0.3);
-        }
 
         [Fact]
         public void GetConfidenceReduction_ReducesForDevelopmentProcess()
@@ -90,10 +83,11 @@ namespace WindowsSentinel.Tests
         public void GetConfidenceReduction_CapsAt50Percent()
         {
             var svc = CreateService();
-            // Trusted publisher + dev process + trusted path = 0.3 + 0.2 + 0.1 = 0.6, capped at 0.5
+            svc.AddToUserAllowlist("dotnet", @"C:\Program Files\dotnet\dotnet.exe", "User trust");
+            // dev process + trusted path + user allowlist = 0.2 + 0.1 + 0.4 = 0.7, capped at 0.5
             double reduction = svc.GetConfidenceReduction("dotnet",
-                @"C:\Program Files\dotnet\dotnet.exe", "Microsoft Corporation", "SomeRule");
-            Assert.True(reduction <= 0.5);
+                @"C:\Program Files\dotnet\dotnet.exe", null, "SomeRule");
+            Assert.Equal(0.5, reduction);
         }
 
         [Fact]
@@ -125,16 +119,6 @@ namespace WindowsSentinel.Tests
             Assert.False(svc.IsGamingProcess("malware"));
         }
 
-        [Fact]
-        public void IsTrustedPublisher_Recognizes_Publishers()
-        {
-            var svc = CreateService();
-            Assert.True(svc.IsTrustedPublisher("Microsoft Corporation"));
-            Assert.True(svc.IsTrustedPublisher("Google LLC"));
-            Assert.False(svc.IsTrustedPublisher("Evil Corp"));
-            Assert.False(svc.IsTrustedPublisher(null));
-            Assert.False(svc.IsTrustedPublisher(""));
-        }
 
         // ── User allowlist ──────────────────────────────────────────────────
 

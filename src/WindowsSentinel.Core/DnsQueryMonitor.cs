@@ -51,6 +51,8 @@ namespace WindowsSentinel.Core
             "codeium.com", "agentclientprotocol.com", "github.com", "github.io",
             "githubusercontent.com", "npmjs.org", "nuget.org",
             "visualstudio.com", "vsassets.io",
+            // Reputations & Certs (safe lookup domains)
+            "abuse.ch", "lencr.org",
             // Other common
             "spotify.com", "scdn.co", "discord.gg", "discordapp.com",
         };

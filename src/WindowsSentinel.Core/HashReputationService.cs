@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Concurrent;
+using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
 
 namespace WindowsSentinel.Core
 {
@@ -15,13 +17,20 @@ namespace WindowsSentinel.Core
     {
         private readonly ConcurrentDictionary<string, HashVerdict> _memoryCache = new();
         private readonly SecureCacheStore _cacheStore;
+        private readonly ThreatReportingConfig _config;
+        private readonly ILogger<HashReputationService> _logger;
 
-        public HashReputationService(SecureCacheStore cacheStore)
+        public HashReputationService(
+            SecureCacheStore cacheStore,
+            ThreatReportingConfig config,
+            ILogger<HashReputationService> logger)
         {
             _cacheStore = cacheStore;
+            _config = config;
+            _logger = logger;
         }
 
-        public async Task<HashVerdict> GetVerdictAsync(string sha256)
+        public async Task<HashVerdict> GetVerdictAsync(string sha256, CancellationToken cancellationToken = default)
         {
             if (string.IsNullOrWhiteSpace(sha256) || sha256.Length != 64)
             {
@@ -45,7 +54,7 @@ namespace WindowsSentinel.Core
             }
 
             // Tier 3: Live reputation lookup via MalwareBazaar API
-            var liveVerdict = await FetchReputationFromApis(sha256);
+            var liveVerdict = await FetchReputationFromApis(sha256, cancellationToken);
 
             // Save to caches
             _memoryCache[sha256] = liveVerdict;
@@ -54,7 +63,7 @@ namespace WindowsSentinel.Core
             return liveVerdict;
         }
 
-        private static async Task<HashVerdict> FetchReputationFromApis(string sha256)
+        private async Task<HashVerdict> FetchReputationFromApis(string sha256, CancellationToken cancellationToken)
         {
             // First check predefined hashes for local verification testing
             if (sha256 == "0000000000000000000000000000000000000000000000000000000000000000")
@@ -72,6 +81,11 @@ namespace WindowsSentinel.Core
                 using var client = new System.Net.Http.HttpClient();
                 client.Timeout = TimeSpan.FromSeconds(3); // Keep it fast, 3s budget
 
+                if (!string.IsNullOrWhiteSpace(_config.MalwareBazaarApiKey))
+                {
+                    client.DefaultRequestHeaders.Add("Auth-Key", _config.MalwareBazaarApiKey);
+                }
+
                 var values = new System.Collections.Generic.Dictionary<string, string>
                 {
                     { "query", "get_info" },
@@ -79,11 +93,11 @@ namespace WindowsSentinel.Core
                 };
 
                 var content = new System.Net.Http.FormUrlEncodedContent(values);
-                var response = await client.PostAsync("https://mb-api.abuse.ch/api/v1/", content);
+                var response = await client.PostAsync("https://mb-api.abuse.ch/api/v1/", content, cancellationToken);
 
                 if (response.IsSuccessStatusCode)
                 {
-                    var responseString = await response.Content.ReadAsStringAsync();
+                    var responseString = await response.Content.ReadAsStringAsync(cancellationToken);
                     // Basic JSON parsing to locate query_status without complex external dependency
                     if (responseString.Contains("\"query_status\": \"ok\"") || responseString.Contains("\"query_status\":\"ok\""))
                     {
@@ -95,9 +109,10 @@ namespace WindowsSentinel.Core
                     }
                 }
             }
-            catch
+            catch (Exception ex)
             {
-                // Degrade gracefully on network / timeout errors
+                // Degrade gracefully on network / timeout errors, but log at debug level per constraints
+                _logger.LogDebug(ex, "Failed to fetch reputation from MalwareBazaar API for hash {Hash}", sha256);
             }
 
             return HashVerdict.Unknown;

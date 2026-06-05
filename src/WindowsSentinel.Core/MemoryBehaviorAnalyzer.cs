@@ -44,6 +44,7 @@ namespace WindowsSentinel.Core
             // Chromium/Electron apps use V8 JIT → RWX is normal
             "msedge.exe", "chrome.exe", "firefox.exe", "brave.exe", "opera.exe", "vivaldi.exe",
             "msedgewebview2.exe", "Devin.exe", "code.exe", "cursor.exe", "Kiro.exe",
+            "Antigravity IDE.exe",
             "electron.exe", "slack.exe", "discord.exe", "teams.exe", "spotify.exe",
             "steamwebhelper.exe", "cefsharp.browsersubprocess.exe",
         };

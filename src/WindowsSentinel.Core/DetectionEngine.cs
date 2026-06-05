@@ -65,6 +65,17 @@ namespace WindowsSentinel.Core
             await HandleDetectionEventAsync(detectionEvent);
         }
 
+        public async Task SubmitConsultantSignalAsync(DetectionEvent detectionEvent)
+        {
+            if (detectionEvent == null) return;
+            detectionEvent.Tier = DetectionTier.Tier2Indicator;
+            if (detectionEvent.Metadata == null)
+            {
+                detectionEvent.Metadata = new Dictionary<string, string>();
+            }
+            await ProcessDetectionAsync(detectionEvent);
+        }
+
         private async Task ProcessTelemetryQueueAsync()
         {
             var reader = _telemetryChannel.Reader;
@@ -86,14 +97,14 @@ namespace WindowsSentinel.Core
                                     using (var sha = System.Security.Cryptography.SHA256.Create())
                                     await using (var fs = System.IO.File.OpenRead(imagePath))
                                     {
-                                        var hashBytes = await sha.ComputeHashAsync(fs);
+                                        var hashBytes = await sha.ComputeHashAsync(fs, _cts.Token);
                                         hash = Convert.ToHexString(hashBytes).ToLowerInvariant();
                                     }
 
                                     if (!string.IsNullOrEmpty(hash))
                                     {
                                         bool isIoC = _iocScanner.IsKnownBadHash(hash);
-                                        var apiVerdict = await _reputationService.GetVerdictAsync(hash);
+                                        var apiVerdict = await _reputationService.GetVerdictAsync(hash, _cts.Token);
 
                                         if (isIoC || apiVerdict == HashVerdict.Unsafe)
                                         {

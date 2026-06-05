@@ -22,14 +22,69 @@ namespace WindowsSentinel.Core
     public sealed class ScoringEngine
     {
         private readonly AllowlistService _allowlist;
+        private readonly SafeProcessExemptionRegistry _exemptionRegistry;
         private readonly ILogger<ScoringEngine> _logger;
         private readonly ConcurrentDictionary<int, ProcessScoreState> _processStates = new();
         private readonly TimeSpan _stateRetention = TimeSpan.FromMinutes(30);
 
-        public ScoringEngine(AllowlistService allowlist, ILogger<ScoringEngine> logger)
+        public ScoringEngine(
+            AllowlistService allowlist,
+            SafeProcessExemptionRegistry exemptionRegistry,
+            ILogger<ScoringEngine> logger)
         {
             _allowlist = allowlist;
+            _exemptionRegistry = exemptionRegistry;
             _logger = logger;
+        }
+
+        private static bool IsAttackOnUserRule(DetectionEvent detection)
+        {
+            var r = (detection.RuleName ?? string.Empty).ToLowerInvariant();
+            return r.Contains("audiohijack") || r.Contains("audio hijack") ||
+                   r.Contains("webcamhijack") || r.Contains("webcam hijack") ||
+                   r.Contains("keyscrambler") || r.Contains("keylogger") || r.Contains("keystroke") ||
+                   r.Contains("cursortakeover") || r.Contains("cursor takeover") ||
+                   r.Contains("fakeuac") || r.Contains("fake uac") ||
+                   r.Contains("lnkprotection") || r.Contains("lnk protection") ||
+                   r.Contains("cookiemonitor") || r.Contains("cookie monitor");
+        }
+
+        private static bool IsPresidentsLawRule(DetectionEvent detection)
+        {
+            var rule = detection.RuleName ?? string.Empty;
+            var lower = rule.ToLowerInvariant();
+            return lower.Contains("lsass") ||
+                   lower.Contains("amsi") ||
+                   lower.Contains("etw") ||
+                   lower.Contains("ransomware") ||
+                   lower.Contains("shadow copy") ||
+                   lower.Contains("self-protection") ||
+                   lower.Contains("selfprotection") ||
+                   lower.Contains("honeypot") ||
+                   lower.Contains("chain-nuke") ||
+                   lower.Contains("composite") ||
+                   lower.Contains("verdictgate") ||
+                   lower.Contains("verdict gate") ||
+                   lower.Contains("webcamhijack") ||
+                   lower.Contains("webcam hijack") ||
+                   lower.Contains("audiohijack") ||
+                   lower.Contains("audio hijack") ||
+                   lower.Contains("antitamper") ||
+                   lower.Contains("anti-tamper") ||
+                   lower.Contains("tampering") ||
+                   lower.Contains("privilege") ||
+                   lower.Contains("attack") ||
+                   lower.Contains("badusb") ||
+                   lower.Contains("arp") ||
+                   lower.Contains("canary") ||
+                   lower.Contains("dns") ||
+                   lower.Contains("tls") ||
+                   lower.Contains("neuro") ||
+                   lower.Contains("beaconing") ||
+                   lower.Contains("hollowing") ||
+                   lower.Contains("reverseshell") ||
+                   lower.Contains("reverse shell") ||
+                   lower.Contains("threatintel");
         }
 
         /// <summary>
@@ -42,6 +97,14 @@ namespace WindowsSentinel.Core
             int baseScore = (int)(detection.Confidence * 100);
 
             var adjustments = new List<ScoreAdjustment>();
+
+            // Attack-on-user boost: double the confidence score adjustment
+            if (IsAttackOnUserRule(detection))
+            {
+                int boost = baseScore;
+                adjustments.Add(new ScoreAdjustment("Attack-on-user double confidence boost", boost, "Double confidence weighting for user-targeting attack"));
+                baseScore += boost;
+            }
 
             // Corroboration boost: +15 per additional source category on this process
             int corroborating = GetCorroboratingCategoryCount(detection.ProcessId, category);
@@ -69,6 +132,14 @@ namespace WindowsSentinel.Core
                 adjustments.Add(new ScoreAdjustment("Allowlist reduction", -penalty,
                     $"Trust reduction {reduction:P0}"));
                 baseScore -= penalty;
+            }
+
+            // Safe process consensus reduction: -30 for safe processes running demoted non-President's Law rules
+            bool isPresidentsLaw = IsPresidentsLawRule(detection);
+            if (detection.Tier == DetectionTier.Tier1Behavioral && !isPresidentsLaw && _exemptionRegistry.IsSafeProcess(detection.ProcessId))
+            {
+                adjustments.Add(new ScoreAdjustment("Safe process consensus reduction", -30, "Consensus safe process with demoted rule"));
+                baseScore -= 30;
             }
 
             baseScore = Math.Max(0, baseScore);

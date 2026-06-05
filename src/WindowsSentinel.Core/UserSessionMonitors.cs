@@ -27,6 +27,7 @@ namespace WindowsSentinel.Core
             "SnippingTool", "ScreenClippingHost", "mstsc", "msrdc",
             "obs64", "obs32", "ShareX", "Greenshot", "LightShot",
             "Teams", "Zoom", "Discord", "Slack",
+            "chrome", "brave", "firefox", "msedge", "Antigravity IDE",
             "WindowsSentinel.Agent"
         };
 
@@ -302,7 +303,8 @@ namespace WindowsSentinel.Core
 
     /// <summary>
     /// Visual behavior analysis — detects suspicious overlay/transparent windows
-    /// that could be used for phishing overlays or keylogger UI.
+    /// that could be used for phishing overlays or keylogger UI, and monitors for
+    /// user session anomalies (focus steals, brightness oscillations, programmatic cursor jumps).
     /// </summary>
     public sealed class NeuroBehaviorVisualMonitor : BackgroundService
     {
@@ -322,13 +324,31 @@ namespace WindowsSentinel.Core
         [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
 
+        [DllImport("user32.dll")]
+        private static extern bool GetCursorPos(out POINT lpPoint);
+
         [StructLayout(LayoutKind.Sequential)]
         private struct RECT { public int Left, Top, Right, Bottom; }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct POINT { public int X; public int Y; }
 
         private const int GWL_EXSTYLE = -20;
         private const int WS_EX_LAYERED = 0x80000;
         private const int WS_EX_TRANSPARENT = 0x20;
         private const int WS_EX_TOPMOST = 0x8;
+
+        private int _focusStealCount;
+        private int _cursorJumpCount;
+        private int _brightnessOscillationCount;
+        private int _anomalyScore;
+
+        private IntPtr _lastFgWnd = IntPtr.Zero;
+        private uint _lastFgPid = 0;
+        private POINT _lastCursorPos;
+        private int _lastBrightness = -1;
+        private DateTime _lastWindowChangeTime = DateTime.UtcNow;
+        private int _overlayCheckCounter;
 
         public NeuroBehaviorVisualMonitor(DetectionEngine de, ILogger<NeuroBehaviorVisualMonitor> l)
         {
@@ -338,51 +358,164 @@ namespace WindowsSentinel.Core
         protected override async Task ExecuteAsync(CancellationToken ct)
         {
             _logger.LogInformation("[NeuroBehaviorVisualMonitor] Started");
+            GetCursorPos(out _lastCursorPos);
+            _lastBrightness = GetScreenBrightness();
 
             while (!ct.IsCancellationRequested)
             {
                 try
                 {
-                    await Task.Delay(10000, ct);
+                    await Task.Delay(1000, ct);
                     var fgWnd = GetForegroundWindow();
                     if (fgWnd == IntPtr.Zero) continue;
 
-                    int exStyle = GetWindowLong(fgWnd, GWL_EXSTYLE);
-                    bool isLayered = (exStyle & WS_EX_LAYERED) != 0;
-                    bool isTransparent = (exStyle & WS_EX_TRANSPARENT) != 0;
-                    bool isTopmost = (exStyle & WS_EX_TOPMOST) != 0;
-
-                    if (isLayered && isTransparent && isTopmost)
+                    // 1. Focus steal check
+                    GetWindowThreadProcessId(fgWnd, out uint pid);
+                    if (pid > 4 && pid != _lastFgPid)
                     {
-                        GetWindowThreadProcessId(fgWnd, out uint pid);
-                        if (pid > 4)
+                        var now = DateTime.UtcNow;
+                        if (now - _lastWindowChangeTime < TimeSpan.FromSeconds(2))
                         {
-                            string procName;
-                            try { using var p = Process.GetProcessById((int)pid); procName = p.ProcessName; }
-                            catch { procName = $"PID_{pid}"; }
+                            _focusStealCount++;
+                            _anomalyScore += 15;
+                        }
+                        _lastFgWnd = fgWnd;
+                        _lastFgPid = pid;
+                        _lastWindowChangeTime = now;
+                    }
 
-                            if (GetWindowRect(fgWnd, out var rect))
+                    // 2. Programmatic cursor jump check
+                    if (GetCursorPos(out var curPos))
+                    {
+                        var dx = curPos.X - _lastCursorPos.X;
+                        var dy = curPos.Y - _lastCursorPos.Y;
+                        var distance = Math.Sqrt(dx * dx + dy * dy);
+
+                        // Large jump within 1 second suggests programmatic control
+                        if (distance > 600)
+                        {
+                            _cursorJumpCount++;
+                            _anomalyScore += 20;
+                        }
+                        _lastCursorPos = curPos;
+                    }
+
+                    // 3. Brightness oscillation check
+                    var brightness = GetScreenBrightness();
+                    if (brightness != -1 && _lastBrightness != -1)
+                    {
+                        var diff = Math.Abs(brightness - _lastBrightness);
+                        if (diff > 15)
+                        {
+                            _brightnessOscillationCount++;
+                            _anomalyScore += 25;
+                        }
+                    }
+                    if (brightness != -1)
+                    {
+                        _lastBrightness = brightness;
+                    }
+
+                    // 4. Transparent Overlay Check (run every 10 seconds)
+                    if (_overlayCheckCounter++ >= 10)
+                    {
+                        _overlayCheckCounter = 0;
+                        int exStyle = GetWindowLong(fgWnd, GWL_EXSTYLE);
+                        bool isLayered = (exStyle & WS_EX_LAYERED) != 0;
+                        bool isTransparent = (exStyle & WS_EX_TRANSPARENT) != 0;
+                        bool isTopmost = (exStyle & WS_EX_TOPMOST) != 0;
+
+                        if (isLayered && isTransparent && isTopmost)
+                        {
+                            if (pid > 4)
                             {
-                                int width = rect.Right - rect.Left;
-                                int height = rect.Bottom - rect.Top;
-                                if (width > 800 && height > 600) // Large overlay
+                                string procName;
+                                try { using var p = Process.GetProcessById((int)pid); procName = p.ProcessName; }
+                                catch { procName = $"PID_{pid}"; }
+
+                                if (GetWindowRect(fgWnd, out var rect))
                                 {
-                                    await _detectionEngine.EmitAsync(new DetectionEvent
+                                    int width = rect.Right - rect.Left;
+                                    int height = rect.Bottom - rect.Top;
+                                    if (width > 800 && height > 600) // Large overlay
                                     {
-                                        RuleName = "UI Overlay: Transparent Fullscreen Overlay Detected",
-                                        Evidence = $"Process '{procName}' (PID {pid}) has a large transparent topmost overlay ({width}x{height})",
-                                        Reasoning = "A large transparent topmost window was detected, which can be used for phishing overlays or credential capture.",
-                                        Confidence = 0.65, Tier = DetectionTier.Tier2Indicator,
-                                        ProcessName = procName, ProcessId = (int)pid
-                                    });
+                                        await _detectionEngine.EmitAsync(new DetectionEvent
+                                        {
+                                            RuleName = "UI Overlay: Transparent Fullscreen Overlay Detected",
+                                            Evidence = $"Process '{procName}' (PID {pid}) has a large transparent topmost overlay ({width}x{height})",
+                                            Reasoning = "A large transparent topmost window was detected, which can be used for phishing overlays or credential capture.",
+                                            Confidence = 0.65, Tier = DetectionTier.Tier2Indicator,
+                                            ProcessName = procName, ProcessId = (int)pid
+                                        });
+                                    }
                                 }
                             }
                         }
+                    }
+
+                    // 5. Anomaly score evaluation
+                    if (_anomalyScore >= 60)
+                    {
+                        string procName = "unknown";
+                        try { using var p = Process.GetProcessById((int)pid); procName = p.ProcessName; }
+                        catch { }
+
+                        await _detectionEngine.EmitAsync(new DetectionEvent
+                        {
+                            RuleName = "NeuroBehavior: Visual Anomaly Detected",
+                            Evidence = $"Visual anomaly score reached {_anomalyScore} (Focus steals: {_focusStealCount}, Cursor jumps: {_cursorJumpCount}, Brightness oscillations: {_brightnessOscillationCount})",
+                            Reasoning = "System-wide visual anomalies (rapid window focus steals, large programmatic cursor jumps, or sudden display brightness oscillations) suggest visual hijacking or background script takeover.",
+                            Confidence = 0.85,
+                            Tier = DetectionTier.Tier1Behavioral,
+                            AuthorizedResponse = ResponseAction.KillProcessTree,
+                            ProcessName = procName,
+                            ProcessId = (int)pid
+                        });
+
+                        ResetStats();
+                    }
+
+                    // Decay anomaly score slowly over time
+                    if (_anomalyScore > 0)
+                    {
+                        _anomalyScore = Math.Max(0, _anomalyScore - 1);
                     }
                 }
                 catch (OperationCanceledException) { break; }
                 catch (Exception ex) { _logger.LogDebug(ex, "[NeuroBehaviorVisualMonitor] Error"); }
             }
+        }
+
+        private int GetScreenBrightness()
+        {
+            try
+            {
+                using var searcher = new System.Management.ManagementObjectSearcher(
+                    new System.Management.ManagementScope(@"root\wmi"),
+                    new System.Management.SelectQuery("WmiMonitorBrightness"));
+                using var collection = searcher.Get();
+                foreach (var obj in collection)
+                {
+                    var val = obj.GetPropertyValue("CurrentBrightness");
+                    if (val != null)
+                    {
+                        return Convert.ToInt32(val);
+                    }
+                }
+            }
+            catch
+            {
+                // Degrade gracefully (non-laptops don't have WmiMonitorBrightness)
+            }
+            return -1;
+        }
+
+        private void ResetStats()
+        {
+            _anomalyScore = 0;
+            _focusStealCount = 0;
+            _cursorJumpCount = 0;
+            _brightnessOscillationCount = 0;
         }
     }
 

@@ -49,7 +49,7 @@ namespace WindowsSentinel.Tests
         [Fact]
         public void QBot_Fires_OnChkdsksExe()
         {
-            var result = _rule.Evaluate(MakeCtx("chkdsks.exe", 3000, imagePath: @"C:\temp\chkdsks.exe"));
+            var result = _rule.Evaluate(MakeCtx("chkdsks", 3000, imagePath: @"C:\temp\chkdsks.exe"));
             Assert.NotNull(result);
             Assert.Contains("QBot", result!.RuleName);
         }
@@ -57,7 +57,7 @@ namespace WindowsSentinel.Tests
         [Fact]
         public void QBot_Fires_OnRegsvr32DatPattern()
         {
-            var result = _rule.Evaluate(MakeCtx("regsvr32.exe", 3001,
+            var result = _rule.Evaluate(MakeCtx("regsvr32", 3001,
                 commandLine: @"regsvr32.exe -s C:\Users\Admin\abcdef12.dat",
                 imagePath: @"C:\Windows\System32\regsvr32.exe"));
             // Must match command line pattern but needs filename too for >= 0.5 confidence
@@ -71,7 +71,7 @@ namespace WindowsSentinel.Tests
         [Fact]
         public void Emotet_Fires_OnSysExe()
         {
-            var result = _rule.Evaluate(MakeCtx("sys.exe", 4000, imagePath: @"C:\temp\sys.exe"));
+            var result = _rule.Evaluate(MakeCtx("sys", 4000, imagePath: @"C:\temp\sys.exe"));
             Assert.NotNull(result);
             Assert.Contains("Emotet", result!.RuleName);
         }
@@ -80,7 +80,7 @@ namespace WindowsSentinel.Tests
         public void Emotet_Fires_OnWinExeWithCommandLine()
         {
             // "win.exe" filename match (0.4) + command line pattern -E123 (0.3) = 0.7 >= 0.5
-            var result = _rule.Evaluate(MakeCtx("win.exe", 4001,
+            var result = _rule.Evaluate(MakeCtx("win", 4001,
                 commandLine: "win.exe -E42", imagePath: @"C:\temp\win.exe"));
             Assert.NotNull(result);
         }
@@ -90,7 +90,7 @@ namespace WindowsSentinel.Tests
         [Fact]
         public void TrickBot_Fires_OnTabExe()
         {
-            var result = _rule.Evaluate(MakeCtx("tab.exe", 5000,
+            var result = _rule.Evaluate(MakeCtx("tab", 5000,
                 commandLine: "tab.exe -s", imagePath: @"C:\temp\tab.exe"));
             Assert.NotNull(result);
             Assert.Contains("TrickBot", result!.RuleName);
@@ -99,7 +99,7 @@ namespace WindowsSentinel.Tests
         [Fact]
         public void TrickBot_Fires_OnInjectExe()
         {
-            var result = _rule.Evaluate(MakeCtx("inject.exe", 5001, imagePath: @"C:\temp\inject.exe"));
+            var result = _rule.Evaluate(MakeCtx("inject", 5001, imagePath: @"C:\temp\inject.exe"));
             Assert.NotNull(result);
         }
 

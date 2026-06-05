@@ -1,8 +1,12 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
 using System.Linq;
+using System.Net;
 using System.Net.NetworkInformation;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
@@ -20,51 +24,258 @@ namespace WindowsSentinel.Core
     {
         private readonly DetectionEngine _detectionEngine;
         private readonly TelemetryFusionEngine _fusionEngine;
+        private readonly ProcessAncestryCache _ancestryCache;
+        private readonly BeaconingDetector _beaconingDetector;
         private readonly ILogger<NetworkMonitor> _logger;
         private readonly System.Threading.Timer _timer;
         private readonly ConcurrentDictionary<string, int> _connectionCounts = new();
 
         private static readonly TimeSpan ScanInterval = TimeSpan.FromSeconds(15);
 
+        private static readonly HashSet<string> ShellProcesses = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "cmd", "powershell", "pwsh", "mshta", "wscript", "cscript", "rundll32", "regsvr32", "bash", "sh"
+        };
+
+        private static readonly HashSet<int> StandardPorts = new() { 80, 443, 53, 8080, 8443 };
+
         public NetworkMonitor(
             DetectionEngine detectionEngine,
             TelemetryFusionEngine fusionEngine,
+            ProcessAncestryCache ancestryCache,
+            BeaconingDetector beaconingDetector,
             ILogger<NetworkMonitor> logger)
         {
             _detectionEngine = detectionEngine;
             _fusionEngine = fusionEngine;
+            _ancestryCache = ancestryCache;
+            _beaconingDetector = beaconingDetector;
             _logger = logger;
             _timer = new System.Threading.Timer(ScanConnections, null, ScanInterval, ScanInterval);
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct MIB_TCPROW_OWNER_PID
+        {
+            public uint state;
+            public uint localAddr;
+            public uint localPort;
+            public uint remoteAddr;
+            public uint remotePort;
+            public uint owningPid;
+        }
+
+        private enum TCP_TABLE_CLASS
+        {
+            TCP_TABLE_BASIC_LISTENER,
+            TCP_TABLE_BASIC_CONNECTIONS,
+            TCP_TABLE_BASIC_ALL,
+            TCP_TABLE_OWNER_PID_LISTENER,
+            TCP_TABLE_OWNER_PID_CONNECTIONS,
+            TCP_TABLE_OWNER_PID_ALL,
+            TCP_TABLE_OWNER_MODULE_LISTENER,
+            TCP_TABLE_OWNER_MODULE_CONNECTIONS,
+            TCP_TABLE_OWNER_MODULE_ALL
+        }
+
+        [DllImport("iphlpapi.dll", SetLastError = true)]
+        private static extern uint GetExtendedTcpTable(
+            IntPtr pTcpTable,
+            ref int pdwSize,
+            bool bOrder,
+            uint ulAf,
+            TCP_TABLE_CLASS tableClass,
+            uint reserved);
+
+        private static int GetPort(uint portDword)
+        {
+            return (int)((portDword & 0xFF) << 8 | (portDword & 0xFF00) >> 8);
+        }
+
+        private static bool IsOutbound(string ipStr)
+        {
+            if (string.IsNullOrEmpty(ipStr)) return false;
+            if (ipStr == "0.0.0.0" || ipStr == "255.255.255.255") return false;
+            if (IPAddress.TryParse(ipStr, out var ip))
+            {
+                if (IPAddress.IsLoopback(ip)) return false;
+                return true;
+            }
+            return false;
+        }
+
+        private static bool IsSuspiciousPath(string? path)
+        {
+            if (string.IsNullOrEmpty(path)) return false;
+            var lower = path.ToLowerInvariant();
+            return lower.Contains(@"\temp\") || lower.Contains(@"\downloads\");
+        }
+
+        private static string? GetProcessImagePath(int pid)
+        {
+            try
+            {
+                using var p = Process.GetProcessById(pid);
+                return p.MainModule?.FileName;
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         private void ScanConnections(object? state)
         {
             try
             {
-                var properties = IPGlobalProperties.GetIPGlobalProperties();
-                var connections = properties.GetActiveTcpConnections();
-
-                // Track connection counts per remote endpoint for beaconing detection
-                var currentCounts = new Dictionary<string, int>();
-                foreach (var conn in connections)
+                int size = 0;
+                uint ret = GetExtendedTcpTable(IntPtr.Zero, ref size, true, 2, TCP_TABLE_CLASS.TCP_TABLE_OWNER_PID_ALL, 0);
+                if (ret != 122) // ERROR_INSUFFICIENT_BUFFER
                 {
-                    if (conn.State == TcpState.Established)
+                    _logger.LogWarning("[NetworkMonitor] GetExtendedTcpTable failed to get size: {Ret}", ret);
+                    return;
+                }
+
+                IntPtr buffer = Marshal.AllocHGlobal(size);
+                try
+                {
+                    ret = GetExtendedTcpTable(buffer, ref size, true, 2, TCP_TABLE_CLASS.TCP_TABLE_OWNER_PID_ALL, 0);
+                    if (ret != 0)
                     {
-                        var key = $"{conn.RemoteEndPoint.Address}:{conn.RemoteEndPoint.Port}";
+                        _logger.LogWarning("[NetworkMonitor] GetExtendedTcpTable failed: {Ret}", ret);
+                        return;
+                    }
+
+                    int numEntries = Marshal.ReadInt32(buffer);
+                    int structSize = Marshal.SizeOf<MIB_TCPROW_OWNER_PID>();
+                    int myPid = Environment.ProcessId;
+
+                    var currentCounts = new Dictionary<string, int>();
+
+                    for (int i = 0; i < numEntries; i++)
+                    {
+                        IntPtr rowPtr = IntPtr.Add(buffer, 4 + i * structSize);
+                        var row = Marshal.PtrToStructure<MIB_TCPROW_OWNER_PID>(rowPtr);
+
+                        // State == 5 (Established)
+                        if (row.state != 5) continue;
+                        if (row.owningPid <= 4 || row.owningPid == myPid) continue;
+
+                        var localIp = new IPAddress(BitConverter.GetBytes(row.localAddr)).ToString();
+                        var remoteIp = new IPAddress(BitConverter.GetBytes(row.remoteAddr)).ToString();
+                        var localPort = GetPort(row.localPort);
+                        var remotePort = GetPort(row.remotePort);
+
+                        var key = $"{remoteIp}:{remotePort}";
                         currentCounts[key] = currentCounts.GetValueOrDefault(key) + 1;
+
+                        if (IsOutbound(remoteIp))
+                        {
+                            var processName = "unknown";
+                            var (parentPid, name) = _ancestryCache.GetParent((int)row.owningPid);
+                            if (name != "unknown")
+                            {
+                                processName = name;
+                            }
+                            else
+                            {
+                                try
+                                {
+                                    using var p = Process.GetProcessById((int)row.owningPid);
+                                    processName = p.ProcessName;
+                                }
+                                catch
+                                {
+                                    // Ignore
+                                }
+                            }
+
+                            // 1. Record connection in statistical beaconing detector
+                            _beaconingDetector.RecordConnection(remoteIp, remotePort, (int)row.owningPid, processName, "Established");
+
+                            // 2. Behavioral checks
+                            // A. Shell process outbound to non-standard port
+                            if (ShellProcesses.Contains(processName) && !StandardPorts.Contains(remotePort))
+                            {
+                                _ = _detectionEngine.EmitAsync(new DetectionEvent
+                                {
+                                    RuleName = "Reverse Shell: Suspicious Outbound Connection",
+                                    Evidence = $"Shell process '{processName}' (PID {row.owningPid}) connected to non-standard remote port {remotePort} ({remoteIp}:{remotePort})",
+                                    Reasoning = "A shell process initiated an outbound network connection to a non-standard port, indicating a potential active reverse shell or remote access tool session.",
+                                    Confidence = 0.85,
+                                    Tier = DetectionTier.Tier1Behavioral,
+                                    AuthorizedResponse = ResponseAction.KillProcessTree,
+                                    ProcessName = processName,
+                                    ProcessId = (int)row.owningPid,
+                                    Metadata = new Dictionary<string, string>
+                                    {
+                                        { "RemoteAddress", remoteIp },
+                                        { "RemotePort", remotePort.ToString() },
+                                        { "LocalAddress", localIp },
+                                        { "LocalPort", localPort.ToString() }
+                                    }
+                                });
+                            }
+
+                            // B. Outbound connection from temp/downloads path
+                            var imagePath = GetProcessImagePath((int)row.owningPid);
+                            if (IsSuspiciousPath(imagePath))
+                            {
+                                _ = _detectionEngine.EmitAsync(new DetectionEvent
+                                {
+                                    RuleName = "Attack Tool: Connection from Suspicious Path",
+                                    Evidence = $"Process '{processName}' (PID {row.owningPid}) running from '{imagePath}' connected to {remoteIp}:{remotePort}",
+                                    Reasoning = "A binary running from a temporary or downloads directory initiated an outbound network connection, which is common for downloaders, droppers, and non-installed attack tools.",
+                                    Confidence = 0.80,
+                                    Tier = DetectionTier.Tier1Behavioral,
+                                    AuthorizedResponse = ResponseAction.KillProcessTree,
+                                    ProcessName = processName,
+                                    ProcessId = (int)row.owningPid,
+                                    Metadata = new Dictionary<string, string>
+                                    {
+                                        { "ImagePath", imagePath ?? "" },
+                                        { "RemoteAddress", remoteIp },
+                                        { "RemotePort", remotePort.ToString() },
+                                        { "LocalAddress", localIp },
+                                        { "LocalPort", localPort.ToString() }
+                                    }
+                                });
+                            }
+
+                            // 3. Submit network telemetry context to telemetry pipeline
+                            var telemetry = new NetworkTelemetry
+                            {
+                                Type = "NetworkConnection",
+                                ProcessId = (int)row.owningPid,
+                                ProcessName = processName,
+                                LocalAddress = localIp,
+                                LocalPort = localPort,
+                                RemoteAddress = remoteIp,
+                                RemotePort = remotePort,
+                                Protocol = "TCP",
+                                State = "ESTABLISHED",
+                                Timestamp = DateTime.UtcNow
+                            };
+                            var context = _fusionEngine.FeedEvent(telemetry);
+                            _detectionEngine.SubmitTelemetry(context);
+                        }
+                    }
+
+                    foreach (var (key, count) in currentCounts)
+                    {
+                        _connectionCounts[key] = count;
+                    }
+
+                    // Prune stale entries
+                    var staleKeys = _connectionCounts.Keys.Except(currentCounts.Keys).ToList();
+                    foreach (var k in staleKeys)
+                    {
+                        _connectionCounts.TryRemove(k, out _);
                     }
                 }
-
-                foreach (var (key, count) in currentCounts)
+                finally
                 {
-                    _connectionCounts[key] = count;
-                }
-
-                // Prune stale entries
-                var staleKeys = _connectionCounts.Keys.Except(currentCounts.Keys).ToList();
-                foreach (var k in staleKeys)
-                {
-                    _connectionCounts.TryRemove(k, out _);
+                    Marshal.FreeHGlobal(buffer);
                 }
             }
             catch (Exception ex)

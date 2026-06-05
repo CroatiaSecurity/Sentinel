@@ -20,20 +20,6 @@ namespace WindowsSentinel.Core
         private readonly ILogger<AllowlistService> _logger;
         private readonly ConcurrentDictionary<string, AllowlistEntry> _userAllowlist;
 
-        private static readonly HashSet<string> TrustedPublishers = new(StringComparer.OrdinalIgnoreCase)
-        {
-            "Microsoft Corporation", "Microsoft Windows",
-            "Google LLC", "Google Inc",
-            "Mozilla Corporation",
-            "Apple Inc.", "Apple Inc",
-            "NVIDIA Corporation",
-            "Adobe Inc.", "Adobe Systems Incorporated",
-            "Valve Corp.", "Valve",
-            "Epic Games, Inc.",
-            "JetBrains s.r.o.",
-            "Codeium Inc.",
-        };
-
         private static readonly HashSet<string> DevelopmentProcesses = new(StringComparer.OrdinalIgnoreCase)
         {
             "devenv", "code", "Windsurf", "cursor",
@@ -108,9 +94,6 @@ namespace WindowsSentinel.Core
 
             double reduction = 0.0;
 
-            if (!string.IsNullOrEmpty(signerName) && TrustedPublishers.Contains(signerName))
-                reduction += 0.3;
-
             if (DevelopmentProcesses.Contains(processName))
                 reduction += 0.2;
 
@@ -129,8 +112,6 @@ namespace WindowsSentinel.Core
 
         public bool IsDevelopmentProcess(string processName) => DevelopmentProcesses.Contains(processName);
         public bool IsGamingProcess(string processName) => GamingProcesses.Contains(processName);
-        public bool IsTrustedPublisher(string? signerName) =>
-            !string.IsNullOrEmpty(signerName) && TrustedPublishers.Contains(signerName);
 
         public void AddToUserAllowlist(string processName, string? imagePath, string reason)
         {
@@ -174,11 +155,38 @@ namespace WindowsSentinel.Core
         {
             if (string.IsNullOrEmpty(ruleName)) return false;
             var lower = ruleName.ToLowerInvariant();
-            return lower.Contains("lsass") || lower.Contains("amsi") ||
-                   lower.Contains("etw") || lower.Contains("ransomware") ||
-                   lower.Contains("shadow copy") || lower.Contains("self-protection") ||
-                   lower.Contains("honeypot") || lower.Contains("chain-nuke") ||
-                   lower.Contains("composite");
+            return lower.Contains("lsass") ||
+                   lower.Contains("amsi") ||
+                   lower.Contains("etw") ||
+                   lower.Contains("ransomware") ||
+                   lower.Contains("shadow copy") ||
+                   lower.Contains("self-protection") ||
+                   lower.Contains("selfprotection") ||
+                   lower.Contains("honeypot") ||
+                   lower.Contains("chain-nuke") ||
+                   lower.Contains("composite") ||
+                   lower.Contains("verdictgate") ||
+                   lower.Contains("verdict gate") ||
+                   lower.Contains("webcamhijack") ||
+                   lower.Contains("webcam hijack") ||
+                   lower.Contains("audiohijack") ||
+                   lower.Contains("audio hijack") ||
+                   lower.Contains("antitamper") ||
+                   lower.Contains("anti-tamper") ||
+                   lower.Contains("tampering") ||
+                   lower.Contains("privilege") ||
+                   lower.Contains("attack") ||
+                   lower.Contains("badusb") ||
+                   lower.Contains("arp") ||
+                   lower.Contains("canary") ||
+                   lower.Contains("dns") ||
+                   lower.Contains("tls") ||
+                   lower.Contains("neuro") ||
+                   lower.Contains("beaconing") ||
+                   lower.Contains("hollowing") ||
+                   lower.Contains("reverseshell") ||
+                   lower.Contains("reverse shell") ||
+                   lower.Contains("threatintel");
         }
 
         private void LoadUserAllowlist()

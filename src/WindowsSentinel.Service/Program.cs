@@ -29,6 +29,9 @@ namespace WindowsSentinel.Service
                     var config = new SentinelConfig();
                     hostContext.Configuration.GetSection("Sentinel").Bind(config);
 
+                    var threatReportingConfig = new ThreatReportingConfig();
+                    hostContext.Configuration.GetSection("ThreatReporting").Bind(threatReportingConfig);
+
                     // CLI flag overrides
                     for (int i = 0; i < args.Length; i++)
                     {
@@ -46,6 +49,7 @@ namespace WindowsSentinel.Service
                         }
                     }
                     services.AddSingleton(config);
+                    services.AddSingleton(threatReportingConfig);
 
                     // Infrastructure & Utilities
                     services.AddSingleton<SentinelMetrics>();
@@ -55,6 +59,8 @@ namespace WindowsSentinel.Service
                     services.AddSingleton<SecureCacheStore>();
                     services.AddSingleton<HashReputationService>();
                     services.AddSingleton<QuarantineManager>();
+                    services.AddSingleton<SafeProcessExemptionRegistry>();
+                    services.AddSingleton<FileVerdictAds>();
 
                     // Utility services (SYSTEM-session safe only)
                     services.AddSingleton<UsbDeviceFingerprinter>();
@@ -81,6 +87,7 @@ namespace WindowsSentinel.Service
                     services.AddTransient<IDetectionRule, CampaignIocRule>();
                     services.AddTransient<IDetectionRule, UnsignedBinaryRule>();
                     services.AddTransient<IDetectionRule, CampaignDetectionRule>();
+                    services.AddTransient<IDetectionRule, VerdictGateRule>();
 
                     // Detection Engine
                     services.AddSingleton<DetectionEngine>();
@@ -123,7 +130,6 @@ namespace WindowsSentinel.Service
                     services.AddHostedService<DnsResponseValidationMonitor>();
                     services.AddHostedService<FirefoxCredentialGuardMonitor>();
                     services.AddHostedService<FirewallIntegrityMonitor>();
-                    services.AddHostedService<GatewayFingerprintMonitor>();
                     services.AddHostedService<MicrosoftAccountGuardMonitor>();
                     services.AddHostedService<PublicIpMonitor>();
                     services.AddHostedService<RemoteAccessMonitor>();
@@ -138,9 +144,15 @@ namespace WindowsSentinel.Service
                     services.AddHostedService<WmiPersistenceMonitor>();
                     services.AddHostedService<WorkFoldersExfilMonitor>();
                     services.AddHostedService<AdsDataStagingMonitor>();
-                    services.AddHostedService<BeaconingDetector>();
+                    services.AddSingleton<BeaconingDetector>();
+                    services.AddHostedService<BeaconingDetector>(sp => sp.GetRequiredService<BeaconingDetector>());
+                    services.AddHostedService<ModuleValidationMonitor>();
+                    services.AddHostedService<DiskWideDllScanner>();
                     services.AddHostedService<BehavioralBaselineService>();
                     services.AddHostedService<PhantomDeviceMonitor>();
+                    services.AddHostedService<FileVerdictScanner>();
+                    services.AddHostedService<WebcamHijackMonitor>();
+                    services.AddHostedService<ConsultantSignalIngestor>();
                 });
     }
 }

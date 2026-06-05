@@ -11,7 +11,7 @@ namespace WindowsSentinel.Tests
             var dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "sentinel_test_" + System.Guid.NewGuid().ToString("N")[..8]);
             var cache = new SecureCacheStore(dir);
             var allowlist = new AllowlistService(cache, NullLogger<AllowlistService>.Instance);
-            return new ScoringEngine(allowlist, NullLogger<ScoringEngine>.Instance);
+            return new ScoringEngine(allowlist, new SafeProcessExemptionRegistry(), NullLogger<ScoringEngine>.Instance);
         }
 
         [Fact]

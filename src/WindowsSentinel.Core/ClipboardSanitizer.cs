@@ -127,7 +127,7 @@ namespace WindowsSentinel.Core
 
         public void Dispose()
         {
-            _timer.Dispose();
+            _timer?.Dispose();
             GC.SuppressFinalize(this);
         }
     }

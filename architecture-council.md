@@ -3,7 +3,7 @@
 **Status:** Architecture spec. Extends, does not replace, `requirements.md`,
 `design.md`, `constraints.md` (all v0.9.0).
 
-**Last updated:** v6.2.0 (June 2026) — Active response DLL unloading and core engines rewiring.
+**Last updated:** v6.3.0 (June 2026) — Production hardening: re-enabled monitors, NetworkMonitor P/Invoke rewrite, ETW ancestry preservation, President's Law synchronization.
 
 ---
 

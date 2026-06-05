@@ -1294,57 +1294,507 @@ namespace WindowsSentinel.Core
     }
 
     // ──────────────────────────────────────────────
-    // TLS Certificate Monitor — detects untrusted root certs
+    // TLS Certificate Monitor — deep analysis of root certificate store
+    // Detects untrusted/suspicious root certs at startup and at runtime.
+    // Active response: removes suspicious certs and kills the adder process.
     // ──────────────────────────────────────────────
     public sealed class TlsCertificateMonitor : BackgroundService
     {
         private readonly DetectionEngine _detectionEngine;
+        private readonly SentinelConfig _config;
+        private readonly JsonlEventLogger _eventLogger;
         private readonly ILogger<TlsCertificateMonitor> _logger;
-        private int _baselineRootCertCount;
+        private readonly HashSet<string> _baselineThumbprints = new(StringComparer.OrdinalIgnoreCase);
 
-        public TlsCertificateMonitor(DetectionEngine de, ILogger<TlsCertificateMonitor> l) { _detectionEngine = de; _logger = l; }
+        // Known enterprise TLS inspection CA subject patterns — these are legitimate
+        // but still logged as Tier2 indicators for visibility
+        private static readonly string[] KnownEnterpriseCAs =
+        {
+            "Zscaler", "Blue Coat", "BlueCoat", "Palo Alto", "Fortinet", "FortiGate",
+            "Symantec WSS", "Cisco Umbrella", "McAfee", "Sophos", "Barracuda",
+            "WatchGuard", "Check Point", "SonicWall", "Trend Micro", "iboss",
+            "Websense", "Forcepoint", "Netskope", "Clearswift"
+        };
+
+        // Known developer/debugging tool CA patterns — Tier2 only, no removal
+        private static readonly string[] KnownDevToolCAs =
+        {
+            "Fiddler", "DO_NOT_TRUST_FiddlerRoot", "Charles", "mitmproxy",
+            "Burp", "BurpSuite", "OWASP ZAP", "Telerik"
+        };
+
+        public TlsCertificateMonitor(
+            DetectionEngine de, SentinelConfig config, JsonlEventLogger logger,
+            ILogger<TlsCertificateMonitor> l)
+        {
+            _detectionEngine = de; _config = config; _eventLogger = logger; _logger = l;
+        }
 
         protected override async Task ExecuteAsync(CancellationToken ct)
         {
-            _logger.LogInformation("[TlsCertificateMonitor] Started");
-            using (var store = new System.Security.Cryptography.X509Certificates.X509Store(
-                System.Security.Cryptography.X509Certificates.StoreName.Root,
-                System.Security.Cryptography.X509Certificates.StoreLocation.LocalMachine))
+            _logger.LogInformation("[TlsCertificateMonitor] Started — performing startup full-store scan");
+
+            // Phase 1: Startup scan — score every existing cert
+            try
             {
-                store.Open(System.Security.Cryptography.X509Certificates.OpenFlags.ReadOnly);
-                _baselineRootCertCount = store.Certificates.Count;
+                await ScanAndBaselineStoreAsync(ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[TlsCertificateMonitor] Startup scan failed");
             }
 
+            _logger.LogInformation("[TlsCertificateMonitor] Baseline established: {Count} trusted root certs", _baselineThumbprints.Count);
+
+            // Phase 2: Runtime polling — detect new certs
             while (!ct.IsCancellationRequested)
             {
                 try
                 {
                     await Task.Delay(60000, ct);
-                    int current;
-                    using (var store = new System.Security.Cryptography.X509Certificates.X509Store(
-                        System.Security.Cryptography.X509Certificates.StoreName.Root,
-                        System.Security.Cryptography.X509Certificates.StoreLocation.LocalMachine))
-                    {
-                        store.Open(System.Security.Cryptography.X509Certificates.OpenFlags.ReadOnly);
-                        current = store.Certificates.Count;
-                    }
-                    if (current > _baselineRootCertCount)
-                    {
-                        await _detectionEngine.EmitAsync(new DetectionEvent
-                        {
-                            RuleName = "TLS: New Root Certificate Installed",
-                            Evidence = $"Root cert count increased from {_baselineRootCertCount} to {current}",
-                            Reasoning = "A new root certificate was installed into the machine trust store, enabling potential TLS interception.",
-                            Confidence = 0.80, Tier = DetectionTier.Tier1Behavioral,
-                            AuthorizedResponse = ResponseAction.LogOnly,
-                            ProcessName = "SYSTEM", ProcessId = 0
-                        });
-                        _baselineRootCertCount = current;
-                    }
+                    await PollForNewCertsAsync(ct);
                 }
                 catch (OperationCanceledException) { break; }
-                catch (Exception ex) { _logger.LogDebug(ex, "[TlsCertificateMonitor] Error"); }
+                catch (Exception ex) { _logger.LogDebug(ex, "[TlsCertificateMonitor] Poll error"); }
             }
+        }
+
+        /// <summary>
+        /// Scans every cert in the Root store, scores each one, actions suspicious ones,
+        /// and baselines only the certs that pass.
+        /// </summary>
+        private async Task ScanAndBaselineStoreAsync(CancellationToken ct)
+        {
+            using var store = new System.Security.Cryptography.X509Certificates.X509Store(
+                System.Security.Cryptography.X509Certificates.StoreName.Root,
+                System.Security.Cryptography.X509Certificates.StoreLocation.LocalMachine);
+            store.Open(System.Security.Cryptography.X509Certificates.OpenFlags.ReadOnly);
+
+            foreach (var cert in store.Certificates)
+            {
+                if (ct.IsCancellationRequested) break;
+
+                var analysis = AnalyzeCert(cert);
+
+                if (analysis.Confidence >= 0.85)
+                {
+                    // Suspicious cert — emit detection and action if active response enabled
+                    var adderInfo = TraceAdderProcess(cert.Thumbprint);
+
+                    await EmitCertDetectionAsync(cert, analysis, adderInfo, isStartupScan: true);
+
+                    if (_config.ActiveResponse)
+                    {
+                        await RemoveCertAsync(cert, adderInfo, analysis);
+                        // Do NOT baseline this cert — it was removed
+                        continue;
+                    }
+                }
+                else if (analysis.Confidence >= 0.55 && analysis.Tier == DetectionTier.Tier2Indicator)
+                {
+                    // Known enterprise/dev tool CA — log as Tier2 for visibility, but baseline it
+                    await EmitCertDetectionAsync(cert, analysis, adderInfo: null, isStartupScan: true);
+                }
+
+                _baselineThumbprints.Add(cert.Thumbprint);
+            }
+        }
+
+        /// <summary>
+        /// Polls the Root store for new certs that weren't in the baseline.
+        /// </summary>
+        private async Task PollForNewCertsAsync(CancellationToken ct)
+        {
+            using var store = new System.Security.Cryptography.X509Certificates.X509Store(
+                System.Security.Cryptography.X509Certificates.StoreName.Root,
+                System.Security.Cryptography.X509Certificates.StoreLocation.LocalMachine);
+            store.Open(System.Security.Cryptography.X509Certificates.OpenFlags.ReadOnly);
+
+            foreach (var cert in store.Certificates)
+            {
+                if (ct.IsCancellationRequested) break;
+                if (_baselineThumbprints.Contains(cert.Thumbprint)) continue;
+
+                // New cert detected — analyze it
+                var analysis = AnalyzeCert(cert);
+                var adderInfo = TraceAdderProcess(cert.Thumbprint);
+
+                _logger.LogWarning("[TlsCertificateMonitor] New root cert detected: Subject={Subject}, Thumbprint={Thumb}, Confidence={Conf:F2}",
+                    cert.Subject, cert.Thumbprint, analysis.Confidence);
+
+                await EmitCertDetectionAsync(cert, analysis, adderInfo, isStartupScan: false);
+
+                if (_config.ActiveResponse && analysis.Confidence >= 0.85)
+                {
+                    await RemoveCertAsync(cert, adderInfo, analysis);
+                    // Do NOT baseline — it was removed
+                }
+                else
+                {
+                    // Baseline it so we don't re-alert every 60s
+                    _baselineThumbprints.Add(cert.Thumbprint);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Analyzes a certificate and returns a confidence score + tier + reasoning.
+        /// </summary>
+        internal static CertAnalysisResult AnalyzeCert(System.Security.Cryptography.X509Certificates.X509Certificate2 cert)
+        {
+            double confidence = 0.60;
+            var tier = DetectionTier.Tier1Behavioral;
+            var reasons = new List<string>();
+
+            var subject = cert.Subject ?? string.Empty;
+            var issuer = cert.Issuer ?? string.Empty;
+
+            // 1. Self-signed check (Subject == Issuer)
+            bool isSelfSigned = subject.Equals(issuer, StringComparison.OrdinalIgnoreCase);
+            if (isSelfSigned)
+            {
+                confidence += 0.15;
+                reasons.Add("Self-signed (Subject == Issuer)");
+            }
+
+            // 2. Short validity period (< 1 year — real root CAs are 10-25 years)
+            var validity = cert.NotAfter - cert.NotBefore;
+            if (validity.TotalDays < 365)
+            {
+                confidence += 0.10;
+                reasons.Add($"Short validity ({validity.TotalDays:F0} days, expected 3650+)");
+            }
+
+            // 3. Very short validity (< 90 days — highly suspicious for a root CA)
+            if (validity.TotalDays < 90)
+            {
+                confidence += 0.05;
+                reasons.Add("Extremely short validity (<90 days)");
+            }
+
+            // 4. Known enterprise CA — downgrade to Tier2, reduce confidence
+            bool isEnterpriseCa = KnownEnterpriseCAs.Any(ca =>
+                subject.Contains(ca, StringComparison.OrdinalIgnoreCase));
+            if (isEnterpriseCa)
+            {
+                tier = DetectionTier.Tier2Indicator;
+                confidence = Math.Min(confidence, 0.65);
+                reasons.Add("Known enterprise TLS inspection CA");
+            }
+
+            // 5. Known dev tool — downgrade to Tier2, reduce confidence
+            bool isDevTool = KnownDevToolCAs.Any(dt =>
+                subject.Contains(dt, StringComparison.OrdinalIgnoreCase));
+            if (isDevTool)
+            {
+                tier = DetectionTier.Tier2Indicator;
+                confidence = Math.Min(confidence, 0.55);
+                reasons.Add("Known developer/debugging tool CA");
+            }
+
+            // 6. No CRL Distribution Points or Authority Info Access (OCSP) — suspicious for a real CA
+            bool hasCrl = false;
+            bool hasOcsp = false;
+            foreach (var ext in cert.Extensions)
+            {
+                // OID 2.5.29.31 = CRL Distribution Points
+                if (ext.Oid?.Value == "2.5.29.31") hasCrl = true;
+                // OID 1.3.6.1.5.5.7.1.1 = Authority Information Access (OCSP)
+                if (ext.Oid?.Value == "1.3.6.1.5.5.7.1.1") hasOcsp = true;
+            }
+
+            if (!hasCrl && !hasOcsp && !isEnterpriseCa && !isDevTool)
+            {
+                confidence += 0.10;
+                reasons.Add("No CRL/OCSP distribution points");
+            }
+
+            // 7. Generic/random Subject CN — real CAs have well-known names
+            var cn = ExtractCN(subject);
+            if (!string.IsNullOrEmpty(cn))
+            {
+                // Check for very short generic names or hex-like random strings
+                if (cn.Length <= 4 && !isEnterpriseCa && !isDevTool)
+                {
+                    confidence += 0.05;
+                    reasons.Add($"Very short Subject CN: '{cn}'");
+                }
+                else if (cn.Length > 6 && IsHexLike(cn))
+                {
+                    confidence += 0.10;
+                    reasons.Add($"Random/hex-like Subject CN: '{cn}'");
+                }
+            }
+
+            // 8. Already expired — suspicious to install an expired root cert
+            if (cert.NotAfter < DateTime.UtcNow)
+            {
+                confidence += 0.05;
+                reasons.Add($"Already expired (NotAfter={cert.NotAfter:u})");
+            }
+
+            // Cap confidence at 0.99
+            confidence = Math.Min(confidence, 0.99);
+
+            return new CertAnalysisResult
+            {
+                Confidence = confidence,
+                Tier = tier,
+                Reasons = reasons,
+                IsSelfSigned = isSelfSigned,
+                IsEnterpriseCa = isEnterpriseCa,
+                IsDevTool = isDevTool,
+                HasRevocationInfo = hasCrl || hasOcsp
+            };
+        }
+
+        /// <summary>
+        /// Extracts the CN value from a distinguished name string.
+        /// </summary>
+        private static string ExtractCN(string distinguishedName)
+        {
+            // Subject format: "CN=Name, O=Org, ..." — extract CN value
+            var parts = distinguishedName.Split(',');
+            foreach (var part in parts)
+            {
+                var trimmed = part.Trim();
+                if (trimmed.StartsWith("CN=", StringComparison.OrdinalIgnoreCase))
+                    return trimmed.Substring(3).Trim();
+            }
+            return string.Empty;
+        }
+
+        /// <summary>
+        /// Checks if a string looks like a random hex/GUID string (common in attack certs).
+        /// </summary>
+        private static bool IsHexLike(string s)
+        {
+            int hexChars = 0;
+            foreach (char c in s)
+            {
+                if ((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F') || c == '-')
+                    hexChars++;
+            }
+            return hexChars > s.Length * 0.7;
+        }
+
+        /// <summary>
+        /// Attempts to trace which process added a cert by querying the Security Event Log
+        /// for recent registry write events to the cert store path.
+        /// Returns the adder process info if found.
+        /// </summary>
+        private AdderProcessInfo? TraceAdderProcess(string thumbprint)
+        {
+            try
+            {
+                // Security Event ID 4657: A registry value was modified
+                // The cert store is at: HKLM\SOFTWARE\Microsoft\SystemCertificates\ROOT\Certificates\{thumbprint}
+                var log = new System.Diagnostics.EventLog("Security");
+                var cutoff = DateTime.UtcNow.AddMinutes(-5);
+
+                // Iterate backwards (most recent first) for efficiency
+                for (int i = log.Entries.Count - 1; i >= 0 && i >= log.Entries.Count - 500; i--)
+                {
+                    try
+                    {
+                        var entry = log.Entries[i];
+                        if (entry.TimeGenerated.ToUniversalTime() < cutoff) break;
+
+                        // Event ID 4657 = Registry value modified, 4663 = Object access
+                        if (entry.InstanceId != 4657 && entry.InstanceId != 4663) continue;
+
+                        var message = entry.Message ?? string.Empty;
+
+                        // Check if this event relates to the cert store
+                        if (!message.Contains("SystemCertificates", StringComparison.OrdinalIgnoreCase) &&
+                            !message.Contains("ROOT\\Certificates", StringComparison.OrdinalIgnoreCase))
+                            continue;
+
+                        // Check if it matches our specific thumbprint (or any cert store write)
+                        if (!string.IsNullOrEmpty(thumbprint) &&
+                            !message.Contains(thumbprint, StringComparison.OrdinalIgnoreCase) &&
+                            !message.Contains("ROOT\\Certificates", StringComparison.OrdinalIgnoreCase))
+                            continue;
+
+                        // Extract process info from the event
+                        var processId = ExtractFieldFromEventMessage(message, "Process ID");
+                        var processName = ExtractFieldFromEventMessage(message, "Process Name");
+
+                        if (int.TryParse(processId?.Replace("0x", ""), System.Globalization.NumberStyles.HexNumber, null, out int pid) && pid > 4)
+                        {
+                            return new AdderProcessInfo
+                            {
+                                ProcessId = pid,
+                                ProcessName = processName ?? "Unknown",
+                                EventTimestamp = entry.TimeGenerated.ToUniversalTime()
+                            };
+                        }
+                    }
+                    catch { continue; }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "[TlsCertificateMonitor] Failed to trace cert adder process");
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Extracts a field value from a Windows Event Log message by field label.
+        /// Event messages have format "Label:\t\tValue" or "Label:  Value".
+        /// </summary>
+        private static string? ExtractFieldFromEventMessage(string message, string fieldName)
+        {
+            var idx = message.IndexOf(fieldName + ":", StringComparison.OrdinalIgnoreCase);
+            if (idx < 0) return null;
+
+            var start = idx + fieldName.Length + 1;
+            if (start >= message.Length) return null;
+
+            // Skip whitespace/tabs
+            while (start < message.Length && (message[start] == ' ' || message[start] == '\t'))
+                start++;
+
+            var end = start;
+            while (end < message.Length && message[end] != '\r' && message[end] != '\n')
+                end++;
+
+            return message.Substring(start, end - start).Trim();
+        }
+
+        /// <summary>
+        /// Emits a detection event for a suspicious certificate.
+        /// </summary>
+        private async Task EmitCertDetectionAsync(
+            System.Security.Cryptography.X509Certificates.X509Certificate2 cert,
+            CertAnalysisResult analysis,
+            AdderProcessInfo? adderInfo,
+            bool isStartupScan)
+        {
+            var cn = ExtractCN(cert.Subject);
+            var scanPhase = isStartupScan ? "Startup scan" : "Runtime detection";
+            var reasonsList = string.Join("; ", analysis.Reasons);
+
+            var evidence = $"{scanPhase}: Root cert Subject='{cert.Subject}', " +
+                           $"Thumbprint={cert.Thumbprint}, " +
+                           $"Validity={cert.NotBefore:yyyy-MM-dd}→{cert.NotAfter:yyyy-MM-dd}, " +
+                           $"Signals=[{reasonsList}]";
+
+            if (adderInfo != null)
+            {
+                evidence += $", Adder='{adderInfo.ProcessName}' PID={adderInfo.ProcessId} at {adderInfo.EventTimestamp:u}";
+            }
+
+            var reasoning = analysis.IsSelfSigned
+                ? $"A self-signed root certificate '{cn}' was found in the machine trust store. "
+                : $"A root certificate '{cn}' was found in the machine trust store. ";
+
+            reasoning += "This enables potential TLS interception of all HTTPS traffic. ";
+            reasoning += $"Suspicion signals: {reasonsList}.";
+
+            var metadata = new Dictionary<string, string>
+            {
+                { "CertThumbprint", cert.Thumbprint },
+                { "CertSubject", cert.Subject },
+                { "CertIssuer", cert.Issuer },
+                { "CertNotBefore", cert.NotBefore.ToString("o") },
+                { "CertNotAfter", cert.NotAfter.ToString("o") },
+                { "IsSelfSigned", analysis.IsSelfSigned.ToString() },
+                { "IsEnterpriseCa", analysis.IsEnterpriseCa.ToString() },
+                { "IsDevTool", analysis.IsDevTool.ToString() },
+                { "HasRevocationInfo", analysis.HasRevocationInfo.ToString() },
+                { "ScanPhase", isStartupScan ? "Startup" : "Runtime" }
+            };
+
+            if (adderInfo != null)
+            {
+                metadata["AdderProcessId"] = adderInfo.ProcessId.ToString();
+                metadata["AdderProcessName"] = adderInfo.ProcessName;
+            }
+
+            var authorizedResponse = analysis.Confidence >= 0.85 && analysis.Tier == DetectionTier.Tier1Behavioral
+                ? ResponseAction.RemoveCertAndKillAdder
+                : ResponseAction.LogOnly;
+
+            await _detectionEngine.EmitAsync(new DetectionEvent
+            {
+                RuleName = "TLS: Suspicious Root Certificate Detected",
+                Evidence = evidence,
+                Reasoning = reasoning,
+                Confidence = analysis.Confidence,
+                Tier = analysis.Tier,
+                AuthorizedResponse = authorizedResponse,
+                ProcessName = adderInfo?.ProcessName ?? "SYSTEM",
+                ProcessId = adderInfo?.ProcessId ?? 0,
+                Metadata = metadata
+            });
+        }
+
+        /// <summary>
+        /// Removes a suspicious cert from the Root store and kills the adder process.
+        /// </summary>
+        private async Task RemoveCertAsync(
+            System.Security.Cryptography.X509Certificates.X509Certificate2 cert,
+            AdderProcessInfo? adderInfo,
+            CertAnalysisResult analysis)
+        {
+            try
+            {
+                // 1. Remove the cert from the store (native .NET API — no shelling out)
+                using var store = new System.Security.Cryptography.X509Certificates.X509Store(
+                    System.Security.Cryptography.X509Certificates.StoreName.Root,
+                    System.Security.Cryptography.X509Certificates.StoreLocation.LocalMachine);
+                store.Open(System.Security.Cryptography.X509Certificates.OpenFlags.ReadWrite);
+                store.Remove(cert);
+
+                _logger.LogWarning("[TlsCertificateMonitor] REMOVED suspicious root cert: Subject={Subject}, Thumbprint={Thumb}",
+                    cert.Subject, cert.Thumbprint);
+
+                // 2. Kill the adder process if traced
+                if (adderInfo != null && adderInfo.ProcessId > 4)
+                {
+                    HardeningModule.SafeKillProcessTree(adderInfo.ProcessId);
+                    _logger.LogWarning("[TlsCertificateMonitor] KILLED adder process: {Name} PID={Pid}",
+                        adderInfo.ProcessName, adderInfo.ProcessId);
+                }
+
+                // 3. Log the response
+                await _eventLogger.LogEventAsync("response", new ResponseEvent
+                {
+                    ProcessId = adderInfo?.ProcessId ?? 0,
+                    ProcessName = adderInfo?.ProcessName ?? "Unknown",
+                    ActionTaken = "REMOVE_CERT_AND_KILL_ADDER",
+                    Reason = $"Removed root cert Subject='{cert.Subject}' Thumbprint={cert.Thumbprint} " +
+                             $"Confidence={analysis.Confidence:F2} Signals=[{string.Join("; ", analysis.Reasons)}]" +
+                             (adderInfo != null ? $" Killed adder PID={adderInfo.ProcessId}" : " Adder not traced")
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[TlsCertificateMonitor] Failed to remove cert {Thumb}", cert.Thumbprint);
+            }
+        }
+
+        /// <summary>Result of analyzing a single certificate.</summary>
+        internal class CertAnalysisResult
+        {
+            public double Confidence { get; set; }
+            public DetectionTier Tier { get; set; }
+            public List<string> Reasons { get; set; } = new();
+            public bool IsSelfSigned { get; set; }
+            public bool IsEnterpriseCa { get; set; }
+            public bool IsDevTool { get; set; }
+            public bool HasRevocationInfo { get; set; }
+        }
+
+        /// <summary>Info about the process that added a cert to the store.</summary>
+        private class AdderProcessInfo
+        {
+            public int ProcessId { get; set; }
+            public string ProcessName { get; set; } = string.Empty;
+            public DateTime EventTimestamp { get; set; }
         }
     }
 

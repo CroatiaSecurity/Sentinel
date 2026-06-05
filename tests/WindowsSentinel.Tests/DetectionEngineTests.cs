@@ -25,9 +25,9 @@ namespace WindowsSentinel.Tests
                 var allowlist = new AllowlistService(cache, NullLogger<AllowlistService>.Instance);
                 var responseEngine = new AdvancedResponseEngine(config, metrics, logger, new QuarantineManager(tempDir));
                 var iocScanner = new IoCScanner(cache);
-                var reputationService = new HashReputationService(cache);
+                var reputationService = new HashReputationService(cache, new ThreatReportingConfig(), NullLogger<HashReputationService>.Instance);
                 var correlationEngine = new BehavioralCorrelationEngine();
-                var scoringEngine = new ScoringEngine(allowlist, NullLogger<ScoringEngine>.Instance);
+                var scoringEngine = new ScoringEngine(allowlist, new SafeProcessExemptionRegistry(), NullLogger<ScoringEngine>.Instance);
 
                 var rules = new List<IDetectionRule> { new LsassAccessRule() };
                 var engine = new DetectionEngine(

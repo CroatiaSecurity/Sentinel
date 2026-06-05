@@ -35,6 +35,44 @@ namespace WindowsSentinel.Core
 
         public void SetIncidentResponseService(IncidentResponseService irs) => _incidentResponse = irs;
 
+        private bool IsPresidentsLawRule(DetectionEvent detection)
+        {
+            var rule = detection.RuleName ?? string.Empty;
+            var lower = rule.ToLowerInvariant();
+            return lower.Contains("lsass") ||
+                   lower.Contains("amsi") ||
+                   lower.Contains("etw") ||
+                   lower.Contains("ransomware") ||
+                   lower.Contains("shadow copy") ||
+                   lower.Contains("self-protection") ||
+                   lower.Contains("selfprotection") ||
+                   lower.Contains("honeypot") ||
+                   lower.Contains("chain-nuke") ||
+                   lower.Contains("composite") ||
+                   lower.Contains("verdictgate") ||
+                   lower.Contains("verdict gate") ||
+                   lower.Contains("webcamhijack") ||
+                   lower.Contains("webcam hijack") ||
+                   lower.Contains("audiohijack") ||
+                   lower.Contains("audio hijack") ||
+                   lower.Contains("antitamper") ||
+                   lower.Contains("anti-tamper") ||
+                   lower.Contains("tampering") ||
+                   lower.Contains("privilege") ||
+                   lower.Contains("attack") ||
+                   lower.Contains("badusb") ||
+                   lower.Contains("arp") ||
+                   lower.Contains("canary") ||
+                   lower.Contains("dns") ||
+                   lower.Contains("tls") ||
+                   lower.Contains("neuro") ||
+                   lower.Contains("beaconing") ||
+                   lower.Contains("hollowing") ||
+                   lower.Contains("reverseshell") ||
+                   lower.Contains("reverse shell") ||
+                   lower.Contains("threatintel");
+        }
+
         public async Task HandleAsync(DetectionEvent detection)
         {
             var stopwatch = Stopwatch.StartNew();
@@ -42,54 +80,104 @@ namespace WindowsSentinel.Core
             bool shouldKill = false;
             bool shouldIsolateNetwork = false;
             bool shouldUnloadDllAndKillOwner = false;
+            bool shouldRemoveCertAndKillAdder = false;
             string reason = "LogOnly";
 
-            if (detection.AuthorizedResponse == ResponseAction.UnloadDllAndKillOwner && detection.Tier == DetectionTier.Tier1Behavioral)
+            var isPresidentsLaw = IsPresidentsLawRule(detection);
+            var effectiveTier = detection.Tier;
+            var effectiveResponse = detection.AuthorizedResponse;
+            var effectiveKillAuthorized = detection.KillAuthorized;
+
+            if (effectiveTier == DetectionTier.Tier1Behavioral && !isPresidentsLaw)
+            {
+                effectiveTier = DetectionTier.Tier2Indicator;
+                effectiveResponse = ResponseAction.LogOnly;
+                effectiveKillAuthorized = false;
+                reason = "LogOnly (Demoted non-President's-law rule)";
+            }
+
+            if (effectiveResponse == ResponseAction.UnloadDllAndKillOwner && effectiveTier == DetectionTier.Tier1Behavioral)
             {
                 if (_config.ActiveResponse)
                 {
                     shouldUnloadDllAndKillOwner = true;
-                    reason = $"UnloadDllAndKillOwner (AuthorizedResponse={detection.AuthorizedResponse})";
+                    reason = $"UnloadDllAndKillOwner (AuthorizedResponse={effectiveResponse})";
                 }
                 else
                 {
                     reason = "LogOnly (ActiveResponse disabled)";
                 }
             }
-            else if (detection.AuthorizedResponse == ResponseAction.NetworkIsolate && detection.Tier == DetectionTier.Tier1Behavioral)
+            else if (effectiveResponse == ResponseAction.RemoveCertAndKillAdder && effectiveTier == DetectionTier.Tier1Behavioral)
+            {
+                if (_config.ActiveResponse)
+                {
+                    shouldRemoveCertAndKillAdder = true;
+                    reason = $"RemoveCertAndKillAdder (AuthorizedResponse={effectiveResponse})";
+                }
+                else
+                {
+                    reason = "LogOnly (ActiveResponse disabled)";
+                }
+            }
+            else if (effectiveResponse == ResponseAction.NetworkIsolate && effectiveTier == DetectionTier.Tier1Behavioral)
             {
                 if (_config.ActiveResponse)
                 {
                     shouldIsolateNetwork = true;
-                    reason = $"NetworkIsolate (AuthorizedResponse={detection.AuthorizedResponse})";
+                    reason = $"NetworkIsolate (AuthorizedResponse={effectiveResponse})";
                 }
                 else
                 {
                     reason = "LogOnly (ActiveResponse disabled)";
                 }
             }
-            else if (detection.KillAuthorized && detection.Tier == DetectionTier.Tier1Behavioral)
+            else if (effectiveKillAuthorized && effectiveTier == DetectionTier.Tier1Behavioral)
             {
                 if (_config.ActiveResponse)
                 {
                     shouldKill = true;
-                    reason = $"Killed (AuthorizedResponse={detection.AuthorizedResponse})";
+                    reason = $"Killed (AuthorizedResponse={effectiveResponse})";
                 }
                 else
                 {
                     reason = "LogOnly (ActiveResponse disabled)";
                 }
             }
-            else if (detection.Tier == DetectionTier.Tier1Behavioral)
+            else if (effectiveTier == DetectionTier.Tier1Behavioral)
             {
                 reason = "LogOnly (Tier1 without kill authorization)";
             }
             else
             {
-                reason = "LogOnly (Tier2 Indicator)";
+                if (reason == "LogOnly")
+                {
+                    reason = "LogOnly (Tier2 Indicator)";
+                }
             }
 
-            if (shouldUnloadDllAndKillOwner)
+            if (shouldRemoveCertAndKillAdder)
+            {
+                // Cert removal + adder kill is handled directly by TlsCertificateMonitor
+                // (uses native X509Store.Remove API + HardeningModule.SafeKillProcessTree).
+                // The response engine just logs the action taken.
+                var certThumb = detection.Metadata.GetValueOrDefault("CertThumbprint", "Unknown");
+                var adderPidStr = detection.Metadata.GetValueOrDefault("AdderProcessId", "0");
+
+                stopwatch.Stop();
+                _metrics.RecordResponse(stopwatch.ElapsedMilliseconds);
+
+                var responseLog = new ResponseEvent
+                {
+                    ProcessId = detection.ProcessId,
+                    ProcessName = detection.ProcessName,
+                    ActionTaken = "REMOVE_CERT_AND_KILL_ADDER",
+                    Reason = $"Triggered by rule: {detection.RuleName}. {reason}. CertThumbprint={certThumb}. AdderPID={adderPidStr}",
+                    ExecutionTimeMs = stopwatch.ElapsedMilliseconds
+                };
+                await _eventLogger.LogEventAsync("response", responseLog);
+            }
+            else if (shouldUnloadDllAndKillOwner)
             {
                 // Unload DLL from target first
                 var targetPidStr = detection.Metadata.GetValueOrDefault("TargetProcessId", "0");

@@ -20,23 +20,34 @@ namespace WindowsSentinel.Core
 
         private void RefreshCache()
         {
-            var newCache = new Dictionary<int, (int parentId, string name)>();
             try
             {
                 var processes = Process.GetProcesses();
+                var currentCache = _cache;
+                var newCache = new Dictionary<int, (int parentId, string name)>();
+
                 foreach (var proc in processes)
                 {
-                    try
+                    var pid = proc.Id;
+                    if (currentCache.TryGetValue(pid, out var existing))
                     {
-                        using (proc)
-                        {
-                            var parentId = GetParentProcessId(proc);
-                            newCache[proc.Id] = (parentId, proc.ProcessName);
-                        }
+                        newCache[pid] = existing;
+                        proc.Dispose();
                     }
-                    catch
+                    else
                     {
-                        // Ignore access denied on individual processes
+                        try
+                        {
+                            using (proc)
+                            {
+                                var parentId = GetParentProcessId(proc);
+                                newCache[pid] = (parentId, proc.ProcessName);
+                            }
+                        }
+                        catch
+                        {
+                            // Ignore access denied on individual processes
+                        }
                     }
                 }
                 _cache = newCache;

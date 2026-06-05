@@ -36,7 +36,7 @@ namespace WindowsSentinel.Core
                 Description = "QBot banking trojan",
                 // v3.8.0: Removed "regsvr32.exe" and "services.exe" — legitimate system binaries
                 FileNames = new[] { "chkdsks.exe", "disk.exe", "taskhost.exe" },
-                ProcessPatterns = new[] { "chkdsks", "disk.exe" },
+                ProcessPatterns = new[] { "chkdsks", "disk" },
                 CommandLinePatterns = new[] { @"regsvr32.*-s.*[a-z0-9]{8}\.dat" },
                 RegistryKeys = new[] { @"Software\\Microsoft\\Windows\\CurrentVersion\\Run\\[a-z]{8}" },
                 ScheduledTaskPatterns = new[] { @"[a-z]{8}_[0-9]{6}" },
@@ -48,7 +48,7 @@ namespace WindowsSentinel.Core
                 Description = "Emotet malware",
                 // v3.8.0: Removed generic "update.exe" — false positives
                 FileNames = new[] { "sys.exe", "win.exe", "syswow.exe" },
-                ProcessPatterns = new[] { "sys.exe", "syswow" },
+                ProcessPatterns = new[] { "sys", "syswow" },
                 CommandLinePatterns = new[] { @"-E\d+" },
                 ServicePatterns = new[] { @"RemoteRegistry[0-9a-f]{4}" },
                 MitreTechniques = new[] { "T1055", "T1059", "T1543", "T1547" }
@@ -59,7 +59,7 @@ namespace WindowsSentinel.Core
                 Description = "TrickBot banking trojan",
                 // v3.8.0: Removed "services.exe" and "client.exe" — too generic
                 FileNames = new[] { "tab.exe", "inject.exe" },
-                ProcessPatterns = new[] { "tab.exe", "inject.exe" },
+                ProcessPatterns = new[] { "tab", "inject" },
                 CommandLinePatterns = new[] { @"tab.exe.*-s", @"tab.exe.*-i" },
                 ModulePatterns = new[] { @"[a-z]{8}64.dll", @"[a-z]{8}32.dll" },
                 MitreTechniques = new[] { "T1003", "T1055", "T1056", "T1071" }

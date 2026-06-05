@@ -184,20 +184,8 @@ namespace WindowsSentinel.Core
             var result = new List<string>();
             try
             {
-                // Walk up the process tree
-                var currentPid = pid;
-                for (int i = 0; i < 10; i++)
-                {
-                    try
-                    {
-                        using var proc = Process.GetProcessById(currentPid);
-                        result.Add($"PID={proc.Id} Name={proc.ProcessName} StartTime={proc.StartTime:O}");
-
-                        // Get parent (best effort via WMI-free approach)
-                        break; // Single level — full tree requires ETW cache
-                    }
-                    catch { break; }
-                }
+                using var proc = Process.GetProcessById(pid);
+                result.Add($"PID={proc.Id} Name={proc.ProcessName} StartTime={proc.StartTime:O}");
             }
             catch { }
             return result;

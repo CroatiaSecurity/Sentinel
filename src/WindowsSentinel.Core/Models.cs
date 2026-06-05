@@ -16,7 +16,8 @@ namespace WindowsSentinel.Core
         KillProcess,
         KillProcessTree,
         Quarantine,
-        UnloadDllAndKillOwner
+        UnloadDllAndKillOwner,
+        RemoveCertAndKillAdder
     }
 
     public class SentinelConfig
@@ -31,6 +32,7 @@ namespace WindowsSentinel.Core
         public bool Enabled { get; set; } = true;
         public string? AbuseIpDbApiKey { get; set; }
         public string? UrlhausAuthToken { get; set; }
+        public string? MalwareBazaarApiKey { get; set; }
         public bool ReportToMalwareBazaar { get; set; } = true;
         public bool ReportToUrlhaus { get; set; } = true;
     }
