@@ -16,6 +16,7 @@ namespace WindowsSentinel.Core
     {
         private readonly DetectionEngine _detectionEngine;
         private readonly ProcessAncestryCache _ancestryCache;
+        private readonly AllowlistService _allowlist;
         private readonly ILogger<ParentPidSpoofDetector> _logger;
         private readonly System.Threading.Timer _timer;
         private readonly HashSet<int> _alertedPids = new();
@@ -40,10 +41,12 @@ namespace WindowsSentinel.Core
         public ParentPidSpoofDetector(
             DetectionEngine de,
             ProcessAncestryCache ac,
+            AllowlistService allowlist,
             ILogger<ParentPidSpoofDetector> l)
         {
             _detectionEngine = de;
             _ancestryCache = ac;
+            _allowlist = allowlist;
             _logger = l;
             _timer = new System.Threading.Timer(Scan, null, TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(10));
         }
@@ -58,6 +61,7 @@ namespace WindowsSentinel.Core
                     {
                         if (proc.Id <= 4) continue;
                         if (_alertedPids.Contains(proc.Id)) continue;
+                        if (_allowlist.IsDevelopmentProcess(proc.ProcessName)) continue;
 
                         var pbi = new PROCESS_BASIC_INFORMATION();
                         int status = NtQueryInformationProcess(proc.Handle, ProcessBasicInformation,

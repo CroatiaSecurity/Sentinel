@@ -253,25 +253,26 @@ namespace WindowsSentinel.Agent
                                         }
                                         shownCache[cacheKey] = DateTime.UtcNow;
 
+                                        bool killAuthorized = false;
+                                        if (data.TryGetProperty("KillAuthorized", out var killProp))
+                                            killAuthorized = killProp.GetBoolean();
+
                                         string title;
                                         string statusText;
-                                        if (tierVal == 0) // Tier1Behavioral
+                                        if (killAuthorized && _config.ActiveResponse)
                                         {
-                                            if (_config.ActiveResponse)
-                                            {
-                                                title = $"Threat Terminated: {ruleName}";
-                                                statusText = "Terminated (Active Response Blocked)";
-                                            }
-                                            else
-                                            {
-                                                title = $"Threat Detected: {ruleName}";
-                                                statusText = "Log Only (Active Response Off)";
-                                            }
+                                            title = $"Threat Terminated: {ruleName}";
+                                            statusText = "Terminated (Active Response)";
+                                        }
+                                        else if (tierVal == 0) // Tier1Behavioral but not kill-authorized
+                                        {
+                                            title = $"Threat Detected: {ruleName}";
+                                            statusText = _config.ActiveResponse ? "Blocked (No Kill)" : "Log Only (Active Response Off)";
                                         }
                                         else // Tier2Indicator
                                         {
                                             title = $"Suspicious Activity: {ruleName}";
-                                            statusText = "Logged (No Terminate Action)";
+                                            statusText = "Logged (No Action)";
                                         }
 
                                         if (rateLimiter.AllowRequest())
