@@ -1655,10 +1655,11 @@ namespace WindowsSentinel.Core
                             !message.Contains("ROOT\\Certificates", StringComparison.OrdinalIgnoreCase))
                             continue;
 
-                        // Check if it matches our specific thumbprint (or any cert store write)
+                        // ONLY match events that contain our specific thumbprint
+                        // Do NOT fall back to generic "ROOT\Certificates" matching - that causes
+                        // misattribution when legitimate processes (browsers) touch the cert store
                         if (!string.IsNullOrEmpty(thumbprint) &&
-                            !message.Contains(thumbprint, StringComparison.OrdinalIgnoreCase) &&
-                            !message.Contains("ROOT\\Certificates", StringComparison.OrdinalIgnoreCase))
+                            !message.Contains(thumbprint, StringComparison.OrdinalIgnoreCase))
                             continue;
 
                         // Extract process info from the event
@@ -1777,17 +1778,8 @@ namespace WindowsSentinel.Core
             });
         }
 
-        // Browser processes that legitimately touch the certificate store - NEVER kill these
-        private static readonly HashSet<string> BrowserProcesses = new(StringComparer.OrdinalIgnoreCase)
-        {
-            "chrome", "chrome.exe", "msedge", "msedge.exe", "firefox", "firefox.exe",
-            "brave", "brave.exe", "opera", "opera.exe", "vivaldi", "vivaldi.exe",
-            "safari", "safari.exe", "iexplore", "iexplore.exe"
-        };
-
         /// <summary>
         /// Removes a suspicious cert from the Root store and kills the adder process.
-        /// SAFETY: Never kills browser processes - they legitimately interact with cert store.
         /// </summary>
         private async Task RemoveCertAsync(
             System.Security.Cryptography.X509Certificates.X509Certificate2 cert,
@@ -1806,21 +1798,12 @@ namespace WindowsSentinel.Core
                 _logger.LogWarning("[TlsCertificateMonitor] REMOVED suspicious root cert: Subject={Subject}, Thumbprint={Thumb}",
                     cert.Subject, cert.Thumbprint);
 
-                // 2. Kill the adder process if traced (NEVER kill browsers - they legitimately touch cert store)
+                // 2. Kill the adder process if traced (only if definitively traced to this cert)
                 if (adderInfo != null && adderInfo.ProcessId > 4)
                 {
-                    var processName = Path.GetFileName(adderInfo.ProcessName);
-                    if (BrowserProcesses.Contains(processName))
-                    {
-                        _logger.LogWarning("[TlsCertificateMonitor] BLOCKED kill of browser process {Name} PID={Pid} - browsers legitimately touch cert store",
-                            adderInfo.ProcessName, adderInfo.ProcessId);
-                    }
-                    else
-                    {
-                        HardeningModule.SafeKillProcessTree(adderInfo.ProcessId);
-                        _logger.LogWarning("[TlsCertificateMonitor] KILLED adder process: {Name} PID={Pid}",
-                            adderInfo.ProcessName, adderInfo.ProcessId);
-                    }
+                    HardeningModule.SafeKillProcessTree(adderInfo.ProcessId);
+                    _logger.LogWarning("[TlsCertificateMonitor] KILLED adder process: {Name} PID={Pid}",
+                        adderInfo.ProcessName, adderInfo.ProcessId);
                 }
 
                 // 3. Log the response
