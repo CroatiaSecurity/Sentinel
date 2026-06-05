@@ -17,6 +17,7 @@ All notable changes to Windows Sentinel are documented in this file.
 - **Devin installer temp binary** — Added `devinusersetup-` to `TrustedTempInstallerPatterns` in `UnsignedBinaryRule` to suppress false positives during Devin IDE installation.
 - **Microsoft connectivity DNS domains** — Added `msftncsi.com`, `s-msft.com`, `s-microsoft.com` to `TrustedBaseDomains` in `DnsQueryMonitor` to suppress false beaconing/tunneling alerts from Windows NCSI and Microsoft services.
 - **ISRG Root X1 runtime false positive** — Public root CAs observed at runtime (e.g. `ISRG Root X1`) are now baselined silently instead of emitted as low-confidence detections.
+- **ThreatIntelInjectionRule browser false positive** — Browsers (Chrome, Edge, Firefox, Brave, Opera, Vivaldi) legitimately use `VirtualAllocEx`, `WriteProcessMemory`, and `CreateRemoteThread` for their multi-process sandbox model. `ThreatIntelInjectionRule` was firing on these legitimate ETW kernel events and killing browser process trees. Now skips all known browser processes entirely.
 
 ## [6.3.0] - 2026-06-05
 
