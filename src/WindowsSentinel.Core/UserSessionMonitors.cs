@@ -311,6 +311,14 @@ namespace WindowsSentinel.Core
         private readonly DetectionEngine _detectionEngine;
         private readonly ILogger<NeuroBehaviorVisualMonitor> _logger;
 
+        // Browsers legitimately change focus rapidly (tab switches, popups, notifications)
+        // and users frequently move the cursor large distances. Skip anomaly counting.
+        private static readonly HashSet<string> KnownBrowserProcesses = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "chrome", "msedge", "firefox", "brave", "opera", "vivaldi", "iexplore",
+            "msedgewebview2", "electron"
+        };
+
         [DllImport("user32.dll")]
         private static extern IntPtr GetForegroundWindow();
 
@@ -371,7 +379,13 @@ namespace WindowsSentinel.Core
 
                     // 1. Focus steal check
                     GetWindowThreadProcessId(fgWnd, out uint pid);
-                    if (pid > 4 && pid != _lastFgPid)
+                    bool isBrowser = false;
+                    if (pid > 4)
+                    {
+                        try { using var p = Process.GetProcessById((int)pid); isBrowser = KnownBrowserProcesses.Contains(p.ProcessName); }
+                        catch { }
+                    }
+                    if (pid > 4 && pid != _lastFgPid && !isBrowser)
                     {
                         var now = DateTime.UtcNow;
                         if (now - _lastWindowChangeTime < TimeSpan.FromSeconds(2))
@@ -383,9 +397,17 @@ namespace WindowsSentinel.Core
                         _lastFgPid = pid;
                         _lastWindowChangeTime = now;
                     }
+                    else if (pid > 4 && pid != _lastFgPid)
+                    {
+                        // Track browser window changes without scoring
+                        _lastFgWnd = fgWnd;
+                        _lastFgPid = pid;
+                        _lastWindowChangeTime = DateTime.UtcNow;
+                    }
 
                     // 2. Programmatic cursor jump check
-                    if (GetCursorPos(out var curPos))
+                    // Skip when a browser is foreground — users legitimately move cursor across monitors
+                    if (GetCursorPos(out var curPos) && !isBrowser)
                     {
                         var dx = curPos.X - _lastCursorPos.X;
                         var dy = curPos.Y - _lastCursorPos.Y;
@@ -397,6 +419,10 @@ namespace WindowsSentinel.Core
                             _cursorJumpCount++;
                             _anomalyScore += 20;
                         }
+                        _lastCursorPos = curPos;
+                    }
+                    else if (GetCursorPos(out var _))
+                    {
                         _lastCursorPos = curPos;
                     }
 
@@ -460,9 +486,17 @@ namespace WindowsSentinel.Core
                         try { using var p = Process.GetProcessById((int)pid); procName = p.ProcessName; }
                         catch { }
 
-                        await _detectionEngine.EmitAsync(new DetectionEvent
+                        // Never kill browsers for visual anomalies — they are normal UI behavior
+                        if (KnownBrowserProcesses.Contains(procName))
                         {
-                            RuleName = "NeuroBehavior: Visual Anomaly Detected",
+                            _logger.LogDebug("[NeuroBehaviorVisualMonitor] Anomaly score {Score} reached with browser {Proc} in foreground — skipping detection", _anomalyScore, procName);
+                            ResetStats();
+                        }
+                        else
+                        {
+                            await _detectionEngine.EmitAsync(new DetectionEvent
+                            {
+                                RuleName = "NeuroBehavior: Visual Anomaly Detected",
                             Evidence = $"Visual anomaly score reached {_anomalyScore} (Focus steals: {_focusStealCount}, Cursor jumps: {_cursorJumpCount}, Brightness oscillations: {_brightnessOscillationCount})",
                             Reasoning = "System-wide visual anomalies (rapid window focus steals, large programmatic cursor jumps, or sudden display brightness oscillations) suggest visual hijacking or background script takeover.",
                             Confidence = 0.85,
@@ -473,6 +507,7 @@ namespace WindowsSentinel.Core
                         });
 
                         ResetStats();
+                        }
                     }
 
                     // Decay anomaly score slowly over time
