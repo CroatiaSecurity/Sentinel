@@ -58,7 +58,8 @@ namespace WindowsSentinel.Core
             "googleapis.com", "gstatic.com", "googlevideo.com",
             // Microsoft
             "microsoft.com", "microsoftonline.com", "windows.net", "office.com", "live.com",
-            "msidentity.com", "windowsupdate.com", "windowsupdate.org",
+            "msidentity.com", "windowsupdate.com", "windowsupdate.org", "msftncsi.com",
+            "s-msft.com", "s-microsoft.com",
             // Gaming
             "steamserver.net", "steamcontent.com", "steampowered.com", "valve.net",
             "epicgames.com", "unrealengine.com",

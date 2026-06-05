@@ -1418,6 +1418,11 @@ namespace WindowsSentinel.Core
                 // New cert detected — analyze it
                 var analysis = AnalyzeCert(cert);
                 var adderInfo = TraceAdderProcess(cert.Thumbprint);
+                if (analysis.IsPublicRootCa && analysis.Confidence <= 0.50)
+                {
+                    _baselineThumbprints.Add(cert.Thumbprint);
+                    continue;
+                }
 
                 _logger.LogWarning("[TlsCertificateMonitor] New root cert detected: Subject={Subject}, Thumbprint={Thumb}, Confidence={Conf:F2}",
                     cert.Subject, cert.Thumbprint, analysis.Confidence);
@@ -1587,6 +1592,7 @@ namespace WindowsSentinel.Core
                 Tier = tier,
                 Reasons = reasons,
                 IsSelfSigned = isSelfSigned,
+                IsPublicRootCa = isPublicRootCA,
                 IsEnterpriseCa = isEnterpriseCa,
                 IsDevTool = isDevTool,
                 HasRevocationInfo = true // Simplified for this refactor
@@ -1826,6 +1832,7 @@ namespace WindowsSentinel.Core
             public DetectionTier Tier { get; set; }
             public List<string> Reasons { get; set; } = new();
             public bool IsSelfSigned { get; set; }
+            public bool IsPublicRootCa { get; set; }
             public bool IsEnterpriseCa { get; set; }
             public bool IsDevTool { get; set; }
             public bool HasRevocationInfo { get; set; }

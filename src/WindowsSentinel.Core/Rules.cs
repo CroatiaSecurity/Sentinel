@@ -375,6 +375,11 @@ namespace WindowsSentinel.Core
             "\\appdata\\local\\postman\\",
         };
 
+        private static readonly string[] TrustedTempInstallerPatterns = new[]
+        {
+            "devinusersetup-",
+        };
+
         public DetectionEvent? Evaluate(FusedTelemetryContext context)
         {
             if (context.TriggeringEvent is ProcessTelemetry pt)
@@ -386,6 +391,8 @@ namespace WindowsSentinel.Core
 
                 // Only flag truly suspicious locations (Temp, Downloads, raw AppData outside program installs)
                 bool isSuspicious = path.Contains("\\temp\\") || path.Contains("\\downloads\\");
+                if (isSuspicious && TrustedTempInstallerPatterns.Any(pattern => path.Contains(pattern)))
+                    isSuspicious = false;
 
                 if (!isSuspicious && path.Contains("\\appdata\\"))
                 {
