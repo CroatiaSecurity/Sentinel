@@ -10,6 +10,7 @@ namespace WindowsSentinel.Core
     {
         private readonly byte[] _hmacKey;
         private readonly string _secureDir;
+        private readonly bool _isCustomDir;
 
         [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
         private struct DATA_BLOB
@@ -55,11 +56,13 @@ namespace WindowsSentinel.Core
             if (!string.IsNullOrWhiteSpace(customSecureDir))
             {
                 _secureDir = customSecureDir;
+                _isCustomDir = true;
             }
             else
             {
                 var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
                 _secureDir = Path.Combine(programData, "WindowsSentinel", "Secure");
+                _isCustomDir = false;
             }
 
             _hmacKey = GetOrCreateHmacKey();
@@ -68,6 +71,54 @@ namespace WindowsSentinel.Core
         private byte[] GetOrCreateHmacKey()
         {
             var keyFilePath = Path.Combine(_secureDir, "ads_hmac.key");
+            try
+            {
+                var dirInfo = new DirectoryInfo(_secureDir);
+                if (!dirInfo.Exists)
+                {
+                    dirInfo.Create();
+                }
+
+                // Apply secure ACLs to restrict access to local SYSTEM and Administrators only
+                var security = dirInfo.GetAccessControl();
+                security.SetAccessRuleProtection(true, false);
+
+                var systemSid = new System.Security.Principal.SecurityIdentifier(
+                    System.Security.Principal.WellKnownSidType.LocalSystemSid, null);
+                security.AddAccessRule(new System.Security.AccessControl.FileSystemAccessRule(
+                    systemSid,
+                    System.Security.AccessControl.FileSystemRights.FullControl,
+                    System.Security.AccessControl.InheritanceFlags.ContainerInherit | System.Security.AccessControl.InheritanceFlags.ObjectInherit,
+                    System.Security.AccessControl.PropagationFlags.None,
+                    System.Security.AccessControl.AccessControlType.Allow));
+
+                var adminsSid = new System.Security.Principal.SecurityIdentifier(
+                    System.Security.Principal.WellKnownSidType.BuiltinAdministratorsSid, null);
+                security.AddAccessRule(new System.Security.AccessControl.FileSystemAccessRule(
+                    adminsSid,
+                    System.Security.AccessControl.FileSystemRights.FullControl,
+                    System.Security.AccessControl.InheritanceFlags.ContainerInherit | System.Security.AccessControl.InheritanceFlags.ObjectInherit,
+                    System.Security.AccessControl.PropagationFlags.None,
+                    System.Security.AccessControl.AccessControlType.Allow));
+
+                if (_isCustomDir)
+                {
+                    var currentUserSid = System.Security.Principal.WindowsIdentity.GetCurrent().User;
+                    if (currentUserSid != null)
+                    {
+                        security.AddAccessRule(new System.Security.AccessControl.FileSystemAccessRule(
+                            currentUserSid,
+                            System.Security.AccessControl.FileSystemRights.FullControl,
+                            System.Security.AccessControl.InheritanceFlags.ContainerInherit | System.Security.AccessControl.InheritanceFlags.ObjectInherit,
+                            System.Security.AccessControl.PropagationFlags.None,
+                            System.Security.AccessControl.AccessControlType.Allow));
+                    }
+                }
+
+                dirInfo.SetAccessControl(security);
+            }
+            catch { }
+
             try
             {
                 if (File.Exists(keyFilePath))
@@ -91,10 +142,6 @@ namespace WindowsSentinel.Core
 
             try
             {
-                if (!Directory.Exists(_secureDir))
-                {
-                    Directory.CreateDirectory(_secureDir);
-                }
                 var encryptedBytes = Protect(newKey);
                 File.WriteAllBytes(keyFilePath, encryptedBytes);
             }
@@ -114,7 +161,8 @@ namespace WindowsSentinel.Core
 
             try
             {
-                if (CryptProtectData(ref dataIn, "SentinelAdsKey", ref entropy, IntPtr.Zero, ref prompt, CRYPTPROTECT_UI_FORBIDDEN | CRYPTPROTECT_LOCAL_MACHINE, ref dataOut))
+                // Remove CRYPTPROTECT_LOCAL_MACHINE to restrict decryption to the current user (SYSTEM in service context)
+                if (CryptProtectData(ref dataIn, "SentinelAdsKey", ref entropy, IntPtr.Zero, ref prompt, CRYPTPROTECT_UI_FORBIDDEN, ref dataOut))
                 {
                     var result = new byte[dataOut.cbData];
                     Marshal.Copy(dataOut.pbData, result, 0, dataOut.cbData);
@@ -143,7 +191,8 @@ namespace WindowsSentinel.Core
 
             try
             {
-                if (CryptUnprotectData(ref dataIn, IntPtr.Zero, ref entropy, IntPtr.Zero, ref prompt, CRYPTPROTECT_UI_FORBIDDEN | CRYPTPROTECT_LOCAL_MACHINE, ref dataOut))
+                // Remove CRYPTPROTECT_LOCAL_MACHINE to restrict decryption to the current user (SYSTEM in service context)
+                if (CryptUnprotectData(ref dataIn, IntPtr.Zero, ref entropy, IntPtr.Zero, ref prompt, CRYPTPROTECT_UI_FORBIDDEN, ref dataOut))
                 {
                     var result = new byte[dataOut.cbData];
                     Marshal.Copy(dataOut.pbData, result, 0, dataOut.cbData);

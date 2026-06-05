@@ -38,14 +38,64 @@ namespace WindowsSentinel.Core
 
             try
             {
-                if (!Directory.Exists(_watchDirectory))
+                var dirInfo = new DirectoryInfo(_watchDirectory);
+                if (!dirInfo.Exists)
                 {
-                    Directory.CreateDirectory(_watchDirectory);
+                    dirInfo.Create();
                 }
+
+                // Apply secure ACLs to prevent low-privileged users from dropping files
+                var security = dirInfo.GetAccessControl();
+                security.SetAccessRuleProtection(true, false);
+
+                var systemSid = new System.Security.Principal.SecurityIdentifier(
+                    System.Security.Principal.WellKnownSidType.LocalSystemSid, null);
+                security.AddAccessRule(new System.Security.AccessControl.FileSystemAccessRule(
+                    systemSid,
+                    System.Security.AccessControl.FileSystemRights.FullControl,
+                    System.Security.AccessControl.InheritanceFlags.ContainerInherit | System.Security.AccessControl.InheritanceFlags.ObjectInherit,
+                    System.Security.AccessControl.PropagationFlags.None,
+                    System.Security.AccessControl.AccessControlType.Allow));
+
+                var adminsSid = new System.Security.Principal.SecurityIdentifier(
+                    System.Security.Principal.WellKnownSidType.BuiltinAdministratorsSid, null);
+                security.AddAccessRule(new System.Security.AccessControl.FileSystemAccessRule(
+                    adminsSid,
+                    System.Security.AccessControl.FileSystemRights.FullControl,
+                    System.Security.AccessControl.InheritanceFlags.ContainerInherit | System.Security.AccessControl.InheritanceFlags.ObjectInherit,
+                    System.Security.AccessControl.PropagationFlags.None,
+                    System.Security.AccessControl.AccessControlType.Allow));
+
+                if (_customWatchDirectory != null)
+                {
+                    var currentUserSid = System.Security.Principal.WindowsIdentity.GetCurrent().User;
+                    if (currentUserSid != null)
+                    {
+                        security.AddAccessRule(new System.Security.AccessControl.FileSystemAccessRule(
+                            currentUserSid,
+                            System.Security.AccessControl.FileSystemRights.FullControl,
+                            System.Security.AccessControl.InheritanceFlags.ContainerInherit | System.Security.AccessControl.InheritanceFlags.ObjectInherit,
+                            System.Security.AccessControl.PropagationFlags.None,
+                            System.Security.AccessControl.AccessControlType.Allow));
+                    }
+                }
+                else
+                {
+                    var usersSid = new System.Security.Principal.SecurityIdentifier(
+                        System.Security.Principal.WellKnownSidType.BuiltinUsersSid, null);
+                    security.AddAccessRule(new System.Security.AccessControl.FileSystemAccessRule(
+                        usersSid,
+                        System.Security.AccessControl.FileSystemRights.ReadAndExecute,
+                        System.Security.AccessControl.InheritanceFlags.ContainerInherit | System.Security.AccessControl.InheritanceFlags.ObjectInherit,
+                        System.Security.AccessControl.PropagationFlags.None,
+                        System.Security.AccessControl.AccessControlType.Allow));
+                }
+
+                dirInfo.SetAccessControl(security);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to create consultants directory: {Path}", _watchDirectory);
+                _logger.LogError(ex, "Failed to create/secure consultants directory: {Path}", _watchDirectory);
                 return;
             }
 
@@ -97,6 +147,38 @@ namespace WindowsSentinel.Core
         {
             if (string.IsNullOrEmpty(filePath) || !filePath.EndsWith(".jsonl", StringComparison.OrdinalIgnoreCase))
             {
+                return;
+            }
+
+            // Verify file owner is Administrator or SYSTEM before processing
+            try
+            {
+                var fileInfo = new FileInfo(filePath);
+                if (fileInfo.Exists)
+                {
+                    var fileSecurity = fileInfo.GetAccessControl();
+                    var ownerSid = fileSecurity.GetOwner(typeof(System.Security.Principal.SecurityIdentifier)) as System.Security.Principal.SecurityIdentifier;
+                    
+                    bool isTestMode = _customWatchDirectory != null;
+                    var currentUserSid = System.Security.Principal.WindowsIdentity.GetCurrent().User;
+
+                    bool isOwnerAdminOrSystem = ownerSid != null && (
+                        ownerSid.IsWellKnown(System.Security.Principal.WellKnownSidType.BuiltinAdministratorsSid) ||
+                        ownerSid.IsWellKnown(System.Security.Principal.WellKnownSidType.LocalSystemSid) ||
+                        (isTestMode && currentUserSid != null && ownerSid.Equals(currentUserSid))
+                    );
+
+                    if (!isOwnerAdminOrSystem)
+                    {
+                        _logger.LogWarning("[ConsultantSignalIngestor] Rejecting file {FilePath} because owner is not Administrator or SYSTEM.", filePath);
+                        try { File.Delete(filePath); } catch { }
+                        return;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[ConsultantSignalIngestor] Failed to check owner for file {FilePath}", filePath);
                 return;
             }
 
