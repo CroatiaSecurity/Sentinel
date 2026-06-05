@@ -17,6 +17,13 @@ namespace WindowsSentinel.Core
         private readonly ILogger<FileVerdictScanner> _logger;
         private readonly List<FileSystemWatcher> _watchers = new();
 
+        // Directories to exclude from real-time scanning (temp downloads, NTLite work dirs, etc.)
+        private static readonly HashSet<string> ExcludedPaths = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "temp", "tmp", "downloads", "uupdump", "ntlite", "mount", "extracted",
+            "cache", "localcache", "opera autoupdate", "google\\update", "edge\\update"
+        };
+
         public FileVerdictScanner(
             HashReputationService reputationService,
             FileVerdictAds verdictAds,
@@ -72,12 +79,32 @@ namespace WindowsSentinel.Core
         {
             if (string.IsNullOrEmpty(filePath) || !filePath.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) return;
 
+            // Skip excluded paths (temp dirs, download dirs, NTLite work dirs, etc.)
+            var pathLower = filePath.ToLowerInvariant();
+            if (ExcludedPaths.Any(excluded => pathLower.Contains(excluded)))
+            {
+                _logger.LogDebug("Skipping scan for file in excluded path: {FilePath}", filePath);
+                return;
+            }
+
+            // Wait for file to stabilize - don't scan files that are actively being written
+            // This prevents "file in use" errors during downloads/UUP extraction/NTLite operations
+            await Task.Delay(2000);
+
             int retries = 5;
             while (retries > 0)
             {
                 try
                 {
                     if (!File.Exists(filePath)) return;
+
+                    // Check if file has been stable (not modified) for at least 1 second
+                    // If it's still being written to, skip this scan attempt
+                    var lastWrite = File.GetLastWriteTimeUtc(filePath);
+                    if (DateTime.UtcNow - lastWrite < TimeSpan.FromSeconds(1))
+                    {
+                        throw new IOException("File is still being modified");
+                    }
 
                     // Try to open file with read sharing to ensure it is not locked for writing
                     using (var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
@@ -89,7 +116,8 @@ namespace WindowsSentinel.Core
                 catch (IOException)
                 {
                     retries--;
-                    await Task.Delay(500);
+                    // Longer backoff: 2 seconds between retries (total max wait: ~12 seconds)
+                    await Task.Delay(2000);
                 }
                 catch (Exception ex)
                 {
@@ -97,6 +125,9 @@ namespace WindowsSentinel.Core
                     return;
                 }
             }
+
+            // If all retries failed, log it but don't interfere with the file operation
+            _logger.LogDebug("File scan abandoned after retries (file likely in use): {FilePath}", filePath);
         }
 
         private async Task ScanFileInternalAsync(string filePath)
