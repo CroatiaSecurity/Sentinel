@@ -1645,8 +1645,9 @@ namespace WindowsSentinel.Core
                         var entry = log.Entries[i];
                         if (entry.TimeGenerated.ToUniversalTime() < cutoff) break;
 
-                        // Event ID 4657 = Registry value modified, 4663 = Object access
-                        if (entry.InstanceId != 4657 && entry.InstanceId != 4663) continue;
+                        // Event ID 4657 = Registry value modified (WRITE only)
+                        // Do NOT use 4663 (Object access) - it fires on READS too, causing misattribution
+                        if (entry.InstanceId != 4657) continue;
 
                         var message = entry.Message ?? string.Empty;
 
