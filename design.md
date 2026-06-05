@@ -80,7 +80,7 @@ The fusion layer is PASSIVE â€” it never blocks, kills, or modifies telemet
 | `PublicIpMonitor` | **3.6.0** Checks public IP via Cloudflare/ipify/icanhazip. Detects geo/ASN shift, VPN hijack, network isolation. Checks every 2min | No |
 | `RouteTableMonitor` | **3.6.0** Polls routing table via GetIpForwardTable. Detects route injection, default route hijack, next-hop modification. Scans every 10s | No |
 | `DnsResponseValidationMonitor` | **3.6.0** Resolves canary domains and validates against expected CIDR ranges. Detects DNS poisoning, captive portal. Checks every 1min | No |
-| `TlsCertificateMonitor` | **3.6.0** Inspects TLS certificates on well-known endpoints. Detects self-signed certs, unexpected CA, MITM proxy. Checks every 3min | No |
+| `TlsCertificateMonitor` | **6.3.0** Monitors the Windows `LocalMachine\Root` certificate store. Baselines existing certs silently at startup; alerts on new root CAs added after baseline. Never auto-removes. Polls every 60s | No |
 | `WifiSecurityMonitor` | **3.6.0** Polls Wi-Fi state via netsh. Detects deauth flood, open network, encryption downgrade, BSSID change. Scans every 10s | No |
 | `BluetoothMonitor` | **3.6.0** Monitors BT device registry and service state. Detects BadBT HID pairing, unauthorized devices, BT activation. Scans every 15s | No |
 | `SecureBootIntegrityMonitor` | **3.6.0** Checks Secure Boot, test signing, kernel debug via registry+bcdedit. Scans every 5min | Yes (bcdedit) |
@@ -368,7 +368,7 @@ Composite detections are emitted as Tier1 `DetectionEvent`s directly into the de
 | `PublicIpMonitor` | Public IP baseline via Cloudflare/ipify/icanhazip. Detects VPN hijack, BGP manipulation, geo/ASN shift, network isolation. |
 | `RouteTableMonitor` | Routing table integrity via GetIpForwardTable P/Invoke. Detects static route injection, selective traffic redirection, default route hijack. Filters VPN/Docker/Hyper-V routes. |
 | `DnsResponseValidationMonitor` | DNS response validation against hardcoded CIDR ranges for canary domains. Detects DNS poisoning, captive portal (all domains â†’ same IP). |
-| `TlsCertificateMonitor` | TLS certificate inspection on well-known endpoints. Detects self-signed certs, unexpected CA (MITM), enterprise TLS inspection, cert pinning violations. |
+| `TlsCertificateMonitor` | Monitors the Windows Root certificate store (`LocalMachine\Root`). Baselines all existing certs silently at startup; detects newly added root CAs at runtime. Scores by validity, revocation info, subject patterns, and expiration. Alerts only — never auto-removes certificates. |
 | `WifiSecurityMonitor` | Wi-Fi state monitoring via netsh. Detects deauthentication flood (rapid disconnect pattern), open network connection, encryption downgrade (evil twin), BSSID change. |
 | `BluetoothMonitor` | Bluetooth attack surface monitoring via registry + service state. Detects BadBT HID device pairing, unauthorized device pairing, unexpected BT activation. |
 | `SecureBootIntegrityMonitor` | Boot integrity via registry + bcdedit. Detects Secure Boot disabled, test signing mode (rootkit vector), kernel debugging enabled. |

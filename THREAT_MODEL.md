@@ -158,7 +158,7 @@ These are fundamental limitations, not bugs:
 4. **Attacker with physical access** â€” Can boot from USB, modify disk offline
 5. **Attacker who already has SYSTEM** â€” Can kill Sentinel (watchdog adds delay only)
 6. **Nation-state tooling** â€” Custom kernel implants, 0-days, hardware backdoors
-7. **Encrypted C2 over legitimate ports** â€” Looks like normal HTTPS traffic (but TLS cert monitor detects MITM)
+7. **Encrypted C2 over legitimate ports** â€” Looks like normal HTTPS traffic (but TLS cert monitor detects unauthorized root CA installations that could enable MITM)
 8. **Direct syscalls from custom code** â€” Bypasses ntdll hooks (but SyscallStubMonitor detects unhooking attempts)
 9. **Upstream BGP hijacking** â€” Detectable via public IP shift but not preventable
 10. **Physical-layer Wi-Fi attacks** â€” Cannot see deauth frames directly (detects the symptom: rapid disconnects)

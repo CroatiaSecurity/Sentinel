@@ -2,6 +2,22 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [6.3.1] - 2026-06-06
+
+### Changed — TLS Certificate Monitor (Non-Destructive Redesign)
+
+- **Startup scan** (`ScanAndBaselineStoreAsync`) now silently baselines ALL existing root certificates. No detections are emitted and no certificates are removed during startup.
+- **Runtime polling** (`PollForNewCertsAsync`) alerts only on NEW certificates added to the `LocalMachine\Root` store after the baseline. Known public root CAs are baselined silently without alert.
+- **Removed auto-removal**. The `RemoveCertAsync` method has been deleted. Sentinel never auto-removes certificates regardless of confidence score.
+- **All cert detections are `LogOnly`**. `AuthorizedResponse` is always `ResponseAction.LogOnly` for certificate events. Previously, high-confidence certs triggered `RemoveCert` when `ActiveResponse` was enabled.
+- **Fixed alarmist reasoning text**. No longer describes all root CAs as "suspicious self-signed" (all root CAs are self-signed by definition). Uses neutral language: "new root certificate was added" and "assessment signals."
+- **Documentation updated** (`design.md`, `THREAT_MODEL.md`) to reflect that `TlsCertificateMonitor` monitors the Windows Root certificate store, not TLS endpoints.
+
+### Fixed — False Positive Reduction
+- **Devin installer temp binary** — Added `devinusersetup-` to `TrustedTempInstallerPatterns` in `UnsignedBinaryRule` to suppress false positives during Devin IDE installation.
+- **Microsoft connectivity DNS domains** — Added `msftncsi.com`, `s-msft.com`, `s-microsoft.com` to `TrustedBaseDomains` in `DnsQueryMonitor` to suppress false beaconing/tunneling alerts from Windows NCSI and Microsoft services.
+- **ISRG Root X1 runtime false positive** — Public root CAs observed at runtime (e.g. `ISRG Root X1`) are now baselined silently instead of emitted as low-confidence detections.
+
 ## [6.3.0] - 2026-06-05
 
 ### Added
