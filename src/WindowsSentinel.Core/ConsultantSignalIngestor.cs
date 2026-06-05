@@ -44,54 +44,61 @@ namespace WindowsSentinel.Core
                     dirInfo.Create();
                 }
 
-                // Apply secure ACLs to prevent low-privileged users from dropping files
-                var security = dirInfo.GetAccessControl();
-                security.SetAccessRuleProtection(true, false);
-
-                var systemSid = new System.Security.Principal.SecurityIdentifier(
-                    System.Security.Principal.WellKnownSidType.LocalSystemSid, null);
-                security.AddAccessRule(new System.Security.AccessControl.FileSystemAccessRule(
-                    systemSid,
-                    System.Security.AccessControl.FileSystemRights.FullControl,
-                    System.Security.AccessControl.InheritanceFlags.ContainerInherit | System.Security.AccessControl.InheritanceFlags.ObjectInherit,
-                    System.Security.AccessControl.PropagationFlags.None,
-                    System.Security.AccessControl.AccessControlType.Allow));
-
-                var adminsSid = new System.Security.Principal.SecurityIdentifier(
-                    System.Security.Principal.WellKnownSidType.BuiltinAdministratorsSid, null);
-                security.AddAccessRule(new System.Security.AccessControl.FileSystemAccessRule(
-                    adminsSid,
-                    System.Security.AccessControl.FileSystemRights.FullControl,
-                    System.Security.AccessControl.InheritanceFlags.ContainerInherit | System.Security.AccessControl.InheritanceFlags.ObjectInherit,
-                    System.Security.AccessControl.PropagationFlags.None,
-                    System.Security.AccessControl.AccessControlType.Allow));
-
-                if (_customWatchDirectory != null)
+                try
                 {
-                    var currentUserSid = System.Security.Principal.WindowsIdentity.GetCurrent().User;
-                    if (currentUserSid != null)
+                    // Apply secure ACLs to prevent low-privileged users from dropping files
+                    var security = dirInfo.GetAccessControl();
+                    security.SetAccessRuleProtection(true, false);
+
+                    var systemSid = new System.Security.Principal.SecurityIdentifier(
+                        System.Security.Principal.WellKnownSidType.LocalSystemSid, null);
+                    security.AddAccessRule(new System.Security.AccessControl.FileSystemAccessRule(
+                        systemSid,
+                        System.Security.AccessControl.FileSystemRights.FullControl,
+                        System.Security.AccessControl.InheritanceFlags.ContainerInherit | System.Security.AccessControl.InheritanceFlags.ObjectInherit,
+                        System.Security.AccessControl.PropagationFlags.None,
+                        System.Security.AccessControl.AccessControlType.Allow));
+
+                    var adminsSid = new System.Security.Principal.SecurityIdentifier(
+                        System.Security.Principal.WellKnownSidType.BuiltinAdministratorsSid, null);
+                    security.AddAccessRule(new System.Security.AccessControl.FileSystemAccessRule(
+                        adminsSid,
+                        System.Security.AccessControl.FileSystemRights.FullControl,
+                        System.Security.AccessControl.InheritanceFlags.ContainerInherit | System.Security.AccessControl.InheritanceFlags.ObjectInherit,
+                        System.Security.AccessControl.PropagationFlags.None,
+                        System.Security.AccessControl.AccessControlType.Allow));
+
+                    if (_customWatchDirectory != null)
                     {
+                        var currentUserSid = System.Security.Principal.WindowsIdentity.GetCurrent().User;
+                        if (currentUserSid != null)
+                        {
+                            security.AddAccessRule(new System.Security.AccessControl.FileSystemAccessRule(
+                                currentUserSid,
+                                System.Security.AccessControl.FileSystemRights.FullControl,
+                                System.Security.AccessControl.InheritanceFlags.ContainerInherit | System.Security.AccessControl.InheritanceFlags.ObjectInherit,
+                                System.Security.AccessControl.PropagationFlags.None,
+                                System.Security.AccessControl.AccessControlType.Allow));
+                        }
+                    }
+                    else
+                    {
+                        var usersSid = new System.Security.Principal.SecurityIdentifier(
+                            System.Security.Principal.WellKnownSidType.BuiltinUsersSid, null);
                         security.AddAccessRule(new System.Security.AccessControl.FileSystemAccessRule(
-                            currentUserSid,
-                            System.Security.AccessControl.FileSystemRights.FullControl,
+                            usersSid,
+                            System.Security.AccessControl.FileSystemRights.ReadAndExecute,
                             System.Security.AccessControl.InheritanceFlags.ContainerInherit | System.Security.AccessControl.InheritanceFlags.ObjectInherit,
                             System.Security.AccessControl.PropagationFlags.None,
                             System.Security.AccessControl.AccessControlType.Allow));
                     }
-                }
-                else
-                {
-                    var usersSid = new System.Security.Principal.SecurityIdentifier(
-                        System.Security.Principal.WellKnownSidType.BuiltinUsersSid, null);
-                    security.AddAccessRule(new System.Security.AccessControl.FileSystemAccessRule(
-                        usersSid,
-                        System.Security.AccessControl.FileSystemRights.ReadAndExecute,
-                        System.Security.AccessControl.InheritanceFlags.ContainerInherit | System.Security.AccessControl.InheritanceFlags.ObjectInherit,
-                        System.Security.AccessControl.PropagationFlags.None,
-                        System.Security.AccessControl.AccessControlType.Allow));
-                }
 
-                dirInfo.SetAccessControl(security);
+                    dirInfo.SetAccessControl(security);
+                }
+                catch (UnauthorizedAccessException uae)
+                {
+                    _logger.LogWarning(uae, "Access denied setting permissions on consultants directory {Path}. Existing permissions will be used.", _watchDirectory);
+                }
             }
             catch (Exception ex)
             {
