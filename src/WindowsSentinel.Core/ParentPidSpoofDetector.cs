@@ -63,6 +63,12 @@ namespace WindowsSentinel.Core
                         if (_alertedPids.Contains(proc.Id)) continue;
                         if (_allowlist.IsDevelopmentProcess(proc.ProcessName)) continue;
 
+                        // Browsers spawn many child processes (renderers, GPU, utility) with
+                        // complex parent-child chains. ETW ancestry can lag, causing false PPID mismatch.
+                        var lowerName = proc.ProcessName.ToLowerInvariant();
+                        if (lowerName is "chrome" or "msedge" or "firefox" or "brave" or "opera" or "vivaldi")
+                            continue;
+
                         var pbi = new PROCESS_BASIC_INFORMATION();
                         int status = NtQueryInformationProcess(proc.Handle, ProcessBasicInformation,
                             ref pbi, Marshal.SizeOf<PROCESS_BASIC_INFORMATION>(), out _);
