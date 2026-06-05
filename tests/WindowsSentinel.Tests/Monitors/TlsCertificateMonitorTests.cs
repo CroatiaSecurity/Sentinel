@@ -75,7 +75,7 @@ namespace WindowsSentinel.Tests.Monitors
                 DateTime.UtcNow.AddYears(-1), DateTime.UtcNow.AddDays(-1)); // Already expired
             var result = TlsCertificateMonitor.AnalyzeCert(cert);
 
-            Assert.True(result.Confidence >= 0.85, $"Multi-signal attack cert should be >= 0.85, got {result.Confidence}");
+            Assert.True(result.Confidence >= 0.95, $"Multi-signal attack cert should be >= 0.95, got {result.Confidence}");
             Assert.Equal(DetectionTier.Tier2Indicator, result.Tier);
             Assert.Contains(result.Reasons, r => r.Contains("Short validity"));
             Assert.Contains(result.Reasons, r => r.Contains("No CRL/OCSP"));
@@ -122,15 +122,16 @@ namespace WindowsSentinel.Tests.Monitors
         [Fact]
         public void HighConfidenceCert_GetsRemoveCertAction()
         {
-            // A Tier2 cert with confidence >= 0.85 should get RemoveCert (no process kill)
-            using var cert = CreateTestCert("CN=MyCA", "CN=MyCA", 30);
+            // A Tier2 cert with confidence >= 0.95 should get RemoveCert (no process kill)
+            // 0.40 base + 0.15 short + 0.10 very-short + 0.15 no-CRL + 0.15 hex-CN = 0.95
+            using var cert = CreateTestCert("CN=a1b2c3d4e5f6", "CN=a1b2c3d4e5f6", 30);
             var result = TlsCertificateMonitor.AnalyzeCert(cert);
 
-            Assert.True(result.Confidence >= 0.85);
+            Assert.True(result.Confidence >= 0.95);
             Assert.Equal(DetectionTier.Tier2Indicator, result.Tier);
 
             // Verify the authorized response logic matches what the monitor would set
-            var authorizedResponse = result.Confidence >= 0.85 && result.Tier == DetectionTier.Tier2Indicator
+            var authorizedResponse = result.Confidence >= 0.95 && result.Tier == DetectionTier.Tier2Indicator
                 ? ResponseAction.RemoveCert
                 : ResponseAction.LogOnly;
             Assert.Equal(ResponseAction.RemoveCert, authorizedResponse);
@@ -147,8 +148,8 @@ namespace WindowsSentinel.Tests.Monitors
 
             Assert.Equal(DetectionTier.Tier2Indicator, result.Tier);
 
-            // Enterprise/dev-tool CAs: confidence is capped below 0.85, so LogOnly
-            var authorizedResponse = result.Confidence >= 0.85 && result.Tier == DetectionTier.Tier2Indicator
+            // Enterprise/dev-tool CAs: confidence is capped below 0.95, so LogOnly
+            var authorizedResponse = result.Confidence >= 0.95 && result.Tier == DetectionTier.Tier2Indicator
                 ? ResponseAction.RemoveCert
                 : ResponseAction.LogOnly;
             Assert.Equal(ResponseAction.LogOnly, authorizedResponse);

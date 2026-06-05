@@ -1376,7 +1376,7 @@ namespace WindowsSentinel.Core
 
                 var analysis = AnalyzeCert(cert);
 
-                if (analysis.Confidence >= 0.85)
+                if (analysis.Confidence >= 0.95)
                 {
                     // Suspicious cert — emit detection and action if active response enabled
                     var adderInfo = TraceAdderProcess(cert.Thumbprint);
@@ -1424,7 +1424,7 @@ namespace WindowsSentinel.Core
 
                 await EmitCertDetectionAsync(cert, analysis, adderInfo, isStartupScan: false);
 
-                if (_config.ActiveResponse && analysis.Confidence >= 0.85)
+                if (_config.ActiveResponse && analysis.Confidence >= 0.95)
                 {
                     await RemoveCertAsync(cert, adderInfo, analysis);
                     // Do NOT baseline — it was removed
@@ -1761,7 +1761,7 @@ namespace WindowsSentinel.Core
                 metadata["AdderProcessName"] = adderInfo.ProcessName;
             }
 
-            var authorizedResponse = analysis.Confidence >= 0.85 && analysis.Tier == DetectionTier.Tier2Indicator
+            var authorizedResponse = analysis.Confidence >= 0.95 && analysis.Tier == DetectionTier.Tier2Indicator
                 ? ResponseAction.RemoveCert
                 : ResponseAction.LogOnly;
 
