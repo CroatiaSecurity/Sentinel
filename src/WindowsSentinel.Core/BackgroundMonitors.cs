@@ -1777,8 +1777,17 @@ namespace WindowsSentinel.Core
             });
         }
 
+        // Browser processes that legitimately touch the certificate store - NEVER kill these
+        private static readonly HashSet<string> BrowserProcesses = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "chrome", "chrome.exe", "msedge", "msedge.exe", "firefox", "firefox.exe",
+            "brave", "brave.exe", "opera", "opera.exe", "vivaldi", "vivaldi.exe",
+            "safari", "safari.exe", "iexplore", "iexplore.exe"
+        };
+
         /// <summary>
         /// Removes a suspicious cert from the Root store and kills the adder process.
+        /// SAFETY: Never kills browser processes - they legitimately interact with cert store.
         /// </summary>
         private async Task RemoveCertAsync(
             System.Security.Cryptography.X509Certificates.X509Certificate2 cert,
@@ -1797,12 +1806,21 @@ namespace WindowsSentinel.Core
                 _logger.LogWarning("[TlsCertificateMonitor] REMOVED suspicious root cert: Subject={Subject}, Thumbprint={Thumb}",
                     cert.Subject, cert.Thumbprint);
 
-                // 2. Kill the adder process if traced
+                // 2. Kill the adder process if traced (NEVER kill browsers - they legitimately touch cert store)
                 if (adderInfo != null && adderInfo.ProcessId > 4)
                 {
-                    HardeningModule.SafeKillProcessTree(adderInfo.ProcessId);
-                    _logger.LogWarning("[TlsCertificateMonitor] KILLED adder process: {Name} PID={Pid}",
-                        adderInfo.ProcessName, adderInfo.ProcessId);
+                    var processName = Path.GetFileName(adderInfo.ProcessName);
+                    if (BrowserProcesses.Contains(processName))
+                    {
+                        _logger.LogWarning("[TlsCertificateMonitor] BLOCKED kill of browser process {Name} PID={Pid} - browsers legitimately touch cert store",
+                            adderInfo.ProcessName, adderInfo.ProcessId);
+                    }
+                    else
+                    {
+                        HardeningModule.SafeKillProcessTree(adderInfo.ProcessId);
+                        _logger.LogWarning("[TlsCertificateMonitor] KILLED adder process: {Name} PID={Pid}",
+                            adderInfo.ProcessName, adderInfo.ProcessId);
+                    }
                 }
 
                 // 3. Log the response
