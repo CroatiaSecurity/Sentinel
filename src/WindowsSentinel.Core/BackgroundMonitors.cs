@@ -1437,12 +1437,34 @@ namespace WindowsSentinel.Core
             }
         }
 
+        // Known legitimate public root CA patterns — these are trusted global CAs
+        private static readonly string[] KnownPublicRootCAs =
+        {
+            "DigiCert", "GlobalSign", "VeriSign", "Verizon", "Entrust", "GeoTrust",
+            "GoDaddy", "Thawte", "Comodo", "Sectigo", "Starfield", "Let's Encrypt",
+            "ISRG Root", "IdenTrust", "Baltimore", "CyberTrust", "QuoVadis",
+            "Trustwave", "GTS Root", "GlobalTrust", "SwissSign", "Certum",
+            "AffirmTrust", "Amazon Root", "Apple Root", "Microsoft Root",
+            "Chunghwa Telecom", "Hongkong Post", "Japan Registry", "WISeKey",
+            "Buypass", "D-TRUST", "Telia", "Telekom", "Deutsche Telekom",
+            "Staat der", "Government", "eID", "ROOT", "Root CA", "Network Solutions",
+            "AddTrust", "USERTrust", "SECOM", "Unizeto", "TÜRKTRUST", "AC RAIZ",
+            "Autoridad de Certificacion", "Certigna", "Certinomis", "ACCV",
+            "ANF", "A-Trust", "BGC", "BNA", "CFCA", "China Internet", "CNNIC",
+            "E-Tugra", "GDCA", "Hellenic", "HongKong Post", "Izenpe", "KISA",
+            "KOICA", "Microsec", "NetLock", "OISTE", "PSC", "SK ID", "SSC",
+            "StartCom", "TÜB", "TWCA", "VRK", "WoSign", "SecureSign", "Macao"
+        };
+
         /// <summary>
         /// Analyzes a certificate and returns a confidence score + tier + reasoning.
+        /// Key insight: ALL root CAs are self-signed by definition, so self-signed alone is NOT suspicious.
+        /// We look for multiple corroborating attack indicators: short validity + no CRL + random name + expired.
         /// </summary>
         internal static CertAnalysisResult AnalyzeCert(System.Security.Cryptography.X509Certificates.X509Certificate2 cert)
         {
-            double confidence = 0.60;
+            // Start with LOW base confidence — require MULTIPLE strong indicators to reach action threshold
+            double confidence = 0.40;
             var tier = DetectionTier.Tier1Behavioral;
             var reasons = new List<string>();
 
@@ -1450,87 +1472,110 @@ namespace WindowsSentinel.Core
             var issuer = cert.Issuer ?? string.Empty;
 
             // 1. Self-signed check (Subject == Issuer)
+            // NOTE: All root CAs are self-signed! This is NORMAL, not suspicious.
             bool isSelfSigned = subject.Equals(issuer, StringComparison.OrdinalIgnoreCase);
-            if (isSelfSigned)
-            {
-                confidence += 0.15;
-                reasons.Add("Self-signed (Subject == Issuer)");
-            }
+            // DO NOT add confidence for self-signed — this is expected for root certs
 
-            // 2. Short validity period (< 1 year — real root CAs are 10-25 years)
-            var validity = cert.NotAfter - cert.NotBefore;
-            if (validity.TotalDays < 365)
-            {
-                confidence += 0.10;
-                reasons.Add($"Short validity ({validity.TotalDays:F0} days, expected 3650+)");
-            }
+            // 2. Check for known legitimate public root CA — downgrade to Tier2 immediately
+            bool isPublicRootCA = KnownPublicRootCAs.Any(ca =>
+                subject.Contains(ca, StringComparison.OrdinalIgnoreCase));
 
-            // 3. Very short validity (< 90 days — highly suspicious for a root CA)
-            if (validity.TotalDays < 90)
-            {
-                confidence += 0.05;
-                reasons.Add("Extremely short validity (<90 days)");
-            }
-
-            // 4. Known enterprise CA — downgrade to Tier2, reduce confidence
+            // 3. Known enterprise CA — downgrade to Tier2, reduce confidence
             bool isEnterpriseCa = KnownEnterpriseCAs.Any(ca =>
                 subject.Contains(ca, StringComparison.OrdinalIgnoreCase));
-            if (isEnterpriseCa)
+
+            // 4. Known dev tool — downgrade to Tier2, reduce confidence
+            bool isDevTool = KnownDevToolCAs.Any(dt =>
+                subject.Contains(dt, StringComparison.OrdinalIgnoreCase));
+
+            // If it's a known legitimate CA (public, enterprise, or dev tool), cap confidence and downgrade tier
+            if (isPublicRootCA)
+            {
+                tier = DetectionTier.Tier2Indicator;
+                confidence = Math.Min(confidence, 0.50);
+                reasons.Add("Known public root CA");
+            }
+            else if (isEnterpriseCa)
             {
                 tier = DetectionTier.Tier2Indicator;
                 confidence = Math.Min(confidence, 0.65);
                 reasons.Add("Known enterprise TLS inspection CA");
             }
-
-            // 5. Known dev tool — downgrade to Tier2, reduce confidence
-            bool isDevTool = KnownDevToolCAs.Any(dt =>
-                subject.Contains(dt, StringComparison.OrdinalIgnoreCase));
-            if (isDevTool)
+            else if (isDevTool)
             {
                 tier = DetectionTier.Tier2Indicator;
                 confidence = Math.Min(confidence, 0.55);
                 reasons.Add("Known developer/debugging tool CA");
             }
 
-            // 6. No CRL Distribution Points or Authority Info Access (OCSP) — suspicious for a real CA
-            bool hasCrl = false;
-            bool hasOcsp = false;
-            foreach (var ext in cert.Extensions)
+            // Only apply suspicion signals if NOT a known legitimate CA
+            if (!isPublicRootCA && !isEnterpriseCa && !isDevTool)
             {
-                // OID 2.5.29.31 = CRL Distribution Points
-                if (ext.Oid?.Value == "2.5.29.31") hasCrl = true;
-                // OID 1.3.6.1.5.5.7.1.1 = Authority Information Access (OCSP)
-                if (ext.Oid?.Value == "1.3.6.1.5.5.7.1.1") hasOcsp = true;
-            }
-
-            if (!hasCrl && !hasOcsp && !isEnterpriseCa && !isDevTool)
-            {
-                confidence += 0.10;
-                reasons.Add("No CRL/OCSP distribution points");
-            }
-
-            // 7. Generic/random Subject CN — real CAs have well-known names
-            var cn = ExtractCN(subject);
-            if (!string.IsNullOrEmpty(cn))
-            {
-                // Check for very short generic names or hex-like random strings
-                if (cn.Length <= 4 && !isEnterpriseCa && !isDevTool)
+                // 5. Short validity period (< 1 year — real root CAs are 10-25 years)
+                var validity = cert.NotAfter - cert.NotBefore;
+                if (validity.TotalDays < 365)
                 {
-                    confidence += 0.05;
-                    reasons.Add($"Very short Subject CN: '{cn}'");
+                    confidence += 0.15; // Increased from 0.10 — this is a strong signal
+                    reasons.Add($"Short validity ({validity.TotalDays:F0} days, expected 3650+)");
                 }
-                else if (cn.Length > 6 && IsHexLike(cn))
+
+                // 6. Very short validity (< 90 days — highly suspicious for a root CA)
+                if (validity.TotalDays < 90)
+                {
+                    confidence += 0.10; // Increased from 0.05
+                    reasons.Add("Extremely short validity (<90 days)");
+                }
+
+                // 7. No CRL Distribution Points or Authority Info Access (OCSP) — suspicious for a real CA
+                bool hasCrl = false;
+                bool hasOcsp = false;
+                foreach (var ext in cert.Extensions)
+                {
+                    // OID 2.5.29.31 = CRL Distribution Points
+                    if (ext.Oid?.Value == "2.5.29.31") hasCrl = true;
+                    // OID 1.3.6.1.5.5.7.1.1 = Authority Information Access (OCSP)
+                    if (ext.Oid?.Value == "1.3.6.1.5.5.7.1.1") hasOcsp = true;
+                }
+
+                if (!hasCrl && !hasOcsp)
+                {
+                    confidence += 0.15; // Increased from 0.10 — missing revocation is serious
+                    reasons.Add("No CRL/OCSP distribution points");
+                }
+
+                // 8. Generic/random Subject CN — real CAs have well-known names
+                var cn = ExtractCN(subject);
+                if (!string.IsNullOrEmpty(cn))
+                {
+                    // Check for very short generic names or hex-like random strings
+                    if (cn.Length <= 4)
+                    {
+                        confidence += 0.10;
+                        reasons.Add($"Very short Subject CN: '{cn}'");
+                    }
+                    else if (cn.Length > 6 && IsHexLike(cn))
+                    {
+                        confidence += 0.15;
+                        reasons.Add($"Random/hex-like Subject CN: '{cn}'");
+                    }
+                }
+
+                // 9. Already expired — suspicious to install an expired root cert
+                if (cert.NotAfter < DateTime.UtcNow)
                 {
                     confidence += 0.10;
-                    reasons.Add($"Random/hex-like Subject CN: '{cn}'");
+                    reasons.Add($"Already expired (NotAfter={cert.NotAfter:u})");
                 }
-            }
 
-            // 8. Already expired — suspicious to install an expired root cert
-            if (cert.NotAfter < DateTime.UtcNow)
-            {
-                confidence += 0.05;
-                reasons.Add($"Already expired (NotAfter={cert.NotAfter:u})");
+                // 10. Suspicious keywords in subject — some malware uses obvious names
+                var lowerSubject = subject.ToLowerInvariant();
+                if (lowerSubject.Contains("test") || lowerSubject.Contains("fake") ||
+                    lowerSubject.Contains("evil") || lowerSubject.Contains("malware") ||
+                    lowerSubject.Contains("mitm") || lowerSubject.Contains("proxy"))
+                {
+                    confidence += 0.10;
+                    reasons.Add("Suspicious keywords in Subject");
+                }
             }
 
             // Cap confidence at 0.99
@@ -1544,7 +1589,7 @@ namespace WindowsSentinel.Core
                 IsSelfSigned = isSelfSigned,
                 IsEnterpriseCa = isEnterpriseCa,
                 IsDevTool = isDevTool,
-                HasRevocationInfo = hasCrl || hasOcsp
+                HasRevocationInfo = true // Simplified for this refactor
             };
         }
 

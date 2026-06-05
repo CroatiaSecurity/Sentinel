@@ -11,25 +11,25 @@ namespace WindowsSentinel.Tests.Monitors
         // ── CertAnalysisResult scoring tests ────────────────────────────────
 
         [Fact]
-        public void AnalyzeCert_SelfSigned_IncreasesConfidence()
+        public void AnalyzeCert_SelfSigned_Alone_DoesNotIncreaseConfidence()
         {
-            // Self-signed: Subject == Issuer
-            using var cert = CreateTestCert("CN=EvilCA", "CN=EvilCA", 30);
+            // Self-signed alone is NOT suspicious — ALL root CAs are self-signed by definition
+            using var cert = CreateTestCert("CN=SomeRootCA", "CN=SomeRootCA", 3650);
             var result = TlsCertificateMonitor.AnalyzeCert(cert);
 
             Assert.True(result.IsSelfSigned);
-            Assert.True(result.Confidence > 0.70, $"Expected > 0.70 but got {result.Confidence}");
-            Assert.Contains(result.Reasons, r => r.Contains("Self-signed"));
+            // Base confidence is 0.40, no bonus for self-signed anymore
+            Assert.True(result.Confidence < 0.60, $"Self-signed alone should be < 0.60, got {result.Confidence}");
         }
 
         [Fact]
         public void AnalyzeCert_ShortValidity_IncreasesConfidence()
         {
-            // Short validity: < 365 days
+            // Short validity: < 365 days (0.40 base + 0.15 short + 0.10 very-short = 0.65)
             using var cert = CreateTestCert("CN=ShortLived", "CN=RealIssuer", 60);
             var result = TlsCertificateMonitor.AnalyzeCert(cert);
 
-            Assert.True(result.Confidence > 0.65, $"Expected > 0.65 but got {result.Confidence}");
+            Assert.True(result.Confidence > 0.60, $"Expected > 0.60 but got {result.Confidence}");
             Assert.Contains(result.Reasons, r => r.Contains("Short validity"));
         }
 
@@ -67,29 +67,33 @@ namespace WindowsSentinel.Tests.Monitors
         }
 
         [Fact]
-        public void AnalyzeCert_SelfSignedShortNoRevocation_HighConfidence()
+        public void AnalyzeCert_MultiSignalAttackCert_HighConfidence()
         {
-            // Self-signed + short validity + no CRL/OCSP = classic attack cert
-            using var cert = CreateTestCert("CN=MyCA", "CN=MyCA", 30);
+            // Short validity + no CRL/OCSP + hex-like CN + expired = classic attack cert
+            // (0.40 base + 0.15 short + 0.10 very-short + 0.15 no-CRL + 0.15 hex-CN + 0.10 expired = 1.05 capped)
+            using var cert = CreateTestCertWithDates("CN=a1b2c3d4e5f6", "CN=a1b2c3d4e5f6",
+                DateTime.UtcNow.AddYears(-1), DateTime.UtcNow.AddDays(-1)); // Already expired
             var result = TlsCertificateMonitor.AnalyzeCert(cert);
 
-            // 0.60 base + 0.15 self-signed + 0.10 short + 0.05 very-short + 0.10 no-CRL = 1.00 capped to 0.99
-            Assert.True(result.Confidence >= 0.85, $"Multi-signal cert should be >= 0.85, got {result.Confidence}");
+            Assert.True(result.Confidence >= 0.85, $"Multi-signal attack cert should be >= 0.85, got {result.Confidence}");
             Assert.Equal(DetectionTier.Tier1Behavioral, result.Tier);
+            Assert.Contains(result.Reasons, r => r.Contains("Short validity"));
+            Assert.Contains(result.Reasons, r => r.Contains("No CRL/OCSP"));
+            Assert.Contains(result.Reasons, r => r.Contains("hex-like"));
+            Assert.Contains(result.Reasons, r => r.Contains("expired"));
         }
 
         [Fact]
-        public void AnalyzeCert_LegitimateCA_StaysLowConfidence()
+        public void AnalyzeCert_KnownPublicRootCA_DowngradesToTier2()
         {
-            // Long validity, different issuer (not self-signed)
+            // DigiCert is now in KnownPublicRootCAs — should be Tier2 with capped confidence
             using var cert = CreateTestCert("CN=DigiCert Global Root G2, O=DigiCert Inc", "CN=DigiCert Global Root G2, O=DigiCert Inc", 7300);
             var result = TlsCertificateMonitor.AnalyzeCert(cert);
 
-            // Self-signed but with very long validity — only gets the self-signed bump
-            // Most legitimate root CAs ARE self-signed, so this alone shouldn't trigger action
-            Assert.Equal(DetectionTier.Tier1Behavioral, result.Tier);
-            Assert.False(result.IsEnterpriseCa);
-            Assert.False(result.IsDevTool);
+            // DigiCert is a known legitimate public root CA
+            Assert.Equal(DetectionTier.Tier2Indicator, result.Tier);
+            Assert.True(result.Confidence <= 0.50, $"Known public CA confidence should be capped at 0.50, got {result.Confidence}");
+            Assert.Contains(result.Reasons, r => r.Contains("public root CA"));
         }
 
         [Fact]
