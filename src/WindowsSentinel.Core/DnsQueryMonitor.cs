@@ -34,6 +34,21 @@ namespace WindowsSentinel.Core
         private const int DgaMinLength = 14;
         private const int RapidQueryThreshold = 50; // queries per base domain per window
 
+        // Dynamically resolved at startup — the local machine's own hostname and FQDN
+        private static readonly HashSet<string> LocalHostNames = BuildLocalHostNames();
+        private static HashSet<string> BuildLocalHostNames()
+        {
+            var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                var name = System.Net.Dns.GetHostName();
+                set.Add(name);
+                set.Add(name.Split('.')[0]); // short name
+            }
+            catch { }
+            return set;
+        }
+
         // Domains with naturally high-entropy subdomains or high query volumes
         private static readonly HashSet<string> TrustedBaseDomains = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -56,7 +71,7 @@ namespace WindowsSentinel.Core
             // Other common
             "spotify.com", "scdn.co", "discord.gg", "discordapp.com",
             // Windows internals — high-volume by design, not C2
-            "wpad", "local", "localdomain",
+            "wpad",
         };
         private const string SessionName = "SentinelDnsMonitor";
         private static readonly Guid DnsClientProvider = new("1C95126E-7EEA-49A9-A3FE-A378B03DDB4D");
@@ -132,7 +147,7 @@ namespace WindowsSentinel.Core
             _queryStats.AddOrUpdate(baseDomain, 1, (_, c) => c + 1);
 
             // Check for DGA-like patterns on subdomain portion
-            if (labels.Length > 2 && !TrustedBaseDomains.Contains(baseDomain))
+            if (labels.Length > 2 && !TrustedBaseDomains.Contains(baseDomain) && !LocalHostNames.Contains(baseDomain))
             {
                 var subdomain = string.Join(".", labels.Take(labels.Length - 2));
                 if (subdomain.Length >= DgaMinLength)
@@ -154,7 +169,7 @@ namespace WindowsSentinel.Core
             }
 
             // Check for rapid unique queries to same base domain (DNS tunneling / beaconing)
-            if (_queryStats.TryGetValue(baseDomain, out var count) && count == RapidQueryThreshold && !TrustedBaseDomains.Contains(baseDomain))
+            if (_queryStats.TryGetValue(baseDomain, out var count) && count == RapidQueryThreshold && !TrustedBaseDomains.Contains(baseDomain) && !LocalHostNames.Contains(baseDomain))
             {
                 _ = _detectionEngine.EmitAsync(new DetectionEvent
                 {

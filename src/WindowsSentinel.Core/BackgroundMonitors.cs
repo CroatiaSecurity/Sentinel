@@ -2107,6 +2107,7 @@ namespace WindowsSentinel.Core
         private readonly ILogger<PhantomDeviceMonitor> _logger;
         private readonly ConcurrentDictionary<string, NetworkDevice> _knownDevices = new(StringComparer.OrdinalIgnoreCase);
         private readonly ConcurrentDictionary<string, DateTime> _blockedIps = new(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<string> _trustedIps = new(StringComparer.OrdinalIgnoreCase);
 
         private static readonly int[] SuspiciousPorts = { 8008, 8009, 8443, 5555, 5353, 9222, 2323, 4443 };
 
@@ -2134,10 +2135,16 @@ namespace WindowsSentinel.Core
         {
             _logger.LogInformation("[PhantomDeviceMonitor] Started");
 
+            // Always trust the default gateway and local machine IPs — never alert on them
+            foreach (var gw in GetDefaultGatewayIps())
+                _trustedIps.Add(gw);
+            foreach (var localIp in GetLocalIps())
+                _trustedIps.Add(localIp);
+
             var initial = GetArpTable();
             foreach (var dev in initial)
                 _knownDevices[dev.Mac] = dev;
-            _logger.LogInformation("[PhantomDeviceMonitor] Baseline: {Count} devices", _knownDevices.Count);
+            _logger.LogInformation("[PhantomDeviceMonitor] Baseline: {Count} devices, {Trusted} trusted IPs", _knownDevices.Count, _trustedIps.Count);
 
             while (!ct.IsCancellationRequested)
             {
@@ -2151,6 +2158,7 @@ namespace WindowsSentinel.Core
                         if (dev.Mac == "FF-FF-FF-FF-FF-FF") continue;
                         if (dev.Mac.StartsWith("01-00-5E", StringComparison.OrdinalIgnoreCase)) continue;
                         if (dev.Mac.StartsWith("33-33-", StringComparison.OrdinalIgnoreCase)) continue;
+                        if (_trustedIps.Contains(dev.Ip)) continue;
 
                         if (!_knownDevices.ContainsKey(dev.Mac))
                         {
@@ -2356,6 +2364,30 @@ namespace WindowsSentinel.Core
             }
             catch { }
             return devices;
+        }
+
+        private static IEnumerable<string> GetDefaultGatewayIps()
+        {
+            foreach (var nic in System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces())
+            {
+                if (nic.OperationalStatus != System.Net.NetworkInformation.OperationalStatus.Up) continue;
+                foreach (var gw in nic.GetIPProperties().GatewayAddresses)
+                {
+                    var addr = gw.Address.ToString();
+                    if (addr != "0.0.0.0" && addr != "::")
+                        yield return addr;
+                }
+            }
+        }
+
+        private static IEnumerable<string> GetLocalIps()
+        {
+            foreach (var nic in System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces())
+            {
+                if (nic.OperationalStatus != System.Net.NetworkInformation.OperationalStatus.Up) continue;
+                foreach (var ua in nic.GetIPProperties().UnicastAddresses)
+                    yield return ua.Address.ToString();
+            }
         }
 
         [StructLayout(LayoutKind.Sequential)]
