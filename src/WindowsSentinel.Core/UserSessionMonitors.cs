@@ -311,12 +311,17 @@ namespace WindowsSentinel.Core
         private readonly DetectionEngine _detectionEngine;
         private readonly ILogger<NeuroBehaviorVisualMonitor> _logger;
 
-        // Browsers legitimately change focus rapidly (tab switches, popups, notifications)
-        // and users frequently move the cursor large distances. Skip anomaly counting.
+        // Browsers and IDEs legitimately change focus rapidly (tab switches, popups, notifications,
+        // panel switches, autocomplete popups) and users frequently move the cursor large distances.
+        // Skip anomaly counting for these processes to avoid false positive kills.
         private static readonly HashSet<string> KnownBrowserProcesses = new(StringComparer.OrdinalIgnoreCase)
         {
+            // Browsers
             "chrome", "msedge", "firefox", "brave", "opera", "vivaldi", "iexplore",
-            "msedgewebview2", "electron"
+            "msedgewebview2", "electron",
+            // IDEs / dev tools
+            "Devin", "code", "cursor", "Windsurf", "devenv", "rider64",
+            "phpstorm64", "idea64", "webstorm64", "goland64", "pycharm64"
         };
 
         [DllImport("user32.dll")]

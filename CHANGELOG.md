@@ -2,6 +2,11 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [6.4.1] - 2026-06-06
+
+### Fixed — IDE False Positive Kill
+- **`NeuroBehaviorVisualMonitor` killed Devin IDE** — The monitor scored rapid window focus changes and large cursor movements as "visual anomalies" and killed the Devin process with `KillProcessTree`. IDEs legitimately trigger focus changes (panel switches, autocomplete popups, file navigation) and developers frequently move the cursor across monitors. Added Devin, VS Code, Cursor, Windsurf, Visual Studio, Rider, and JetBrains IDEs to the exemption list alongside browsers.
+
 ## [6.4.0] - 2026-06-06
 
 ### Security Fix — ChainTracer Critical Process Spoofing
