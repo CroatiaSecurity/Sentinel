@@ -82,6 +82,7 @@ namespace WindowsSentinel.Core
             bool shouldIsolateNetwork = false;
             bool shouldUnloadDllAndKillOwner = false;
             bool shouldRemoveCertAndKillAdder = false;
+            bool shouldRemoveCert = false;
             bool shouldRemoveRegistryEntry = false;
             string reason = "LogOnly";
 
@@ -110,7 +111,7 @@ namespace WindowsSentinel.Core
                     reason = "LogOnly (ActiveResponse disabled)";
                 }
             }
-            else if (effectiveResponse == ResponseAction.RemoveCertAndKillAdder && effectiveTier == DetectionTier.Tier2Indicator)
+            else if (effectiveResponse == ResponseAction.RemoveCertAndKillAdder && effectiveTier == DetectionTier.Tier1Behavioral)
             {
                 if (_config.ActiveResponse)
                 {
@@ -134,13 +135,17 @@ namespace WindowsSentinel.Core
                     reason = "LogOnly (ActiveResponse disabled)";
                 }
             }
-            else if (effectiveResponse == ResponseAction.RemoveCert && effectiveTier == DetectionTier.Tier2Indicator)
+            else if (effectiveResponse == ResponseAction.RemoveCert && effectiveTier == DetectionTier.Tier1Behavioral)
             {
-                // Cert removal is handled directly by TlsCertificateMonitor (native X509Store.Remove).
-                // No process is terminated. The response engine just records the action.
-                reason = _config.ActiveResponse
-                    ? $"RemoveCert (AuthorizedResponse={effectiveResponse}, no process terminated)"
-                    : "LogOnly (ActiveResponse disabled)";
+                if (_config.ActiveResponse)
+                {
+                    shouldRemoveCert = true;
+                    reason = $"RemoveCert (AuthorizedResponse={effectiveResponse}, no process terminated)";
+                }
+                else
+                {
+                    reason = "LogOnly (ActiveResponse disabled)";
+                }
             }
             else if (effectiveResponse == ResponseAction.NetworkIsolate && effectiveTier == DetectionTier.Tier1Behavioral)
             {
@@ -180,11 +185,18 @@ namespace WindowsSentinel.Core
 
             if (shouldRemoveCertAndKillAdder)
             {
-                // Cert removal + adder kill is handled directly by TlsCertificateMonitor
-                // (uses native X509Store.Remove API + HardeningModule.SafeKillProcessTree).
-                // The response engine just logs the action taken.
                 var certThumb = detection.Metadata.GetValueOrDefault("CertThumbprint", "Unknown");
                 var adderPidStr = detection.Metadata.GetValueOrDefault("AdderProcessId", "0");
+
+                if (!string.IsNullOrEmpty(certThumb) && certThumb != "Unknown")
+                {
+                    RemoveCertificateFromStore(certThumb);
+                }
+
+                if (int.TryParse(adderPidStr, out int adderPid) && adderPid > 4)
+                {
+                    HardeningModule.SafeKillProcessTree(adderPid);
+                }
 
                 stopwatch.Stop();
                 _metrics.RecordResponse(stopwatch.ElapsedMilliseconds);
@@ -195,6 +207,28 @@ namespace WindowsSentinel.Core
                     ProcessName = detection.ProcessName,
                     ActionTaken = "REMOVE_CERT_AND_KILL_ADDER",
                     Reason = $"Triggered by rule: {detection.RuleName}. {reason}. CertThumbprint={certThumb}. AdderPID={adderPidStr}",
+                    ExecutionTimeMs = stopwatch.ElapsedMilliseconds
+                };
+                await _eventLogger.LogEventAsync("response", responseLog);
+            }
+            else if (shouldRemoveCert)
+            {
+                var certThumb = detection.Metadata.GetValueOrDefault("CertThumbprint", "Unknown");
+
+                if (!string.IsNullOrEmpty(certThumb) && certThumb != "Unknown")
+                {
+                    RemoveCertificateFromStore(certThumb);
+                }
+
+                stopwatch.Stop();
+                _metrics.RecordResponse(stopwatch.ElapsedMilliseconds);
+
+                var responseLog = new ResponseEvent
+                {
+                    ProcessId = detection.ProcessId,
+                    ProcessName = detection.ProcessName,
+                    ActionTaken = "REMOVE_CERT",
+                    Reason = $"Triggered by rule: {detection.RuleName}. {reason}. CertThumbprint={certThumb}",
                     ExecutionTimeMs = stopwatch.ElapsedMilliseconds
                 };
                 await _eventLogger.LogEventAsync("response", responseLog);
@@ -388,6 +422,31 @@ namespace WindowsSentinel.Core
                     ExecutionTimeMs = stopwatch.ElapsedMilliseconds
                 };
                 await _eventLogger.LogEventAsync("response", responseLog);
+            }
+        }
+
+        private void RemoveCertificateFromStore(string thumbprint)
+        {
+            try
+            {
+                using var store = new System.Security.Cryptography.X509Certificates.X509Store(
+                    System.Security.Cryptography.X509Certificates.StoreName.Root,
+                    System.Security.Cryptography.X509Certificates.StoreLocation.LocalMachine);
+                store.Open(System.Security.Cryptography.X509Certificates.OpenFlags.ReadWrite);
+
+                var certs = store.Certificates.Find(
+                    System.Security.Cryptography.X509Certificates.X509FindType.FindByThumbprint,
+                    thumbprint,
+                    validOnly: false);
+
+                foreach (var cert in certs)
+                {
+                    store.Remove(cert);
+                }
+            }
+            catch (Exception ex)
+            {
+                _eventLogger.LogEventAsync("debug", new { Message = $"Failed to remove cert {thumbprint}: {ex.Message}" }).GetAwaiter().GetResult();
             }
         }
 

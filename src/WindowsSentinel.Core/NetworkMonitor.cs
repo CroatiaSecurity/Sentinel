@@ -27,6 +27,7 @@ namespace WindowsSentinel.Core
         private readonly ProcessAncestryCache _ancestryCache;
         private readonly BeaconingDetector _beaconingDetector;
         private readonly ILogger<NetworkMonitor> _logger;
+        private readonly BehavioralBaselineService? _behavioralBaseline;
         private readonly System.Threading.Timer _timer;
         private readonly ConcurrentDictionary<string, int> _connectionCounts = new();
 
@@ -44,12 +45,14 @@ namespace WindowsSentinel.Core
             TelemetryFusionEngine fusionEngine,
             ProcessAncestryCache ancestryCache,
             BeaconingDetector beaconingDetector,
-            ILogger<NetworkMonitor> logger)
+            ILogger<NetworkMonitor> logger,
+            BehavioralBaselineService? behavioralBaseline = null)
         {
             _detectionEngine = detectionEngine;
             _fusionEngine = fusionEngine;
             _ancestryCache = ancestryCache;
             _beaconingDetector = beaconingDetector;
+            _behavioralBaseline = behavioralBaseline;
             _logger = logger;
             _timer = new System.Threading.Timer(ScanConnections, null, ScanInterval, ScanInterval);
         }
@@ -203,10 +206,13 @@ namespace WindowsSentinel.Core
                                 }
                             }
 
-                            // 1. Record connection in statistical beaconing detector
-                            _beaconingDetector.RecordConnection(remoteIp, remotePort, (int)row.owningPid, processName, "Established");
-
-                            // 2. Behavioral checks
+                             // 1. Record connection in statistical beaconing detector
+                             _beaconingDetector.RecordConnection(remoteIp, remotePort, (int)row.owningPid, processName, "Established");
+ 
+                             // 1.5. Record connection in behavioral baseline
+                             _behavioralBaseline?.RecordNetworkConnection(processName, remoteIp, remotePort);
+ 
+                             // 2. Behavioral checks
                             // A. Shell process outbound to non-standard port
                             if (ShellProcesses.Contains(processName) && !StandardPorts.Contains(remotePort))
                             {

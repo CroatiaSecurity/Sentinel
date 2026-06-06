@@ -54,10 +54,13 @@ namespace WindowsSentinel.Core
                 "Windsurf", "code", "cursor",
             };
 
-        public BeaconingDetector(DetectionEngine de, ILogger<BeaconingDetector> l)
+        private readonly BehavioralBaselineService? _baseline;
+
+        public BeaconingDetector(DetectionEngine de, ILogger<BeaconingDetector> l, BehavioralBaselineService? baseline = null)
         {
             _detectionEngine = de;
             _logger = l;
+            _baseline = baseline;
         }
 
         /// <summary>
@@ -69,6 +72,11 @@ namespace WindowsSentinel.Core
             if (LegitimatePeriodicProcesses.Contains(processName)) return;
             if (state != "Established") return;
             if (remotePort is 80 or 443) return;
+
+            if (_baseline != null && _baseline.IsKnownNetworkDestination(processName, remoteAddress, remotePort))
+            {
+                return;
+            }
 
             var key = $"{processId}:{remoteAddress}:{remotePort}";
             var history = _history.GetOrAdd(key, _ => new ConnectionHistory(

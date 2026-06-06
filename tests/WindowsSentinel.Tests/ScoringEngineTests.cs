@@ -181,5 +181,45 @@ namespace WindowsSentinel.Tests
             var engine = CreateEngine();
             engine.Cleanup(); // Should not throw even with no state
         }
+
+        [Fact]
+        public void Score_EstablishedBaselineProcess_AppliesReduction()
+        {
+            var dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "sentinel_test_baseline_" + System.Guid.NewGuid().ToString("N")[..8]);
+            var cache = new SecureCacheStore(dir);
+            var allowlist = new AllowlistService(cache, NullLogger<AllowlistService>.Instance);
+            var baseline = new BehavioralBaselineService(cache, NullLogger<BehavioralBaselineService>.Instance);
+            
+            // Record a process multiple times to establish it in baseline
+            for (int i = 0; i < 5; i++)
+            {
+                baseline.RecordProcess("goodapp.exe", @"C:\Program Files\goodapp.exe", 100, "explorer.exe");
+            }
+
+            var engine = new ScoringEngine(allowlist, new SafeProcessExemptionRegistry(), NullLogger<ScoringEngine>.Instance, baseline);
+            
+            // Non-President's Law rule hit
+            var detection = new DetectionEvent
+            {
+                RuleName = "Suspicious Execution Path",
+                Confidence = 0.80,
+                Tier = DetectionTier.Tier1Behavioral,
+                ProcessName = "goodapp.exe",
+                ProcessId = 9000,
+                Metadata = new()
+                {
+                    ["ParentProcessName"] = "explorer.exe"
+                }
+            };
+
+            var score = engine.Score(detection);
+            
+            // 80 base + 10 Tier1 - 15 established - 10 parent-child = 65 threat score
+            Assert.Equal(65, score.Score);
+            Assert.Contains(score.Adjustments, adj => adj.Reason.Contains("established"));
+            Assert.Contains(score.Adjustments, adj => adj.Reason.Contains("parent-child"));
+
+            try { System.IO.Directory.Delete(dir, true); } catch { }
+        }
     }
 }

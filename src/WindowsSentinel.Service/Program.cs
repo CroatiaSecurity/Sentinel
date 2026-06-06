@@ -131,6 +131,7 @@ namespace WindowsSentinel.Service
                     services.AddHostedService<DnsResponseValidationMonitor>();
                     services.AddHostedService<FirefoxCredentialGuardMonitor>();
                     services.AddHostedService<FirewallIntegrityMonitor>();
+                    services.AddHostedService<GatewayFingerprintMonitor>();
                     services.AddHostedService<MicrosoftAccountGuardMonitor>();
                     services.AddHostedService<PublicIpMonitor>();
                     services.AddHostedService<RemoteAccessMonitor>();
@@ -149,7 +150,8 @@ namespace WindowsSentinel.Service
                     services.AddHostedService<BeaconingDetector>(sp => sp.GetRequiredService<BeaconingDetector>());
                     services.AddHostedService<ModuleValidationMonitor>();
                     services.AddHostedService<DiskWideDllScanner>();
-                    services.AddHostedService<BehavioralBaselineService>();
+                    services.AddSingleton<BehavioralBaselineService>();
+                    services.AddHostedService<BehavioralBaselineService>(sp => sp.GetRequiredService<BehavioralBaselineService>());
                     services.AddHostedService<PhantomDeviceMonitor>();
                     services.AddHostedService<FileVerdictScanner>();
                     services.AddHostedService<WebcamHijackMonitor>();

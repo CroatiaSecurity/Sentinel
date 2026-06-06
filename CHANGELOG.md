@@ -2,6 +2,17 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [6.8.0] - 2026-06-06
+
+### Added — Behavioral Baseline & Response Integrity
+- **`GatewayFingerprintMonitor`** — Registered as a hosted service under the SYSTEM service host.
+- **`BehavioralBaselineService`** — Registered as a singleton hosted service in DI, wiring it up to monitors and the ScoringEngine.
+- **Baseline Telemetry Collection** — Wired process monitors (`EtwProcessMonitor`, `WmiProcessMonitor`) and network monitor (`NetworkMonitor`) to automatically record process start and network connection telemetry in the baseline.
+- **Baseline Scoring Adjustments** — Integrated baseline querying into `ScoringEngine` to reduce the threat score (apply trust adjustments) for established processes, known parent-child chains, and known network destinations.
+- **Statistical Beaconing Filter** — Wired the baseline query into `BeaconingDetector` to ignore periodic network connections that are already established/known in the baseline, preventing false-positive storms on standard background services.
+- **Response Engine Constraints** — Corrected `AdvancedResponseEngine` to strictly enforce the Tier 2 security contract (demoting any Tier 2 certificate detections to log-only).
+- **Active Certificate Removal** — Implemented actual certificate store modification (`X509Store.Remove`) and process tree termination (`HardeningModule.SafeKillProcessTree`) for Tier 1 certificate detections in `AdvancedResponseEngine.cs` (replacing the previous security theater logging).
+
 ## [6.7.0] - 2026-06-06
 
 ### Fixed — Logging Robustness & Data Integrity

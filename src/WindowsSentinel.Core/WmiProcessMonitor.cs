@@ -9,16 +9,19 @@ namespace WindowsSentinel.Core
         private readonly TelemetryFusionEngine _fusionEngine;
         private readonly DetectionEngine _detectionEngine;
         private readonly ProcessAncestryCache _ancestryCache;
+        private readonly BehavioralBaselineService? _behavioralBaseline;
         private ManagementEventWatcher? _watcher;
 
         public WmiProcessMonitor(
             TelemetryFusionEngine fusionEngine,
             DetectionEngine detectionEngine,
-            ProcessAncestryCache ancestryCache)
+            ProcessAncestryCache ancestryCache,
+            BehavioralBaselineService? behavioralBaseline = null)
         {
             _fusionEngine = fusionEngine;
             _detectionEngine = detectionEngine;
             _ancestryCache = ancestryCache;
+            _behavioralBaseline = behavioralBaseline;
 
             Start();
         }
@@ -53,6 +56,8 @@ namespace WindowsSentinel.Core
 
                 var parent = _ancestryCache.GetParent(pid);
                 string parentName = parent.name != "unknown" ? parent.name : "unknown";
+
+                _behavioralBaseline?.RecordProcess(name, imagePath, ppid, parentName);
 
                 var telemetry = new ProcessTelemetry
                 {

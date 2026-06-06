@@ -23,6 +23,7 @@ namespace WindowsSentinel.Core
     {
         private readonly AllowlistService _allowlist;
         private readonly SafeProcessExemptionRegistry _exemptionRegistry;
+        private readonly BehavioralBaselineService? _baseline;
         private readonly ILogger<ScoringEngine> _logger;
         private readonly ConcurrentDictionary<int, ProcessScoreState> _processStates = new();
         private readonly TimeSpan _stateRetention = TimeSpan.FromMinutes(30);
@@ -30,10 +31,12 @@ namespace WindowsSentinel.Core
         public ScoringEngine(
             AllowlistService allowlist,
             SafeProcessExemptionRegistry exemptionRegistry,
-            ILogger<ScoringEngine> logger)
+            ILogger<ScoringEngine> logger,
+            BehavioralBaselineService? baseline = null)
         {
             _allowlist = allowlist;
             _exemptionRegistry = exemptionRegistry;
+            _baseline = baseline;
             _logger = logger;
         }
 
@@ -132,6 +135,38 @@ namespace WindowsSentinel.Core
                 adjustments.Add(new ScoreAdjustment("Allowlist reduction", -penalty,
                     $"Trust reduction {reduction:P0}"));
                 baseScore -= penalty;
+            }
+
+            // Behavioral baseline reduction
+            if (_baseline != null)
+            {
+                if (_baseline.IsEstablishedProcess(detection.ProcessName))
+                {
+                    int baselinePenalty = 15;
+                    adjustments.Add(new ScoreAdjustment("Behavioral baseline established process", -baselinePenalty,
+                        $"Process '{detection.ProcessName}' is established in behavioral baseline"));
+                    baseScore -= baselinePenalty;
+                }
+
+                if (detection.Metadata.TryGetValue("ParentProcessName", out var parentName) &&
+                    _baseline.IsKnownParentChild(parentName, detection.ProcessName))
+                {
+                    int pcPenalty = 10;
+                    adjustments.Add(new ScoreAdjustment("Behavioral baseline parent-child relationship", -pcPenalty,
+                        $"Parent-child '{parentName} -> {detection.ProcessName}' is known in baseline"));
+                    baseScore -= pcPenalty;
+                }
+
+                if (detection.Metadata.TryGetValue("RemoteAddress", out var remoteAddr) &&
+                    detection.Metadata.TryGetValue("RemotePort", out var remotePortStr) &&
+                    int.TryParse(remotePortStr, out var remotePort) &&
+                    _baseline.IsKnownNetworkDestination(detection.ProcessName, remoteAddr, remotePort))
+                {
+                    int netPenalty = 15;
+                    adjustments.Add(new ScoreAdjustment("Behavioral baseline network destination", -netPenalty,
+                        $"Network destination '{remoteAddr}:{remotePort}' is known for {detection.ProcessName} in baseline"));
+                    baseScore -= netPenalty;
+                }
             }
 
             // Safe process consensus reduction: -30 for safe processes running demoted non-President's Law rules

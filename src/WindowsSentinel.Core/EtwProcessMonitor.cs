@@ -23,6 +23,7 @@ namespace WindowsSentinel.Core
         private readonly DetectionEngine _detectionEngine;
         private readonly TelemetryFusionEngine _fusionEngine;
         private readonly ProcessAncestryCache _ancestryCache;
+        private readonly BehavioralBaselineService? _behavioralBaseline;
         private readonly ILogger<EtwProcessMonitor> _logger;
         private CancellationTokenSource? _cts;
         private TraceEventSession? _session;
@@ -32,11 +33,13 @@ namespace WindowsSentinel.Core
             DetectionEngine detectionEngine,
             TelemetryFusionEngine fusionEngine,
             ProcessAncestryCache ancestryCache,
-            ILogger<EtwProcessMonitor> logger)
+            ILogger<EtwProcessMonitor> logger,
+            BehavioralBaselineService? behavioralBaseline = null)
         {
             _detectionEngine = detectionEngine;
             _fusionEngine = fusionEngine;
             _ancestryCache = ancestryCache;
+            _behavioralBaseline = behavioralBaseline;
             _logger = logger;
         }
 
@@ -80,6 +83,9 @@ namespace WindowsSentinel.Core
                             var processName = System.IO.Path.GetFileNameWithoutExtension(imagePath);
 
                             _ancestryCache.RecordProcessStart(pid, parentPid, processName, imagePath);
+
+                            var (_, parentName) = _ancestryCache.GetParent(parentPid);
+                            _behavioralBaseline?.RecordProcess(processName, imagePath, parentPid, parentName);
 
                             var telemetry = new ProcessTelemetry
                             {
