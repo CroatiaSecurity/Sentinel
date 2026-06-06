@@ -27,7 +27,7 @@ Designed for personal endpoint protection, blue-team education, behavioral analy
 Run the installer as Administrator:
 
 ```powershell
-.\WindowsSentinelSetup-6.3.0.exe
+.\WindowsSentinelSetup-6.7.0.exe
 ```
 
 Installs to `%ProgramFiles%\WindowsSentinel`, creates a Windows Service (SYSTEM), and launches the Agent into the user session with a system tray icon.

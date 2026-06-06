@@ -2,6 +2,19 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [6.7.0] - 2026-06-06
+
+### Fixed — Logging Robustness & Data Integrity
+- **`JsonlEventLogger`** — Fixed race conditions between `LogEventAsync` and `DisposeAsync` with a `_disposed` flag and safe semaphore handling. Added `CancellationToken` support for graceful shutdown. Protected `JsonSerializer.Serialize` with a try/catch fallback to prevent unhandled exceptions from leaking to callers. Added `DroppedEvents` counter for rate-limited events. Fixed `50 * 1024 * 1024` integer overflow risk with `50L` literal. Safe semaphore release now handles `ObjectDisposedException`.
+- **`SentinelHealthCheck`** — Fixed hardcoded `CommonApplicationData\WindowsSentinel` paths; now derives log/quarantine directories from `_eventLogger.LogFilePath`. Fixed integer division bug in `LogFileSizeMB` (files < 1 MB always reported `0` due to `long / (1024*1024)`). First health check now runs immediately (changed `while` to `do-while` with delay after). Exception handler upgraded from `LogDebug` to `LogError`.
+- **`SentinelService`** — Fixed hardcoded log/quarantine directory paths in `RunStartupSelfTest`; now uses `_eventLogger.LogFilePath`. Passed `CancellationToken` to startup `LogEventAsync`. Updated logged version string to `6.7.0`.
+- **`StartupSelfTest`** — Fixed hardcoded `CommonApplicationData\WindowsSentinel` paths in log and quarantine directory checks; now derives from `_eventLogger.LogFilePath`.
+- **`DetectionEngine`** — Fixed deduplication race condition that caused duplicate detection floods. Replaced non-atomic `TryGetValue` + indexer-assignment pattern with `ConcurrentDictionary.AddOrUpdate`, making the 60-second suppression window thread-safe.
+- **`AdvancedResponseEngine`** — Fixed missing `_metrics.RecordResponse()` call in the `LOG`-only `else` branch, so `ResponsesTotal` now correctly counts all response events (previously stayed at `0` for log-only detections).
+- **Installer** — Updated `setup.iss` and `build.ps1` version references to `6.7.0`.
+
+----
+
 ## [6.6.0] - 2026-06-06
 
 ### Added — Registry Monitor (`RegistryMonitor`)

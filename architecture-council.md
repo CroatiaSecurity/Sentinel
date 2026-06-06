@@ -3,7 +3,7 @@
 **Status:** Architecture spec. Extends, does not replace, `requirements.md`,
 `design.md`, `constraints.md` (all v0.9.0).
 
-**Last updated:** v6.3.0 (June 2026) — Production hardening: re-enabled monitors, NetworkMonitor P/Invoke rewrite, ETW ancestry preservation, President's Law synchronization.
+**Last updated:** v6.7.0 (June 2026) — Logging robustness: fixed race conditions, deduplication, hardcoded paths, disposal safety, serialization exceptions, metrics accuracy, and CancellationToken support.
 
 ---
 
