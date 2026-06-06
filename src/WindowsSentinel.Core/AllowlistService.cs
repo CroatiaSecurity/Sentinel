@@ -55,6 +55,25 @@ namespace WindowsSentinel.Core
             "ffxiv_dx11",
         };
 
+        private static readonly string[] GamePathFragments = new[]
+        {
+            @"\steam",
+            @"\epic games",
+            @"\origin games",
+            @"\gog galaxy",
+            @"\riot games",
+            @"\ubisoft",
+            @"\battle.net",
+            @"\games",
+            @"\gaming",
+            @"\xbox",
+            @"\lotro",
+            @"\standingstone",
+            @"\cryptic",
+            @"\wargaming",
+            @"\blizzard"
+        };
+
         private static readonly string[] TrustedPaths = new[]
         {
             @"\Program Files\",
@@ -73,15 +92,25 @@ namespace WindowsSentinel.Core
             LoadUserAllowlist();
         }
 
+        public bool IsGamingPath(string? imagePath)
+        {
+            if (string.IsNullOrEmpty(imagePath)) return false;
+            var lower = imagePath.ToLowerInvariant();
+            return GamePathFragments.Any(gf => lower.Contains(gf));
+        }
+
         /// <summary>
         /// Checks if a process should be suppressed from detection entirely.
         /// President's Law rules are NEVER suppressed.
         /// </summary>
         public bool ShouldSuppress(string processName, string? imagePath, string? ruleName)
         {
-            if (IsPresidentsLawRule(ruleName)) return false;
+            bool isBeaconing = ruleName != null && ruleName.ToLowerInvariant().Contains("beaconing");
+            if (IsPresidentsLawRule(ruleName) && !isBeaconing) return false;
+
             if (IsUserAllowlisted(processName, imagePath)) return true;
             if (GamingProcesses.Contains(processName)) return true;
+            if (IsGamingPath(imagePath)) return true;
             return false;
         }
 

@@ -3,7 +3,7 @@
 **Status:** Architecture spec. Extends, does not replace, `requirements.md`,
 `design.md`, `constraints.md` (all v0.9.0).
 
-**Last updated:** v6.8.0 (June 2026) — Behavioral Baseline & Response Integrity: registered GatewayFingerprintMonitor and BehavioralBaselineService, wired baseline telemetry & scoring adjustments, implemented active response certificate removal, and demoted Tier 2 detections to LogOnly.
+**Last updated:** v6.9.0 (June 2026) — Gaming & Casting False Positive Mitigation: added gaming path identification, beaconing rule allowlist bypasses, and phantom device monitor adjustments for smart TVs.
 
 ---
 

@@ -2112,7 +2112,17 @@ namespace WindowsSentinel.Core
 
                             if (suspiciousService != null)
                             {
-                                confidence = 0.90;
+                                // Only promote confidence to 0.90 (which triggers Active Response blocking)
+                                // for high-risk remote access/debugging ports (ADB, Telnet, DevTools, Pharos)
+                                bool isHighRisk = suspiciousService.Contains("ADB", StringComparison.OrdinalIgnoreCase) || 
+                                                  suspiciousService.Contains("Telnet", StringComparison.OrdinalIgnoreCase) || 
+                                                  suspiciousService.Contains("DevTools", StringComparison.OrdinalIgnoreCase) || 
+                                                  suspiciousService.Contains("Pharos", StringComparison.OrdinalIgnoreCase);
+
+                                if (isHighRisk)
+                                {
+                                    confidence = 0.90;
+                                }
                                 reasoning += $" Device has an open {suspiciousService} port, which is commonly used for screen casting, debugging, or remote access.";
                             }
 

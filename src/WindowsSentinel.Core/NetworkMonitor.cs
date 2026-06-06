@@ -206,8 +206,10 @@ namespace WindowsSentinel.Core
                                 }
                             }
 
+                             var imagePath = GetProcessImagePath((int)row.owningPid);
+
                              // 1. Record connection in statistical beaconing detector
-                             _beaconingDetector.RecordConnection(remoteIp, remotePort, (int)row.owningPid, processName, "Established");
+                             _beaconingDetector.RecordConnection(remoteIp, remotePort, (int)row.owningPid, processName, imagePath, "Established");
  
                              // 1.5. Record connection in behavioral baseline
                              _behavioralBaseline?.RecordNetworkConnection(processName, remoteIp, remotePort);
@@ -238,7 +240,6 @@ namespace WindowsSentinel.Core
 
                             // B. Outbound connection from temp/downloads path
                             // SAFETY: Don't kill known browsers - users legitimately run portable browsers from Downloads
-                            var imagePath = GetProcessImagePath((int)row.owningPid);
                             if (IsSuspiciousPath(imagePath) && !IsKnownBrowser(processName))
                             {
                                 _ = _detectionEngine.EmitAsync(new DetectionEvent

@@ -76,7 +76,7 @@ namespace WindowsSentinel.Core
                         if (data.EventName == "ProcessStart" || data.EventName == "ProcessStart/Start")
                         {
                             var pid = (int)data.PayloadByName("ProcessID");
-                            var imagePath = data.PayloadStringByName("ImageFileName") ?? string.Empty;
+                            var imagePath = data.PayloadStringByName("ImageName") ?? string.Empty;
                             var cmdLine = data.PayloadStringByName("CommandLine") ?? string.Empty;
                             var parentPid = (int)data.PayloadByName("ParentProcessID");
 

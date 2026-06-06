@@ -2,6 +2,15 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [6.9.0] - 2026-06-06
+
+### Fixed — Gaming False Positive Network Isolation & Smart TV Blocking
+- **`EtwProcessMonitor` Process Name Resolution** — Changed the kernel process start ETW event payload parser from `"ImageFileName"` to `"ImageName"` (matching the `Microsoft-Windows-Kernel-Process` event schema). This resolves a critical bug where process names monitored via ETW were parsed as empty strings `""`.
+- **Gaming Path Identification** — Implemented `IsGamingPath` in `AllowlistService` to identify game executables running from Steam, Epic Games, Origin, GOG Galaxy, Riot Games, Ubisoft Connect, and other game directory patterns.
+- **Beaconing Rule Allowlist Integration** — Added early check in `BeaconingDetector` to prevent logging or tracking network connectivity for gaming processes or applications in game folders, eliminating false positives on games.
+- **Active Response Allowlist Suppression** — Integrated the allowlist check into `AdvancedResponseEngine` to demote detections to `LogOnly` (Tier2) when the process is allowlisted or in a gaming path, suppressing disruptive actions (like `NetworkIsolate` or process kills). Bypassed President's Law restrictions specifically for beaconing rules to allow games/allowlisted apps to be suppressed.
+- **Smart TV and Chromecast Probes** — Adjusted `PhantomDeviceMonitor` to only perform firewall blocking for high-risk remote access services (ADB, Telnet, Chrome DevTools, Pharos) on newly detected network devices. Standard casting/mDNS/HTTP-Alt consumer devices (such as Chromecasts and Smart TVs) are logged without being blocked.
+
 ## [6.8.0] - 2026-06-06
 
 ### Added — Behavioral Baseline & Response Integrity

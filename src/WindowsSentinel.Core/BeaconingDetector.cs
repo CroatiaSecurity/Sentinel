@@ -54,12 +54,18 @@ namespace WindowsSentinel.Core
                 "Windsurf", "code", "cursor",
             };
 
+        private readonly AllowlistService? _allowlist;
         private readonly BehavioralBaselineService? _baseline;
 
-        public BeaconingDetector(DetectionEngine de, ILogger<BeaconingDetector> l, BehavioralBaselineService? baseline = null)
+        public BeaconingDetector(
+            DetectionEngine de,
+            ILogger<BeaconingDetector> l,
+            AllowlistService? allowlist = null,
+            BehavioralBaselineService? baseline = null)
         {
             _detectionEngine = de;
             _logger = l;
+            _allowlist = allowlist;
             _baseline = baseline;
         }
 
@@ -67,9 +73,10 @@ namespace WindowsSentinel.Core
         /// Called by NetworkMonitor for every observed connection.
         /// Records the timestamp for statistical analysis.
         /// </summary>
-        public void RecordConnection(string remoteAddress, int remotePort, int processId, string processName, string state)
+        public void RecordConnection(string remoteAddress, int remotePort, int processId, string processName, string? imagePath, string state)
         {
             if (LegitimatePeriodicProcesses.Contains(processName)) return;
+            if (_allowlist != null && (_allowlist.IsGamingProcess(processName) || _allowlist.IsGamingPath(imagePath) || _allowlist.ShouldSuppress(processName, imagePath, "C2 Beaconing Behavior (Statistical)"))) return;
             if (state != "Established") return;
             if (remotePort is 80 or 443) return;
 

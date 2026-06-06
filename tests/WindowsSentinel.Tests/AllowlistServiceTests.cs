@@ -150,5 +150,31 @@ namespace WindowsSentinel.Tests
             var list = svc.GetUserAllowlist();
             Assert.Equal(2, list.Count);
         }
+
+        [Fact]
+        public void IsGamingPath_Recognizes_GamingPaths()
+        {
+            var svc = CreateService();
+            Assert.True(svc.IsGamingPath(@"D:\SteamLibrary\steamapps\common\game.exe"));
+            Assert.True(svc.IsGamingPath(@"C:\Riot Games\League of Legends\game.exe"));
+            Assert.True(svc.IsGamingPath(@"C:\Program Files (x86)\Epic Games\Launcher.exe"));
+            Assert.True(svc.IsGamingPath(@"D:\games\lotroclient.exe"));
+            Assert.False(svc.IsGamingPath(@"C:\Windows\System32\cmd.exe"));
+        }
+
+        [Fact]
+        public void ShouldSuppress_AllowsSuppressingBeaconing_ForGamingProcess()
+        {
+            var svc = CreateService();
+            // Typically beaconing is a President's Law rule, but we added an exception to allow suppression for gaming processes
+            Assert.True(svc.ShouldSuppress("steam", null, "C2 Beaconing Behavior (Statistical)"));
+        }
+
+        [Fact]
+        public void ShouldSuppress_AllowsSuppressingBeaconing_ForGamingPath()
+        {
+            var svc = CreateService();
+            Assert.True(svc.ShouldSuppress("lotroclient", @"D:\StandingStoneGames\LOTRO\lotroclient.exe", "C2 Beaconing Behavior (Statistical)"));
+        }
     }
 }

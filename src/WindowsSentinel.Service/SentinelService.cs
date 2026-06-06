@@ -117,7 +117,7 @@ namespace WindowsSentinel.Service
             await _eventLogger.LogEventAsync("service_start", new
             {
                 Status = "started",
-                Version = "6.8.0",
+                Version = "6.9.0",
                 Timestamp = DateTime.UtcNow
             }, stoppingToken);
 

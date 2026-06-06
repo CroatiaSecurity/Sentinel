@@ -13,6 +13,7 @@ namespace WindowsSentinel.Core
         private readonly SentinelMetrics _metrics;
         private readonly JsonlEventLogger _eventLogger;
         private readonly QuarantineManager _quarantineManager;
+        private readonly AllowlistService? _allowlist;
         private IncidentResponseService? _incidentResponse;
         private DllUnloadEngine? _dllUnloadEngine;
         private ChainTracer? _chainTracer;
@@ -21,12 +22,14 @@ namespace WindowsSentinel.Core
             SentinelConfig config,
             SentinelMetrics metrics,
             JsonlEventLogger eventLogger,
-            QuarantineManager quarantineManager)
+            QuarantineManager quarantineManager,
+            AllowlistService? allowlist = null)
         {
             _config = config;
             _metrics = metrics;
             _eventLogger = eventLogger;
             _quarantineManager = quarantineManager;
+            _allowlist = allowlist;
         }
 
         public void SetDllUnloadEngine(DllUnloadEngine engine) => _dllUnloadEngine = engine;
@@ -91,7 +94,25 @@ namespace WindowsSentinel.Core
             var effectiveResponse = detection.AuthorizedResponse;
             var effectiveKillAuthorized = detection.KillAuthorized;
 
-            if (effectiveTier == DetectionTier.Tier1Behavioral && !isPresidentsLaw)
+            string? imagePath = null;
+            try
+            {
+                if (detection.ProcessId > 0)
+                {
+                    using var proc = Process.GetProcessById(detection.ProcessId);
+                    imagePath = proc.MainModule?.FileName;
+                }
+            }
+            catch { }
+
+            if (_allowlist != null && _allowlist.ShouldSuppress(detection.ProcessName, imagePath, detection.RuleName))
+            {
+                effectiveTier = DetectionTier.Tier2Indicator;
+                effectiveResponse = ResponseAction.LogOnly;
+                effectiveKillAuthorized = false;
+                reason = "LogOnly (Suppressed by allowlist)";
+            }
+            else if (effectiveTier == DetectionTier.Tier1Behavioral && !isPresidentsLaw)
             {
                 effectiveTier = DetectionTier.Tier2Indicator;
                 effectiveResponse = ResponseAction.LogOnly;
@@ -253,10 +274,10 @@ namespace WindowsSentinel.Core
                 try
                 {
                     using var proc = Process.GetProcessById(detection.ProcessId);
-                    var imagePath = proc.MainModule?.FileName;
-                    if (!string.IsNullOrEmpty(imagePath) && File.Exists(imagePath))
+                    var quarantinePath = proc.MainModule?.FileName;
+                    if (!string.IsNullOrEmpty(quarantinePath) && File.Exists(quarantinePath))
                     {
-                        await _quarantineManager.QuarantineFileAtomicAsync(imagePath);
+                        await _quarantineManager.QuarantineFileAtomicAsync(quarantinePath);
                     }
                 }
                 catch { }

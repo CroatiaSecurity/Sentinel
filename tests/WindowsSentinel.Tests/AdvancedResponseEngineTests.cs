@@ -123,5 +123,64 @@ namespace WindowsSentinel.Tests
                 try { Directory.Delete(tempDir, true); } catch { }
             }
         }
+
+        [Fact]
+        public async Task HandleAsync_SuppressedByAllowlist_DoesNotTriggerAction()
+        {
+            var tempDir = Path.Combine(Path.GetTempPath(), "sentinel_are_test_suppressed_" + Guid.NewGuid().ToString("N")[..8]);
+            Directory.CreateDirectory(tempDir);
+            try
+            {
+                var config = new SentinelConfig { ActiveResponse = true };
+                var metrics = new SentinelMetrics();
+                var logPath = Path.Combine(tempDir, "events.jsonl");
+                var logger = new JsonlEventLogger(logPath);
+                var quarantine = new QuarantineManager(tempDir);
+                var cache = new SecureCacheStore(tempDir);
+                var allowlist = new AllowlistService(cache, Microsoft.Extensions.Logging.Abstractions.NullLogger<AllowlistService>.Instance);
+                
+                var engine = new AdvancedResponseEngine(config, metrics, logger, quarantine, allowlist);
+
+                // Emitted event with Tier1, but the process name is "steam" (allowlisted game)
+                var detection = new DetectionEvent
+                {
+                    RuleName = "C2 Beaconing Behavior (Statistical)",
+                    Evidence = "Periodic connection to game server",
+                    Reasoning = "Testing allowlist suppression",
+                    Confidence = 0.90,
+                    Tier = DetectionTier.Tier1Behavioral,
+                    AuthorizedResponse = ResponseAction.NetworkIsolate,
+                    ProcessName = "steam",
+                    ProcessId = 1234
+                };
+
+                await engine.HandleAsync(detection);
+                await logger.DisposeAsync();
+
+                // Read logged response event
+                var logLines = await File.ReadAllLinesAsync(logPath);
+                bool foundAction = false;
+                bool foundSuppressedLog = false;
+
+                foreach (var line in logLines)
+                {
+                    if (line.Contains("\"ActionTaken\":\"NETWORK_ISOLATE\""))
+                    {
+                        foundAction = true;
+                    }
+                    if (line.Contains("\"ActionTaken\":\"LOG\"") && line.Contains("Suppressed by allowlist"))
+                    {
+                        foundSuppressedLog = true;
+                    }
+                }
+
+                Assert.False(foundAction, "Active response action was taken on allowlisted process.");
+                Assert.True(foundSuppressedLog, "Expected LOG action with suppression reason.");
+            }
+            finally
+            {
+                try { Directory.Delete(tempDir, true); } catch { }
+            }
+        }
     }
 }
