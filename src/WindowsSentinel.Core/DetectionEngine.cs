@@ -156,16 +156,14 @@ namespace WindowsSentinel.Core
             var key = (detection.RuleName, detection.ProcessId);
             var now = DateTime.UtcNow;
 
-            // 60-second deduplication
-            if (_dedupCache.TryGetValue(key, out var lastTime))
-            {
-                if (now - lastTime < TimeSpan.FromSeconds(60))
-                {
-                    return; // Suppress
-                }
-            }
+            // 60-second deduplication (atomic via AddOrUpdate)
+            var lastTime = _dedupCache.AddOrUpdate(key, now, (k, oldTime) =>
+                now - oldTime < TimeSpan.FromSeconds(60) ? oldTime : now);
 
-            _dedupCache[key] = now;
+            if (lastTime != now)
+            {
+                return; // Suppressed by existing recent entry
+            }
 
             // Apply threat scoring
             var scoreProfile = _scoringEngine.Score(detection);

@@ -41,9 +41,9 @@ namespace WindowsSentinel.Core
             // 1. Log file writable
             try
             {
-                var logDir = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-                    "WindowsSentinel");
+                var logDir = Path.GetDirectoryName(_eventLogger.LogFilePath);
+                if (string.IsNullOrEmpty(logDir))
+                    logDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "WindowsSentinel");
                 if (Directory.Exists(logDir)) passed++; else { Directory.CreateDirectory(logDir); passed++; }
             }
             catch (Exception ex) { failed++; _logger.LogWarning(ex, "[StartupSelfTest] Log directory check FAILED"); }
@@ -51,9 +51,10 @@ namespace WindowsSentinel.Core
             // 2. Quarantine directory accessible
             try
             {
-                var quarantineDir = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-                    "WindowsSentinel", "Quarantine");
+                var logDir = Path.GetDirectoryName(_eventLogger.LogFilePath);
+                if (string.IsNullOrEmpty(logDir))
+                    logDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "WindowsSentinel");
+                var quarantineDir = Path.Combine(logDir, "Quarantine");
                 if (!Directory.Exists(quarantineDir)) Directory.CreateDirectory(quarantineDir);
                 passed++;
             }

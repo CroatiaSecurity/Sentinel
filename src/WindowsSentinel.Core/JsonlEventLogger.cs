@@ -14,6 +14,11 @@ namespace WindowsSentinel.Core
         private FileStream? _fileStream;
         private StreamWriter? _writer;
         private bool _isDegraded;
+        private bool _disposed;
+
+        public string LogFilePath => _logFilePath;
+        private long _droppedEvents;
+        public long DroppedEvents => Interlocked.Read(ref _droppedEvents);
 
         public JsonlEventLogger(string? customPath = null)
         {
@@ -41,10 +46,10 @@ namespace WindowsSentinel.Core
                 }
             }
 
-            TryOpenFile();
+            TryOpenFileInternal();
         }
 
-        private void TryOpenFile()
+        private void TryOpenFileInternal()
         {
             try
             {
@@ -88,21 +93,39 @@ namespace WindowsSentinel.Core
             }
         }
 
-        public async Task LogEventAsync<T>(string type, T data)
+        public async Task LogEventAsync<T>(string type, T data, CancellationToken cancellationToken = default)
         {
             if (!_rateLimiter.AllowRequest())
             {
-                // Rate limited, discard or handle
+                Interlocked.Increment(ref _droppedEvents);
                 return;
             }
 
-            await _semaphore.WaitAsync();
+            if (_disposed)
+                return;
+
             try
             {
+                await _semaphore.WaitAsync(cancellationToken);
+            }
+            catch (ObjectDisposedException)
+            {
+                return;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+
+            try
+            {
+                if (_disposed)
+                    return;
+
                 if (_isDegraded || _writer == null)
                 {
                     // Self-healing attempt
-                    TryOpenFile();
+                    TryOpenFileInternal();
                     if (_isDegraded || _writer == null)
                     {
                         // Still degraded
@@ -113,9 +136,9 @@ namespace WindowsSentinel.Core
                 // Check file size for rotation (50 MB)
                 try
                 {
-                    if (_fileStream != null && _fileStream.Length > 50 * 1024 * 1024)
+                    if (_fileStream != null && _fileStream.Length > 50L * 1024 * 1024)
                     {
-                        RotateLogs();
+                        RotateLogsInternal();
                     }
                 }
                 catch
@@ -130,19 +153,29 @@ namespace WindowsSentinel.Core
                     data
                 };
 
-                var jsonLine = JsonSerializer.Serialize(entry);
+                string jsonLine;
+                try
+                {
+                    jsonLine = JsonSerializer.Serialize(entry);
+                }
+                catch
+                {
+                    // Fallback: serialize with type name and error indicator
+                    jsonLine = JsonSerializer.Serialize(new { type, timestamp = DateTime.UtcNow, data = $"<unserializable:{typeof(T).Name}>" });
+                }
+
                 if (_writer != null)
                 {
-                    await _writer.WriteLineAsync(jsonLine);
+                    await _writer.WriteLineAsync(jsonLine.AsMemory(), cancellationToken);
                 }
             }
             finally
             {
-                _semaphore.Release();
+                try { _semaphore.Release(); } catch (ObjectDisposedException) { }
             }
         }
 
-        private void RotateLogs()
+        private void RotateLogsInternal()
         {
             try
             {
@@ -176,7 +209,7 @@ namespace WindowsSentinel.Core
                     File.Move(_logFilePath, backupPath);
                 }
 
-                TryOpenFile();
+                TryOpenFileInternal();
             }
             catch
             {
@@ -186,9 +219,21 @@ namespace WindowsSentinel.Core
 
         public async ValueTask DisposeAsync()
         {
-            await _semaphore.WaitAsync();
+            if (_disposed)
+                return;
+
             try
             {
+                await _semaphore.WaitAsync();
+            }
+            catch (ObjectDisposedException)
+            {
+                return;
+            }
+
+            try
+            {
+                _disposed = true;
                 if (_writer != null)
                 {
                     await _writer.DisposeAsync();
@@ -202,7 +247,7 @@ namespace WindowsSentinel.Core
             }
             finally
             {
-                _semaphore.Release();
+                try { _semaphore.Release(); } catch (ObjectDisposedException) { }
                 _semaphore.Dispose();
             }
             GC.SuppressFinalize(this);

@@ -378,6 +378,7 @@ namespace WindowsSentinel.Core
             else
             {
                 stopwatch.Stop();
+                _metrics.RecordResponse(stopwatch.ElapsedMilliseconds);
                 var responseLog = new ResponseEvent
                 {
                     ProcessId = detection.ProcessId,

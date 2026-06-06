@@ -33,33 +33,28 @@ namespace WindowsSentinel.Core
         {
             _logger.LogInformation("[SentinelHealthCheck] Started (interval: {Interval})", Interval);
 
-            while (!ct.IsCancellationRequested)
+            do
             {
                 try
                 {
-                    await Task.Delay(Interval, ct);
-
                     using var proc = Process.GetCurrentProcess();
-                    var workingSetMb = proc.WorkingSet64 / (1024 * 1024);
+                    var workingSetMb = proc.WorkingSet64 / (1024.0 * 1024.0);
                     var handleCount = proc.HandleCount;
                     var threadCount = proc.Threads.Count;
 
-                    // Log file size
-                    long logFileSizeMb = 0;
-                    var logPath = Path.Combine(
-                        Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-                        "WindowsSentinel", "events.jsonl");
+                    // Log file size (use configured path from logger)
+                    double logFileSizeMb = 0;
+                    var logPath = _eventLogger.LogFilePath;
                     if (File.Exists(logPath))
                     {
-                        logFileSizeMb = new FileInfo(logPath).Length / (1024 * 1024);
+                        logFileSizeMb = new FileInfo(logPath).Length / (1024.0 * 1024.0);
                     }
 
-                    // Quarantine count
+                    // Quarantine count (derive from log directory)
                     int quarantineCount = 0;
-                    var quarantineDir = Path.Combine(
-                        Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-                        "WindowsSentinel", "Quarantine");
-                    if (Directory.Exists(quarantineDir))
+                    var logDir = Path.GetDirectoryName(logPath);
+                    var quarantineDir = logDir != null ? Path.Combine(logDir, "Quarantine") : null;
+                    if (quarantineDir != null && Directory.Exists(quarantineDir))
                     {
                         quarantineCount = Directory.GetFiles(quarantineDir).Length;
                     }
@@ -81,19 +76,26 @@ namespace WindowsSentinel.Core
                         ResponsesTotal = _metrics.GetResponsesCount()
                     };
 
-                    await _eventLogger.LogEventAsync("health", health);
+                    await _eventLogger.LogEventAsync("health", health, ct);
 
                     // Warn if resources are getting high
                     if (workingSetMb > 500)
-                        _logger.LogWarning("[SentinelHealthCheck] High memory usage: {MB}MB", workingSetMb);
+                        _logger.LogWarning("[SentinelHealthCheck] High memory usage: {MB:F0}MB", workingSetMb);
                     if (handleCount > 5000)
                         _logger.LogWarning("[SentinelHealthCheck] High handle count: {Handles}", handleCount);
                     if (logFileSizeMb > 40)
-                        _logger.LogWarning("[SentinelHealthCheck] Log file approaching rotation threshold: {MB}MB", logFileSizeMb);
+                        _logger.LogWarning("[SentinelHealthCheck] Log file approaching rotation threshold: {MB:F0}MB", logFileSizeMb);
                 }
                 catch (OperationCanceledException) { break; }
-                catch (Exception ex) { _logger.LogDebug(ex, "[SentinelHealthCheck] Error"); }
+                catch (Exception ex) { _logger.LogError(ex, "[SentinelHealthCheck] Error"); }
+
+                try
+                {
+                    await Task.Delay(Interval, ct);
+                }
+                catch (OperationCanceledException) { break; }
             }
+            while (!ct.IsCancellationRequested);
         }
     }
 }

@@ -117,9 +117,9 @@ namespace WindowsSentinel.Service
             await _eventLogger.LogEventAsync("service_start", new
             {
                 Status = "started",
-                Version = "6.3.0",
+                Version = "6.7.0",
                 Timestamp = DateTime.UtcNow
-            });
+            }, stoppingToken);
 
             try
             {
@@ -153,8 +153,9 @@ namespace WindowsSentinel.Service
             _logger.LogInformation("Running startup self-test...");
 
             // 1. Verify log path access
-            var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
-            var logDir = Path.Combine(programData, "WindowsSentinel");
+            var logDir = Path.GetDirectoryName(_eventLogger.LogFilePath);
+            if (string.IsNullOrEmpty(logDir))
+                logDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "WindowsSentinel");
             if (!Directory.Exists(logDir))
             {
                 try
