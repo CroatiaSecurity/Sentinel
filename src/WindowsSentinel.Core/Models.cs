@@ -18,7 +18,8 @@ namespace WindowsSentinel.Core
         KillProcessTree,
         Quarantine,
         UnloadDllAndKillOwner,
-        RemoveCertAndKillAdder
+        RemoveCertAndKillAdder,
+        RemoveRegistryEntry
     }
 
     public class SentinelConfig

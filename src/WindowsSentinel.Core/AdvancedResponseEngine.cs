@@ -70,7 +70,8 @@ namespace WindowsSentinel.Core
                    lower.Contains("hollowing") ||
                    lower.Contains("reverseshell") ||
                    lower.Contains("reverse shell") ||
-                   lower.Contains("threatintel");
+                   lower.Contains("threatintel") ||
+                   lower.Contains("registry");
         }
 
         public async Task HandleAsync(DetectionEvent detection)
@@ -81,6 +82,7 @@ namespace WindowsSentinel.Core
             bool shouldIsolateNetwork = false;
             bool shouldUnloadDllAndKillOwner = false;
             bool shouldRemoveCertAndKillAdder = false;
+            bool shouldRemoveRegistryEntry = false;
             string reason = "LogOnly";
 
             var isPresidentsLaw = IsPresidentsLawRule(detection);
@@ -114,6 +116,18 @@ namespace WindowsSentinel.Core
                 {
                     shouldRemoveCertAndKillAdder = true;
                     reason = $"RemoveCertAndKillAdder (AuthorizedResponse={effectiveResponse})";
+                }
+                else
+                {
+                    reason = "LogOnly (ActiveResponse disabled)";
+                }
+            }
+            else if (effectiveResponse == ResponseAction.RemoveRegistryEntry && effectiveTier == DetectionTier.Tier1Behavioral)
+            {
+                if (_config.ActiveResponse)
+                {
+                    shouldRemoveRegistryEntry = true;
+                    reason = $"RemoveRegistryEntry (AuthorizedResponse={effectiveResponse})";
                 }
                 else
                 {
@@ -253,6 +267,83 @@ namespace WindowsSentinel.Core
                     ProcessName = detection.ProcessName,
                     ActionTaken = "NETWORK_ISOLATE",
                     Reason = $"Triggered by rule: {detection.RuleName}. {reason}. Target={targetIp}",
+                    ExecutionTimeMs = stopwatch.ElapsedMilliseconds
+                };
+                await _eventLogger.LogEventAsync("response", responseLog);
+            }
+            else if (shouldRemoveRegistryEntry)
+            {
+                var hive = detection.Metadata.GetValueOrDefault("Hive", "HKLM");
+                var keyPath = detection.Metadata.GetValueOrDefault("KeyPath", "");
+                var valueName = detection.Metadata.GetValueOrDefault("ValueName", "");
+                var subKey = detection.Metadata.GetValueOrDefault("SubKey", "");
+                var removed = false;
+                var removalLog = "";
+
+                try
+                {
+                    if (!string.IsNullOrEmpty(valueName) && !string.IsNullOrEmpty(keyPath))
+                    {
+                        // Remove a specific value from a key
+                        var regHive = hive switch
+                        {
+                            "HKCU" => Microsoft.Win32.Registry.CurrentUser,
+                            "HKCR" => Microsoft.Win32.Registry.ClassesRoot,
+                            _ => Microsoft.Win32.Registry.LocalMachine
+                        };
+                        using var key = regHive.OpenSubKey(keyPath, writable: true);
+                        if (key != null)
+                        {
+                            key.DeleteValue(valueName, throwOnMissingValue: false);
+                            removed = true;
+                            removalLog = $"Removed value '{valueName}' from {hive}\\{keyPath}";
+                        }
+                    }
+                    else if (!string.IsNullOrEmpty(subKey) && keyPath.Contains("Services"))
+                    {
+                        // Remove a service subkey
+                        using var servicesKey = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(keyPath, writable: true);
+                        if (servicesKey != null)
+                        {
+                            servicesKey.DeleteSubKeyTree(subKey, throwOnMissingSubKey: false);
+                            removed = true;
+                            removalLog = $"Removed service subkey '{subKey}' from {hive}\\{keyPath}";
+                        }
+                    }
+                    else if (!string.IsNullOrEmpty(keyPath) && keyPath.Contains("CLSID"))
+                    {
+                        // Remove a CLSID subkey tree
+                        using var clsidKey = Microsoft.Win32.Registry.ClassesRoot.OpenSubKey(keyPath, writable: true);
+                        if (clsidKey != null)
+                        {
+                            var parent = Microsoft.Win32.Registry.ClassesRoot.OpenSubKey("CLSID", writable: true);
+                            if (parent != null)
+                            {
+                                var clsid = detection.Metadata.GetValueOrDefault("CLSID", "");
+                                if (!string.IsNullOrEmpty(clsid))
+                                {
+                                    parent.DeleteSubKeyTree(clsid, throwOnMissingSubKey: false);
+                                    removed = true;
+                                    removalLog = $"Removed CLSID '{clsid}' from HKCR\\CLSID";
+                                }
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    removalLog = $"Failed to remove registry entry: {ex.Message}";
+                }
+
+                stopwatch.Stop();
+                _metrics.RecordResponse(stopwatch.ElapsedMilliseconds);
+
+                var responseLog = new ResponseEvent
+                {
+                    ProcessId = detection.ProcessId,
+                    ProcessName = detection.ProcessName,
+                    ActionTaken = removed ? "REMOVE_REGISTRY_ENTRY" : "REMOVE_REGISTRY_ENTRY_FAILED",
+                    Reason = $"Triggered by rule: {detection.RuleName}. {reason}. {removalLog}",
                     ExecutionTimeMs = stopwatch.ElapsedMilliseconds
                 };
                 await _eventLogger.LogEventAsync("response", responseLog);

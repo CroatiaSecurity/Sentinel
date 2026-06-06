@@ -66,6 +66,7 @@ namespace WindowsSentinel.Service
                     services.AddSingleton<UsbDeviceFingerprinter>();
                     services.AddSingleton<IoCScanner>();
                     services.AddSingleton<ParentPidSpoofDetector>();
+                    services.AddSingleton<ToastService>();
 
                     // Engines
                     services.AddSingleton<TelemetryFusionEngine>();
@@ -153,6 +154,7 @@ namespace WindowsSentinel.Service
                     services.AddHostedService<FileVerdictScanner>();
                     services.AddHostedService<WebcamHijackMonitor>();
                     services.AddHostedService<ConsultantSignalIngestor>();
+                    services.AddHostedService<RegistryMonitor>();
                 });
     }
 }

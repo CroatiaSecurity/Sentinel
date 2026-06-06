@@ -2,6 +2,30 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [6.6.0] - 2026-06-06
+
+### Added — Registry Monitor (`RegistryMonitor`)
+- **WMI-based registry change monitoring** for persistence and COM hijacking:
+  - `HKLM\Software\Microsoft\Windows\CurrentVersion\Run`
+  - `HKLM\Software\Microsoft\Windows\CurrentVersion\RunOnce`
+  - `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`
+  - `HKLM\System\CurrentControlSet\Services`
+  - `HKCR\CLSID` (periodic scan every 30s for new InprocServer32 registrations)
+- **Process creation monitoring** via WMI `__InstanceCreationEvent` for:
+  - `regsvr32.exe` — detects `/i`, `scrobj.dll`, remote URLs, temp paths, and scriptlet files
+  - `reg.exe` — detects `import`/`add` operations targeting Run keys or services, especially from user-writable directories
+  - `regedit.exe` — detects silent import (`/s`) and `.reg` files from temp/downloads
+- **Heuristic threat scoring** for:
+  - Suspicious autorun entries (user-writable paths, script launchers, encoded PowerShell commands)
+  - Suspicious service registrations (non-standard image paths, script interpreters)
+  - COM CLSID hijacking (user-writable DLL paths, non-standard directories)
+- **Active response**: `ResponseAction.RemoveRegistryEntry` — automatically removes:
+  - Malicious autorun values from Run keys
+  - Malicious service subkeys
+  - Hijacked COM CLSID registrations
+- **Toast notifications** via `ToastService` — shows Windows 10/11 toast alerts when registry threats are detected, using `SetCurrentProcessExplicitAppUserModelID` and reflection-based `ToastNotificationManager` invocation.
+- **Baselining**: Captures registry state at startup so only NEW entries since launch trigger alerts.
+
 ## [6.5.0] - 2026-06-06
 
 ### Security Fix — ChainTracer Critical Process Spoofing
