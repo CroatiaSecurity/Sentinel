@@ -2,6 +2,16 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [6.4.0] - 2026-06-06
+
+### Security Fix — ChainTracer Critical Process Spoofing
+- **`ChainTracer` kill protection now requires both name AND legitimate system path.** Previously, `ChainTracer` skipped killing any process whose name matched the `CriticalSystemProcesses` list (`svchost`, `explorer`, `winlogon`, etc.). Malware could evade termination by simply renaming its executable to match a critical system process name.
+- The fix adds an `IsSystemBinary` path check: a process is only protected from kill if its name matches the critical list **AND** its image path is under `C:\Windows\System32\`, `C:\Windows\SysWOW64\`, or `C:\Windows\`. This closes a significant evasion vector.
+
+### Fixed — Additional Browser False Positive Reduction
+- **`NeuroBehaviorVisualMonitor` browser kills** — Browsers legitimately trigger rapid focus changes (tab switches, popups, notifications) and users frequently move the cursor large distances across monitors. `NeuroBehaviorVisualMonitor` was scoring these as "visual anomalies" and killing Chrome/Edge with `KillProcessTree`. Now skips anomaly scoring for all known browser processes and never emits a kill detection when a browser is in the foreground.
+- **`ParentPidSpoofDetector` browser child process false positives** — Browsers spawn many child processes (renderers, GPU, utility) with complex parent-child chains. ETW ancestry can lag, causing false PPID mismatch detections that led to browser process tree kills. Now skips all known browser processes entirely.
+
 ## [6.3.1] - 2026-06-06
 
 ### Changed — TLS Certificate Monitor (Non-Destructive Redesign)

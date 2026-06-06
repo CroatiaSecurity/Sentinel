@@ -90,7 +90,10 @@ namespace WindowsSentinel.Core
                 {
                     foreach (var node in chain)
                     {
-                        if (CriticalSystemProcesses.Contains(node.ProcessName.Replace(".exe", "")))
+                        // Protect critical system processes ONLY if they reside in legitimate system paths.
+                        // Prevents malware from renaming itself to svchost.exe/explorer.exe/etc. to evade kill.
+                        var cleanName = node.ProcessName.Replace(".exe", "");
+                        if (CriticalSystemProcesses.Contains(cleanName) && IsSystemBinary(node.ImagePath, node.ProcessName))
                             continue;
 
                         try
