@@ -2,20 +2,20 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
-## [6.4.1] - 2026-06-06
-
-### Fixed — IDE False Positive Kill
-- **`NeuroBehaviorVisualMonitor` killed Devin IDE** — The monitor scored rapid window focus changes and large cursor movements as "visual anomalies" and killed the Devin process with `KillProcessTree`. IDEs legitimately trigger focus changes (panel switches, autocomplete popups, file navigation) and developers frequently move the cursor across monitors. Added Devin, VS Code, Cursor, Windsurf, Visual Studio, Rider, and JetBrains IDEs to the exemption list alongside browsers.
-
-## [6.4.0] - 2026-06-06
+## [6.5.0] - 2026-06-06
 
 ### Security Fix — ChainTracer Critical Process Spoofing
 - **`ChainTracer` kill protection now requires both name AND legitimate system path.** Previously, `ChainTracer` skipped killing any process whose name matched the `CriticalSystemProcesses` list (`svchost`, `explorer`, `winlogon`, etc.). Malware could evade termination by simply renaming its executable to match a critical system process name.
 - The fix adds an `IsSystemBinary` path check: a process is only protected from kill if its name matches the critical list **AND** its image path is under `C:\Windows\System32\`, `C:\Windows\SysWOW64\`, or `C:\Windows\`. This closes a significant evasion vector.
 
-### Fixed — Additional Browser False Positive Reduction
-- **`NeuroBehaviorVisualMonitor` browser kills** — Browsers legitimately trigger rapid focus changes (tab switches, popups, notifications) and users frequently move the cursor large distances across monitors. `NeuroBehaviorVisualMonitor` was scoring these as "visual anomalies" and killing Chrome/Edge with `KillProcessTree`. Now skips anomaly scoring for all known browser processes and never emits a kill detection when a browser is in the foreground.
-- **`ParentPidSpoofDetector` browser child process false positives** — Browsers spawn many child processes (renderers, GPU, utility) with complex parent-child chains. ETW ancestry can lag, causing false PPID mismatch detections that led to browser process tree kills. Now skips all known browser processes entirely.
+### Fixed — NeuroBehaviorVisualMonitor Redesign (Allow Until Proven Malicious)
+- **Anomaly scoring (focus steals, cursor jumps, brightness oscillations) is now `LogOnly` (Tier2).** Previously, the monitor accumulated an anomaly score from normal user behavior (rapid window switching, large mouse movements across monitors) and killed the foreground process with `KillProcessTree` when the score reached 60. This killed browsers, IDEs (Devin, VS Code, Cursor, Windsurf), and any other app the user was actively using. Focus changes and cursor movements are **not proof of maliciousness** — they are normal user behavior.
+- **Transparent overlay detection is now `KillProcessTree` (Tier1).** A large (`>800x600`), layered + transparent + topmost window is actual proof of a phishing overlay or clickjacking attack. This is the only condition in `NeuroBehaviorVisualMonitor` that triggers an active kill response.
+- **Removed all browser/IDE exemption lists.** Since anomaly scoring no longer kills, static name-based exemptions are unnecessary and were an evasion vector (open-source attackers could read the list and rename malware to match). Sentinel now follows the principle: *allow anything to run until proven malicious at runtime*.
+
+### Fixed — Browser False Positive Reduction
+- **`ThreatIntelInjectionRule`** — Browsers legitimately use `VirtualAllocEx`, `WriteProcessMemory`, and `CreateRemoteThread` for their multi-process sandbox model. Now skips all known browser processes entirely.
+- **`ParentPidSpoofDetector`** — Browsers spawn many child processes (renderers, GPU, utility) with complex parent-child chains. ETW ancestry can lag, causing false PPID mismatch detections. Now skips all known browser processes entirely.
 
 ## [6.3.1] - 2026-06-06
 

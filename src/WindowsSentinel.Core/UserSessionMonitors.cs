@@ -311,19 +311,6 @@ namespace WindowsSentinel.Core
         private readonly DetectionEngine _detectionEngine;
         private readonly ILogger<NeuroBehaviorVisualMonitor> _logger;
 
-        // Browsers and IDEs legitimately change focus rapidly (tab switches, popups, notifications,
-        // panel switches, autocomplete popups) and users frequently move the cursor large distances.
-        // Skip anomaly counting for these processes to avoid false positive kills.
-        private static readonly HashSet<string> KnownBrowserProcesses = new(StringComparer.OrdinalIgnoreCase)
-        {
-            // Browsers
-            "chrome", "msedge", "firefox", "brave", "opera", "vivaldi", "iexplore",
-            "msedgewebview2", "electron",
-            // IDEs / dev tools
-            "Devin", "code", "cursor", "Windsurf", "devenv", "rider64",
-            "phpstorm64", "idea64", "webstorm64", "goland64", "pycharm64"
-        };
-
         [DllImport("user32.dll")]
         private static extern IntPtr GetForegroundWindow();
 
@@ -384,13 +371,7 @@ namespace WindowsSentinel.Core
 
                     // 1. Focus steal check
                     GetWindowThreadProcessId(fgWnd, out uint pid);
-                    bool isBrowser = false;
-                    if (pid > 4)
-                    {
-                        try { using var p = Process.GetProcessById((int)pid); isBrowser = KnownBrowserProcesses.Contains(p.ProcessName); }
-                        catch { }
-                    }
-                    if (pid > 4 && pid != _lastFgPid && !isBrowser)
+                    if (pid > 4 && pid != _lastFgPid)
                     {
                         var now = DateTime.UtcNow;
                         if (now - _lastWindowChangeTime < TimeSpan.FromSeconds(2))
@@ -402,17 +383,8 @@ namespace WindowsSentinel.Core
                         _lastFgPid = pid;
                         _lastWindowChangeTime = now;
                     }
-                    else if (pid > 4 && pid != _lastFgPid)
-                    {
-                        // Track browser window changes without scoring
-                        _lastFgWnd = fgWnd;
-                        _lastFgPid = pid;
-                        _lastWindowChangeTime = DateTime.UtcNow;
-                    }
-
                     // 2. Programmatic cursor jump check
-                    // Skip when a browser is foreground — users legitimately move cursor across monitors
-                    if (GetCursorPos(out var curPos) && !isBrowser)
+                    if (GetCursorPos(out var curPos))
                     {
                         var dx = curPos.X - _lastCursorPos.X;
                         var dy = curPos.Y - _lastCursorPos.Y;
@@ -424,10 +396,6 @@ namespace WindowsSentinel.Core
                             _cursorJumpCount++;
                             _anomalyScore += 20;
                         }
-                        _lastCursorPos = curPos;
-                    }
-                    else if (GetCursorPos(out var _))
-                    {
                         _lastCursorPos = curPos;
                     }
 
@@ -475,7 +443,9 @@ namespace WindowsSentinel.Core
                                             RuleName = "UI Overlay: Transparent Fullscreen Overlay Detected",
                                             Evidence = $"Process '{procName}' (PID {pid}) has a large transparent topmost overlay ({width}x{height})",
                                             Reasoning = "A large transparent topmost window was detected, which can be used for phishing overlays or credential capture.",
-                                            Confidence = 0.65, Tier = DetectionTier.Tier2Indicator,
+                                            Confidence = 0.65,
+                                            Tier = DetectionTier.Tier1Behavioral,
+                                            AuthorizedResponse = ResponseAction.KillProcessTree,
                                             ProcessName = procName, ProcessId = (int)pid
                                         });
                                     }
@@ -485,34 +455,26 @@ namespace WindowsSentinel.Core
                     }
 
                     // 5. Anomaly score evaluation
+                    // Focus steals, cursor jumps, and brightness changes alone are NOT proof of maliciousness.
+                    // They are normal user behavior. Log only — never kill for this.
                     if (_anomalyScore >= 60)
                     {
                         string procName = "unknown";
                         try { using var p = Process.GetProcessById((int)pid); procName = p.ProcessName; }
                         catch { }
 
-                        // Never kill browsers for visual anomalies — they are normal UI behavior
-                        if (KnownBrowserProcesses.Contains(procName))
+                        await _detectionEngine.EmitAsync(new DetectionEvent
                         {
-                            _logger.LogDebug("[NeuroBehaviorVisualMonitor] Anomaly score {Score} reached with browser {Proc} in foreground — skipping detection", _anomalyScore, procName);
-                            ResetStats();
-                        }
-                        else
-                        {
-                            await _detectionEngine.EmitAsync(new DetectionEvent
-                            {
-                                RuleName = "NeuroBehavior: Visual Anomaly Detected",
+                            RuleName = "NeuroBehavior: Visual Anomaly Detected",
                             Evidence = $"Visual anomaly score reached {_anomalyScore} (Focus steals: {_focusStealCount}, Cursor jumps: {_cursorJumpCount}, Brightness oscillations: {_brightnessOscillationCount})",
                             Reasoning = "System-wide visual anomalies (rapid window focus steals, large programmatic cursor jumps, or sudden display brightness oscillations) suggest visual hijacking or background script takeover.",
-                            Confidence = 0.85,
-                            Tier = DetectionTier.Tier1Behavioral,
-                            AuthorizedResponse = ResponseAction.KillProcessTree,
+                            Confidence = 0.60,
+                            Tier = DetectionTier.Tier2Indicator,
                             ProcessName = procName,
                             ProcessId = (int)pid
                         });
 
                         ResetStats();
-                        }
                     }
 
                     // Decay anomaly score slowly over time
