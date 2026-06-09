@@ -899,6 +899,7 @@ namespace WindowsSentinel.Core
     {
         private readonly DetectionEngine _detectionEngine;
         private readonly ILogger<MicrosoftAccountGuardMonitor> _logger;
+        private readonly HashSet<string> _alertedFiles = new(StringComparer.OrdinalIgnoreCase);
 
         public MicrosoftAccountGuardMonitor(DetectionEngine de, ILogger<MicrosoftAccountGuardMonitor> l) { _detectionEngine = de; _logger = l; }
 
@@ -915,13 +916,57 @@ namespace WindowsSentinel.Core
                 {
                     await Task.Delay(30000, ct);
                     if (!Directory.Exists(tokenCachePath)) continue;
+
                     foreach (var file in Directory.EnumerateFiles(tokenCachePath, "*.tbres"))
                     {
                         var fi = new FileInfo(file);
                         if (fi.LastWriteTimeUtc > lastScan)
                         {
-                            // Check if any non-browser process is reading token files
-                            _logger.LogDebug("[MicrosoftAccountGuardMonitor] Token cache updated: {File}", file);
+                            // Check which process has the token file open
+                            // If a non-browser, non-system process is touching token files, alert
+                            var fileName = Path.GetFileName(file);
+                            if (_alertedFiles.Contains(fileName)) continue;
+
+                            // Look for processes that might be reading token files
+                            foreach (var proc in Process.GetProcesses())
+                            {
+                                try
+                                {
+                                    var name = proc.ProcessName;
+                                    // Skip known legitimate token consumers
+                                    if (name.Contains("RuntimeBroker", StringComparison.OrdinalIgnoreCase) ||
+                                        name.Contains("svchost", StringComparison.OrdinalIgnoreCase) ||
+                                        name.Contains("TokenBroker", StringComparison.OrdinalIgnoreCase) ||
+                                        name.Contains("msedge", StringComparison.OrdinalIgnoreCase) ||
+                                        name.Contains("chrome", StringComparison.OrdinalIgnoreCase) ||
+                                        name.Contains("Teams", StringComparison.OrdinalIgnoreCase) ||
+                                        name.Contains("OneDrive", StringComparison.OrdinalIgnoreCase) ||
+                                        name.Contains("explorer", StringComparison.OrdinalIgnoreCase))
+                                        continue;
+
+                                    // Check if process is from temp/suspicious path
+                                    string? imagePath = null;
+                                    try { imagePath = proc.MainModule?.FileName; } catch { }
+                                    if (!string.IsNullOrEmpty(imagePath) &&
+                                        (imagePath.Contains(@"\Temp\", StringComparison.OrdinalIgnoreCase) ||
+                                         imagePath.Contains(@"\Downloads\", StringComparison.OrdinalIgnoreCase)))
+                                    {
+                                        _alertedFiles.Add(fileName);
+                                        await _detectionEngine.EmitAsync(new DetectionEvent
+                                        {
+                                            RuleName = "Credential Theft: Microsoft Token Cache Accessed",
+                                            Evidence = $"Token cache file '{fileName}' modified while suspicious process '{name}' (PID {proc.Id}) from '{imagePath}' is running",
+                                            Reasoning = "The Microsoft TokenBroker cache was accessed while a process from a suspicious path is active, which may indicate token theft.",
+                                            Confidence = 0.70, Tier = DetectionTier.Tier1Behavioral,
+                                            AuthorizedResponse = ResponseAction.KillProcessTree,
+                                            ProcessName = name, ProcessId = proc.Id
+                                        });
+                                        break;
+                                    }
+                                }
+                                catch { }
+                                finally { proc.Dispose(); }
+                            }
                         }
                     }
                     lastScan = DateTime.UtcNow;
@@ -1837,6 +1882,7 @@ namespace WindowsSentinel.Core
     {
         private readonly DetectionEngine _detectionEngine;
         private readonly ILogger<WifiSecurityMonitor> _logger;
+        private readonly HashSet<string> _alertedProfiles = new(StringComparer.OrdinalIgnoreCase);
 
         public WifiSecurityMonitor(DetectionEngine de, ILogger<WifiSecurityMonitor> l) { _detectionEngine = de; _logger = l; }
 
@@ -1849,11 +1895,42 @@ namespace WindowsSentinel.Core
                 try
                 {
                     await Task.Delay(60000, ct);
-                    // Check connected WiFi authentication type via WMI
+                    // Check WiFi profiles for insecure authentication (Open/WEP)
                     try
                     {
-                        using var searcher = new ManagementObjectSearcher("SELECT * FROM MSNdis_80211_AuthenticationMode");
-                        // On most systems the WMI class may not be available; degrade gracefully
+                        using var key = Registry.LocalMachine.OpenSubKey(
+                            @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\NetworkList\Profiles");
+                        if (key == null) continue;
+
+                        foreach (var profileName in key.GetSubKeyNames())
+                        {
+                            try
+                            {
+                                using var profile = key.OpenSubKey(profileName);
+                                if (profile == null) continue;
+
+                                var name = profile.GetValue("ProfileName")?.ToString();
+                                var managed = profile.GetValue("Managed")?.ToString();
+                                var category = profile.GetValue("Category");
+
+                                // Check for unmanaged profiles (Category 0 = Public network)
+                                if (category is int cat && cat == 0 && !string.IsNullOrEmpty(name))
+                                {
+                                    if (_alertedProfiles.Contains(name)) continue;
+                                    _alertedProfiles.Add(name);
+
+                                    await _detectionEngine.EmitAsync(new DetectionEvent
+                                    {
+                                        RuleName = "WiFi Security: Public/Unsecured Network Connected",
+                                        Evidence = $"Connected to public network profile: '{name}'",
+                                        Reasoning = "System is connected to a network categorized as Public, which may lack encryption and be vulnerable to traffic interception.",
+                                        Confidence = 0.45, Tier = DetectionTier.Tier2Indicator,
+                                        ProcessName = "SYSTEM", ProcessId = 0
+                                    });
+                                }
+                            }
+                            catch { }
+                        }
                     }
                     catch { }
                 }
@@ -1970,24 +2047,60 @@ namespace WindowsSentinel.Core
     {
         private readonly DetectionEngine _detectionEngine;
         private readonly ILogger<WorkFoldersExfilMonitor> _logger;
+        private long _baselineFileCount;
 
         public WorkFoldersExfilMonitor(DetectionEngine de, ILogger<WorkFoldersExfilMonitor> l) { _detectionEngine = de; _logger = l; }
 
         protected override async Task ExecuteAsync(CancellationToken ct)
         {
             _logger.LogInformation("[WorkFoldersExfilMonitor] Started");
+            var workFolders = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Work Folders");
+
+            // Baseline file count
+            if (Directory.Exists(workFolders))
+            {
+                try { _baselineFileCount = Directory.EnumerateFiles(workFolders, "*", SearchOption.AllDirectories).LongCount(); }
+                catch { _baselineFileCount = 0; }
+            }
 
             while (!ct.IsCancellationRequested)
             {
                 try
                 {
                     await Task.Delay(30000, ct);
-                    // Check if Work Folders sync is active and copying large volumes
-                    var workFolders = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Work Folders");
-                    if (Directory.Exists(workFolders))
+                    if (!Directory.Exists(workFolders)) continue;
+
+                    long currentCount = 0;
+                    try { currentCount = Directory.EnumerateFiles(workFolders, "*", SearchOption.AllDirectories).LongCount(); }
+                    catch { continue; }
+
+                    // If file count suddenly drops by 50+ files, possible bulk exfiltration/deletion
+                    if (_baselineFileCount > 50 && currentCount < _baselineFileCount - 50)
                     {
-                        _logger.LogDebug("[WorkFoldersExfilMonitor] Work Folders directory exists, monitoring sync activity");
+                        await _detectionEngine.EmitAsync(new DetectionEvent
+                        {
+                            RuleName = "Data Exfiltration: Work Folders Mass File Removal",
+                            Evidence = $"Work Folders file count dropped from {_baselineFileCount} to {currentCount} ({_baselineFileCount - currentCount} files removed)",
+                            Reasoning = "A large number of files were removed from the Work Folders sync directory in a short period, which may indicate data exfiltration via sync or ransomware activity.",
+                            Confidence = 0.70, Tier = DetectionTier.Tier1Behavioral,
+                            AuthorizedResponse = ResponseAction.LogOnly,
+                            ProcessName = "SYSTEM", ProcessId = 0
+                        });
                     }
+                    // If file count increases dramatically (100+ new files added quickly) — staging for sync exfil
+                    else if (currentCount > _baselineFileCount + 100)
+                    {
+                        await _detectionEngine.EmitAsync(new DetectionEvent
+                        {
+                            RuleName = "Data Exfiltration: Work Folders Mass File Addition",
+                            Evidence = $"Work Folders file count increased from {_baselineFileCount} to {currentCount} ({currentCount - _baselineFileCount} files added)",
+                            Reasoning = "A large number of files were rapidly added to the Work Folders sync directory, which may indicate data staging for cloud exfiltration.",
+                            Confidence = 0.60, Tier = DetectionTier.Tier2Indicator,
+                            ProcessName = "SYSTEM", ProcessId = 0
+                        });
+                    }
+
+                    _baselineFileCount = currentCount;
                 }
                 catch (OperationCanceledException) { break; }
                 catch (Exception ex) { _logger.LogDebug(ex, "[WorkFoldersExfilMonitor] Error"); }
@@ -2002,6 +2115,28 @@ namespace WindowsSentinel.Core
     {
         private readonly DetectionEngine _detectionEngine;
         private readonly ILogger<AdsDataStagingMonitor> _logger;
+        private readonly HashSet<string> _alertedFiles = new(StringComparer.OrdinalIgnoreCase);
+
+        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        private static extern IntPtr FindFirstStreamW(string lpFileName, int infoLevel, out WIN32_FIND_STREAM_DATA lpFindStreamData, int dwFlags);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool FindNextStreamW(IntPtr hFindStream, out WIN32_FIND_STREAM_DATA lpFindStreamData);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool FindClose(IntPtr hFindFile);
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        private struct WIN32_FIND_STREAM_DATA
+        {
+            public long StreamSize;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 296)]
+            public string cStreamName;
+        }
+
+        private static readonly IntPtr INVALID_HANDLE_VALUE = new(-1);
 
         public AdsDataStagingMonitor(DetectionEngine de, ILogger<AdsDataStagingMonitor> l) { _detectionEngine = de; _logger = l; }
 
@@ -2014,24 +2149,74 @@ namespace WindowsSentinel.Core
                 try
                 {
                     await Task.Delay(30000, ct);
-                    // Scan temp + downloads for files with ADS streams
+                    // Scan temp + downloads for files with suspicious ADS streams
                     var tempDir = Path.GetTempPath();
-                    if (Directory.Exists(tempDir))
+                    var downloadsDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
+
+                    foreach (var dir in new[] { tempDir, downloadsDir })
                     {
-                        foreach (var file in Directory.EnumerateFiles(tempDir, "*.*", SearchOption.TopDirectoryOnly))
+                        if (!Directory.Exists(dir)) continue;
+                        try
                         {
-                            try
+                            foreach (var file in Directory.EnumerateFiles(dir, "*.*", SearchOption.TopDirectoryOnly))
                             {
-                                // Check for Zone.Identifier (normal) vs other ADS streams
-                                // Full implementation uses FindFirstStreamW / FindNextStreamW
+                                if (_alertedFiles.Contains(file)) continue;
+                                try
+                                {
+                                    var streams = GetAlternateDataStreams(file);
+                                    // Zone.Identifier is normal (Mark of the Web). Others are suspicious.
+                                    foreach (var stream in streams)
+                                    {
+                                        if (stream.Name.Contains("Zone.Identifier", StringComparison.OrdinalIgnoreCase)) continue;
+                                        if (stream.Name == "::$DATA") continue; // Primary data stream
+
+                                        if (stream.Size > 1024) // Only flag ADS > 1KB (payload-sized)
+                                        {
+                                            _alertedFiles.Add(file);
+                                            await _detectionEngine.EmitAsync(new DetectionEvent
+                                            {
+                                                RuleName = "ADS Staging: Hidden Data in Alternate Data Stream",
+                                                Evidence = $"File '{file}' has a suspicious ADS '{stream.Name}' ({stream.Size} bytes)",
+                                                Reasoning = "A file in a user-writable directory has a non-standard Alternate Data Stream larger than 1KB. ADS is used to hide payloads, exfiltration data, or persistence mechanisms from normal file listings.",
+                                                Confidence = 0.65, Tier = DetectionTier.Tier2Indicator,
+                                                ProcessName = "SYSTEM", ProcessId = 0
+                                            });
+                                            break;
+                                        }
+                                    }
+                                }
+                                catch { }
                             }
-                            catch { }
                         }
+                        catch { }
                     }
+
+                    // Limit alertedFiles growth
+                    if (_alertedFiles.Count > 500) _alertedFiles.Clear();
                 }
                 catch (OperationCanceledException) { break; }
                 catch (Exception ex) { _logger.LogDebug(ex, "[AdsDataStagingMonitor] Error"); }
             }
+        }
+
+        private static List<(string Name, long Size)> GetAlternateDataStreams(string filePath)
+        {
+            var streams = new List<(string, long)>();
+            var handle = FindFirstStreamW(filePath, 0, out var data, 0);
+            if (handle == INVALID_HANDLE_VALUE) return streams;
+
+            try
+            {
+                do
+                {
+                    streams.Add((data.cStreamName, data.StreamSize));
+                } while (FindNextStreamW(handle, out data));
+            }
+            finally
+            {
+                FindClose(handle);
+            }
+            return streams;
         }
     }
 

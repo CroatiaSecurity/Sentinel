@@ -1,12 +1,12 @@
 # Windows Sentinel — Design Document
 
-**Version: 6.9.0**
+**Version: 0.7.0**
 
 ---
 
 ## Platform
 
-- .NET 8, Windows only (`net8.0-windows`)
+- .NET 10, Windows only (`net10.0-windows`)
 - Self-contained single-file publish for distribution
 - Targets x64 and arm64
 

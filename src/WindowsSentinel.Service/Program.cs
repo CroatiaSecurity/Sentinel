@@ -118,7 +118,8 @@ namespace WindowsSentinel.Service
                     // BackgroundService monitors
                     services.AddHostedService<SentinelService>();
                     services.AddHostedService<AntiTamperGuard>();
-                    services.AddHostedService<RansomwareIoMonitor>();
+                    services.AddSingleton<RansomwareIoMonitor>();
+                    services.AddHostedService<RansomwareIoMonitor>(sp => sp.GetRequiredService<RansomwareIoMonitor>());
                     services.AddHostedService<ArpSpoofMonitor>();
                     services.AddHostedService<BluetoothMonitor>();
                     services.AddHostedService<CanaryFileMonitor>();

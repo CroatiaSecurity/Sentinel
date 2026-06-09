@@ -207,6 +207,12 @@ namespace WindowsSentinel.Core
                         if (pattern.EndsWith(".exe") && pt.ParentProcessName?.Equals("explorer", StringComparison.OrdinalIgnoreCase) == true)
                             continue;
 
+                        // Skip COM auto-elevation: when auto-elevate binaries are launched with
+                        // "-Embedding" by the COM runtime (svchost/DcomLaunch), it's legitimate.
+                        // This prevents false positives on FodHelper.exe, eventvwr.exe, etc.
+                        if (pattern.EndsWith(".exe") && cmd.Contains("-embedding"))
+                            continue;
+
                         // Skip false positives on legitimate named pipes used for IPC by development/IDE tools or other applications
                         if (pattern.Equals("\\pipe\\", StringComparison.OrdinalIgnoreCase))
                         {

@@ -33,6 +33,7 @@ namespace WindowsSentinel.Service
         private readonly LocalServerMonitor _localServerMonitor;
         private readonly ParentPidSpoofDetector _parentPidSpoofDetector;
         private readonly ChainTracer _chainTracer;
+        private readonly string _version;
 
         public SentinelService(
             ILogger<SentinelService> logger,
@@ -84,6 +85,7 @@ namespace WindowsSentinel.Service
             _localServerMonitor = localServerMonitor;
             _parentPidSpoofDetector = parentPidSpoofDetector;
             _chainTracer = chainTracer;
+            _version = typeof(SentinelService).Assembly.GetName().Version?.ToString(3) ?? "6.9.0";
         }
 
 
@@ -117,7 +119,7 @@ namespace WindowsSentinel.Service
             await _eventLogger.LogEventAsync("service_start", new
             {
                 Status = "started",
-                Version = "6.9.0",
+                Version = _version,
                 Timestamp = DateTime.UtcNow
             }, stoppingToken);
 

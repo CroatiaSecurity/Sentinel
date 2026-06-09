@@ -17,10 +17,12 @@ namespace WindowsSentinel.Agent
         private ContextMenuStrip? _contextMenu;
         private Thread? _uiThread;
         private readonly CancellationTokenSource _cts = new();
+        private readonly string _version;
 
         public TrayIconService(SentinelConfig config)
         {
             _config = config;
+            _version = typeof(TrayIconService).Assembly.GetName().Version?.ToString(3) ?? "0.7.0";
         }
 
         public Task StartAsync(CancellationToken cancellationToken)
@@ -74,7 +76,7 @@ namespace WindowsSentinel.Agent
             {
                 Icon = appIcon ?? System.Drawing.SystemIcons.Shield,
                 ContextMenuStrip = _contextMenu,
-                Text = "Windows Sentinel v6.3.0 — Protection Active",
+                Text = $"Windows Sentinel v{_version} — Protection Active",
                 Visible = true
             };
 
@@ -149,7 +151,7 @@ namespace WindowsSentinel.Agent
         {
             _config.ActiveResponse = !_config.ActiveResponse;
             var status = _config.ActiveResponse ? "Active" : "Disabled";
-            _notifyIcon!.Text = $"Windows Sentinel v6.3.0 — Protection {status}";
+            _notifyIcon!.Text = $"Windows Sentinel v{_version} — Protection {status}";
             _notifyIcon.ShowBalloonTip(2000, "Windows Sentinel", $"Protection mode set to {status}.", ToolTipIcon.Warning);
         }
 

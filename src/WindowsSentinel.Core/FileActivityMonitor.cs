@@ -11,6 +11,7 @@ namespace WindowsSentinel.Core
     {
         private readonly TelemetryFusionEngine _fusionEngine;
         private readonly DetectionEngine _detectionEngine;
+        private readonly RansomwareIoMonitor? _ransomwareIoMonitor;
         private readonly SentinelConfig _config;
         private readonly ILogger<FileActivityMonitor> _logger;
         private readonly List<FileSystemWatcher> _watchers = new();
@@ -65,10 +66,12 @@ namespace WindowsSentinel.Core
             TelemetryFusionEngine fusionEngine,
             DetectionEngine detectionEngine,
             SentinelConfig config,
-            ILogger<FileActivityMonitor> logger)
+            ILogger<FileActivityMonitor> logger,
+            RansomwareIoMonitor? ransomwareIoMonitor = null)
         {
             _fusionEngine = fusionEngine;
             _detectionEngine = detectionEngine;
+            _ransomwareIoMonitor = ransomwareIoMonitor;
             _config = config;
             _logger = logger;
 
@@ -229,6 +232,10 @@ namespace WindowsSentinel.Core
             }
 
             var processInfo = GetProcessUsingFile(e.FullPath);
+
+            // Feed mass-rename counter for ransomware behavioral detection
+            _ransomwareIoMonitor?.RecordRename(processInfo.pid, processInfo.name);
+
             SubmitEvent(e.OldFullPath, "RENAME", e.FullPath, processInfo.pid, processInfo.name);
         }
 

@@ -56,6 +56,7 @@ namespace WindowsSentinel.Core
             "akamaiedge.net", "akamai.net", "cloudfront.net", "cloudflare.com",
             "azureedge.net", "azure.com", "msedge.net", "trafficmanager.net",
             "googleapis.com", "gstatic.com", "googlevideo.com",
+            "gvt1.com", "gvt2.com", "googleusercontent.com",
             // Microsoft
             "microsoft.com", "microsoftonline.com", "windows.net", "office.com", "live.com",
             "msidentity.com", "windowsupdate.com", "windowsupdate.org", "msftncsi.com",
@@ -68,7 +69,7 @@ namespace WindowsSentinel.Core
             "githubusercontent.com", "npmjs.org", "nuget.org",
             "visualstudio.com", "vsassets.io",
             // Reputations & Certs (safe lookup domains)
-            "abuse.ch", "lencr.org",
+            "abuse.ch", "lencr.org", "amazontrust.com", "digicert.com", "globalsign.com",
             // Other common
             "spotify.com", "scdn.co", "discord.gg", "discordapp.com",
             // Windows internals — high-volume by design, not C2

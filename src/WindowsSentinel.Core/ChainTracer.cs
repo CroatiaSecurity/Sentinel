@@ -121,6 +121,19 @@ namespace WindowsSentinel.Core
                         {
                             if (File.Exists(node.ImagePath))
                             {
+                                // NEVER quarantine files from Windows system directories —
+                                // these are WRP-protected and removing them breaks the OS.
+                                // This is a safety net in case a system binary is incorrectly
+                                // identified as part of an attack chain.
+                                var lowerPath = node.ImagePath!.ToLowerInvariant();
+                                if (lowerPath.Contains(@"\windows\system32\") ||
+                                    lowerPath.Contains(@"\windows\syswow64\") ||
+                                    lowerPath.Contains(@"\windows\winsxs\"))
+                                {
+                                    _logger.LogWarning("[ChainTracer] Skipping quarantine of system binary: {Path}", node.ImagePath);
+                                    continue;
+                                }
+
                                 var hash = await ComputeFileHashAsync(node.ImagePath!, ct);
                                 await _quarantineManager.QuarantineFileAtomicAsync(node.ImagePath!);
                                 result.QuarantinedFiles.Add(new QuarantinedFileInfo
