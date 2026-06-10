@@ -158,6 +158,9 @@ namespace WindowsSentinel.Service
                     services.AddHostedService<WebcamHijackMonitor>();
                     services.AddHostedService<ConsultantSignalIngestor>();
                     services.AddHostedService<RegistryMonitor>();
+                    services.AddHostedService<GhostProcessMonitor>();
+                    services.AddHostedService<ShellWatchdog>();
+                    services.AddHostedService<CriticalServiceGuard>();
                 });
     }
 }

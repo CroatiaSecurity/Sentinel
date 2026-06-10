@@ -2,6 +2,18 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [0.7.1] - 2026-06-10
+
+### Added — RAT Detection & System Resilience
+
+- **`GhostProcessMonitor`** — Detects PIDs with active outbound network connections whose process name cannot be resolved or was recorded as empty by ETW. Catches the exact blind spot exploited by PlugX, ShadowPad, and Mustang Panda RATs that use DLL sideloading/process hollowing, leaving orphaned network connections under unresolvable PIDs. Scans every 15s. Requires 2+ sightings before alerting to avoid startup race conditions. Network-isolates when connections target known masquerade ports (5228, 8009, 4443, etc.).
+- **`ShellWatchdog`** — Monitors explorer.exe health via `SendMessageTimeout` responsiveness checks. Detects shell termination, cross-process hangs (AppHangXProcB1), and repeated crashes. Auto-restarts explorer.exe when the shell dies to restore user control. Emits Tier1 alert when crash frequency exceeds threshold (3+ in 10 minutes), indicating active attack on the shell. Scans every 5s.
+- **`CriticalServiceGuard`** — Monitors 15 critical Windows services (TokenBroker, Defender, Firewall, EventLog, etc.) for repeated crash patterns via SCM event log polling. Detects STATUS_STACK_BUFFER_OVERRUN (0xC0000409) exploitation patterns — the exact crash signature seen when PlugX injects into svchost/TokenBroker. Also monitors BSOD-critical processes (csrss, smss, lsass, wininit) for debugger attachment, which malware uses as a kill switch (detach = instant BSOD). Scans every 10s.
+
+### Fixed
+
+- **BeaconingDetector empty process name gap** — The `GhostProcessMonitor` now covers the scenario where `BeaconingDetector` fires with empty process names. Previously, these detections had low forensic value because the process was unresolvable. Ghost monitor provides early detection (15s vs 30s) and explicit investigation of the unresolvable PID.
+
 ## [0.7.0] - 2026-06-09
 
 ### Fixed — Audit & Integrity Sweep
