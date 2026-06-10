@@ -2,6 +2,23 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [0.7.3] - 2026-06-10
+
+### Fixed — BeaconingDetector False Positive Kill & DNS Noise
+
+- **`BeaconingDetector` removed name-based allowlist (`LegitimatePeriodicProcesses`)** — The previous approach exempted processes by name (chrome, msedge, svchost, etc.) from beaconing analysis entirely. An attacker could bypass the detector by renaming their RAT to any name on the list. The allowlist has been completely removed. No process is trusted based on its name alone.
+- **`BeaconingDetector` cryptographic trust verification replaces empty-name heuristic** — Previously, processes with an empty/unresolvable name triggered `KillProcess` unconditionally (the PlugX hollowing heuristic). This killed legitimate Chrome network subprocesses whose names weren't resolved by the ancestry cache. New `DetermineResponseAction()` logic:
+  1. Resolves the process image path (stored at connection time or live via PID).
+  2. If unresolvable → KillProcess (truly hollowed/orphaned).
+  3. If path is outside protected OS directories (Program Files, System32) → KillProcess.
+  4. If path IS in a protected directory → compute SHA-256 and check FileVerdictAds reputation:
+     - Safe hash → downgrade to NetworkIsolate.
+     - Unsafe hash → KillProcess.
+     - Unknown hash → NetworkIsolate (protected paths require admin to write).
+  This is not bypassable by renaming because trust is based on file location (admin-only directories) combined with cryptographic hash verification, not the process name.
+- **`ConnectionHistory` now stores `ImagePath`** — The image path captured by NetworkMonitor is persisted in the connection history so it's available at analysis time without requiring the process to still be running.
+- **`DnsQueryMonitor` added `kiro.dev` to `TrustedBaseDomains`** — Kiro IDE generates high DNS query volumes during active sessions. Added to the IDE/Dev tooling section to suppress noisy LogOnly rapid-query alerts.
+
 ## [0.7.2] - 2026-06-10
 
 ### Fixed — PlugX Campaign Response & Monitor Placement

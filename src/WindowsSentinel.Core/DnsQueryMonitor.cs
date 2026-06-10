@@ -67,7 +67,7 @@ namespace WindowsSentinel.Core
             // IDE / Dev tooling
             "codeium.com", "agentclientprotocol.com", "github.com", "github.io",
             "githubusercontent.com", "npmjs.org", "nuget.org",
-            "visualstudio.com", "vsassets.io",
+            "visualstudio.com", "vsassets.io", "kiro.dev",
             // Reputations & Certs (safe lookup domains)
             "abuse.ch", "lencr.org", "amazontrust.com", "digicert.com", "globalsign.com",
             // Other common
