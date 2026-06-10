@@ -2,7 +2,7 @@
 
 **Userland EDR for Windows � Behavioral Detection & Automated Response**
 
-> Version: 0.7.0 | Author: [Gorstak](https://gorstak.eu) | [GitHub](https://github.com/CroatiaSecurity/Sentinel) | License: MIT
+> Version: 0.7.2 | Author: [Gorstak](https://gorstak.eu) | [GitHub](https://github.com/CroatiaSecurity/Sentinel) | License: MIT
 
 ---
 

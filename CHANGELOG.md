@@ -2,6 +2,14 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [0.7.2] - 2026-06-10
+
+### Fixed — PlugX Campaign Response & Monitor Placement
+
+- **`ShellWatchdog` moved from Service to Agent** — `ShellWatchdog` uses `GetShellWindow()` and `SendMessageTimeout` (user32.dll) which require an interactive desktop session. The SYSTEM service runs in Session 0 with no desktop, making all window-based responsiveness checks dead code. Moved registration to the Agent (user session) where the shell window is accessible. Process enumeration and `SendMessageTimeout` now function correctly.
+- **`BeaconingDetector` PlugX/Google FCM collision** — PlugX RAT uses `googleupdate.exe` DLL sideloading to maintain C2 on port 5228 (Google FCM) to legitimate Google IPs, indistinguishable by IP/port from Chrome push notifications. Previously the detector issued `NETWORK_ISOLATE` which blocked Google IPs via Windows Firewall — breaking all legitimate Google connectivity. Fix: empty-name process beacons now trigger `KillProcess` (target the hollowed PID) instead of `NetworkIsolate` (block the IP). The threat is the process, not Google's infrastructure. Legitimate browser FCM connections are unaffected because browsers have resolvable names in the `LegitimatePeriodicProcesses` allowlist.
+- **`PhantomDeviceMonitor` cast device C2 relay detection** — PlugX deploys LAN relay nodes that spoof Google MAC addresses and open port 8008/8009 (Cast protocol), appearing identical to a Chromecast. Previously, cast-port devices were always logged without blocking (v0.6.9 relaxation to avoid blocking real Chromecasts/Smart TVs). Fix: `PhantomDeviceMonitor` now cross-correlates with live TCP state — if any ghost/unresolvable process has active connections to the new cast device, confidence is promoted to 0.92 and the device is firewall-blocked. Real Chromecasts won't have ghost processes connecting to them.
+
 ## [0.7.1] - 2026-06-10
 
 ### Added — RAT Detection & System Resilience

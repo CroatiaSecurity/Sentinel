@@ -3,7 +3,7 @@
 **Status:** Architecture spec. Extends, does not replace, `requirements.md`,
 `design.md`, `constraints.md` (all v0.9.0).
 
-**Last updated:** v0.7.0 (June 2026) — Gaming & Casting False Positive Mitigation: added gaming path identification, beaconing rule allowlist bypasses, and phantom device monitor adjustments for smart TVs.
+**Last updated:** v0.7.2 (June 2026) — PlugX Campaign Response: BeaconingDetector response changed from NetworkIsolate to KillProcess for empty-name beacons, PhantomDeviceMonitor ghost-connection correlation for cast device relay detection, ShellWatchdog moved to Agent for proper desktop session access.
 
 ---
 

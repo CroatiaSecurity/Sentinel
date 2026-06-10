@@ -2297,8 +2297,7 @@ namespace WindowsSentinel.Core
 
                             if (suspiciousService != null)
                             {
-                                // Only promote confidence to 0.90 (which triggers Active Response blocking)
-                                // for high-risk remote access/debugging ports (ADB, Telnet, DevTools, Pharos)
+                                // High-risk ports that always warrant blocking
                                 bool isHighRisk = suspiciousService.Contains("ADB", StringComparison.OrdinalIgnoreCase) || 
                                                   suspiciousService.Contains("Telnet", StringComparison.OrdinalIgnoreCase) || 
                                                   suspiciousService.Contains("DevTools", StringComparison.OrdinalIgnoreCase) || 
@@ -2308,6 +2307,22 @@ namespace WindowsSentinel.Core
                                 {
                                     confidence = 0.90;
                                 }
+
+                                // Cast ports (8008/8009) on a new device: check if any ghost/empty-name
+                                // process is actively connecting to this device IP. If yes, this isn't a
+                                // Chromecast — it's a C2 relay masquerading as one (PlugX technique).
+                                // If no ghost connection, treat as normal consumer device (log only).
+                                if (!isHighRisk && 
+                                    (suspiciousService.Contains("Cast", StringComparison.OrdinalIgnoreCase) ||
+                                     suspiciousService.Contains("8008", StringComparison.OrdinalIgnoreCase)))
+                                {
+                                    if (HasGhostConnectionTo(dev.Ip))
+                                    {
+                                        confidence = 0.92;
+                                        reasoning += " CORRELATED: An unresolvable/empty-name process has active connections to this device, indicating C2 relay masquerading as a casting device.";
+                                    }
+                                }
+
                                 reasoning += $" Device has an open {suspiciousService} port, which is commonly used for screen casting, debugging, or remote access.";
                             }
 
@@ -2523,6 +2538,64 @@ namespace WindowsSentinel.Core
                     yield return ua.Address.ToString();
             }
         }
+
+        /// <summary>
+        /// Checks if any unresolvable/empty-name process has active TCP connections to the given IP.
+        /// This correlates phantom device detection with ghost process behavior — if a process we
+        /// can't identify is talking to the new device, it's likely C2, not a Chromecast.
+        /// </summary>
+        private static bool HasGhostConnectionTo(string targetIp)
+        {
+            try
+            {
+                int size = 0;
+                var ret = GetExtendedTcpTable(IntPtr.Zero, ref size, true, 2, 5 /* TCP_TABLE_OWNER_PID_ALL */, 0);
+                if (ret != 122) return false;
+
+                var buffer = Marshal.AllocHGlobal(size);
+                try
+                {
+                    ret = GetExtendedTcpTable(buffer, ref size, true, 2, 5, 0);
+                    if (ret != 0) return false;
+
+                    int numEntries = Marshal.ReadInt32(buffer);
+                    int structSize = 24; // sizeof MIB_TCPROW_OWNER_PID (6 uint = 24 bytes)
+                    int myPid = Environment.ProcessId;
+
+                    for (int i = 0; i < numEntries; i++)
+                    {
+                        var rowPtr = IntPtr.Add(buffer, 4 + i * structSize);
+                        uint state = (uint)Marshal.ReadInt32(rowPtr, 0);
+                        uint remoteAddr = (uint)Marshal.ReadInt32(rowPtr, 12);
+                        uint owningPid = (uint)Marshal.ReadInt32(rowPtr, 20);
+
+                        if (state != 5) continue; // Established only
+                        if (owningPid <= 4 || owningPid == myPid) continue;
+
+                        var remoteIp = new IPAddress(BitConverter.GetBytes(remoteAddr)).ToString();
+                        if (!remoteIp.Equals(targetIp, StringComparison.Ordinal)) continue;
+
+                        // Found a connection to the target IP — check if the owning process is resolvable
+                        try
+                        {
+                            using var proc = Process.GetProcessById((int)owningPid);
+                            var name = proc.ProcessName;
+                            if (string.IsNullOrEmpty(name)) return true; // Empty name = ghost
+                        }
+                        catch (ArgumentException) { return true; } // Process doesn't exist = ghost
+                        catch (InvalidOperationException) { return true; }
+                        catch { }
+                    }
+                }
+                finally { Marshal.FreeHGlobal(buffer); }
+            }
+            catch { }
+            return false;
+        }
+
+        [DllImport("iphlpapi.dll", SetLastError = true)]
+        private static extern uint GetExtendedTcpTable(IntPtr pTcpTable, ref int pdwSize,
+            bool bOrder, int ulAf, int tableClass, uint reserved);
 
         [StructLayout(LayoutKind.Sequential)]
         private struct MIB_IPNETROW

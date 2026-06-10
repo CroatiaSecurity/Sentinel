@@ -133,6 +133,16 @@ namespace WindowsSentinel.Core
                 double countFactor = Math.Min(1.0, intervals.Count / 20.0);
                 double confidence = Math.Min(0.95, 0.70 + cvFactor * 0.20 + countFactor * 0.08);
 
+                // For empty process names (DLL sideloading/hollowing like PlugX), use
+                // KillProcess instead of NetworkIsolate. The threat is the hollowed process
+                // using legitimate infrastructure (Google IPs on port 5228). Blocking IPs is
+                // counterproductive because the RAT reconnects to different IPs in the same
+                // rotation, while the block breaks legitimate services on the same infra.
+                // Kill the PID directly — GhostProcessMonitor provides complementary detection.
+                bool hasEmptyName = string.IsNullOrEmpty(history.ProcessName);
+                var responseAction = hasEmptyName ? ResponseAction.KillProcess : ResponseAction.NetworkIsolate;
+                var tier = DetectionTier.Tier1Behavioral;
+
                 string intervalDesc = mean < 60 ? $"{mean:F1}s" : $"{mean / 60:F1}min";
 
                 await _detectionEngine.EmitAsync(new DetectionEvent
@@ -147,8 +157,8 @@ namespace WindowsSentinel.Core
                                 "Legitimate software connects irregularly (CV > 1.0). " +
                                 "This detection is signature-independent.",
                     Confidence = confidence,
-                    Tier = DetectionTier.Tier1Behavioral,
-                    AuthorizedResponse = ResponseAction.NetworkIsolate,
+                    Tier = tier,
+                    AuthorizedResponse = responseAction,
                     ProcessName = history.ProcessName,
                     ProcessId = history.ProcessId,
                     Metadata = new()
