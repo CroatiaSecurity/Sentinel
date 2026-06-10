@@ -22,7 +22,22 @@ namespace WindowsSentinel.Agent
         public TrayIconService(SentinelConfig config)
         {
             _config = config;
-            _version = typeof(TrayIconService).Assembly.GetName().Version?.ToString(3) ?? "0.7.0";
+            _version = LoadVersion();
+        }
+
+        private static string LoadVersion()
+        {
+            // 1. Try version.txt next to the executable (single source of truth)
+            var exeDir = AppContext.BaseDirectory;
+            var versionFile = Path.Combine(exeDir, "version.txt");
+            if (File.Exists(versionFile))
+            {
+                var text = File.ReadAllText(versionFile).Trim();
+                if (!string.IsNullOrEmpty(text)) return text;
+            }
+
+            // 2. Fallback to assembly version
+            return typeof(TrayIconService).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
         }
 
         public Task StartAsync(CancellationToken cancellationToken)

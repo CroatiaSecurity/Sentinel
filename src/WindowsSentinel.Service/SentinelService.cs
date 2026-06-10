@@ -85,7 +85,19 @@ namespace WindowsSentinel.Service
             _localServerMonitor = localServerMonitor;
             _parentPidSpoofDetector = parentPidSpoofDetector;
             _chainTracer = chainTracer;
-            _version = typeof(SentinelService).Assembly.GetName().Version?.ToString(3) ?? "6.9.0";
+            _version = LoadVersion();
+        }
+
+        private static string LoadVersion()
+        {
+            var exeDir = AppContext.BaseDirectory;
+            var versionFile = System.IO.Path.Combine(exeDir, "version.txt");
+            if (System.IO.File.Exists(versionFile))
+            {
+                var text = System.IO.File.ReadAllText(versionFile).Trim();
+                if (!string.IsNullOrEmpty(text)) return text;
+            }
+            return typeof(SentinelService).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
         }
 
 

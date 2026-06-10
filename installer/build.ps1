@@ -7,6 +7,27 @@ Write-Host "==============================================" -ForegroundColor Cya
 Write-Host "   Windows Sentinel - Building Installer      " -ForegroundColor Cyan
 Write-Host "==============================================" -ForegroundColor Cyan
 
+# 0. Read version from single source of truth
+$VersionFile = Join-Path $PSScriptRoot "..\version.txt"
+$Version = (Get-Content $VersionFile -Raw).Trim()
+Write-Host "Version: $Version" -ForegroundColor Green
+
+# 0.1 Stamp all .csproj files with the version
+$CsprojFiles = Get-ChildItem (Join-Path $PSScriptRoot "..") -Recurse -Filter "*.csproj"
+foreach ($csproj in $CsprojFiles) {
+    $content = Get-Content $csproj.FullName -Raw
+    $content = $content -replace '<Version>[^<]+</Version>', "<Version>$Version</Version>"
+    Set-Content $csproj.FullName -Value $content -NoNewline
+}
+Write-Host "Stamped $($CsprojFiles.Count) .csproj files with version $Version" -ForegroundColor Yellow
+
+# 0.2 Stamp Inno Setup script
+$SetupScript = Join-Path $PSScriptRoot "setup.iss"
+$issContent = Get-Content $SetupScript -Raw
+$issContent = $issContent -replace 'AppVersion=.*', "AppVersion=$Version"
+$issContent = $issContent -replace 'OutputBaseFilename=WindowsSentinelSetup-.*', "OutputBaseFilename=WindowsSentinelSetup-$Version"
+Set-Content $SetupScript -Value $issContent -NoNewline
+
 # 1. Clean previous build artifacts and publish folder
 $PublishDir = Join-Path $PSScriptRoot "..\publish"
 $SrcDir = Join-Path $PSScriptRoot "..\src"
@@ -26,11 +47,13 @@ Write-Host "Publishing Sentinel Agent (win-x64 self-contained)..." -ForegroundCo
 $AgentProj = Join-Path $PSScriptRoot "..\src\WindowsSentinel.Agent\WindowsSentinel.Agent.csproj"
 & "C:\Program Files\dotnet\dotnet.exe" publish $AgentProj -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -o (Join-Path $PublishDir "agent")
 
-# 3a. Copy Sentinel.ico to publish outputs for runtime icon access
-Write-Host "Deploying Sentinel.ico to publish directories..." -ForegroundColor Yellow
+# 3a. Copy Sentinel.ico and version.txt to publish outputs
+Write-Host "Deploying Sentinel.ico and version.txt to publish directories..." -ForegroundColor Yellow
 $IconSource = Join-Path $PSScriptRoot "assets\Sentinel.ico"
 Copy-Item $IconSource -Destination (Join-Path $PublishDir "agent\Sentinel.ico") -Force
 Copy-Item $IconSource -Destination (Join-Path $PublishDir "service\Sentinel.ico") -Force
+Copy-Item $VersionFile -Destination (Join-Path $PublishDir "agent\version.txt") -Force
+Copy-Item $VersionFile -Destination (Join-Path $PublishDir "service\version.txt") -Force
 
 # 4. Locate Inno Setup Compiler (ISCC.exe)
 Write-Host "Locating Inno Setup compiler..." -ForegroundColor Yellow
@@ -67,6 +90,6 @@ $SetupScript = Join-Path $PSScriptRoot "setup.iss"
 
 Write-Host "==============================================" -ForegroundColor Green
 Write-Host "Build completed successfully!" -ForegroundColor Green
-Write-Host "Installer output: installer\WindowsSentinelSetup-0.7.1.exe" -ForegroundColor Green
+Write-Host "Installer output: installer\WindowsSentinelSetup-$Version.exe" -ForegroundColor Green
 Write-Host "==============================================" -ForegroundColor Green
 
