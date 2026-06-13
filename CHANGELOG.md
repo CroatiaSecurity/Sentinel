@@ -2,6 +2,14 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [0.7.9] - 2026-06-13
+
+### Fixed — Startup False Positives
+
+- **RouteTableMonitor** — Fixed startup race: default route was alerting as "new" on first scan before baseline was captured. Now waits for baseline before checking for changes.
+- **System32 write detection** — Added `CNG Key Isolation`, `Credential Guard`, `VBS Key Protection`, `LsaIso`, and Sentinel itself to trusted system writers. Prevents false positives on legitimate Windows security subsystems.
+- **DNS trusted domains** — Added `msftconnecttest.com` (Windows NCSI), `.localmachine`, `disabled.invalid` to suppress rapid-query false positives.
+
 ## [0.7.8] - 2026-06-13
 
 ### Improved — TlsCertificateMonitor Hardened

@@ -376,8 +376,11 @@ namespace WindowsSentinel.Core
                 "dism", "dismhost", "sfc", "poqexec",
                 // Critical system processes that legitimately modify System32
                 "csrss", "smss", "wininit", "services", "lsass", "svchost",
+                "lsaiso", "cng key isolation", "credential guard",
+                "vbs key protection", "keyiso",
                 // Sentinel itself
-                "windowssentinel.service", "windowssentinel.agent" };
+                "windowssentinel.service", "windowssentinel.agent",
+                "windows sentinel" };
 
             var lowerName = processName.ToLowerInvariant();
             if (trustedNames.Any(t => lowerName.Contains(t))) return true;

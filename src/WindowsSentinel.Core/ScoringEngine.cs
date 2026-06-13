@@ -221,7 +221,7 @@ namespace WindowsSentinel.Core
         private static string CategorizeDetection(DetectionEvent detection)
         {
             var r = detection.RuleName.ToLowerInvariant();
-            if (r.Contains("lsass") || r.Contains("credential") || r.Contains("mimikatz")) return "credential_dump";
+            if (r.Contains("lsass") || r.Contains("credential") || r.Contains("credtool")) return "credential_dump";
             if (r.Contains("reverse shell") || r.Contains("c2") || r.Contains("callback")) return "reverse_shell";
             if (r.Contains("injection") || r.Contains("hollowing")) return "process_injection";
             if (r.Contains("ransomware") || r.Contains("shadow copy")) return "ransomware";

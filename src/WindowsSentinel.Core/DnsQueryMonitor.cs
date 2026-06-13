@@ -61,7 +61,7 @@ namespace WindowsSentinel.Core
             // Microsoft
             "microsoft.com", "microsoftonline.com", "windows.net", "office.com", "live.com",
             "msidentity.com", "windowsupdate.com", "windowsupdate.org", "msftncsi.com",
-            "s-msft.com", "s-microsoft.com",
+            "msftconnecttest.com", "s-msft.com", "s-microsoft.com",
             // Gaming
             "steamserver.net", "steamcontent.com", "steampowered.com", "valve.net",
             "steamstatic.com", "steamgames.com",
@@ -75,7 +75,7 @@ namespace WindowsSentinel.Core
             // Other common
             "spotify.com", "scdn.co", "discord.gg", "discordapp.com",
             // Windows internals — high-volume by design, not C2
-            "wpad",
+            "wpad", "localmachine", "disabled.invalid",
         };
         private const string SessionName = "SentinelDnsMonitor";
         private static readonly Guid DnsClientProvider = new("1C95126E-7EEA-49A9-A3FE-A378B03DDB4D");

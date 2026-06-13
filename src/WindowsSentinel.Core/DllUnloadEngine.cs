@@ -128,11 +128,31 @@ namespace WindowsSentinel.Core
 
                 if (sideloadedFiles.Count == 0) return result;
 
-                // Step 1: Kill the compromised process — it already ran attacker code
-                try { proc.Kill(entireProcessTree: true); }
-                catch { }
+                // Step 1: Attempt in-memory DLL unload via FreeLibrary
+                // This removes the malicious code from the process's address space
+                // without killing the host process (if possible)
+                bool allUnloaded = true;
+                foreach (ProcessModule mod in proc.Modules)
+                {
+                    try
+                    {
+                        if (sideloadedFiles.Contains(mod.FileName))
+                        {
+                            bool unloaded = TryUnloadDll(processId, mod.BaseAddress);
+                            if (!unloaded) allUnloaded = false;
+                        }
+                    }
+                    catch { allUnloaded = false; }
+                }
 
-                // Step 2: Quarantine each sideloaded DLL + place lock file
+                // Step 2: If unload failed, kill the process — can't leave malicious code running
+                if (!allUnloaded)
+                {
+                    try { proc.Kill(entireProcessTree: true); }
+                    catch { }
+                }
+
+                // Step 3: Quarantine each sideloaded DLL from disk + place lock file
                 foreach (var dllPath in sideloadedFiles)
                 {
                     await RemediateDroppedDll(dllPath, processName, processId);
@@ -227,11 +247,29 @@ namespace WindowsSentinel.Core
 
                 if (suspiciousDlls.Count == 0) return result;
 
-                // Kill the process — it's compromised
-                try { proc.Kill(entireProcessTree: true); }
-                catch { }
+                // Step 1: Attempt in-memory unload via FreeLibrary
+                bool allUnloaded = true;
+                foreach (ProcessModule mod in proc.Modules)
+                {
+                    try
+                    {
+                        if (suspiciousDlls.Contains(mod.FileName))
+                        {
+                            bool unloaded = TryUnloadDll(targetPid, mod.BaseAddress);
+                            if (!unloaded) allUnloaded = false;
+                        }
+                    }
+                    catch { allUnloaded = false; }
+                }
 
-                // Quarantine each suspicious DLL
+                // Step 2: If unload failed, kill the process
+                if (!allUnloaded)
+                {
+                    try { proc.Kill(entireProcessTree: true); }
+                    catch { }
+                }
+
+                // Step 3: Quarantine each suspicious DLL from disk
                 foreach (var dllPath in suspiciousDlls)
                 {
                     await RemediateDroppedDll(dllPath, result.ProcessName, targetPid);
@@ -243,6 +281,57 @@ namespace WindowsSentinel.Core
             catch { }
             return result;
         }
+
+        /// <summary>
+        /// Unloads a DLL from a target process using CreateRemoteThread + FreeLibrary.
+        /// This is the same technique as DLL injection but in reverse — removes instead of adds.
+        /// </summary>
+        private static bool TryUnloadDll(int processId, IntPtr moduleBaseAddress)
+        {
+            IntPtr hProcess = IntPtr.Zero;
+            try
+            {
+                hProcess = OpenProcess(0x1F0FFF, false, processId); // PROCESS_ALL_ACCESS
+                if (hProcess == IntPtr.Zero) return false;
+
+                var kernel32 = GetModuleHandleA("kernel32.dll");
+                if (kernel32 == IntPtr.Zero) return false;
+                var freeLibAddr = GetProcAddress(kernel32, "FreeLibrary");
+                if (freeLibAddr == IntPtr.Zero) return false;
+
+                var thread = CreateRemoteThread(hProcess, IntPtr.Zero, 0, freeLibAddr,
+                    moduleBaseAddress, 0, out _);
+                if (thread == IntPtr.Zero) return false;
+
+                WaitForSingleObject(thread, 5000);
+                CloseHandle(thread);
+                return true;
+            }
+            catch { return false; }
+            finally
+            {
+                if (hProcess != IntPtr.Zero) CloseHandle(hProcess);
+            }
+        }
+
+        [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+        private static extern IntPtr OpenProcess(uint dwDesiredAccess, bool bInheritHandle, int dwProcessId);
+
+        [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true, CharSet = System.Runtime.InteropServices.CharSet.Ansi)]
+        private static extern IntPtr GetModuleHandleA(string lpModuleName);
+
+        [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true, CharSet = System.Runtime.InteropServices.CharSet.Ansi)]
+        private static extern IntPtr GetProcAddress(IntPtr hModule, string lpProcName);
+
+        [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+        private static extern IntPtr CreateRemoteThread(IntPtr hProcess, IntPtr lpThreadAttributes,
+            uint dwStackSize, IntPtr lpStartAddress, IntPtr lpParameter, uint dwCreationFlags, out uint lpThreadId);
+
+        [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+        private static extern uint WaitForSingleObject(IntPtr hHandle, uint dwMilliseconds);
+
+        [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool CloseHandle(IntPtr hObject);
 
         /// <summary>
         /// Quarantines a dropped DLL and places a lock file to prevent re-drop.

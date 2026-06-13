@@ -39,6 +39,7 @@ namespace WindowsSentinel.Core
         private readonly ConcurrentDictionary<string, RouteEntry> _baselineRoutes = new();
         private string? _baselineGateway;
         private bool _startupCleanupDone;
+        private bool _baselineCaptured;
 
         private static readonly TimeSpan ScanInterval = TimeSpan.FromSeconds(15);
 
@@ -128,8 +129,9 @@ namespace WindowsSentinel.Core
             _eventLogger = eventLogger;
             _config = config;
             _logger = logger;
-            SnapshotBaseline();
-            _timer = new System.Threading.Timer(CheckRoutes, null, ScanInterval, ScanInterval);
+            // Don't baseline in constructor — network may not be up yet on cold boot.
+            // First timer tick will capture baseline instead.
+            _timer = new System.Threading.Timer(CheckRoutes, null, TimeSpan.FromSeconds(30), ScanInterval);
         }
 
         private void SnapshotBaseline()
@@ -137,11 +139,22 @@ namespace WindowsSentinel.Core
             try
             {
                 var routes = GetRouteTable();
+                var gateway = GetDefaultGateway();
+
+                // If no routes or no gateway, network isn't ready yet — don't mark as captured
+                if (routes.Count == 0 || gateway == null)
+                {
+                    _logger.LogDebug("[RouteTableMonitor] Network not ready ({Count} routes, gw={Gw}), deferring baseline",
+                        routes.Count, gateway ?? "null");
+                    return;
+                }
+
                 foreach (var r in routes)
                     _baselineRoutes[r.Key] = r;
-                _baselineGateway = GetDefaultGateway();
+                _baselineGateway = gateway;
+                _baselineCaptured = true;
                 _logger.LogInformation("[RouteTableMonitor] Baseline: {Count} routes, gateway={Gw}",
-                    _baselineRoutes.Count, _baselineGateway ?? "none");
+                    _baselineRoutes.Count, _baselineGateway);
             }
             catch (Exception ex)
             {
@@ -153,6 +166,13 @@ namespace WindowsSentinel.Core
         {
             try
             {
+                // Capture baseline if not yet done (network may not have been ready at startup)
+                if (!_baselineCaptured)
+                {
+                    SnapshotBaseline();
+                    return; // Don't check on the same tick we baseline — wait for next cycle
+                }
+
                 // One-time startup cleanup of persistent route registry
                 if (!_startupCleanupDone)
                 {
