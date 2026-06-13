@@ -2,6 +2,55 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [0.7.5] - 2026-06-13
+
+### Added — Full Monitor Implementations & LOL* Detection
+
+- **`RouteTableMonitor` full rewrite** — `GetIpForwardTable` P/Invoke for real route table enumeration. Detects /32 host routes injected via netmgmt protocol (selective traffic redirection). Active response: `DeleteIpForwardEntry` removes suspicious routes. Persistent route registry monitoring with startup cleanup (removes pre-existing malicious /32 routes). VPN/Docker/Hyper-V virtual adapter exclusion. Multicast/broadcast filtering. 15s scan interval.
+- **`AntiTamperGuard` full implementation** — Anti-suspend detection via 2s execution timing tick; fires Tier1 alert if gap exceeds 10s (indicates NtSuspendProcess by attacker). Binary integrity check alerts if own executable deleted. Service self-reinstall via SCM if registration deleted. Last-gasp logging to `last_gasp.jsonl` on ProcessExit/UnhandledException.
+- **LOL* attack detection expanded to 60+ behavioral patterns** in `AttackToolsRule`:
+  - LOLBins: certutil, bitsadmin, mshta, regsvr32, rundll32, wmic, msiexec, msbuild, installutil, csc, forfiles, cmstp, syncappvpublishingserver, presentationhost (all pattern-based: binary + suspicious arguments)
+  - LOLScripts: PowerShell encoded/hidden/IEX/downloadstring, cscript/wscript JScript execution
+  - LOLLibs: comsvcs.dll MiniDump (#24), advpack, zipfldr, url.dll, shell32, ieadvpack, pcwutl, shdocvw, dbgcore abuse via rundll32
+- **`RemoteAccessMonitor` expanded** — 5 → 35+ tools. Added tunneling tool detection (ngrok, frpc, chisel, rathole, cloudflared, bore) with path-based confidence escalation.
+- **`ArpSpoofMonitor` expanded** — Added `GetIpNetTable` P/Invoke for full ARP table enumeration. Multi-IP shared MAC poisoning detection (3+ IPs on same MAC = ARP table poisoning). Per-host MAC change tracking. 15s scan interval (was 30s).
+- **`WifiSecurityMonitor` expanded** — Added deauthentication flood detection (4+ disconnects in 2 minutes). BSSID change detection on same SSID (evil twin indicator). Encryption downgrade detection (Open/WEP). 15s scan interval (was 60s).
+
+## [0.7.4] - 2026-06-13
+
+### Fixed — AV-Clean Refactor & Monitor Unification
+
+- **Removed all AV-triggering P/Invoke patterns** — `CreateRemoteThread`, `ReadProcessMemory`, `WriteProcessMemory`, `PROCESS_ALL_ACCESS`, `NtQuerySystemInformation(SystemHandleInformation)`, `DuplicateHandle`, `CheckRemoteDebuggerPresent` all removed from compiled binary.
+- **`DllUnloadEngine` rewritten** — No longer uses code injection (CreateRemoteThread+FreeLibrary). New approach: detect sideloaded DLL → kill compromised process → quarantine DLL file → place read-only lock file at original path to prevent re-drop.
+- **`LsassDumpCanaryMonitor` rewritten** — Replaced NtQuerySystemInformation handle enumeration (Mimikatz-identical pattern) with event log monitoring: Sysmon Event ID 10, Security Event 4656, Defender ASR Event 1121.
+- **`MemoryBehaviorAnalyzer` cleaned** — Removed `ReadProcessMemory` and hardcoded shellcode prologue byte arrays. Retains `VirtualQueryEx` for region metadata only. Merged `HollowProcessMonitor` logic (single process scan does both hollowing + RWX checks).
+- **`CriticalServiceGuard`** — Removed `CheckRemoteDebuggerPresent` P/Invoke (anti-debug API). Service crash detection via event log retained.
+- **`AdvancedResponseEngine`** — Replaced `Process.Start("netsh")` shell-outs with Windows Firewall COM API (`HNetCfg.FwPolicy2`). DNS flush via `DnsFlushResolverCache` P/Invoke.
+- **`PhantomDeviceMonitor`** — Replaced netsh/powershell shell-outs with Firewall COM API.
+
+### Changed — Monitor Unification
+
+- **Merged `HollowProcessMonitor`** into `MemoryBehaviorAnalyzer` — single process enumeration pass, eliminates redundant `VirtualQueryEx` calls.
+- **Merged `ChromeCredentialGuardMonitor` + `ChromeSessionGuardMonitor` + `FirefoxCredentialGuardMonitor`** into unified `BrowserCredentialGuard` covering Chrome, Edge, and Firefox credentials/sessions on one 30s timer.
+- **Removed `GatewayFingerprintMonitor`** — exact duplicate of `RouteTableMonitor`'s gateway detection.
+- **Fixed dual registrations** — `DiskWideDllScanner` + `FileVerdictScanner` Service-only; `WebcamHijackMonitor` Agent-only.
+- **`EtwProcessMonitor`** now auto-disables `WmiProcessMonitor` when ETW session succeeds (eliminates duplicate process telemetry).
+
+### Fixed — Ghost Process Kill Escalation
+
+- **`GhostProcessMonitor`** now cross-references `PhantomDeviceMonitor.IsBlockedDevice()`. Ghost process connecting to a blocked phantom device → `KillProcessTree` (was NetworkIsolate). Ghost process on suspicious masquerade port (5228, 8009, 4443) → `KillProcessTree`. ChainTracer walks parent chain, quarantines dropper, removes persistence.
+
+### Fixed — DNS
+
+- Added `azurefd.net` to `TrustedBaseDomains` (Azure Front Door CDN generates high-entropy subdomains by design).
+- Added per-domain 60-second dedup cache in `DnsQueryMonitor` to prevent ETW burst flooding on DGA alerts.
+
+### Removed
+
+- `ResponseAction.UnloadDllAndKillOwner` renamed to `QuarantineAndKill`
+- `SentinelMetrics.RecordDeception()` and deception latency queue (dead code from removed DeceptionEngine)
+- `HollowProcessMonitor.cs` (merged into MemoryBehaviorAnalyzer)
+
 ## [0.7.3] - 2026-06-10
 
 ### Fixed — BeaconingDetector False Positive Kill & DNS Noise
