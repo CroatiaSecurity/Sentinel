@@ -27,7 +27,6 @@ namespace WindowsSentinel.Core
     {
         private readonly TelemetryFusionEngine _fusionEngine;
         private readonly DetectionEngine _detectionEngine;
-        private readonly AllowlistService? _allowlist;
         private readonly ILogger<MemoryBehaviorAnalyzer> _logger;
         private readonly System.Threading.Timer _timer;
 
@@ -53,12 +52,10 @@ namespace WindowsSentinel.Core
         public MemoryBehaviorAnalyzer(
             TelemetryFusionEngine fusionEngine,
             DetectionEngine detectionEngine,
-            ILogger<MemoryBehaviorAnalyzer> logger,
-            AllowlistService? allowlist = null)
+            ILogger<MemoryBehaviorAnalyzer> logger)
         {
             _fusionEngine = fusionEngine;
             _detectionEngine = detectionEngine;
-            _allowlist = allowlist;
             _logger = logger;
             _timer = new System.Threading.Timer(ScanMemory, null, ScanInterval, ScanInterval);
         }

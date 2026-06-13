@@ -20,6 +20,57 @@ namespace WindowsSentinel.Core
         private readonly ILogger<AllowlistService> _logger;
         private readonly ConcurrentDictionary<string, AllowlistEntry> _userAllowlist;
 
+        public AllowlistService(SecureCacheStore cacheStore, ILogger<AllowlistService> logger)
+        {
+            _cacheStore = cacheStore;
+            _logger = logger;
+            _userAllowlist = new ConcurrentDictionary<string, AllowlistEntry>(StringComparer.OrdinalIgnoreCase);
+            LoadUserAllowlist();
+        }
+
+        /// <summary>
+        /// Checks if a process should be suppressed from detection entirely.
+        ///
+        /// ONLY the user-managed allowlist can suppress detections.
+        /// No built-in name lists, no path guessing, no gaming exemptions.
+        ///
+        /// If a detection fires on a legitimate app, it means the behavioral
+        /// detection is wrong and needs fixing — not that the app needs allowlisting.
+        ///
+        /// President's Law rules (LSASS, ransomware, injection, etc.) are NEVER
+        /// suppressed regardless of allowlist status.
+        /// </summary>
+        public bool ShouldSuppress(string processName, string? imagePath, string? ruleName)
+        {
+            // President's Law rules are NEVER fully suppressed — even if user-allowlisted.
+            // However, user-allowlisted processes get demoted in the response engine (LogOnly),
+            // not suppressed at detection level. This ensures the detection is always logged.
+            if (IsPresidentsLawRule(ruleName)) return false;
+            if (IsUserAllowlisted(processName, imagePath)) return true;
+            return false;
+        }
+
+        /// <summary>
+        /// Gets a confidence reduction factor (0.0 to 0.3) based on trust signals.
+        /// Only reduces confidence — never suppresses. And only for user-allowlisted processes.
+        /// </summary>
+        public double GetConfidenceReduction(string processName, string? imagePath, string? signerName, string? ruleName)
+        {
+            if (IsPresidentsLawRule(ruleName)) return 0.0;
+            if (IsUserAllowlisted(processName, imagePath)) return 0.3;
+            return 0.0;
+        }
+
+        /// <summary>
+        /// Development process check — used only by ParentPidSpoofDetector to reduce
+        /// PPID false positives on tools with complex spawn chains. Requires path verification
+        /// at the call site — this method alone does NOT grant any suppression.
+        /// </summary>
+        public bool IsDevelopmentProcess(string processName)
+        {
+            return DevelopmentProcesses.Contains(processName);
+        }
+
         private static readonly HashSet<string> DevelopmentProcesses = new(StringComparer.OrdinalIgnoreCase)
         {
             "devenv", "code", "Windsurf", "cursor",
@@ -31,125 +82,6 @@ namespace WindowsSentinel.Core
             "powershell", "pwsh", "cmd", "wt",
             "rider64", "phpstorm64", "idea64", "webstorm64", "goland64",
         };
-
-        private static readonly HashSet<string> GamingProcesses = new(StringComparer.OrdinalIgnoreCase)
-        {
-            "steam", "steamwebhelper", "GameOverlayUI",
-            "EpicGamesLauncher", "EpicWebHelper",
-            "origin", "EADesktop", "EABackgroundService",
-            "battle.net", "GalaxyClient",
-            "UbisoftConnect",
-            "riotclientservices", "valorant", "leagueclient",
-            "overwolf",
-            "EasyAntiCheat", "EasyAntiCheat_EOS",
-            "BEService", "BEService_x64",
-            "vgc", "vgtray",
-            "PnkBstrA", "PnkBstrB",
-            "FaceItService",
-            "UnityCrashHandler64", "CrashReportClient",
-            "UnrealCEFSubProcess",
-            "GTA5", "RDR2", "eldenring", "cyberpunk2077",
-            "FortniteClient-Win64-Shipping",
-            "csgo", "cs2", "dota2",
-            "Minecraft.Windows", "javaw",
-            "ffxiv_dx11",
-        };
-
-        private static readonly string[] GamePathFragments = new[]
-        {
-            @"\steam",
-            @"\epic games",
-            @"\origin games",
-            @"\gog galaxy",
-            @"\riot games",
-            @"\ubisoft",
-            @"\battle.net",
-            @"\games",
-            @"\gaming",
-            @"\xbox",
-            @"\lotro",
-            @"\standingstone",
-            @"\cryptic",
-            @"\wargaming",
-            @"\blizzard"
-        };
-
-        private static readonly string[] TrustedPaths = new[]
-        {
-            @"\Program Files\",
-            @"\Program Files (x86)\",
-            @"\Windows\System32\",
-            @"\Windows\SysWOW64\",
-            @"\Windows\WinSxS\",
-            @"\Windows\Microsoft.NET\",
-        };
-
-        public AllowlistService(SecureCacheStore cacheStore, ILogger<AllowlistService> logger)
-        {
-            _cacheStore = cacheStore;
-            _logger = logger;
-            _userAllowlist = new ConcurrentDictionary<string, AllowlistEntry>(StringComparer.OrdinalIgnoreCase);
-            LoadUserAllowlist();
-        }
-
-        public bool IsGamingPath(string? imagePath)
-        {
-            if (string.IsNullOrEmpty(imagePath)) return false;
-            var lower = imagePath.ToLowerInvariant();
-            return GamePathFragments.Any(gf => lower.Contains(gf));
-        }
-
-        /// <summary>
-        /// Checks if a process should be suppressed from detection entirely.
-        /// President's Law rules are NEVER suppressed.
-        /// Gaming/allowlist suppression requires BOTH name match AND legitimate path.
-        /// Name alone is never sufficient (attacker can rename).
-        /// </summary>
-        public bool ShouldSuppress(string processName, string? imagePath, string? ruleName)
-        {
-            bool isBeaconing = ruleName != null && ruleName.ToLowerInvariant().Contains("beaconing");
-            if (IsPresidentsLawRule(ruleName) && !isBeaconing) return false;
-
-            if (IsUserAllowlisted(processName, imagePath)) return true;
-
-            // Gaming suppression: require BOTH name match AND path in a gaming directory.
-            // Name alone is trivially spoofed. Path alone is spoofable but requires
-            // write access to known game folders (which is higher bar than rename).
-            if (GamingProcesses.Contains(processName) && IsGamingPath(imagePath)) return true;
-
-            // Path-only gaming suppression: only for beaconing rules (games have keep-alive connections)
-            if (isBeaconing && IsGamingPath(imagePath)) return true;
-
-            return false;
-        }
-
-        /// <summary>
-        /// Gets a confidence reduction factor (0.0 to 0.5) based on trust signals.
-        /// </summary>
-        public double GetConfidenceReduction(string processName, string? imagePath, string? signerName, string? ruleName)
-        {
-            if (IsPresidentsLawRule(ruleName)) return 0.0;
-
-            double reduction = 0.0;
-
-            if (DevelopmentProcesses.Contains(processName))
-                reduction += 0.2;
-
-            if (!string.IsNullOrEmpty(imagePath))
-            {
-                var lowerPath = imagePath.ToLowerInvariant();
-                if (TrustedPaths.Any(tp => lowerPath.Contains(tp.ToLowerInvariant())))
-                    reduction += 0.1;
-            }
-
-            if (IsUserAllowlisted(processName, imagePath))
-                reduction += 0.4;
-
-            return Math.Min(0.5, reduction);
-        }
-
-        public bool IsDevelopmentProcess(string processName) => DevelopmentProcesses.Contains(processName);
-        public bool IsGamingProcess(string processName) => GamingProcesses.Contains(processName);
 
         public void AddToUserAllowlist(string processName, string? imagePath, string reason)
         {

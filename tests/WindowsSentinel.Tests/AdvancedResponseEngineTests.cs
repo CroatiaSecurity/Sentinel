@@ -149,8 +149,8 @@ namespace WindowsSentinel.Tests
 
                 var detection = new DetectionEvent
                 {
-                    RuleName = "C2 Beaconing Behavior (Statistical)",
-                    Evidence = "Periodic connection to game server",
+                    RuleName = "UnsignedBinaryRule",
+                    Evidence = "Binary from user path",
                     Reasoning = "Testing allowlist suppression",
                     Confidence = 0.90,
                     Tier = DetectionTier.Tier1Behavioral,

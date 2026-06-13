@@ -91,7 +91,7 @@ namespace WindowsSentinel.Tests
                 ProcessId = 4000
             };
             var score = engine.Score(detection);
-            Assert.True(score.Score < 60); // Should be reduced
+            Assert.True(score.Score >= 60); // No built-in reduction without user allowlist
         }
 
         [Fact]
