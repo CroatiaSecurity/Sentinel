@@ -1,6 +1,6 @@
 # Windows Sentinel — Design Document
 
-**Version: 0.7.4**
+**Version: 0.7.5**
 
 ---
 

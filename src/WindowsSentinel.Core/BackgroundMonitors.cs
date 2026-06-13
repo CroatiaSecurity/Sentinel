@@ -27,11 +27,25 @@ namespace WindowsSentinel.Core
         private readonly ILogger<ArpSpoofMonitor> _logger;
         private string? _baselineGatewayMac;
         private string? _gatewayIp;
+        private readonly ConcurrentDictionary<string, string> _arpBaseline = new(); // IP → MAC
 
         public ArpSpoofMonitor(DetectionEngine de, ILogger<ArpSpoofMonitor> l) { _detectionEngine = de; _logger = l; }
 
         [DllImport("iphlpapi.dll", ExactSpelling = true)]
         private static extern int SendARP(uint destIp, uint srcIp, byte[] macAddr, ref int macLen);
+
+        [DllImport("iphlpapi.dll", SetLastError = true)]
+        private static extern int GetIpNetTable(IntPtr pIpNetTable, ref int pdwSize, bool bOrder);
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct MIB_IPNETROW
+        {
+            public int dwIndex;
+            public int dwPhysAddrLen;
+            public byte mac0, mac1, mac2, mac3, mac4, mac5, mac6, mac7;
+            public int dwAddr;
+            public int dwType;
+        }
 
         protected override async Task ExecuteAsync(CancellationToken ct)
         {
@@ -39,31 +53,133 @@ namespace WindowsSentinel.Core
             _gatewayIp = GetDefaultGateway();
             if (_gatewayIp != null) _baselineGatewayMac = ResolveMac(_gatewayIp);
 
+            // Baseline ARP table
+            var initial = GetArpTable();
+            foreach (var (ip, mac) in initial)
+                _arpBaseline[ip] = mac;
+
             while (!ct.IsCancellationRequested)
             {
                 try
                 {
-                    await Task.Delay(30000, ct);
-                    if (_gatewayIp == null) continue;
-                    var currentMac = ResolveMac(_gatewayIp);
-                    if (_baselineGatewayMac != null && currentMac != null && currentMac != _baselineGatewayMac)
+                    await Task.Delay(15000, ct);
+
+                    // === Check 1: Gateway MAC change ===
+                    if (_gatewayIp != null)
                     {
+                        var currentMac = ResolveMac(_gatewayIp);
+                        if (_baselineGatewayMac != null && currentMac != null && currentMac != _baselineGatewayMac)
+                        {
+                            await _detectionEngine.EmitAsync(new DetectionEvent
+                            {
+                                RuleName = "ARP Spoof: Gateway MAC Changed",
+                                Evidence = $"Gateway {_gatewayIp} MAC changed from {_baselineGatewayMac} to {currentMac}",
+                                Reasoning = "The default gateway MAC address changed at runtime, indicating a possible ARP spoofing or MitM attack on the local network.",
+                                Confidence = 0.88, Tier = DetectionTier.Tier1Behavioral,
+                                AuthorizedResponse = ResponseAction.NetworkIsolate,
+                                ProcessName = "SYSTEM", ProcessId = 0,
+                                Metadata = new Dictionary<string, string> { { "TargetIP", _gatewayIp ?? "" } }
+                            });
+                            _baselineGatewayMac = currentMac;
+                        }
+                    }
+
+                    // === Check 2: Multiple IPs sharing same MAC (ARP table poisoning) ===
+                    var currentArp = GetArpTable();
+                    var macToIps = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var (ip, mac) in currentArp)
+                    {
+                        if (!macToIps.ContainsKey(mac)) macToIps[mac] = new List<string>();
+                        macToIps[mac].Add(ip);
+                    }
+
+                    foreach (var (mac, ips) in macToIps)
+                    {
+                        if (ips.Count < 3) continue; // Normal: 1 IP per MAC. 2 = maybe DHCP transition. 3+ = poisoning
+                        if (mac == "FF-FF-FF-FF-FF-FF") continue;
+                        if (mac.StartsWith("01-00-5E")) continue; // Multicast
+
+                        // Is the gateway IP one of them? That's the worst case.
+                        bool includesGateway = _gatewayIp != null && ips.Contains(_gatewayIp);
+
                         await _detectionEngine.EmitAsync(new DetectionEvent
                         {
-                            RuleName = "ARP Spoof: Gateway MAC Changed",
-                            Evidence = $"Gateway {_gatewayIp} MAC changed from {_baselineGatewayMac} to {currentMac}",
-                            Reasoning = "The default gateway MAC address changed at runtime, indicating a possible ARP spoofing or MitM attack on the local network.",
-                            Confidence = 0.85, Tier = DetectionTier.Tier1Behavioral,
-                            AuthorizedResponse = ResponseAction.NetworkIsolate,
+                            RuleName = "ARP Spoof: Multiple IPs Sharing MAC",
+                            Evidence = $"MAC {mac} is associated with {ips.Count} IPs: [{string.Join(", ", ips.Take(5))}]{(includesGateway ? " (INCLUDES GATEWAY)" : "")}",
+                            Reasoning = "Multiple IP addresses resolve to the same MAC address in the ARP table. " +
+                                        "This is a strong indicator of ARP table poisoning, where an attacker responds " +
+                                        "to ARP requests for multiple IPs with their own MAC to intercept traffic. " +
+                                        (includesGateway ? "The gateway IP is affected — all outbound traffic may be intercepted." : ""),
+                            Confidence = includesGateway ? 0.92 : 0.80,
+                            Tier = DetectionTier.Tier1Behavioral,
+                            AuthorizedResponse = includesGateway ? ResponseAction.NetworkIsolate : ResponseAction.LogOnly,
                             ProcessName = "SYSTEM", ProcessId = 0,
-                            Metadata = new Dictionary<string, string> { { "TargetIP", _gatewayIp ?? "" } }
+                            Metadata = new Dictionary<string, string>
+                            {
+                                ["MAC"] = mac,
+                                ["AffectedIPs"] = string.Join(";", ips),
+                                ["IncludesGateway"] = includesGateway.ToString(),
+                                ["TargetIP"] = includesGateway ? (_gatewayIp ?? "") : ""
+                            }
                         });
-                        _baselineGatewayMac = currentMac;
+                    }
+
+                    // === Check 3: IP-to-MAC change for known hosts ===
+                    foreach (var (ip, mac) in currentArp)
+                    {
+                        if (_arpBaseline.TryGetValue(ip, out var prevMac) && prevMac != mac)
+                        {
+                            // Skip gateway (handled above with higher confidence)
+                            if (ip == _gatewayIp) continue;
+
+                            // MAC changed for a known host — possible targeted spoof
+                            await _detectionEngine.EmitAsync(new DetectionEvent
+                            {
+                                RuleName = "ARP Spoof: Host MAC Changed",
+                                Evidence = $"Host {ip} MAC changed from {prevMac} to {mac}",
+                                Reasoning = "A known network host's MAC address changed, which may indicate ARP spoofing targeting that specific host for traffic interception.",
+                                Confidence = 0.65, Tier = DetectionTier.Tier2Indicator,
+                                AuthorizedResponse = ResponseAction.LogOnly,
+                                ProcessName = "SYSTEM", ProcessId = 0
+                            });
+                        }
+                        _arpBaseline[ip] = mac;
                     }
                 }
                 catch (OperationCanceledException) { break; }
                 catch (Exception ex) { _logger.LogDebug(ex, "[ArpSpoofMonitor] Error"); }
             }
+        }
+
+        private static List<(string Ip, string Mac)> GetArpTable()
+        {
+            var results = new List<(string, string)>();
+            try
+            {
+                int size = 0;
+                GetIpNetTable(IntPtr.Zero, ref size, false);
+                if (size == 0) return results;
+                var buffer = Marshal.AllocHGlobal(size);
+                try
+                {
+                    if (GetIpNetTable(buffer, ref size, false) != 0) return results;
+                    int entries = Marshal.ReadInt32(buffer);
+                    int entrySize = Marshal.SizeOf<MIB_IPNETROW>();
+                    for (int i = 0; i < entries; i++)
+                    {
+                        var row = Marshal.PtrToStructure<MIB_IPNETROW>(IntPtr.Add(buffer, 4 + i * entrySize));
+                        if (row.dwType == 2) continue; // Invalid entry
+                        var ip = new IPAddress(BitConverter.GetBytes(row.dwAddr)).ToString();
+                        if (ip.StartsWith("224.") || ip == "255.255.255.255") continue;
+                        var mac = $"{row.mac0:X2}-{row.mac1:X2}-{row.mac2:X2}-{row.mac3:X2}-{row.mac4:X2}-{row.mac5:X2}";
+                        if (mac == "00-00-00-00-00-00") continue;
+                        results.Add((ip, mac));
+                    }
+                }
+                finally { Marshal.FreeHGlobal(buffer); }
+            }
+            catch { }
+            return results;
         }
 
         private static string? GetDefaultGateway()
@@ -1018,13 +1134,44 @@ namespace WindowsSentinel.Core
         private readonly DetectionEngine _detectionEngine;
         private readonly ILogger<RemoteAccessMonitor> _logger;
 
-        private static readonly string[] RatListenerNames = { "vnc", "teamviewer", "anydesk", "rustdesk", "radmin" };
+        // 35+ known remote access tools — both legitimate and commonly abused
+        // Detection is Tier2 (LogOnly) because running these isn't proof of compromise.
+        // Trust model: detect presence, let correlation engine decide if suspicious context exists.
+        private static readonly string[] RemoteAccessProcessNames =
+        {
+            // Commercial remote desktop/support
+            "teamviewer", "teamviewer_service", "tv_w32", "tv_x64",
+            "anydesk", "anydesk.exe",
+            "rustdesk", "rustdesk-service",
+            "radmin", "rserver3", "radminserver",
+            "logmein", "logmeinrescue", "lmi_rescue",
+            "bomgar", "bomgar-scc", "bomgar-rdp",
+            "connectwise", "screenconnect",
+            "splashtop", "splashtopstreamer", "srmanager",
+            "supremo", "supremoservice",
+            "ammyy", "ammyyadmin", "aa_v3",
+            "ultraviewer", "ultraviewerservice",
+            "parsec", "parsecd",
+            "chrome remote desktop", "remoting_host",
+            "dwservice", "dwagent",
+            "meshagent", "meshcentral",
+            "getscreen", "getscreen.me",
+            // VNC implementations
+            "vnc", "vncserver", "vncviewer", "winvnc", "tvnserver", "uvnc",
+            "tightvnc", "tigervnc", "realvnc",
+            // RDP-related (non-standard)
+            "rdpwrap", "rdpcheck", "rdpclip",
+            // Potentially unwanted — often deployed by attackers
+            "ngrok", "frpc", "frps", "cloudflared", // Tunneling
+            "chisel", "rathole", "bore", // Reverse tunnels
+            "mstsc", // Standard RDP client - context matters
+        };
 
         public RemoteAccessMonitor(DetectionEngine de, ILogger<RemoteAccessMonitor> l) { _detectionEngine = de; _logger = l; }
 
         protected override async Task ExecuteAsync(CancellationToken ct)
         {
-            _logger.LogInformation("[RemoteAccessMonitor] Started");
+            _logger.LogInformation("[RemoteAccessMonitor] Started — monitoring {Count} known remote access tools", RemoteAccessProcessNames.Length);
 
             while (!ct.IsCancellationRequested)
             {
@@ -1036,14 +1183,40 @@ namespace WindowsSentinel.Core
                         try
                         {
                             var name = proc.ProcessName.ToLowerInvariant();
-                            if (RatListenerNames.Any(r => name.Contains(r)))
+                            if (RemoteAccessProcessNames.Any(r => name.Contains(r)))
                             {
+                                // Higher confidence for tunneling tools (ngrok, frpc, chisel)
+                                // — these are almost never legitimate on endpoints
+                                bool isTunnel = name.Contains("ngrok") || name.Contains("frpc") ||
+                                                name.Contains("chisel") || name.Contains("rathole") ||
+                                                name.Contains("bore") || name.Contains("cloudflared");
+
+                                string? imagePath = null;
+                                try { imagePath = proc.MainModule?.FileName; } catch { }
+
+                                // Tunneling from Temp/Downloads = very suspicious
+                                bool fromSuspiciousPath = imagePath != null &&
+                                    (imagePath.Contains(@"\Temp\", StringComparison.OrdinalIgnoreCase) ||
+                                     imagePath.Contains(@"\Downloads\", StringComparison.OrdinalIgnoreCase));
+
+                                var confidence = isTunnel ? (fromSuspiciousPath ? 0.85 : 0.75) : 0.55;
+                                var tier = (isTunnel && fromSuspiciousPath)
+                                    ? DetectionTier.Tier1Behavioral
+                                    : DetectionTier.Tier2Indicator;
+
                                 await _detectionEngine.EmitAsync(new DetectionEvent
                                 {
-                                    RuleName = "Remote Access: Known RAT Process Running",
-                                    Evidence = $"Process '{proc.ProcessName}' (PID {proc.Id}) is running",
-                                    Reasoning = "A remote access tool process was detected. While some are legitimate, they are commonly abused by attackers.",
-                                    Confidence = 0.60, Tier = DetectionTier.Tier2Indicator,
+                                    RuleName = isTunnel
+                                        ? "Remote Access: Tunneling Tool Detected"
+                                        : "Remote Access: Known RAT Process Running",
+                                    Evidence = $"Process '{proc.ProcessName}' (PID {proc.Id}) running{(imagePath != null ? $" from '{imagePath}'" : "")}",
+                                    Reasoning = isTunnel
+                                        ? "A reverse tunneling tool was detected. These are rarely legitimate on endpoints and are commonly used to bypass firewalls for C2 or unauthorized access."
+                                        : "A remote access tool process was detected. While some are legitimate, they are commonly abused for unauthorized access.",
+                                    Confidence = confidence, Tier = tier,
+                                    AuthorizedResponse = (isTunnel && fromSuspiciousPath)
+                                        ? ResponseAction.KillProcessTree
+                                        : ResponseAction.LogOnly,
                                     ProcessName = proc.ProcessName, ProcessId = proc.Id
                                 });
                             }
@@ -1802,6 +1975,12 @@ namespace WindowsSentinel.Core
         private readonly DetectionEngine _detectionEngine;
         private readonly ILogger<WifiSecurityMonitor> _logger;
         private readonly HashSet<string> _alertedProfiles = new(StringComparer.OrdinalIgnoreCase);
+        private readonly List<DateTimeOffset> _disconnectHistory = new();
+        private string? _baselineBssid;
+        private string? _baselineSsid;
+
+        private const int DeauthThreshold = 4;         // 4+ disconnects in window = deauth flood
+        private static readonly TimeSpan DeauthWindow = TimeSpan.FromMinutes(2);
 
         public WifiSecurityMonitor(DetectionEngine de, ILogger<WifiSecurityMonitor> l) { _detectionEngine = de; _logger = l; }
 
@@ -1809,53 +1988,206 @@ namespace WindowsSentinel.Core
         {
             _logger.LogInformation("[WifiSecurityMonitor] Started");
 
+            // Capture initial SSID/BSSID baseline
+            var initial = GetCurrentWifiState();
+            _baselineSsid = initial.ssid;
+            _baselineBssid = initial.bssid;
+
             while (!ct.IsCancellationRequested)
             {
                 try
                 {
-                    await Task.Delay(60000, ct);
-                    // Check WiFi profiles for insecure authentication (Open/WEP)
-                    try
+                    await Task.Delay(15000, ct); // 15s scan interval
+
+                    var current = GetCurrentWifiState();
+
+                    // === Check 1: Deauth flood detection ===
+                    // If we were connected and now disconnected, record it
+                    if (_baselineSsid != null && current.ssid == null)
                     {
-                        using var key = Registry.LocalMachine.OpenSubKey(
-                            @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\NetworkList\Profiles");
-                        if (key == null) continue;
+                        _disconnectHistory.Add(DateTimeOffset.UtcNow);
 
-                        foreach (var profileName in key.GetSubKeyNames())
+                        // Prune old disconnects
+                        var cutoff = DateTimeOffset.UtcNow - DeauthWindow;
+                        _disconnectHistory.RemoveAll(t => t < cutoff);
+
+                        if (_disconnectHistory.Count >= DeauthThreshold)
                         {
-                            try
+                            await _detectionEngine.EmitAsync(new DetectionEvent
                             {
-                                using var profile = key.OpenSubKey(profileName);
-                                if (profile == null) continue;
-
-                                var name = profile.GetValue("ProfileName")?.ToString();
-                                var managed = profile.GetValue("Managed")?.ToString();
-                                var category = profile.GetValue("Category");
-
-                                // Check for unmanaged profiles (Category 0 = Public network)
-                                if (category is int cat && cat == 0 && !string.IsNullOrEmpty(name))
+                                RuleName = "WiFi Security: Deauthentication Flood Detected",
+                                Evidence = $"Wi-Fi disconnected {_disconnectHistory.Count} times in {DeauthWindow.TotalMinutes} minutes (SSID: '{_baselineSsid}')",
+                                Reasoning = "Repeated Wi-Fi disconnections in rapid succession indicate a deauthentication flood attack. " +
+                                            "Attackers send forged deauth frames to force clients off the network, often as a precursor " +
+                                            "to evil twin AP deployment or WPA handshake capture.",
+                                Confidence = 0.85, Tier = DetectionTier.Tier1Behavioral,
+                                AuthorizedResponse = ResponseAction.LogOnly,
+                                ProcessName = "SYSTEM", ProcessId = 0,
+                                Metadata = new Dictionary<string, string>
                                 {
-                                    if (_alertedProfiles.Contains(name)) continue;
-                                    _alertedProfiles.Add(name);
-
-                                    await _detectionEngine.EmitAsync(new DetectionEvent
-                                    {
-                                        RuleName = "WiFi Security: Public/Unsecured Network Connected",
-                                        Evidence = $"Connected to public network profile: '{name}'",
-                                        Reasoning = "System is connected to a network categorized as Public, which may lack encryption and be vulnerable to traffic interception.",
-                                        Confidence = 0.45, Tier = DetectionTier.Tier2Indicator,
-                                        ProcessName = "SYSTEM", ProcessId = 0
-                                    });
+                                    ["SSID"] = _baselineSsid ?? "",
+                                    ["DisconnectCount"] = _disconnectHistory.Count.ToString()
                                 }
-                            }
-                            catch { }
+                            });
+                            _disconnectHistory.Clear(); // Reset after alert
                         }
                     }
-                    catch { }
+
+                    // === Check 2: BSSID change on same SSID (evil twin) ===
+                    if (current.ssid != null && current.bssid != null &&
+                        current.ssid == _baselineSsid && _baselineBssid != null &&
+                        current.bssid != _baselineBssid)
+                    {
+                        await _detectionEngine.EmitAsync(new DetectionEvent
+                        {
+                            RuleName = "WiFi Security: BSSID Changed (Possible Evil Twin)",
+                            Evidence = $"BSSID changed from {_baselineBssid} to {current.bssid} while SSID remains '{current.ssid}'",
+                            Reasoning = "The access point's hardware address (BSSID) changed while connected to the same SSID. " +
+                                        "This can indicate an evil twin attack where the attacker creates a fake AP with the same name, " +
+                                        "or a legitimate roaming event between APs. Correlate with deauth events.",
+                            Confidence = 0.60, Tier = DetectionTier.Tier2Indicator,
+                            AuthorizedResponse = ResponseAction.LogOnly,
+                            ProcessName = "SYSTEM", ProcessId = 0,
+                            Metadata = new Dictionary<string, string>
+                            {
+                                ["SSID"] = current.ssid,
+                                ["OldBSSID"] = _baselineBssid,
+                                ["NewBSSID"] = current.bssid
+                            }
+                        });
+                        _baselineBssid = current.bssid;
+                    }
+
+                    // === Check 3: Encryption downgrade ===
+                    if (current.ssid != null && current.auth != null)
+                    {
+                        bool isInsecure = current.auth.Contains("Open", StringComparison.OrdinalIgnoreCase) ||
+                                          current.auth.Contains("WEP", StringComparison.OrdinalIgnoreCase);
+                        if (isInsecure && !_alertedProfiles.Contains(current.ssid))
+                        {
+                            _alertedProfiles.Add(current.ssid);
+                            await _detectionEngine.EmitAsync(new DetectionEvent
+                            {
+                                RuleName = "WiFi Security: Insecure/Open Network Connected",
+                                Evidence = $"Connected to '{current.ssid}' with authentication: {current.auth}",
+                                Reasoning = "System is connected to a Wi-Fi network with weak or no encryption. " +
+                                            "Open and WEP networks allow trivial traffic interception. If this was previously " +
+                                            "a WPA2 network, it may indicate an encryption downgrade attack.",
+                                Confidence = 0.55, Tier = DetectionTier.Tier2Indicator,
+                                AuthorizedResponse = ResponseAction.LogOnly,
+                                ProcessName = "SYSTEM", ProcessId = 0
+                            });
+                        }
+                    }
+
+                    // === Check 4: Public network profile (registry-based, original check) ===
+                    CheckPublicNetworkProfiles();
+
+                    // Update baseline
+                    if (current.ssid != null)
+                    {
+                        _baselineSsid = current.ssid;
+                        if (current.bssid != null) _baselineBssid = current.bssid;
+                    }
                 }
                 catch (OperationCanceledException) { break; }
                 catch (Exception ex) { _logger.LogDebug(ex, "[WifiSecurityMonitor] Error"); }
             }
+        }
+
+        private void CheckPublicNetworkProfiles()
+        {
+            try
+            {
+                using var key = Registry.LocalMachine.OpenSubKey(
+                    @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\NetworkList\Profiles");
+                if (key == null) return;
+
+                foreach (var profileName in key.GetSubKeyNames())
+                {
+                    try
+                    {
+                        using var profile = key.OpenSubKey(profileName);
+                        if (profile == null) continue;
+
+                        var name = profile.GetValue("ProfileName")?.ToString();
+                        var category = profile.GetValue("Category");
+
+                        if (category is int cat && cat == 0 && !string.IsNullOrEmpty(name))
+                        {
+                            if (_alertedProfiles.Contains(name)) continue;
+                            _alertedProfiles.Add(name);
+
+                            _ = _detectionEngine.EmitAsync(new DetectionEvent
+                            {
+                                RuleName = "WiFi Security: Public/Unsecured Network Connected",
+                                Evidence = $"Connected to public network profile: '{name}'",
+                                Reasoning = "System is connected to a network categorized as Public, which may lack encryption and be vulnerable to traffic interception.",
+                                Confidence = 0.45, Tier = DetectionTier.Tier2Indicator,
+                                ProcessName = "SYSTEM", ProcessId = 0
+                            });
+                        }
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+        }
+
+        /// <summary>
+        /// Gets current Wi-Fi state from the WLAN interface registry.
+        /// Uses the Windows WLAN AutoConfig service state stored in registry.
+        /// </summary>
+        private static (string? ssid, string? bssid, string? auth) GetCurrentWifiState()
+        {
+            try
+            {
+                // Read current wireless connection from the Wlansvc Interfaces registry
+                using var key = Registry.LocalMachine.OpenSubKey(
+                    @"SYSTEM\CurrentControlSet\Services\Wlansvc\Parameters\Interfaces");
+                if (key == null) return (null, null, null);
+
+                foreach (var ifGuid in key.GetSubKeyNames())
+                {
+                    using var ifKey = key.OpenSubKey(ifGuid);
+                    if (ifKey == null) continue;
+
+                    // CurrentConnection subkey has SSID and BSSID
+                    using var connKey = ifKey.OpenSubKey("CurrentConnection");
+                    if (connKey == null) continue;
+
+                    var ssidBytes = connKey.GetValue("SSID") as byte[];
+                    var bssidBytes = connKey.GetValue("BSSID") as byte[];
+                    var authMode = connKey.GetValue("AuthMode")?.ToString();
+
+                    string? ssid = ssidBytes != null
+                        ? System.Text.Encoding.UTF8.GetString(ssidBytes).TrimEnd('\0')
+                        : null;
+                    string? bssid = bssidBytes != null && bssidBytes.Length >= 6
+                        ? BitConverter.ToString(bssidBytes, 0, 6)
+                        : null;
+
+                    if (!string.IsNullOrEmpty(ssid))
+                        return (ssid, bssid, authMode);
+                }
+            }
+            catch { }
+
+            // Fallback: check NetworkList for connected interface info
+            try
+            {
+                foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
+                {
+                    if (ni.NetworkInterfaceType == NetworkInterfaceType.Wireless80211 &&
+                        ni.OperationalStatus == OperationalStatus.Up)
+                    {
+                        return (ni.Name, null, null); // At least we know we're connected to Wi-Fi
+                    }
+                }
+            }
+            catch { }
+
+            return (null, null, null);
         }
     }
 
