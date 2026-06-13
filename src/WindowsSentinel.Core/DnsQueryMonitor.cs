@@ -28,6 +28,7 @@ namespace WindowsSentinel.Core
 
         // Per-base-domain query count in sliding window
         private readonly ConcurrentDictionary<string, int> _queryStats = new();
+        private readonly ConcurrentDictionary<string, DateTime> _dgaDedupCache = new();
         private DateTime _lastPrune = DateTime.UtcNow;
 
         private const double DgaEntropyThreshold = 4.0;
@@ -54,7 +55,7 @@ namespace WindowsSentinel.Core
         {
             // CDN / Cloud
             "akamaiedge.net", "akamai.net", "cloudfront.net", "cloudflare.com",
-            "azureedge.net", "azure.com", "msedge.net", "trafficmanager.net",
+            "azureedge.net", "azurefd.net", "azure.com", "msedge.net", "trafficmanager.net",
             "googleapis.com", "gstatic.com", "googlevideo.com",
             "gvt1.com", "gvt2.com", "googleusercontent.com",
             // Microsoft
@@ -157,15 +158,22 @@ namespace WindowsSentinel.Core
                     var entropy = CalculateEntropy(subdomain.Replace(".", ""));
                     if (entropy >= DgaEntropyThreshold)
                     {
-                        _ = _detectionEngine.EmitAsync(new DetectionEvent
+                        // Dedup: suppress repeated DGA alerts for same domain within 60s
+                        var now = DateTime.UtcNow;
+                        var lastSeen = _dgaDedupCache.AddOrUpdate(domain, now, (_, old) =>
+                            now - old < TimeSpan.FromSeconds(60) ? old : now);
+                        if (lastSeen == now)
                         {
-                            RuleName = "DNS: DGA-like Domain Query",
-                            Evidence = $"High-entropy subdomain queried: {domain} (entropy {entropy:F2}, PID {pid})",
-                            Reasoning = "A DNS query was made to a domain with a high-entropy subdomain pattern consistent with domain generation algorithm (DGA) malware communication.",
-                            Confidence = 0.70, Tier = DetectionTier.Tier1Behavioral,
-                            AuthorizedResponse = ResponseAction.LogOnly,
-                            ProcessName = "SYSTEM", ProcessId = pid
-                        });
+                            _ = _detectionEngine.EmitAsync(new DetectionEvent
+                            {
+                                RuleName = "DNS: DGA-like Domain Query",
+                                Evidence = $"High-entropy subdomain queried: {domain} (entropy {entropy:F2}, PID {pid})",
+                                Reasoning = "A DNS query was made to a domain with a high-entropy subdomain pattern consistent with domain generation algorithm (DGA) malware communication.",
+                                Confidence = 0.70, Tier = DetectionTier.Tier1Behavioral,
+                                AuthorizedResponse = ResponseAction.LogOnly,
+                                ProcessName = "SYSTEM", ProcessId = pid
+                            });
+                        }
                     }
                 }
             }
@@ -188,6 +196,13 @@ namespace WindowsSentinel.Core
         private void PruneStats()
         {
             _queryStats.Clear();
+            // Prune expired DGA dedup entries
+            var cutoff = DateTime.UtcNow.AddSeconds(-60);
+            foreach (var kvp in _dgaDedupCache)
+            {
+                if (kvp.Value < cutoff)
+                    _dgaDedupCache.TryRemove(kvp.Key, out _);
+            }
             _lastPrune = DateTime.UtcNow;
         }
 

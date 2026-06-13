@@ -26,7 +26,6 @@ namespace WindowsSentinel.Service
         private readonly NetworkMonitor _networkMonitor;
         private readonly LsassDumpCanaryMonitor _lsassDumpCanaryMonitor;
         private readonly RouteTableMonitor _routeTableMonitor;
-        private readonly HollowProcessMonitor _hollowProcessMonitor;
         private readonly MemoryBehaviorAnalyzer _memoryBehaviorAnalyzer;
         private readonly TokenIntegrityMonitor _tokenIntegrityMonitor;
         private readonly CredentialCanaryMonitor _credentialCanaryMonitor;
@@ -49,7 +48,6 @@ namespace WindowsSentinel.Service
             NetworkMonitor networkMonitor,
             LsassDumpCanaryMonitor lsassDumpCanaryMonitor,
             RouteTableMonitor routeTableMonitor,
-            HollowProcessMonitor hollowProcessMonitor,
             MemoryBehaviorAnalyzer memoryBehaviorAnalyzer,
             TokenIntegrityMonitor tokenIntegrityMonitor,
             CredentialCanaryMonitor credentialCanaryMonitor,
@@ -78,7 +76,6 @@ namespace WindowsSentinel.Service
             _networkMonitor = networkMonitor;
             _lsassDumpCanaryMonitor = lsassDumpCanaryMonitor;
             _routeTableMonitor = routeTableMonitor;
-            _hollowProcessMonitor = hollowProcessMonitor;
             _memoryBehaviorAnalyzer = memoryBehaviorAnalyzer;
             _tokenIntegrityMonitor = tokenIntegrityMonitor;
             _credentialCanaryMonitor = credentialCanaryMonitor;

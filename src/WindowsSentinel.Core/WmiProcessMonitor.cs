@@ -11,6 +11,13 @@ namespace WindowsSentinel.Core
         private readonly ProcessAncestryCache _ancestryCache;
         private readonly BehavioralBaselineService? _behavioralBaseline;
         private ManagementEventWatcher? _watcher;
+        private volatile bool _disabled;
+
+        /// <summary>
+        /// When true, WMI process monitoring is active (ETW failed or hasn't started).
+        /// Set to false by EtwProcessMonitor once ETW session is processing events.
+        /// </summary>
+        public bool IsActive => !_disabled && _watcher != null;
 
         public WmiProcessMonitor(
             TelemetryFusionEngine fusionEngine,
@@ -24,6 +31,22 @@ namespace WindowsSentinel.Core
             _behavioralBaseline = behavioralBaseline;
 
             Start();
+        }
+
+        /// <summary>
+        /// Called by EtwProcessMonitor when ETW session succeeds.
+        /// Stops WMI monitoring to prevent duplicate telemetry events.
+        /// </summary>
+        public void Disable()
+        {
+            _disabled = true;
+            try
+            {
+                _watcher?.Stop();
+                _watcher?.Dispose();
+                _watcher = null;
+            }
+            catch { }
         }
 
         public void Start()
@@ -45,6 +68,7 @@ namespace WindowsSentinel.Core
 
         private void OnProcessStarted(object sender, EventArrivedEventArgs e)
         {
+            if (_disabled) return;
             try
             {
                 var targetInstance = (ManagementBaseObject)e.NewEvent["TargetInstance"];

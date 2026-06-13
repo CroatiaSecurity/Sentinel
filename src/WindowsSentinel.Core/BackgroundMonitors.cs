@@ -219,112 +219,92 @@ namespace WindowsSentinel.Core
     }
 
     // ──────────────────────────────────────────────
-    // Chrome Credential Guard — detects unauthorized reads of Login Data
+    // Browser Credential Guard — unified monitor for browser credential/session theft
+    // Covers Chrome, Edge, and Firefox credential stores and cookie databases
     // ──────────────────────────────────────────────
-    public sealed class ChromeCredentialGuardMonitor : BackgroundService
+    public sealed class BrowserCredentialGuard : BackgroundService
     {
         private readonly DetectionEngine _detectionEngine;
-        private readonly ILogger<ChromeCredentialGuardMonitor> _logger;
-        private DateTime _lastModified;
+        private readonly ILogger<BrowserCredentialGuard> _logger;
+        private readonly Dictionary<string, DateTime> _baselines = new();
 
-        public ChromeCredentialGuardMonitor(DetectionEngine de, ILogger<ChromeCredentialGuardMonitor> l) { _detectionEngine = de; _logger = l; }
+        public BrowserCredentialGuard(DetectionEngine de, ILogger<BrowserCredentialGuard> l) { _detectionEngine = de; _logger = l; }
 
         protected override async Task ExecuteAsync(CancellationToken ct)
         {
-            _logger.LogInformation("[ChromeCredentialGuardMonitor] Started");
-            var loginDataPath = GetChromeLoginDataPath();
-            if (loginDataPath != null && File.Exists(loginDataPath))
-                _lastModified = File.GetLastWriteTimeUtc(loginDataPath);
+            _logger.LogInformation("[BrowserCredentialGuard] Started");
 
-            while (!ct.IsCancellationRequested)
+            var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            var roamingAppData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+
+            // Define all browser targets: (BrowserName, FilePath, ProcessName, Description)
+            var targets = new List<(string BrowserName, string FilePath, string ProcessName, string Description)>();
+
+            // Chrome Login Data (credential theft)
+            if (!string.IsNullOrEmpty(localAppData))
             {
-                try
-                {
-                    await Task.Delay(30000, ct);
-                    if (loginDataPath == null || !File.Exists(loginDataPath)) continue;
-                    var current = File.GetLastWriteTimeUtc(loginDataPath);
-                    if (_lastModified != default && current != _lastModified)
-                    {
-                        await _detectionEngine.EmitAsync(new DetectionEvent
-                        {
-                            RuleName = "Browser Credential Theft: Chrome Login Data Modified",
-                            Evidence = $"Chrome Login Data file modified at {current:O}",
-                            Reasoning = "The Chrome credential database was modified outside of normal browser operation, indicating possible credential theft.",
-                            Confidence = 0.80, Tier = DetectionTier.Tier1Behavioral,
-                            AuthorizedResponse = ResponseAction.KillProcessTree,
-                            ProcessName = "SYSTEM", ProcessId = 0
-                        });
-                    }
-                    _lastModified = current;
-                }
-                catch (OperationCanceledException) { break; }
-                catch (Exception ex) { _logger.LogDebug(ex, "[ChromeCredentialGuardMonitor] Error"); }
+                targets.Add(("Chrome", Path.Combine(localAppData, @"Google\Chrome\User Data\Default\Login Data"), "chrome", "credential theft"));
+                targets.Add(("Chrome", Path.Combine(localAppData, @"Google\Chrome\User Data\Default\Network\Cookies"), "chrome", "session theft"));
+                targets.Add(("Edge", Path.Combine(localAppData, @"Microsoft\Edge\User Data\Default\Login Data"), "msedge", "credential theft"));
+                targets.Add(("Edge", Path.Combine(localAppData, @"Microsoft\Edge\User Data\Default\Network\Cookies"), "msedge", "session theft"));
             }
-        }
 
-        private static string? GetChromeLoginDataPath()
-        {
-            var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            if (string.IsNullOrEmpty(local)) return null;
-            var path = Path.Combine(local, @"Google\Chrome\User Data\Default\Login Data");
-            return File.Exists(path) ? path : null;
-        }
-    }
+            // Firefox logins.json — multiple profiles possible
+            if (!string.IsNullOrEmpty(roamingAppData))
+            {
+                var profilesDir = Path.Combine(roamingAppData, @"Mozilla\Firefox\Profiles");
+                if (Directory.Exists(profilesDir))
+                {
+                    foreach (var prof in Directory.GetDirectories(profilesDir))
+                    {
+                        var loginJson = Path.Combine(prof, "logins.json");
+                        targets.Add(("Firefox", loginJson, "firefox", "credential theft"));
+                    }
+                }
+            }
 
-    // ──────────────────────────────────────────────
-    // Chrome Session Guard — detects cookie DB theft
-    // ──────────────────────────────────────────────
-    public sealed class ChromeSessionGuardMonitor : BackgroundService
-    {
-        private readonly DetectionEngine _detectionEngine;
-        private readonly ILogger<ChromeSessionGuardMonitor> _logger;
-        private DateTime _lastModified;
-
-        public ChromeSessionGuardMonitor(DetectionEngine de, ILogger<ChromeSessionGuardMonitor> l) { _detectionEngine = de; _logger = l; }
-
-        protected override async Task ExecuteAsync(CancellationToken ct)
-        {
-            _logger.LogInformation("[ChromeSessionGuardMonitor] Started");
-            var cookiePath = GetChromeCookiePath();
-            if (cookiePath != null && File.Exists(cookiePath))
-                _lastModified = File.GetLastWriteTimeUtc(cookiePath);
+            // Baseline all existing files
+            foreach (var (_, filePath, _, _) in targets)
+            {
+                if (File.Exists(filePath))
+                    _baselines[filePath] = File.GetLastWriteTimeUtc(filePath);
+            }
 
             while (!ct.IsCancellationRequested)
             {
                 try
                 {
                     await Task.Delay(30000, ct);
-                    if (cookiePath == null || !File.Exists(cookiePath)) continue;
-                    var current = File.GetLastWriteTimeUtc(cookiePath);
-                    if (_lastModified != default && current != _lastModified)
+
+                    foreach (var (browserName, filePath, processName, description) in targets)
                     {
-                        var chromeRunning = Process.GetProcessesByName("chrome").Length > 0;
-                        if (!chromeRunning)
+                        if (!File.Exists(filePath)) continue;
+
+                        var current = File.GetLastWriteTimeUtc(filePath);
+                        if (_baselines.TryGetValue(filePath, out var prev) && current != prev)
                         {
-                            await _detectionEngine.EmitAsync(new DetectionEvent
+                            var browserRunning = Process.GetProcessesByName(processName).Length > 0;
+                            if (!browserRunning)
                             {
-                                RuleName = "Browser Session Theft: Chrome Cookies Modified While Browser Closed",
-                                Evidence = $"Chrome Cookies file modified at {current:O} while chrome.exe is not running",
-                                Reasoning = "Chrome cookie database was written to while the browser was not running, indicating session hijacking.",
-                                Confidence = 0.85, Tier = DetectionTier.Tier1Behavioral,
-                                AuthorizedResponse = ResponseAction.KillProcessTree,
-                                ProcessName = "SYSTEM", ProcessId = 0
-                            });
+                                var dataType = description == "session theft" ? "Session" : "Credential";
+                                var fileName = Path.GetFileName(filePath);
+                                await _detectionEngine.EmitAsync(new DetectionEvent
+                                {
+                                    RuleName = $"Browser {dataType} Theft: {browserName} {fileName} Modified While Browser Closed",
+                                    Evidence = $"{browserName} {fileName} modified at {current:O} while {processName}.exe is not running",
+                                    Reasoning = $"{browserName} {description} store was modified while the browser was not running, indicating {description}.",
+                                    Confidence = 0.85, Tier = DetectionTier.Tier1Behavioral,
+                                    AuthorizedResponse = ResponseAction.KillProcessTree,
+                                    ProcessName = "SYSTEM", ProcessId = 0
+                                });
+                            }
                         }
+                        _baselines[filePath] = current;
                     }
-                    _lastModified = current;
                 }
                 catch (OperationCanceledException) { break; }
-                catch (Exception ex) { _logger.LogDebug(ex, "[ChromeSessionGuardMonitor] Error"); }
+                catch (Exception ex) { _logger.LogDebug(ex, "[BrowserCredentialGuard] Error"); }
             }
-        }
-
-        private static string? GetChromeCookiePath()
-        {
-            var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            if (string.IsNullOrEmpty(local)) return null;
-            var path = Path.Combine(local, @"Google\Chrome\User Data\Default\Network\Cookies");
-            return File.Exists(path) ? path : null;
         }
     }
 
@@ -719,67 +699,6 @@ namespace WindowsSentinel.Core
         }
     }
 
-    // ──────────────────────────────────────────────
-    // Firefox Credential Guard — detects unauthorized reads of logins.json
-    // ──────────────────────────────────────────────
-    public sealed class FirefoxCredentialGuardMonitor : BackgroundService
-    {
-        private readonly DetectionEngine _detectionEngine;
-        private readonly ILogger<FirefoxCredentialGuardMonitor> _logger;
-
-        public FirefoxCredentialGuardMonitor(DetectionEngine de, ILogger<FirefoxCredentialGuardMonitor> l) { _detectionEngine = de; _logger = l; }
-
-        protected override async Task ExecuteAsync(CancellationToken ct)
-        {
-            _logger.LogInformation("[FirefoxCredentialGuardMonitor] Started");
-            var profilesDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), @"Mozilla\Firefox\Profiles");
-            var lastModified = new Dictionary<string, DateTime>();
-
-            // Baseline
-            if (Directory.Exists(profilesDir))
-            {
-                foreach (var prof in Directory.GetDirectories(profilesDir))
-                {
-                    var loginJson = Path.Combine(prof, "logins.json");
-                    if (File.Exists(loginJson)) lastModified[loginJson] = File.GetLastWriteTimeUtc(loginJson);
-                }
-            }
-
-            while (!ct.IsCancellationRequested)
-            {
-                try
-                {
-                    await Task.Delay(30000, ct);
-                    if (!Directory.Exists(profilesDir)) continue;
-                    foreach (var prof in Directory.GetDirectories(profilesDir))
-                    {
-                        var loginJson = Path.Combine(prof, "logins.json");
-                        if (!File.Exists(loginJson)) continue;
-                        var current = File.GetLastWriteTimeUtc(loginJson);
-                        if (lastModified.TryGetValue(loginJson, out var prev) && current != prev)
-                        {
-                            var ffRunning = Process.GetProcessesByName("firefox").Length > 0;
-                            if (!ffRunning)
-                            {
-                                await _detectionEngine.EmitAsync(new DetectionEvent
-                                {
-                                    RuleName = "Browser Credential Theft: Firefox logins.json Modified While Browser Closed",
-                                    Evidence = $"Firefox logins.json modified while firefox.exe is not running",
-                                    Reasoning = "Firefox credential store was modified while the browser was not running, indicating credential theft.",
-                                    Confidence = 0.85, Tier = DetectionTier.Tier1Behavioral,
-                                    AuthorizedResponse = ResponseAction.KillProcessTree,
-                                    ProcessName = "SYSTEM", ProcessId = 0
-                                });
-                            }
-                        }
-                        lastModified[loginJson] = current;
-                    }
-                }
-                catch (OperationCanceledException) { break; }
-                catch (Exception ex) { _logger.LogDebug(ex, "[FirefoxCredentialGuardMonitor] Error"); }
-            }
-        }
-    }
 
     // ──────────────────────────────────────────────
     // Firewall Integrity Monitor — detects firewall rule tampering
@@ -2233,6 +2152,19 @@ namespace WindowsSentinel.Core
         private readonly ConcurrentDictionary<string, DateTime> _blockedIps = new(StringComparer.OrdinalIgnoreCase);
         private readonly HashSet<string> _trustedIps = new(StringComparer.OrdinalIgnoreCase);
 
+        /// <summary>
+        /// Returns true if the given IP has been identified and blocked as a phantom/rogue device.
+        /// Used by GhostProcessMonitor to escalate ghost processes connecting to blocked devices
+        /// from NetworkIsolate to KillProcessTree.
+        /// </summary>
+        public bool IsBlockedDevice(string ip) => _blockedIps.ContainsKey(ip);
+
+        /// <summary>
+        /// Returns true if the given IP belongs to a device that was detected after startup
+        /// (regardless of whether it was blocked). Used for correlation.
+        /// </summary>
+        public bool IsPhantomDevice(string ip) => _knownDevices.Values.Any(d => d.Ip == ip) && !_trustedIps.Contains(ip);
+
         private static readonly int[] SuspiciousPorts = { 8008, 8009, 8443, 5555, 5353, 9222, 2323, 4443 };
 
         private static readonly Dictionary<string, string> OuiLookup = new(StringComparer.OrdinalIgnoreCase)
@@ -2361,21 +2293,12 @@ namespace WindowsSentinel.Core
                 if (_blockedIps.ContainsKey(ip)) return;
                 var ruleName = $"Sentinel-Block-PhantomDevice-{ip.Replace('.', '_')}";
 
-                // 1. Firewall block — prevent all traffic to/from this IP
-                RunHidden("netsh", $"advfirewall firewall add rule name=\"{ruleName}-OUT\" dir=out action=block remoteip={ip} enable=yes");
-                RunHidden("netsh", $"advfirewall firewall add rule name=\"{ruleName}-IN\" dir=in action=block remoteip={ip} enable=yes");
-
-                // 2. Flush ARP entry — force our PC to stop talking to it immediately
-                RunHidden("netsh", $"interface ip delete arpcache");
-                RunHidden("arp", $"-d {ip}");
-
-                // 3. Kill any existing TCP connections to the rogue device
-                KillConnectionsTo(ip);
-
-                // 4. Disable mDNS/SSDP discovery responses to prevent auto-reconnection
-                //    (Edge/Chrome auto-discover Cast devices via mDNS on 224.0.0.251:5353)
-                RunHidden("netsh", $"advfirewall firewall add rule name=\"{ruleName}-MDNS\" dir=out action=block remoteip=224.0.0.251 remoteport=5353 protocol=udp enable=yes");
-                RunHidden("netsh", $"advfirewall firewall add rule name=\"{ruleName}-SSDP\" dir=out action=block remoteip=239.255.255.250 remoteport=1900 protocol=udp enable=yes");
+                // Use Windows Firewall COM API instead of shelling to netsh
+                AddFirewallRule($"{ruleName}-OUT", ip, 2); // Outbound block
+                AddFirewallRule($"{ruleName}-IN", ip, 1);  // Inbound block
+                // Block mDNS/SSDP discovery to prevent auto-reconnection
+                AddFirewallRule($"{ruleName}-MDNS", "224.0.0.251", 2, protocol: 17, remotePort: 5353);
+                AddFirewallRule($"{ruleName}-SSDP", "239.255.255.250", 2, protocol: 17, remotePort: 1900);
 
                 _blockedIps[ip] = DateTime.UtcNow;
 
@@ -2383,11 +2306,11 @@ namespace WindowsSentinel.Core
                 {
                     ProcessId = 0,
                     ProcessName = "PhantomDeviceMonitor",
-                    ActionTaken = "FIREWALL_BLOCK+ARP_FLUSH+CONN_KILL+DISCOVERY_BLOCK",
+                    ActionTaken = "FIREWALL_BLOCK+DISCOVERY_BLOCK",
                     Reason = $"Blocked phantom device IP={ip} MAC={mac} Manufacturer={manufacturer} SuspiciousPort={suspiciousService ?? "none"}"
                 });
 
-                _logger.LogWarning("[PhantomDeviceMonitor] BLOCKED+ISOLATED device IP={Ip} MAC={Mac} Manufacturer={Mfg}", ip, mac, manufacturer);
+                _logger.LogWarning("[PhantomDeviceMonitor] BLOCKED device IP={Ip} MAC={Mac} Manufacturer={Mfg}", ip, mac, manufacturer);
             }
             catch (Exception ex)
             {
@@ -2395,25 +2318,48 @@ namespace WindowsSentinel.Core
             }
         }
 
-        private static void KillConnectionsTo(string ip)
+        private static void AddFirewallRule(string name, string remoteIp, int direction, int protocol = 256, int remotePort = 0)
         {
-            // Kill all TCP connections to the rogue device by finding and terminating
-            // the owning processes' connections via netstat + established filter
             try
             {
-                var psi = new ProcessStartInfo("powershell", $"-NoProfile -Command \"Get-NetTCPConnection -RemoteAddress '{ip}' -ErrorAction SilentlyContinue | ForEach-Object {{ $_.OwningProcess }} | Sort-Object -Unique | ForEach-Object {{ Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }}\"")
-                { CreateNoWindow = true, UseShellExecute = false };
-                Process.Start(psi)?.WaitForExit(10000);
+                var policyType = Type.GetTypeFromProgID("HNetCfg.FwPolicy2");
+                if (policyType == null) return;
+                dynamic? policy = Activator.CreateInstance(policyType);
+                if (policy == null) return;
+
+                var ruleType = Type.GetTypeFromProgID("HNetCfg.FWRule");
+                if (ruleType == null) return;
+
+                dynamic? rule = Activator.CreateInstance(ruleType);
+                if (rule == null) return;
+
+                rule.Name = name;
+                rule.Direction = direction;
+                rule.Action = 0; // Block
+                rule.RemoteAddresses = remoteIp;
+                rule.Enabled = true;
+                rule.Profiles = 0x7FFFFFFF; // All profiles
+
+                if (protocol != 256) // 256 = Any
+                {
+                    rule.Protocol = protocol; // 17 = UDP, 6 = TCP
+                    if (remotePort > 0) rule.RemotePorts = remotePort.ToString();
+                }
+
+                policy.Rules.Add(rule);
             }
             catch { }
         }
 
-        private static void RunHidden(string exe, string args)
+        private static void RemoveFirewallRule(string name)
         {
             try
             {
-                Process.Start(new ProcessStartInfo(exe, args)
-                { CreateNoWindow = true, UseShellExecute = false })?.WaitForExit(5000);
+                var policyType = Type.GetTypeFromProgID("HNetCfg.FwPolicy2");
+                if (policyType == null) return;
+                dynamic? policy = Activator.CreateInstance(policyType);
+                if (policy == null) return;
+                policy.Rules.Remove(name);
             }
             catch { }
         }
@@ -2429,10 +2375,10 @@ namespace WindowsSentinel.Core
                     try
                     {
                         var ruleName = $"Sentinel-Block-PhantomDevice-{kvp.Key.Replace('.', '_')}";
-                        RunHidden("netsh", $"advfirewall firewall delete rule name=\"{ruleName}-OUT\"");
-                        RunHidden("netsh", $"advfirewall firewall delete rule name=\"{ruleName}-IN\"");
-                        RunHidden("netsh", $"advfirewall firewall delete rule name=\"{ruleName}-MDNS\"");
-                        RunHidden("netsh", $"advfirewall firewall delete rule name=\"{ruleName}-SSDP\"");
+                        RemoveFirewallRule($"{ruleName}-OUT");
+                        RemoveFirewallRule($"{ruleName}-IN");
+                        RemoveFirewallRule($"{ruleName}-MDNS");
+                        RemoveFirewallRule($"{ruleName}-SSDP");
                         toRemove.Add(kvp.Key);
                         _logger.LogInformation("[PhantomDeviceMonitor] Removed block for departed device {Ip}", kvp.Key);
                     }

@@ -79,11 +79,9 @@ namespace WindowsSentinel.Agent
                     services.AddHostedService<WebcamMicMonitor>();
                     services.AddHostedService<AudioHijackMonitor>();
                     services.AddHostedService<MicSessionMonitor>();
-                    services.AddHostedService<DiskWideDllScanner>();
                     services.AddHostedService<NeuroBehaviorVisualMonitor>();
                     services.AddHostedService<BrowserExtensionMonitor>();
                     services.AddHostedService<PhantomKeystrokeGuard>();
-                    services.AddHostedService<FileVerdictScanner>();
                     services.AddHostedService<WebcamHijackMonitor>();
                     services.AddHostedService<ConsultantSignalIngestor>();
                     services.AddHostedService<ShellWatchdog>();

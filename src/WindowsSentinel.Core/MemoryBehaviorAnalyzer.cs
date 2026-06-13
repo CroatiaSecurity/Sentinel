@@ -10,11 +10,18 @@ using Microsoft.Extensions.Logging;
 namespace WindowsSentinel.Core
 {
     /// <summary>
-    /// Scans process memory for behavioral anomalies:
-    /// - Excessive RWX (read-write-execute) memory regions
+    /// Scans process memory layout for behavioral anomalies:
+    /// - Excessive RWX (read-write-execute) private memory regions
     /// - Unbacked executable memory (no file on disk)
-    /// - Known byte prologues indicating position-independent code
-    /// Purely behavioral — no tool names, detects memory layout anomalies.
+    ///
+    /// Detection method: VirtualQueryEx to enumerate memory region types/protection.
+    /// Does NOT read process memory (no ReadProcessMemory) — only queries metadata.
+    /// This avoids AV heuristic triggers while still detecting injected code regions.
+    ///
+    /// Rationale: Legitimate apps (browsers, .NET, JIT engines) have some RWX regions.
+    /// But 3+ private RWX regions in a non-JIT process is anomalous. Combined with
+    /// other signals (process from Temp path, unsigned, suspicious parent), this
+    /// contributes to composite detection via the correlation engine.
     /// </summary>
     public sealed class MemoryBehaviorAnalyzer : IDisposable
     {
@@ -26,22 +33,12 @@ namespace WindowsSentinel.Core
         private readonly ConcurrentDictionary<int, DateTime> _scannedPids = new();
         private static readonly TimeSpan ScanInterval = TimeSpan.FromSeconds(90);
 
-        // Known byte sequences for position-independent code prologues
-        private static readonly byte[][] CodePrologues = new byte[][]
-        {
-            new byte[] { 0xFC, 0x48, 0x83, 0xE4, 0xF0 },  // CLD; AND RSP, -10h (common x64)
-            new byte[] { 0xFC, 0xE8, 0x82, 0x00, 0x00 },  // CLD; CALL +82h (common stager)
-            new byte[] { 0x48, 0x31, 0xC9, 0x48, 0x81 },  // XOR RCX,RCX; ...
-            new byte[] { 0x4D, 0x5A, 0x90, 0x00, 0x03 },  // MZ header (reflective PE)
-            new byte[] { 0xE8, 0x00, 0x00, 0x00, 0x00 },  // CALL $+5
-        };
-
         private static readonly HashSet<string> JitProcesses = new(StringComparer.OrdinalIgnoreCase)
         {
             "java.exe", "javaw.exe", "node.exe", "python.exe", "python3.exe",
             "ruby.exe", "dotnet.exe", "pwsh.exe", "powershell.exe",
             "deno.exe", "bun.exe",
-            // Chromium/Electron apps use V8 JIT → RWX is normal
+            // Chromium/Electron apps use V8 JIT — RWX is normal
             "msedge.exe", "chrome.exe", "firefox.exe", "brave.exe", "opera.exe", "vivaldi.exe",
             "msedgewebview2.exe", "Devin.exe", "code.exe", "cursor.exe", "Kiro.exe",
             "Antigravity IDE.exe",
@@ -64,10 +61,6 @@ namespace WindowsSentinel.Core
         private static extern int VirtualQueryEx(IntPtr hProcess, IntPtr lpAddress,
             out MEMORY_BASIC_INFORMATION lpBuffer, int dwLength);
 
-        [DllImport("kernel32.dll", SetLastError = true)]
-        private static extern bool ReadProcessMemory(IntPtr hProcess, IntPtr lpBaseAddress,
-            byte[] lpBuffer, int nSize, out int lpNumberOfBytesRead);
-
         [StructLayout(LayoutKind.Sequential)]
         private struct MEMORY_BASIC_INFORMATION
         {
@@ -82,9 +75,10 @@ namespace WindowsSentinel.Core
 
         private const uint MEM_COMMIT = 0x1000;
         private const uint MEM_PRIVATE = 0x20000;
+        private const uint MEM_IMAGE = 0x1000000;
         private const uint PAGE_EXECUTE_READWRITE = 0x40;
         private const uint PAGE_EXECUTE_WRITECOPY = 0x80;
-        private const int RwxThreshold = 3;
+        private const int RwxThreshold = 5; // Raised from 3 to reduce FP on .NET processes
 
         private void ScanMemory(object? state)
         {
@@ -101,15 +95,42 @@ namespace WindowsSentinel.Core
                         if (_scannedPids.ContainsKey(proc.Id)) continue;
                         _scannedPids[proc.Id] = DateTime.UtcNow;
 
-                        // Walk the virtual address space looking for RWX private regions
+                        IntPtr baseAddress = IntPtr.Zero;
+                        try { baseAddress = proc.MainModule?.BaseAddress ?? IntPtr.Zero; } catch { }
+
+                        // === Check 1: Process Hollowing (T1055.012) ===
+                        // If base address region is MEM_PRIVATE instead of MEM_IMAGE,
+                        // the original image was unmapped and replaced.
+                        if (baseAddress != IntPtr.Zero)
+                        {
+                            int infoSize = Marshal.SizeOf<MEMORY_BASIC_INFORMATION>();
+                            if (VirtualQueryEx(proc.Handle, baseAddress, out var baseMbi, infoSize) == infoSize)
+                            {
+                                if ((baseMbi.State & MEM_COMMIT) != 0 && (baseMbi.Type & MEM_IMAGE) == 0)
+                                {
+                                    _ = _detectionEngine.EmitAsync(new DetectionEvent
+                                    {
+                                        RuleName = "Process Hollowing: Image Region Replaced",
+                                        Evidence = $"Process '{name}' (PID {proc.Id}) base address 0x{baseAddress:X} is MEM_PRIVATE (not MEM_IMAGE)",
+                                        Reasoning = "The memory at the process image base address is backed by private memory instead of the file image, indicating the original binary was unmapped and replaced (process hollowing T1055.012).",
+                                        Confidence = 0.90, Tier = DetectionTier.Tier1Behavioral,
+                                        AuthorizedResponse = ResponseAction.KillProcessTree,
+                                        ProcessName = name, ProcessId = proc.Id
+                                    });
+                                    continue; // Already detected as hollowed — skip RWX check
+                                }
+                            }
+                        }
+
+                        // === Check 2: Excessive RWX Private Regions ===
                         int rwxCount = 0;
-                        bool hasPrologue = false;
+                        long totalRwxSize = 0;
                         IntPtr address = IntPtr.Zero;
-                        int infoSize = Marshal.SizeOf<MEMORY_BASIC_INFORMATION>();
+                        int mbiSize = Marshal.SizeOf<MEMORY_BASIC_INFORMATION>();
 
                         while (true)
                         {
-                            if (VirtualQueryEx(proc.Handle, address, out var mbi, infoSize) != infoSize)
+                            if (VirtualQueryEx(proc.Handle, address, out var mbi, mbiSize) != mbiSize)
                                 break;
 
                             if ((mbi.State & MEM_COMMIT) != 0 &&
@@ -117,45 +138,41 @@ namespace WindowsSentinel.Core
                                 (mbi.Protect == PAGE_EXECUTE_READWRITE || mbi.Protect == PAGE_EXECUTE_WRITECOPY))
                             {
                                 rwxCount++;
-
-                                // Sample first 16 bytes for code prologues
-                                if (!hasPrologue && (long)mbi.RegionSize >= 16)
-                                {
-                                    var sample = new byte[16];
-                                    if (ReadProcessMemory(proc.Handle, mbi.BaseAddress, sample, sample.Length, out _))
-                                    {
-                                        foreach (var prologue in CodePrologues)
-                                        {
-                                            if (sample.AsSpan(0, prologue.Length).SequenceEqual(prologue))
-                                            {
-                                                hasPrologue = true;
-                                                break;
-                                            }
-                                        }
-                                    }
-                                }
+                                totalRwxSize += (long)mbi.RegionSize;
                             }
 
                             var nextAddr = (long)mbi.BaseAddress + (long)mbi.RegionSize;
-                            if (nextAddr <= (long)address) break; // Overflow protection
+                            if (nextAddr <= (long)address) break;
                             address = (IntPtr)nextAddr;
                         }
 
                         if (rwxCount >= RwxThreshold)
                         {
-                            var confidence = hasPrologue ? 0.85 : 0.65;
-                            var tier = hasPrologue ? DetectionTier.Tier1Behavioral : DetectionTier.Tier2Indicator;
+                            bool isFromSuspiciousPath = false;
+                            try
+                            {
+                                var imagePath = proc.MainModule?.FileName ?? "";
+                                isFromSuspiciousPath =
+                                    imagePath.Contains(@"\Temp\", StringComparison.OrdinalIgnoreCase) ||
+                                    imagePath.Contains(@"\Downloads\", StringComparison.OrdinalIgnoreCase) ||
+                                    imagePath.Contains(@"\AppData\Local\Temp\", StringComparison.OrdinalIgnoreCase);
+                            }
+                            catch { }
+
+                            var confidence = isFromSuspiciousPath ? 0.80 : 0.60;
+                            var tier = isFromSuspiciousPath
+                                ? DetectionTier.Tier1Behavioral
+                                : DetectionTier.Tier2Indicator;
+
                             _ = _detectionEngine.EmitAsync(new DetectionEvent
                             {
-                                RuleName = hasPrologue
-                                    ? "Memory Injection: RWX Region with Shellcode Prologue"
-                                    : "Memory Injection: Excessive RWX Private Regions",
-                                Evidence = $"Process '{name}' (PID {proc.Id}) has {rwxCount} RWX private memory regions{(hasPrologue ? " with known shellcode prologue" : "")}",
-                                Reasoning = hasPrologue
-                                    ? "A process has private RWX memory containing known position-independent code prologues, strongly indicating injected shellcode."
-                                    : "A process has an abnormally high number of private RWX memory regions, which is unusual for legitimate software and suggests code injection.",
+                                RuleName = "Memory Injection: Excessive RWX Private Regions",
+                                Evidence = $"Process '{name}' (PID {proc.Id}) has {rwxCount} RWX private memory regions ({totalRwxSize / 1024}KB total)",
+                                Reasoning = "A non-JIT process has an abnormally high number of private RWX memory regions, which is unusual for legitimate software and suggests code injection or unpacked payload execution.",
                                 Confidence = confidence, Tier = tier,
-                                AuthorizedResponse = hasPrologue ? ResponseAction.KillProcessTree : ResponseAction.LogOnly,
+                                AuthorizedResponse = isFromSuspiciousPath
+                                    ? ResponseAction.KillProcessTree
+                                    : ResponseAction.LogOnly,
                                 ProcessName = name, ProcessId = proc.Id
                             });
                         }

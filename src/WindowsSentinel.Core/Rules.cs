@@ -159,7 +159,7 @@ namespace WindowsSentinel.Core
                             ProcessId = tit.ProcessId,
                             Confidence = 0.90,
                             Tier = DetectionTier.Tier1Behavioral,
-                            AuthorizedResponse = ResponseAction.UnloadDllAndKillOwner,
+                            AuthorizedResponse = ResponseAction.QuarantineAndKill,
                             Evidence = $"Injection API invoked: {tit.ApiName} by {tit.ProcessName} (PID {tit.ProcessId}) targeting process PID {tit.TargetProcessId}",
                             Reasoning = "Process invoked a kernel-observed memory injection API targeting another process, indicating code injection (T1055).",
                             Metadata = new Dictionary<string, string>

@@ -4,7 +4,6 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.Eventing.Reader;
 using System.Linq;
-using System.Runtime.InteropServices;
 using System.ServiceProcess;
 using System.Threading;
 using System.Threading.Tasks;
@@ -279,49 +278,9 @@ namespace WindowsSentinel.Core
                     }
                     else
                     {
-                        // Check if any critical processes have unusual parents or are being debugged
                         foreach (var proc in processes)
                         {
-                            try
-                            {
-                                // Check if a debugger is attached — malware attaching a debugger to csrss
-                                // can control when it crashes (detach = BSOD)
-                                if (IsBeingDebugged(proc.Id))
-                                {
-                                    var key = $"debug_{processName}_{proc.Id}";
-                                    if (!_alertedServices.ContainsKey(key))
-                                    {
-                                        _alertedServices[key] = DateTimeOffset.UtcNow;
-
-                                        await _detectionEngine.EmitAsync(new DetectionEvent
-                                        {
-                                            RuleName = "Critical Service Guard: Debugger Attached to Critical Process",
-                                            Evidence = $"Critical process '{processName}' (PID {proc.Id}) has a debugger attached. " +
-                                                       "Detaching the debugger would cause an immediate BSOD.",
-                                            Reasoning = "A debugger is attached to a BSOD-critical process. " +
-                                                        "Sophisticated malware attaches to csrss/lsass as a kill switch — " +
-                                                        "if the malware is terminated, the debugger detaches, " +
-                                                        "causing the critical process to crash and triggering a BSOD. " +
-                                                        "This is used as anti-forensics and anti-analysis.",
-                                            Confidence = 0.90,
-                                            Tier = DetectionTier.Tier1Behavioral,
-                                            AuthorizedResponse = ResponseAction.LogOnly,
-                                            ProcessName = processName,
-                                            ProcessId = proc.Id,
-                                            Metadata = new Dictionary<string, string>
-                                            {
-                                                ["CriticalProcess"] = processName,
-                                                ["Impact"] = "BSOD kill switch (debugger detach = crash)"
-                                            }
-                                        });
-                                    }
-                                }
-                            }
-                            catch { }
-                            finally
-                            {
-                                proc.Dispose();
-                            }
+                            proc.Dispose();
                         }
                     }
                 }
@@ -329,36 +288,12 @@ namespace WindowsSentinel.Core
             }
         }
 
-        private static bool IsBeingDebugged(int pid)
-        {
-            try
-            {
-                IntPtr hProcess = OpenProcess(PROCESS_QUERY_INFORMATION, false, pid);
-                if (hProcess == IntPtr.Zero) return false;
-
-                try
-                {
-                    bool isDebugged = false;
-                    if (CheckRemoteDebuggerPresent(hProcess, ref isDebugged))
-                        return isDebugged;
-                    return false;
-                }
-                finally
-                {
-                    CloseHandle(hProcess);
-                }
-            }
-            catch
-            {
-                return false;
-            }
-        }
+        #region Internal Types
 
         private static string? ExtractServiceName(EventRecord record)
         {
             try
             {
-                // Event 7034/7031 has the service name in the first property
                 if (record.Properties.Count > 0)
                     return record.Properties[0].Value?.ToString();
             }
@@ -368,7 +303,7 @@ namespace WindowsSentinel.Core
 
         private void PruneStaleHistory()
         {
-            var cutoff = DateTimeOffset.UtcNow - CrashWindow - CrashWindow; // 2x window for cleanup
+            var cutoff = DateTimeOffset.UtcNow - CrashWindow - CrashWindow;
             foreach (var key in _crashHistory.Keys.ToArray())
             {
                 if (_crashHistory.TryGetValue(key, out var history) && history.LastCrash < cutoff)
@@ -382,23 +317,6 @@ namespace WindowsSentinel.Core
                     _alertedServices.TryRemove(key, out _);
             }
         }
-
-        #region P/Invoke
-
-        [DllImport("kernel32.dll", SetLastError = true)]
-        private static extern IntPtr OpenProcess(uint dwDesiredAccess, bool bInheritHandle, int dwProcessId);
-
-        [DllImport("kernel32.dll", SetLastError = true)]
-        private static extern bool CheckRemoteDebuggerPresent(IntPtr hProcess, ref bool pbDebuggerPresent);
-
-        [DllImport("kernel32.dll", SetLastError = true)]
-        private static extern bool CloseHandle(IntPtr hObject);
-
-        private const uint PROCESS_QUERY_INFORMATION = 0x0400;
-
-        #endregion
-
-        #region Internal Types
 
         private sealed class ServiceCrashHistory
         {

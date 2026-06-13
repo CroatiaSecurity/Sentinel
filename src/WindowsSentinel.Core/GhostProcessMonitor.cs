@@ -34,6 +34,7 @@ namespace WindowsSentinel.Core
     {
         private readonly DetectionEngine _detectionEngine;
         private readonly ProcessAncestryCache _ancestryCache;
+        private readonly PhantomDeviceMonitor? _phantomDeviceMonitor;
         private readonly ILogger<GhostProcessMonitor> _logger;
 
         // Track already-alerted PIDs to avoid flooding
@@ -62,10 +63,12 @@ namespace WindowsSentinel.Core
         public GhostProcessMonitor(
             DetectionEngine detectionEngine,
             ProcessAncestryCache ancestryCache,
-            ILogger<GhostProcessMonitor> logger)
+            ILogger<GhostProcessMonitor> logger,
+            PhantomDeviceMonitor? phantomDeviceMonitor = null)
         {
             _detectionEngine = detectionEngine;
             _ancestryCache = ancestryCache;
+            _phantomDeviceMonitor = phantomDeviceMonitor;
             _logger = logger;
         }
 
@@ -160,23 +163,56 @@ namespace WindowsSentinel.Core
                 state.Connections.Select(c => $"{c.RemoteAddress}:{c.RemotePort}").Distinct().Take(5));
 
             bool hasSuspiciousPort = state.Connections.Any(c => SuspiciousMasqueradePorts.Contains(c.RemotePort));
-            double confidence = hasSuspiciousPort ? 0.88 : 0.78;
+
+            // Escalation: if connecting to a device PhantomDeviceMonitor already blocked/flagged,
+            // this is confirmed C2 via a rogue LAN relay. Kill it + chain trace.
+            bool connectsToBlockedDevice = _phantomDeviceMonitor != null &&
+                state.Connections.Any(c => _phantomDeviceMonitor.IsBlockedDevice(c.RemoteAddress));
+            bool connectsToPhantomDevice = !connectsToBlockedDevice && _phantomDeviceMonitor != null &&
+                state.Connections.Any(c => IsPrivateIp(c.RemoteAddress) && _phantomDeviceMonitor.IsPhantomDevice(c.RemoteAddress));
+
+            double confidence;
+            ResponseAction response;
+
+            if (connectsToBlockedDevice)
+            {
+                confidence = 0.95;
+                response = ResponseAction.KillProcessTree;
+            }
+            else if (connectsToPhantomDevice && hasSuspiciousPort)
+            {
+                confidence = 0.92;
+                response = ResponseAction.KillProcessTree;
+            }
+            else if (hasSuspiciousPort)
+            {
+                confidence = 0.88;
+                response = ResponseAction.KillProcessTree;
+            }
+            else
+            {
+                confidence = 0.78;
+                response = ResponseAction.NetworkIsolate;
+            }
 
             await _detectionEngine.EmitAsync(new DetectionEvent
             {
                 RuleName = "Ghost Process: Unresolvable PID with Active Network",
                 Evidence = $"PID {pid} has {state.Connections.Count} established outbound connection(s) " +
                            $"to [{destinations}] but cannot be resolved to a running process. " +
-                           $"Observed in {state.SeenCount} consecutive scans.",
+                           $"Observed in {state.SeenCount} consecutive scans." +
+                           (connectsToBlockedDevice ? " TARGET IS A BLOCKED PHANTOM DEVICE." : ""),
                 Reasoning = "A process ID owns active outbound TCP connections but the process " +
                             "cannot be resolved via Process.GetProcessById or the ancestry cache. " +
                             "This occurs when a process exits but its connections persist (orphaned sockets), " +
                             "or when a RAT uses process hollowing/DLL sideloading causing the host process " +
                             "to terminate while the injected code's network activity continues under the original PID. " +
-                            "PlugX, ShadowPad, and Mustang Panda specifically exploit this technique.",
+                            (connectsToBlockedDevice
+                                ? "The target IP is a device already blocked by PhantomDeviceMonitor — confirmed C2 relay."
+                                : "PlugX, ShadowPad, and Mustang Panda specifically exploit this technique."),
                 Confidence = confidence,
                 Tier = DetectionTier.Tier1Behavioral,
-                AuthorizedResponse = ResponseAction.NetworkIsolate,
+                AuthorizedResponse = response,
                 ProcessName = resolution.Name ?? "UNRESOLVABLE",
                 ProcessId = pid,
                 Metadata = new Dictionary<string, string>
@@ -184,7 +220,8 @@ namespace WindowsSentinel.Core
                     ["Destinations"] = destinations,
                     ["ConnectionCount"] = state.Connections.Count.ToString(),
                     ["ScansSeen"] = state.SeenCount.ToString(),
-                    ["HasSuspiciousPort"] = hasSuspiciousPort.ToString()
+                    ["HasSuspiciousPort"] = hasSuspiciousPort.ToString(),
+                    ["ConnectsToBlockedDevice"] = connectsToBlockedDevice.ToString()
                 }
             });
         }
@@ -196,29 +233,59 @@ namespace WindowsSentinel.Core
                 connections.Select(c => $"{c.RemoteAddress}:{c.RemotePort}").Distinct().Take(5));
 
             bool hasSuspiciousPort = connections.Any(c => SuspiciousMasqueradePorts.Contains(c.RemotePort));
-            double confidence = hasSuspiciousPort ? 0.85 : 0.72;
+
+            // Escalation: ghost + connecting to blocked/phantom device = confirmed C2
+            bool connectsToBlockedDevice = _phantomDeviceMonitor != null &&
+                connections.Any(c => _phantomDeviceMonitor.IsBlockedDevice(c.RemoteAddress));
+            bool connectsToPhantomOnCastPort = !connectsToBlockedDevice && _phantomDeviceMonitor != null &&
+                connections.Any(c => IsPrivateIp(c.RemoteAddress) &&
+                    (c.RemotePort == 8009 || c.RemotePort == 8008) &&
+                    _phantomDeviceMonitor.IsPhantomDevice(c.RemoteAddress));
+
+            double confidence;
+            ResponseAction response;
+
+            if (connectsToBlockedDevice || connectsToPhantomOnCastPort)
+            {
+                confidence = 0.95;
+                response = ResponseAction.KillProcessTree;
+            }
+            else if (hasSuspiciousPort)
+            {
+                confidence = 0.85;
+                response = ResponseAction.KillProcessTree;
+            }
+            else
+            {
+                confidence = 0.72;
+                response = ResponseAction.LogOnly;
+            }
 
             await _detectionEngine.EmitAsync(new DetectionEvent
             {
                 RuleName = "Ghost Process: Empty Name with Active Network",
                 Evidence = $"PID {pid} has {connections.Count} established outbound connection(s) " +
                            $"to [{destinations}] but process name is empty/blank. " +
-                           $"Image path: '{resolution.ImagePath ?? "unknown"}'",
+                           $"Image path: '{resolution.ImagePath ?? "unknown"}'" +
+                           (connectsToBlockedDevice ? " TARGET IS A BLOCKED PHANTOM DEVICE." : ""),
                 Reasoning = "A process with an empty/unresolvable name is maintaining active outbound " +
                             "network connections. Empty process names in ETW telemetry indicate the " +
                             "ImageName field was blank at process creation — a hallmark of process hollowing " +
                             "(T1055.012) where the original image is unmapped after spawn. " +
-                            "RATs like PlugX use this to evade name-based allowlists in security tools.",
+                            (connectsToBlockedDevice || connectsToPhantomOnCastPort
+                                ? "The target is a confirmed rogue LAN device — kill authorized."
+                                : "RATs like PlugX use this to evade name-based allowlists in security tools."),
                 Confidence = confidence,
                 Tier = DetectionTier.Tier1Behavioral,
-                AuthorizedResponse = hasSuspiciousPort ? ResponseAction.NetworkIsolate : ResponseAction.LogOnly,
+                AuthorizedResponse = response,
                 ProcessName = string.IsNullOrEmpty(resolution.Name) ? "EMPTY_NAME" : resolution.Name,
                 ProcessId = pid,
                 Metadata = new Dictionary<string, string>
                 {
                     ["Destinations"] = destinations,
                     ["ImagePath"] = resolution.ImagePath ?? "unknown",
-                    ["HasSuspiciousPort"] = hasSuspiciousPort.ToString()
+                    ["HasSuspiciousPort"] = hasSuspiciousPort.ToString(),
+                    ["ConnectsToBlockedDevice"] = connectsToBlockedDevice.ToString()
                 }
             });
         }
@@ -370,6 +437,19 @@ namespace WindowsSentinel.Core
         #endregion
 
         #region Internal Types
+
+        private static bool IsPrivateIp(string ip)
+        {
+            if (ip.StartsWith("10.")) return true;
+            if (ip.StartsWith("192.168.")) return true;
+            if (ip.StartsWith("172."))
+            {
+                var parts = ip.Split('.');
+                if (parts.Length >= 2 && int.TryParse(parts[1], out int second))
+                    return second >= 16 && second <= 31;
+            }
+            return false;
+        }
 
         private sealed class ConnectionInfo
         {

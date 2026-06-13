@@ -39,7 +39,7 @@ namespace WindowsSentinel.Tests
         [Fact]
         public void DetectionEvent_UnloadDllAndKillOwner_IsKillAuthorized()
         {
-            var evt = new DetectionEvent { AuthorizedResponse = ResponseAction.UnloadDllAndKillOwner };
+            var evt = new DetectionEvent { AuthorizedResponse = ResponseAction.QuarantineAndKill };
             Assert.True(evt.KillAuthorized);
         }
 
@@ -89,8 +89,8 @@ namespace WindowsSentinel.Tests
             Assert.True(ResponseAction.LogOnly < ResponseAction.KillProcess);
             Assert.True(ResponseAction.KillProcess < ResponseAction.KillProcessTree);
             Assert.True(ResponseAction.KillProcessTree < ResponseAction.Quarantine);
-            Assert.True(ResponseAction.Quarantine < ResponseAction.UnloadDllAndKillOwner);
-            Assert.True(ResponseAction.UnloadDllAndKillOwner < ResponseAction.RemoveCertAndKillAdder);
+            Assert.True(ResponseAction.Quarantine < ResponseAction.QuarantineAndKill);
+            Assert.True(ResponseAction.QuarantineAndKill < ResponseAction.RemoveCertAndKillAdder);
         }
 
         // ── ThreatScore ─────────────────────────────────────────────────────
