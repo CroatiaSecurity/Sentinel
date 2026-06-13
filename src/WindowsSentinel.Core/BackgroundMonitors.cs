@@ -1470,19 +1470,19 @@ namespace WindowsSentinel.Core
 
         protected override async Task ExecuteAsync(CancellationToken ct)
         {
-            _logger.LogInformation("[TlsCertificateMonitor] Started — performing startup full-store scan");
+            _logger.LogInformation("[TlsCertificateMonitor] Started — performing startup full-store audit");
 
-            // Phase 1: Startup scan — score every existing cert
+            // Phase 1: Startup scan — audit every existing cert, flag unknowns
             try
             {
-                await ScanAndBaselineStoreAsync(ct);
+                await AuditAndBaselineStoreAsync(ct);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "[TlsCertificateMonitor] Startup scan failed");
+                _logger.LogError(ex, "[TlsCertificateMonitor] Startup audit failed");
             }
 
-            _logger.LogInformation("[TlsCertificateMonitor] Baseline established: {Count} trusted root certs", _baselineThumbprints.Count);
+            _logger.LogInformation("[TlsCertificateMonitor] Audit complete: {Count} certs baselined", _baselineThumbprints.Count);
 
             // Phase 2: Runtime polling — detect new certs
             while (!ct.IsCancellationRequested)
@@ -1498,10 +1498,12 @@ namespace WindowsSentinel.Core
         }
 
         /// <summary>
-        /// Scans every cert in the Root store and silently baselines all existing certs.
-        /// No detections are emitted and no certs are removed during startup.
+        /// Startup audit: score every existing cert. Known public CAs are silently baselined.
+        /// Unknown/suspicious certs that were present before Sentinel started get flagged as
+        /// Tier2 indicators (can't auto-remove because we don't know if user installed them).
+        /// This prevents the "race the baseline" attack from going completely unnoticed.
         /// </summary>
-        private async Task ScanAndBaselineStoreAsync(CancellationToken ct)
+        private async Task AuditAndBaselineStoreAsync(CancellationToken ct)
         {
             using var store = new System.Security.Cryptography.X509Certificates.X509Store(
                 System.Security.Cryptography.X509Certificates.StoreName.Root,
@@ -1512,14 +1514,34 @@ namespace WindowsSentinel.Core
             {
                 if (ct.IsCancellationRequested) break;
                 _baselineThumbprints.Add(cert.Thumbprint);
-            }
 
-            _logger.LogInformation("[TlsCertificateMonitor] Baselined {Count} existing root certs silently", _baselineThumbprints.Count);
+                var analysis = AnalyzeCert(cert);
+
+                // Known public root CAs: fully trusted, no alert
+                if (analysis.IsPublicRootCa) continue;
+
+                // Known enterprise/dev tool CAs: log as Tier2 for visibility but no action
+                if (analysis.IsEnterpriseCa || analysis.IsDevTool)
+                {
+                    await EmitCertDetectionAsync(cert, analysis, null, isStartupScan: true);
+                    continue;
+                }
+
+                // Unknown cert with suspicious signals: flag it even though it was pre-existing
+                // This catches the "install cert before Sentinel starts" attack
+                if (analysis.Confidence >= 0.70)
+                {
+                    _logger.LogWarning("[TlsCertificateMonitor] Startup: suspicious pre-existing cert: {Subject} (confidence {Conf:F2})",
+                        cert.Subject, analysis.Confidence);
+                    await EmitCertDetectionAsync(cert, analysis, null, isStartupScan: true);
+                }
+            }
         }
 
         /// <summary>
-        /// Polls the Root store for new certs that weren't in the baseline.
-        /// Emits log-only detections for new certs; never removes anything.
+        /// Runtime polling: detect new certs added after baseline.
+        /// New unknown certs with high confidence → remove + notify.
+        /// New known public CAs → baseline silently.
         /// </summary>
         private async Task PollForNewCertsAsync(CancellationToken ct)
         {
@@ -1537,20 +1559,37 @@ namespace WindowsSentinel.Core
                 var analysis = AnalyzeCert(cert);
                 var adderInfo = TraceAdderProcess(cert.Thumbprint);
 
-                // Known public root CAs: baseline silently (no alert)
+                // Known public root CAs added at runtime (e.g., Windows Update adding new roots): baseline silently
                 if (analysis.IsPublicRootCa && analysis.Confidence <= 0.50)
                 {
                     _baselineThumbprints.Add(cert.Thumbprint);
                     continue;
                 }
 
-                _logger.LogWarning("[TlsCertificateMonitor] New root cert detected: Subject={Subject}, Thumbprint={Thumb}, Confidence={Conf:F2}",
-                    cert.Subject, cert.Thumbprint, analysis.Confidence);
+                _logger.LogWarning("[TlsCertificateMonitor] New root cert: Subject={Subject}, Confidence={Conf:F2}",
+                    cert.Subject, analysis.Confidence);
 
-                // Emit detection for the newly added cert (log-only, never auto-remove)
-                await EmitCertDetectionAsync(cert, analysis, adderInfo, isStartupScan: false);
+                // Determine response based on confidence
+                ResponseAction response;
+                if (analysis.Confidence >= 0.80)
+                {
+                    // High confidence malicious — remove the cert and kill the adder
+                    response = adderInfo != null ? ResponseAction.RemoveCertAndKillAdder : ResponseAction.RemoveCert;
+                }
+                else if (analysis.Confidence >= 0.65 && !analysis.IsEnterpriseCa && !analysis.IsDevTool)
+                {
+                    // Medium confidence — remove the cert but don't kill anything
+                    response = ResponseAction.RemoveCert;
+                }
+                else
+                {
+                    // Low confidence or known enterprise/dev tool — log only
+                    response = ResponseAction.LogOnly;
+                }
 
-                // Baseline after first alert so we don't spam
+                await EmitCertDetectionAsync(cert, analysis, adderInfo, isStartupScan: false, response);
+
+                // Baseline after alert so we don't spam
                 _baselineThumbprints.Add(cert.Thumbprint);
             }
         }
@@ -1837,7 +1876,8 @@ namespace WindowsSentinel.Core
             System.Security.Cryptography.X509Certificates.X509Certificate2 cert,
             CertAnalysisResult analysis,
             AdderProcessInfo? adderInfo,
-            bool isStartupScan)
+            bool isStartupScan,
+            ResponseAction? overrideResponse = null)
         {
             var cn = ExtractCN(cert.Subject);
             var scanPhase = isStartupScan ? "Startup scan" : "Runtime detection";
@@ -1877,7 +1917,10 @@ namespace WindowsSentinel.Core
                 metadata["AdderProcessName"] = adderInfo.ProcessName;
             }
 
-            var authorizedResponse = ResponseAction.LogOnly;
+            var authorizedResponse = overrideResponse ?? ResponseAction.LogOnly;
+
+            // Startup scans never auto-remove (user may have installed them intentionally)
+            if (isStartupScan) authorizedResponse = ResponseAction.LogOnly;
 
             await _detectionEngine.EmitAsync(new DetectionEvent
             {
