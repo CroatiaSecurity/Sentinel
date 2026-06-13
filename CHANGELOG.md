@@ -2,6 +2,18 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [0.7.6] - 2026-06-13
+
+### Security Hardening — Eliminate All Bypassable Allowlists
+
+- **Removed all built-in name/path-based suppression lists** — `GamingProcesses` (40+ names), `GamePathFragments` (15 path patterns), `TrustedPaths` confidence reduction, `DevelopmentProcesses` confidence reduction. An attacker reading the source code can no longer bypass detection by renaming to `steam.exe`, dropping into `C:\games\`, or using any other trick from the published lists.
+- **Only the user-managed allowlist can suppress detections** — explicit opt-in, persisted to disk. President's Law rules (LSASS, ransomware, injection, etc.) can NEVER be suppressed even with user allowlist.
+- **All remaining name-based skips require path verification** — `JitProcesses` (MemoryBehaviorAnalyzer), `DevelopmentProcesses` (ParentPidSpoofDetector), `ProtectedProcesses` (DllUnloadEngine), browser skip (ParentPidSpoofDetector), `SystemBinaries` (ChainTracer) all now verify the process image path is in a legitimate install directory before granting any exemption.
+- **MemoryBehaviorAnalyzer switched to growth-rate detection** — no longer alerts on static RWX counts (which games/JIT engines naturally have). Only alerts when RWX region count GROWS between scans (active injection). Eliminates all game false positives without any allowlist.
+- **`GetConfidenceReduction` simplified** — only user-allowlisted processes get any reduction (0.3 max). No built-in name/path bonuses.
+- **Fixed AntiTamperGuard service check flooding** — only alerts once when service not registered (prevents log spam in dev/debug mode).
+- **Added `google.com` and `steamstatic.com` to DNS TrustedBaseDomains** — high-query-volume base domains that triggered rapid-query false positives.
+
 ## [0.7.5] - 2026-06-13
 
 ### Added — Full Monitor Implementations & LOL* Detection
