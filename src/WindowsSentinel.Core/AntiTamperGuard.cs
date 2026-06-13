@@ -35,6 +35,7 @@ namespace WindowsSentinel.Core
         private readonly string? _ownExePath;
         private readonly string _lastGaspPath;
         private bool _exitHandlerRegistered;
+        private bool _serviceAlertSuppressed; // Only alert once about missing service registration
 
         public AntiTamperGuard(
             DetectionEngine detectionEngine,
@@ -148,6 +149,8 @@ namespace WindowsSentinel.Core
         /// </summary>
         private async Task CheckServiceRegistration()
         {
+            if (_serviceAlertSuppressed) return;
+
             try
             {
                 // Check if service exists via ServiceController
@@ -156,6 +159,8 @@ namespace WindowsSentinel.Core
             }
             catch (InvalidOperationException)
             {
+                _serviceAlertSuppressed = true; // Only alert once
+
                 // Service registration is gone — attempt re-register
                 await _detectionEngine.EmitAsync(new DetectionEvent
                 {
