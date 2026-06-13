@@ -2,6 +2,13 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [0.7.7] - 2026-06-13
+
+### Added — System Integrity & Graceful Degradation
+
+- **System32/SysWOW64 write detection** — `FileActivityMonitor` now watches protected OS directories. Any file creation or modification by a non-OS process (not TrustedInstaller, Defender, DISM, SFC) fires Tier1 with KillProcessTree. Catches DLL planting, backdoor installation, system binary replacement.
+- **`RegistryMonitor` graceful degradation** — When WMI service is unavailable (custom/debloated Windows), automatically falls back to direct registry polling via `Microsoft.Win32.Registry` APIs every 15 seconds. Monitors Run keys, RunOnce, and Services without WMI dependency.
+
 ## [0.7.6] - 2026-06-13
 
 ### Security Hardening — Eliminate All Bypassable Allowlists
