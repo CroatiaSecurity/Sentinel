@@ -2,6 +2,19 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [0.7.8] - 2026-06-13
+
+### Improved — TlsCertificateMonitor Hardened
+
+- **Startup audit now detects pre-existing MitM certs** — certs with confidence ≥0.90 at startup are actively removed (catches "install cert before Sentinel starts" race attack).
+- **Active removal at lower threshold** — runtime certs with confidence ≥0.80 get removed + adder killed (was 0.95, too conservative).
+- **New detection signals:**
+  - Machine hostname CN (WIN-XXXXX, DESKTOP-XXXXX, or matching local machine name) → +0.25 confidence
+  - Absurd validity (>100 years / 999-year certs) → +0.20 confidence
+  - Server Authentication EKU on a root cert (root CAs shouldn't have leaf EKUs) → +0.20 confidence
+- **Monitors TrustedPublisher store** — catches BYOVD (Bring Your Own Vulnerable Driver) attacks where attacker adds a code-signing cert to make their vulnerable driver appear trusted.
+- **Won't touch legitimate certs:** Windows roots, DigiCert, Let's Encrypt, game anti-cheat CAs all score ≤0.50 and are silently baselined. Long validity + proper CRL/OCSP + organizational CN = safe.
+
 ## [0.7.7] - 2026-06-13
 
 ### Added — System Integrity & Graceful Degradation

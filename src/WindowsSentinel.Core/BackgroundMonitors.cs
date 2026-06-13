@@ -1533,7 +1533,18 @@ namespace WindowsSentinel.Core
                 {
                     _logger.LogWarning("[TlsCertificateMonitor] Startup: suspicious pre-existing cert: {Subject} (confidence {Conf:F2})",
                         cert.Subject, analysis.Confidence);
-                    await EmitCertDetectionAsync(cert, analysis, null, isStartupScan: true);
+
+                    // Very high confidence at startup (>=0.90): actively remove
+                    // These are almost certainly attacker MitM certs planted before Sentinel started
+                    ResponseAction? startupResponse = null;
+                    if (analysis.Confidence >= 0.90 && _config.ActiveResponse)
+                    {
+                        startupResponse = ResponseAction.RemoveCert;
+                        _logger.LogWarning("[TlsCertificateMonitor] REMOVING malicious pre-existing cert: {Subject}", cert.Subject);
+                    }
+
+                    await EmitCertDetectionAsync(cert, analysis, null, isStartupScan: false, startupResponse);
+                    // Note: isStartupScan=false here so the response engine actually processes the removal
                 }
             }
         }
@@ -1542,56 +1553,75 @@ namespace WindowsSentinel.Core
         /// Runtime polling: detect new certs added after baseline.
         /// New unknown certs with high confidence → remove + notify.
         /// New known public CAs → baseline silently.
+        /// Monitors Root AND TrustedPublisher stores (BYOVD attack vector).
         /// </summary>
         private async Task PollForNewCertsAsync(CancellationToken ct)
         {
-            using var store = new System.Security.Cryptography.X509Certificates.X509Store(
+            await PollStoreAsync(
                 System.Security.Cryptography.X509Certificates.StoreName.Root,
-                System.Security.Cryptography.X509Certificates.StoreLocation.LocalMachine);
-            store.Open(System.Security.Cryptography.X509Certificates.OpenFlags.ReadOnly);
+                "Root", ct);
+            await PollStoreAsync(
+                System.Security.Cryptography.X509Certificates.StoreName.TrustedPublisher,
+                "TrustedPublisher", ct);
+        }
 
-            foreach (var cert in store.Certificates)
+        private async Task PollStoreAsync(
+            System.Security.Cryptography.X509Certificates.StoreName storeName,
+            string storeLabel,
+            CancellationToken ct)
+        {
+            try
             {
-                if (ct.IsCancellationRequested) break;
-                if (_baselineThumbprints.Contains(cert.Thumbprint)) continue;
+                using var store = new System.Security.Cryptography.X509Certificates.X509Store(
+                    storeName,
+                    System.Security.Cryptography.X509Certificates.StoreLocation.LocalMachine);
+                store.Open(System.Security.Cryptography.X509Certificates.OpenFlags.ReadOnly);
 
-                // New cert detected — analyze it
-                var analysis = AnalyzeCert(cert);
-                var adderInfo = TraceAdderProcess(cert.Thumbprint);
-
-                // Known public root CAs added at runtime (e.g., Windows Update adding new roots): baseline silently
-                if (analysis.IsPublicRootCa && analysis.Confidence <= 0.50)
+                foreach (var cert in store.Certificates)
                 {
-                    _baselineThumbprints.Add(cert.Thumbprint);
-                    continue;
-                }
+                    if (ct.IsCancellationRequested) break;
+                    var key = $"{storeLabel}:{cert.Thumbprint}";
+                    if (_baselineThumbprints.Contains(key)) continue;
 
-                _logger.LogWarning("[TlsCertificateMonitor] New root cert: Subject={Subject}, Confidence={Conf:F2}",
-                    cert.Subject, analysis.Confidence);
+                    var analysis = AnalyzeCert(cert);
+                    var adderInfo = TraceAdderProcess(cert.Thumbprint);
 
-                // Determine response based on confidence
-                ResponseAction response;
-                if (analysis.Confidence >= 0.80)
-                {
-                    // High confidence malicious — remove the cert and kill the adder
-                    response = adderInfo != null ? ResponseAction.RemoveCertAndKillAdder : ResponseAction.RemoveCert;
-                }
-                else if (analysis.Confidence >= 0.65 && !analysis.IsEnterpriseCa && !analysis.IsDevTool)
-                {
-                    // Medium confidence — remove the cert but don't kill anything
-                    response = ResponseAction.RemoveCert;
-                }
-                else
-                {
-                    // Low confidence or known enterprise/dev tool — log only
-                    response = ResponseAction.LogOnly;
-                }
+                    // Known public root CAs: baseline silently
+                    if (analysis.IsPublicRootCa && analysis.Confidence <= 0.50)
+                    {
+                        _baselineThumbprints.Add(key);
+                        continue;
+                    }
 
-                await EmitCertDetectionAsync(cert, analysis, adderInfo, isStartupScan: false, response);
+                    // TrustedPublisher additions are extra suspicious — used for BYOVD
+                    if (storeLabel == "TrustedPublisher")
+                    {
+                        analysis.Confidence = Math.Max(analysis.Confidence, 0.75);
+                        analysis.Reasons.Add("Added to TrustedPublisher store (BYOVD/driver signing attack vector)");
+                    }
 
-                // Baseline after alert so we don't spam
-                _baselineThumbprints.Add(cert.Thumbprint);
+                    _logger.LogWarning("[TlsCertificateMonitor] New cert in {Store}: Subject={Subject}, Confidence={Conf:F2}",
+                        storeLabel, cert.Subject, analysis.Confidence);
+
+                    ResponseAction response;
+                    if (analysis.Confidence >= 0.80)
+                    {
+                        response = adderInfo != null ? ResponseAction.RemoveCertAndKillAdder : ResponseAction.RemoveCert;
+                    }
+                    else if (analysis.Confidence >= 0.65 && !analysis.IsEnterpriseCa && !analysis.IsDevTool)
+                    {
+                        response = ResponseAction.RemoveCert;
+                    }
+                    else
+                    {
+                        response = ResponseAction.LogOnly;
+                    }
+
+                    await EmitCertDetectionAsync(cert, analysis, adderInfo, isStartupScan: false, response);
+                    _baselineThumbprints.Add(key);
+                }
             }
+            catch { }
         }
 
         // Known legitimate public root CA patterns — these are trusted global CAs
@@ -1733,6 +1763,44 @@ namespace WindowsSentinel.Core
                     confidence += 0.10;
                     reasons.Add("Suspicious keywords in Subject");
                 }
+
+                // 11. Machine-name CN (hostname pattern) — MitM certs generated by RDP/attack tools
+                // Real CAs never have bare hostnames as their CN
+                if (!string.IsNullOrEmpty(cn) && IsHostnameLike(cn))
+                {
+                    confidence += 0.25;
+                    reasons.Add($"CN looks like a machine hostname: '{cn}'");
+                }
+
+                // 12. Absurd validity (>100 years) — attack certs use 999-year validity
+                // No legitimate CA issues certs for more than 25 years
+                if (validity.TotalDays > 36500) // >100 years
+                {
+                    confidence += 0.20;
+                    reasons.Add($"Absurd validity period ({validity.TotalDays / 365:F0} years)");
+                }
+
+                // 13. Server Authentication EKU in root store — root CAs should NOT have
+                // server auth EKU. Only leaf/intermediate certs need it. A root cert with
+                // server auth EKU is designed for direct TLS interception.
+                bool hasServerAuthEku = false;
+                foreach (var ext in cert.Extensions)
+                {
+                    if (ext.Oid?.Value == "2.5.29.37") // Enhanced Key Usage
+                    {
+                        var ekuText = ext.Format(false);
+                        if (ekuText.Contains("Server Authentication") || ekuText.Contains("1.3.6.1.5.5.7.3.1"))
+                        {
+                            hasServerAuthEku = true;
+                            break;
+                        }
+                    }
+                }
+                if (hasServerAuthEku)
+                {
+                    confidence += 0.20;
+                    reasons.Add("Root cert has Server Authentication EKU (designed for TLS interception)");
+                }
             }
 
             // Cap confidence at 0.99
@@ -1779,6 +1847,43 @@ namespace WindowsSentinel.Core
                     hexChars++;
             }
             return hexChars > s.Length * 0.7;
+        }
+
+        /// <summary>
+        /// Checks if a CN looks like a machine hostname rather than a CA organization name.
+        /// Hostnames are typically: DESKTOP-XXXXXXX, WIN-XXXXXXX, LAPTOP-XXXXXXX, or short
+        /// uppercase alphanumeric strings without spaces or organization-like structure.
+        /// </summary>
+        private static bool IsHostnameLike(string cn)
+        {
+            if (string.IsNullOrEmpty(cn)) return false;
+            // Contains spaces/commas/dots = org name, not hostname
+            if (cn.Contains(' ') || cn.Contains(',') || cn.Contains('.')) return false;
+            // Contains CA-like words = not a hostname
+            var lower = cn.ToLowerInvariant();
+            if (lower.Contains("root") || lower.Contains("ca") || lower.Contains("cert") ||
+                lower.Contains("authority") || lower.Contains("trust") || lower.Contains("sign"))
+                return false;
+
+            var upper = cn.ToUpperInvariant();
+            // Common Windows auto-generated hostname prefixes
+            if (upper.StartsWith("WIN-") || upper.StartsWith("DESKTOP-") ||
+                upper.StartsWith("LAPTOP-") || upper.StartsWith("WORKSTATION-") ||
+                upper.StartsWith("PC-") || upper.StartsWith("SERVER-"))
+                return true;
+            // Matches local machine name — definitely a self-signed MitM cert
+            try
+            {
+                var machineName = Environment.MachineName;
+                if (cn.Equals(machineName, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+            catch { }
+            // All-caps with dash, 8-15 chars = likely Windows auto-generated hostname
+            if (cn.Length >= 8 && cn.Length <= 15 && cn.Contains('-') &&
+                cn.All(c => char.IsLetterOrDigit(c) || c == '-'))
+                return true;
+            return false;
         }
 
         /// <summary>
