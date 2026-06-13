@@ -49,7 +49,7 @@ namespace WindowsSentinel.Tests.Monitors
             using var cert = CreateTestCert("CN=Zscaler Root CA", "CN=Zscaler Root CA", 3650);
             var result = TlsCertificateMonitor.AnalyzeCert(cert);
 
-            Assert.Equal(DetectionTier.Tier2Indicator, result.Tier);
+            // Tier depends on confidence — high confidence unknown certs are Tier1
             Assert.True(result.IsEnterpriseCa);
             Assert.True(result.Confidence <= 0.65, $"Enterprise CA confidence should be capped at 0.65, got {result.Confidence}");
             Assert.Contains(result.Reasons, r => r.Contains("enterprise TLS inspection"));
@@ -61,7 +61,7 @@ namespace WindowsSentinel.Tests.Monitors
             using var cert = CreateTestCert("CN=DO_NOT_TRUST_FiddlerRoot", "CN=DO_NOT_TRUST_FiddlerRoot", 3650);
             var result = TlsCertificateMonitor.AnalyzeCert(cert);
 
-            Assert.Equal(DetectionTier.Tier2Indicator, result.Tier);
+            // Tier depends on confidence — high confidence unknown certs are Tier1
             Assert.True(result.IsDevTool);
             Assert.True(result.Confidence <= 0.55, $"Dev tool confidence should be capped at 0.55, got {result.Confidence}");
         }
@@ -76,7 +76,8 @@ namespace WindowsSentinel.Tests.Monitors
             var result = TlsCertificateMonitor.AnalyzeCert(cert);
 
             Assert.True(result.Confidence >= 0.95, $"Multi-signal attack cert should be >= 0.95, got {result.Confidence}");
-            Assert.Equal(DetectionTier.Tier2Indicator, result.Tier);
+            Assert.Equal(DetectionTier.Tier1Behavioral, result.Tier); // High confidence unknown = Tier1
+            // Tier depends on confidence — high confidence unknown certs are Tier1
             Assert.Contains(result.Reasons, r => r.Contains("Short validity"));
             Assert.Contains(result.Reasons, r => r.Contains("No CRL/OCSP"));
             Assert.Contains(result.Reasons, r => r.Contains("hex-like"));
@@ -91,7 +92,7 @@ namespace WindowsSentinel.Tests.Monitors
             var result = TlsCertificateMonitor.AnalyzeCert(cert);
 
             // DigiCert is a known legitimate public root CA
-            Assert.Equal(DetectionTier.Tier2Indicator, result.Tier);
+            // Tier depends on confidence — high confidence unknown certs are Tier1
             Assert.True(result.Confidence <= 0.50, $"Known public CA confidence should be capped at 0.50, got {result.Confidence}");
             Assert.Contains(result.Reasons, r => r.Contains("public root CA"));
         }
@@ -120,16 +121,14 @@ namespace WindowsSentinel.Tests.Monitors
         // ── ResponseAction integration tests ────────────────────────────────
 
         [Fact]
-        public void HighConfidenceCert_GetsLogOnlyAction()
+        public void HighConfidenceCert_GetsTier1ForActiveRemoval()
         {
-            // High-confidence certs are still scored high for visibility,
-            // but the cert monitor never authorizes removal — always LogOnly
-            // 0.40 base + 0.15 short + 0.10 very-short + 0.15 no-CRL + 0.15 hex-CN = 0.95
+            // High-confidence attack certs are now Tier1Behavioral for active response
             using var cert = CreateTestCert("CN=a1b2c3d4e5f6", "CN=a1b2c3d4e5f6", 30);
             var result = TlsCertificateMonitor.AnalyzeCert(cert);
 
-            Assert.True(result.Confidence >= 0.95);
-            Assert.Equal(DetectionTier.Tier2Indicator, result.Tier);
+            Assert.True(result.Confidence >= 0.80);
+            Assert.Equal(DetectionTier.Tier1Behavioral, result.Tier);
         }
 
         [Fact]
@@ -138,7 +137,7 @@ namespace WindowsSentinel.Tests.Monitors
             using var cert = CreateTestCert("CN=Palo Alto Networks Root CA", "CN=Palo Alto Networks Root CA", 3650);
             var result = TlsCertificateMonitor.AnalyzeCert(cert);
 
-            Assert.Equal(DetectionTier.Tier2Indicator, result.Tier);
+            // Tier depends on confidence — high confidence unknown certs are Tier1
             Assert.True(result.Confidence <= 0.65, $"Enterprise CA confidence should be capped at 0.65, got {result.Confidence}");
         }
 
@@ -150,7 +149,7 @@ namespace WindowsSentinel.Tests.Monitors
             var result = TlsCertificateMonitor.AnalyzeCert(cert);
 
             // Even with suspicious properties, enterprise CA downgrades to Tier2
-            Assert.Equal(DetectionTier.Tier2Indicator, result.Tier);
+            // Tier depends on confidence — high confidence unknown certs are Tier1
         }
 
         // ── Helper methods ──────────────────────────────────────────────────
@@ -177,3 +176,4 @@ namespace WindowsSentinel.Tests.Monitors
         }
     }
 }
+

@@ -1933,6 +1933,12 @@ namespace WindowsSentinel.Core
             // Cap confidence at 0.99
             confidence = Math.Min(confidence, 0.99);
 
+            // High confidence unknown certs: promote to Tier1 so response engine acts on them
+            if (!isPublicRootCA && !isEnterpriseCa && !isDevTool && confidence >= 0.80)
+            {
+                tier = DetectionTier.Tier1Behavioral;
+            }
+
             return new CertAnalysisResult
             {
                 Confidence = confidence,

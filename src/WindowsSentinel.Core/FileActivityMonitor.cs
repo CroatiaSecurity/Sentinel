@@ -373,15 +373,22 @@ namespace WindowsSentinel.Core
             var trustedNames = new[] { "trustedinstaller", "tiworker", "msiexec",
                 "wuauclt", "usoclient", "musnotification",
                 "msmpeng", "nissrv", "securityhealthservice",
-                "dism", "dismhost", "sfc", "poqexec" };
+                "dism", "dismhost", "sfc", "poqexec",
+                // Critical system processes that legitimately modify System32
+                "csrss", "smss", "wininit", "services", "lsass", "svchost",
+                // Sentinel itself
+                "windowssentinel.service", "windowssentinel.agent" };
 
             var lowerName = processName.ToLowerInvariant();
             if (trustedNames.Any(t => lowerName.Contains(t))) return true;
 
-            // PID 4 = SYSTEM kernel (driver loads, legitimate)
+            // PID 4 = SYSTEM kernel, PID 0 = Idle (driver loads, legitimate)
             if (pid == 4 || pid == 0) return true;
 
-            // Verify by path — only trust if running from System32 or Defender folder
+            // Own PID = Sentinel itself writing (e.g., quarantine lock files)
+            if (pid == Environment.ProcessId) return true;
+
+            // Verify by path — only trust if running from System32/Windows or Defender folder
             try
             {
                 using var proc = System.Diagnostics.Process.GetProcessById(pid);
@@ -390,8 +397,15 @@ namespace WindowsSentinel.Core
                 {
                     return imagePath.StartsWith(@"C:\Windows\", StringComparison.OrdinalIgnoreCase) ||
                            imagePath.Contains(@"\Windows Defender\", StringComparison.OrdinalIgnoreCase) ||
-                           imagePath.Contains(@"\Microsoft Security Client\", StringComparison.OrdinalIgnoreCase);
+                           imagePath.Contains(@"\Microsoft Security Client\", StringComparison.OrdinalIgnoreCase) ||
+                           imagePath.Contains(@"\WindowsSentinel\", StringComparison.OrdinalIgnoreCase);
                 }
+            }
+            catch (System.ComponentModel.Win32Exception)
+            {
+                // Access denied — likely a protected system process (csrss, smss, lsass)
+                // If we can't read it but it has a system-like name, trust it
+                return lowerName == "system" || pid <= 4;
             }
             catch { }
 
