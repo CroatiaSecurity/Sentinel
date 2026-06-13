@@ -102,6 +102,8 @@ namespace WindowsSentinel.Core
         /// <summary>
         /// Checks if a process should be suppressed from detection entirely.
         /// President's Law rules are NEVER suppressed.
+        /// Gaming/allowlist suppression requires BOTH name match AND legitimate path.
+        /// Name alone is never sufficient (attacker can rename).
         /// </summary>
         public bool ShouldSuppress(string processName, string? imagePath, string? ruleName)
         {
@@ -109,8 +111,15 @@ namespace WindowsSentinel.Core
             if (IsPresidentsLawRule(ruleName) && !isBeaconing) return false;
 
             if (IsUserAllowlisted(processName, imagePath)) return true;
-            if (GamingProcesses.Contains(processName)) return true;
-            if (IsGamingPath(imagePath)) return true;
+
+            // Gaming suppression: require BOTH name match AND path in a gaming directory.
+            // Name alone is trivially spoofed. Path alone is spoofable but requires
+            // write access to known game folders (which is higher bar than rename).
+            if (GamingProcesses.Contains(processName) && IsGamingPath(imagePath)) return true;
+
+            // Path-only gaming suppression: only for beaconing rules (games have keep-alive connections)
+            if (isBeaconing && IsGamingPath(imagePath)) return true;
+
             return false;
         }
 

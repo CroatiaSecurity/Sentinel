@@ -27,10 +27,12 @@ namespace WindowsSentinel.Core
     {
         private readonly TelemetryFusionEngine _fusionEngine;
         private readonly DetectionEngine _detectionEngine;
+        private readonly AllowlistService? _allowlist;
         private readonly ILogger<MemoryBehaviorAnalyzer> _logger;
         private readonly System.Threading.Timer _timer;
 
         private readonly ConcurrentDictionary<int, DateTime> _scannedPids = new();
+        private readonly ConcurrentDictionary<int, int> _previousRwxCounts = new();
         private static readonly TimeSpan ScanInterval = TimeSpan.FromSeconds(90);
 
         private static readonly HashSet<string> JitProcesses = new(StringComparer.OrdinalIgnoreCase)
@@ -44,15 +46,19 @@ namespace WindowsSentinel.Core
             "Antigravity IDE.exe",
             "electron.exe", "slack.exe", "discord.exe", "teams.exe", "spotify.exe",
             "steamwebhelper.exe", "cefsharp.browsersubprocess.exe",
+            // Games with JIT/scripting engines
+            "fm.exe", "Football Manager 2024.exe", "Football Manager 2025.exe",
         };
 
         public MemoryBehaviorAnalyzer(
             TelemetryFusionEngine fusionEngine,
             DetectionEngine detectionEngine,
-            ILogger<MemoryBehaviorAnalyzer> logger)
+            ILogger<MemoryBehaviorAnalyzer> logger,
+            AllowlistService? allowlist = null)
         {
             _fusionEngine = fusionEngine;
             _detectionEngine = detectionEngine;
+            _allowlist = allowlist;
             _logger = logger;
             _timer = new System.Threading.Timer(ScanMemory, null, ScanInterval, ScanInterval);
         }
@@ -91,7 +97,14 @@ namespace WindowsSentinel.Core
                         if (proc.Id <= 4) continue;
                         var name = proc.ProcessName;
 
-                        if (JitProcesses.Contains(name + ".exe")) continue;
+                        if (JitProcesses.Contains(name + ".exe"))
+                        {
+                            // JIT name match — but verify path to prevent rename bypass
+                            string? jitPath = null;
+                            try { jitPath = proc.MainModule?.FileName; } catch { }
+                            if (IsLegitimateJitPath(jitPath))
+                                continue;
+                        }
                         if (_scannedPids.ContainsKey(proc.Id)) continue;
                         _scannedPids[proc.Id] = DateTime.UtcNow;
 
@@ -148,6 +161,23 @@ namespace WindowsSentinel.Core
 
                         if (rwxCount >= RwxThreshold)
                         {
+                            // Check if this is a GROWING count (injection) vs STABLE count (JIT engine)
+                            // JIT engines allocate RWX at startup and stay stable.
+                            // Injection adds new RWX regions over time.
+                            bool isGrowing = false;
+                            if (_previousRwxCounts.TryGetValue(proc.Id, out int prevCount))
+                            {
+                                // If RWX count grew by 3+ since last scan, it's actively being injected
+                                isGrowing = rwxCount > prevCount + 2;
+                            }
+                            _previousRwxCounts[proc.Id] = rwxCount;
+
+                            // First time seeing this PID with high RWX: record baseline, don't alert yet
+                            if (!isGrowing && prevCount == 0) continue;
+
+                            // Stable high count across scans = JIT engine, not injection
+                            if (!isGrowing) continue;
+
                             bool isFromSuspiciousPath = false;
                             try
                             {
@@ -159,22 +189,27 @@ namespace WindowsSentinel.Core
                             }
                             catch { }
 
-                            var confidence = isFromSuspiciousPath ? 0.80 : 0.60;
+                            var confidence = isFromSuspiciousPath ? 0.80 : 0.70;
                             var tier = isFromSuspiciousPath
                                 ? DetectionTier.Tier1Behavioral
                                 : DetectionTier.Tier2Indicator;
 
                             _ = _detectionEngine.EmitAsync(new DetectionEvent
                             {
-                                RuleName = "Memory Injection: Excessive RWX Private Regions",
-                                Evidence = $"Process '{name}' (PID {proc.Id}) has {rwxCount} RWX private memory regions ({totalRwxSize / 1024}KB total)",
-                                Reasoning = "A non-JIT process has an abnormally high number of private RWX memory regions, which is unusual for legitimate software and suggests code injection or unpacked payload execution.",
+                                RuleName = "Memory Injection: RWX Region Growth Detected",
+                                Evidence = $"Process '{name}' (PID {proc.Id}) RWX regions grew from {prevCount} to {rwxCount} ({totalRwxSize / 1024}KB total)",
+                                Reasoning = "A process's private RWX memory region count increased between scans, indicating new executable code was injected at runtime. Stable JIT engines allocate RWX at startup and don't grow. Growing RWX = active code injection.",
                                 Confidence = confidence, Tier = tier,
                                 AuthorizedResponse = isFromSuspiciousPath
                                     ? ResponseAction.KillProcessTree
                                     : ResponseAction.LogOnly,
                                 ProcessName = name, ProcessId = proc.Id
                             });
+                        }
+                        else
+                        {
+                            // Below threshold — record for future comparison
+                            _previousRwxCounts[proc.Id] = rwxCount;
                         }
                     }
                     catch (System.ComponentModel.Win32Exception) { }
@@ -203,6 +238,26 @@ namespace WindowsSentinel.Core
         public void Dispose()
         {
             _timer.Dispose();
+        }
+
+        /// <summary>
+        /// Verifies that a JIT-named process is actually running from a legitimate install path.
+        /// Prevents bypass via rename: attacker can't just name malware "node.exe" — it must
+        /// also be in Program Files, AppData\Local\Programs, or a known runtime directory.
+        /// </summary>
+        private static bool IsLegitimateJitPath(string? path)
+        {
+            if (string.IsNullOrEmpty(path)) return false;
+            return path.StartsWith(@"C:\Program Files", StringComparison.OrdinalIgnoreCase) ||
+                   path.Contains(@"\AppData\Local\Programs\", StringComparison.OrdinalIgnoreCase) ||
+                   path.Contains(@"\AppData\Local\Google\", StringComparison.OrdinalIgnoreCase) ||
+                   path.Contains(@"\AppData\Local\Microsoft\", StringComparison.OrdinalIgnoreCase) ||
+                   path.Contains(@"\AppData\Local\BraveSoftware\", StringComparison.OrdinalIgnoreCase) ||
+                   path.Contains(@"\AppData\Local\Vivaldi\", StringComparison.OrdinalIgnoreCase) ||
+                   path.Contains(@"\dotnet\", StringComparison.OrdinalIgnoreCase) ||
+                   path.Contains(@"\nodejs\", StringComparison.OrdinalIgnoreCase) ||
+                   path.Contains(@"\Python", StringComparison.OrdinalIgnoreCase) ||
+                   path.StartsWith(@"C:\Windows\", StringComparison.OrdinalIgnoreCase);
         }
     }
 }

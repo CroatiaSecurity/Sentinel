@@ -142,6 +142,11 @@ namespace WindowsSentinel.Tests
                 var engine = new AdvancedResponseEngine(config, metrics, logger, quarantine, allowlist);
 
                 // Emitted event with Tier1, but the process name is "steam" (allowlisted game)
+                // Note: allowlist requires BOTH name AND gaming path for suppression.
+                // In AdvancedResponseEngine, imagePath is resolved from the live process.
+                // Since PID 1234 won't exist in tests, we use the user-managed allowlist instead.
+                allowlist.AddToUserAllowlist("steam", @"C:\Program Files (x86)\Steam\steam.exe", "Test");
+
                 var detection = new DetectionEvent
                 {
                     RuleName = "C2 Beaconing Behavior (Statistical)",

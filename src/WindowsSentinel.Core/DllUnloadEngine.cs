@@ -78,7 +78,16 @@ namespace WindowsSentinel.Core
             var result = new DllUnloadResult { ProcessId = processId, ProcessName = processName };
 
             if (ProtectedProcesses.Contains(processName))
-                return result;
+            {
+                // Verify path — name alone is spoofable. Only skip if running from legitimate location.
+                try
+                {
+                    using var p = Process.GetProcessById(processId);
+                    var path = p.MainModule?.FileName;
+                    if (IsProtectedPath(path)) return result;
+                }
+                catch { return result; } // Can't verify — err on side of caution, don't remediate
+            }
 
             try
             {
@@ -168,7 +177,14 @@ namespace WindowsSentinel.Core
                 using var proc = Process.GetProcessById(targetPid);
                 result.ProcessName = proc.ProcessName;
                 if (ProtectedProcesses.Contains(result.ProcessName))
-                    return result;
+                {
+                    try
+                    {
+                        var path = proc.MainModule?.FileName;
+                        if (IsProtectedPath(path)) return result;
+                    }
+                    catch { return result; }
+                }
 
                 string? procDir = null;
                 try { procDir = Path.GetDirectoryName(proc.MainModule?.FileName); } catch { }
@@ -291,6 +307,18 @@ namespace WindowsSentinel.Core
         public void Dispose()
         {
             _remediationHistory.Clear();
+        }
+
+        private static bool IsProtectedPath(string? path)
+        {
+            if (string.IsNullOrEmpty(path)) return false;
+            return path.StartsWith(@"C:\Windows\", StringComparison.OrdinalIgnoreCase) ||
+                   path.StartsWith(@"C:\Program Files", StringComparison.OrdinalIgnoreCase) ||
+                   path.Contains(@"\AppData\Local\Google\", StringComparison.OrdinalIgnoreCase) ||
+                   path.Contains(@"\AppData\Local\Microsoft\", StringComparison.OrdinalIgnoreCase) ||
+                   path.Contains(@"\AppData\Local\BraveSoftware\", StringComparison.OrdinalIgnoreCase) ||
+                   path.Contains(@"\AppData\Local\Programs\", StringComparison.OrdinalIgnoreCase) ||
+                   path.Contains(@"\WindowsSentinel", StringComparison.OrdinalIgnoreCase);
         }
     }
 

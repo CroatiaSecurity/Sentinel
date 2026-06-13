@@ -34,14 +34,18 @@ namespace WindowsSentinel.Tests
         public void ShouldSuppress_ReturnsTrue_ForGamingProcess()
         {
             var svc = CreateService();
-            Assert.True(svc.ShouldSuppress("steam", null, "UnsignedBinaryRule"));
+            // Requires BOTH name AND gaming path — name alone is no longer sufficient
+            Assert.True(svc.ShouldSuppress("steam", @"C:\Program Files (x86)\Steam\steam.exe", "UnsignedBinaryRule"));
+            // Name alone should NOT suppress (attacker could rename)
+            Assert.False(svc.ShouldSuppress("steam", null, "UnsignedBinaryRule"));
         }
 
         [Fact]
         public void ShouldSuppress_ReturnsTrue_ForGamingProcess_AntiCheat()
         {
             var svc = CreateService();
-            Assert.True(svc.ShouldSuppress("EasyAntiCheat", null, "SomeRule"));
+            // EasyAntiCheat typically runs from a game directory
+            Assert.True(svc.ShouldSuppress("EasyAntiCheat", @"D:\Steam\steamapps\common\SomeGame\EasyAntiCheat\EasyAntiCheat.exe", "SomeRule"));
         }
 
         [Fact]
@@ -166,8 +170,10 @@ namespace WindowsSentinel.Tests
         public void ShouldSuppress_AllowsSuppressingBeaconing_ForGamingProcess()
         {
             var svc = CreateService();
-            // Typically beaconing is a President's Law rule, but we added an exception to allow suppression for gaming processes
-            Assert.True(svc.ShouldSuppress("steam", null, "C2 Beaconing Behavior (Statistical)"));
+            // Beaconing for gaming: requires gaming path
+            Assert.True(svc.ShouldSuppress("steam", @"D:\Steam\steam.exe", "C2 Beaconing Behavior (Statistical)"));
+            // Non-gaming path should NOT suppress even with gaming name
+            Assert.False(svc.ShouldSuppress("unknowngame", @"C:\Temp\unknowngame.exe", "C2 Beaconing Behavior (Statistical)"));
         }
 
         [Fact]

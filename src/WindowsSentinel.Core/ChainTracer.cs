@@ -265,7 +265,7 @@ namespace WindowsSentinel.Core
 
         private static bool IsSystemBinary(string? imagePath, string processName)
         {
-            if (SystemBinaries.Contains(processName)) return true;
+            // Never trust name alone — require path verification
             if (string.IsNullOrEmpty(imagePath)) return false;
             return SystemPaths.Any(sp => imagePath.StartsWith(sp, StringComparison.OrdinalIgnoreCase));
         }
