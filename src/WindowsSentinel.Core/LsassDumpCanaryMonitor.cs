@@ -1,7 +1,10 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Runtime.InteropServices;
+using System.Diagnostics.Eventing.Reader;
+using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
@@ -9,30 +12,43 @@ using Microsoft.Extensions.Logging;
 namespace WindowsSentinel.Core
 {
     /// <summary>
-    /// Detects LSASS credential dumping by monitoring process handles to lsass.exe.
-    /// Behavioral detection — watches for unauthorized processes opening handles
-    /// with PROCESS_VM_READ or PROCESS_QUERY_INFORMATION to the LSASS process.
-    /// No tool names used; purely runtime handle monitoring.
+    /// Detects LSASS credential dumping attempts via Windows event log monitoring.
+    ///
+    /// Detection sources:
+    ///   1. Sysmon Event ID 10 (ProcessAccess) targeting lsass.exe with GrantedAccess
+    ///      containing PROCESS_VM_READ (0x0010) from non-trusted processes.
+    ///   2. Windows Security Event ID 4656/4663 (Handle to object requested/accessed)
+    ///      targeting \Device\... lsass with read permissions.
+    ///   3. Defender Event ID 1121 (ASR rule triggered) for LSASS credential theft.
+    ///
+    /// Why not NtQuerySystemInformation + DuplicateHandle?
+    ///   That approach (enumerating all system handles) uses the exact same API pattern
+    ///   as Mimikatz and gets flagged by every AV engine. Event log monitoring achieves
+    ///   the same detection without looking like a credential dumper itself.
+    ///
+    /// Trust model: processes accessing LSASS are trusted ONLY by verified path
+    /// (System32, Defender platform folder). Never by name alone.
     /// </summary>
     public sealed class LsassDumpCanaryMonitor : IDisposable
     {
         private readonly DetectionEngine _detectionEngine;
         private readonly ILogger<LsassDumpCanaryMonitor> _logger;
         private readonly System.Threading.Timer _timer;
-        private byte? _processTypeIndex;
+        private readonly ConcurrentDictionary<string, DateTimeOffset> _alertedProcesses = new();
 
-        // Known legitimate processes that access LSASS (by verified path, not name alone)
-        private static readonly HashSet<string> TrustedLsassAccessors = new(StringComparer.OrdinalIgnoreCase)
+        // Known legitimate processes that access LSASS (by verified path prefix)
+        private static readonly string[] TrustedLsassAccessorPaths = new[]
         {
-            @"C:\Windows\System32\lsass.exe",
-            @"C:\Windows\System32\csrss.exe",
-            @"C:\Windows\System32\services.exe",
-            @"C:\Windows\System32\svchost.exe",
-            @"C:\Windows\System32\wininit.exe",
-            @"C:\ProgramData\Microsoft\Windows Defender\Platform",
+            @"C:\Windows\System32\",
+            @"C:\Windows\SysWOW64\",
+            @"C:\ProgramData\Microsoft\Windows Defender\Platform\",
+            @"C:\Program Files\Windows Defender\",
+            @"C:\Program Files\Microsoft Security Client\",
         };
 
-        private static readonly TimeSpan ScanInterval = TimeSpan.FromSeconds(45);
+        private static readonly TimeSpan ScanInterval = TimeSpan.FromSeconds(30);
+        private static readonly TimeSpan AlertCooldown = TimeSpan.FromMinutes(5);
+        private DateTime _lastQueryTime = DateTime.UtcNow.AddMinutes(-1);
 
         public LsassDumpCanaryMonitor(
             DetectionEngine detectionEngine,
@@ -40,225 +56,242 @@ namespace WindowsSentinel.Core
         {
             _detectionEngine = detectionEngine;
             _logger = logger;
-            _timer = new System.Threading.Timer(CheckLsassHandles, null, ScanInterval, ScanInterval);
+            _timer = new System.Threading.Timer(CheckLsassAccess, null, ScanInterval, ScanInterval);
         }
 
-        [DllImport("ntdll.dll")]
-        private static extern int NtQuerySystemInformation(
-            int SystemInformationClass,
-            IntPtr SystemInformation,
-            int SystemInformationLength,
-            ref int ReturnLength);
-
-        [DllImport("kernel32.dll", SetLastError = true)]
-        private static extern IntPtr OpenProcess(
-            uint dwDesiredAccess,
-            bool bInheritHandle,
-            int dwProcessId);
-
-        [DllImport("kernel32.dll", SetLastError = true)]
-        private static extern bool DuplicateHandle(
-            IntPtr hSourceProcessHandle,
-            IntPtr hSourceHandle,
-            IntPtr hTargetProcessHandle,
-            out IntPtr lpTargetHandle,
-            uint dwDesiredAccess,
-            bool bInheritHandle,
-            uint dwOptions);
-
-        [DllImport("kernel32.dll")]
-        private static extern int GetProcessId(IntPtr handle);
-
-        [DllImport("kernel32.dll")]
-        private static extern IntPtr GetCurrentProcess();
-
-        [DllImport("kernel32.dll", SetLastError = true)]
-        private static extern bool CloseHandle(IntPtr hObject);
-
-        private const uint PROCESS_DUP_HANDLE = 0x0040;
-        private const uint DUPLICATE_SAME_ACCESS = 0x00000002;
-        private const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
-
-        [StructLayout(LayoutKind.Sequential)]
-        private struct SYSTEM_HANDLE_TABLE_ENTRY_INFO
-        {
-            public ushort UniqueProcessId;
-            public ushort CreatorBackTraceIndex;
-            public byte ObjectTypeIndex;
-            public byte HandleAttributes;
-            public ushort HandleValue;
-            public IntPtr Object;
-            public uint GrantedAccess;
-        }
-
-        private static byte GetProcessObjectTypeIndex()
-        {
-            var selfHandle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, Environment.ProcessId);
-            if (selfHandle == IntPtr.Zero) return 0;
-
-            try
-            {
-                int bufferSize = 1024 * 1024 * 4; // Start with 4MB
-                IntPtr buffer = Marshal.AllocHGlobal(bufferSize);
-                try
-                {
-                    int returnLength = 0;
-                    int status = NtQuerySystemInformation(16, buffer, bufferSize, ref returnLength);
-                    while (status == -1073741820) // STATUS_INFO_LENGTH_MISMATCH
-                    {
-                        Marshal.FreeHGlobal(buffer);
-                        bufferSize = returnLength + 65536;
-                        buffer = Marshal.AllocHGlobal(bufferSize);
-                        status = NtQuerySystemInformation(16, buffer, bufferSize, ref returnLength);
-                    }
-
-                    if (status == 0) // STATUS_SUCCESS
-                    {
-                        long count = Marshal.ReadIntPtr(buffer).ToInt64();
-                        IntPtr entryPtr = buffer + IntPtr.Size;
-                        int entrySize = Marshal.SizeOf<SYSTEM_HANDLE_TABLE_ENTRY_INFO>();
-
-                        for (long i = 0; i < count; i++)
-                        {
-                            var entry = Marshal.PtrToStructure<SYSTEM_HANDLE_TABLE_ENTRY_INFO>(entryPtr);
-                            entryPtr += entrySize;
-
-                            if (entry.UniqueProcessId == Environment.ProcessId && entry.HandleValue == (ushort)selfHandle)
-                            {
-                                return entry.ObjectTypeIndex;
-                            }
-                        }
-                    }
-                }
-                finally
-                {
-                    Marshal.FreeHGlobal(buffer);
-                }
-            }
-            catch { }
-            finally
-            {
-                CloseHandle(selfHandle);
-            }
-            return 0;
-        }
-
-        private void CheckLsassHandles(object? state)
+        private void CheckLsassAccess(object? state)
         {
             try
             {
-                // Find LSASS PID
-                var lsassProcs = Process.GetProcessesByName("lsass");
-                if (lsassProcs.Length == 0) return;
-
-                var lsassPid = lsassProcs[0].Id;
-                foreach (var p in lsassProcs) p.Dispose();
-
-                if (_processTypeIndex == null)
-                {
-                    _processTypeIndex = GetProcessObjectTypeIndex();
-                }
-
-                int bufferSize = 1024 * 1024 * 4; // Start with 4MB
-                IntPtr buffer = Marshal.AllocHGlobal(bufferSize);
-                try
-                {
-                    int returnLength = 0;
-                    int status = NtQuerySystemInformation(16, buffer, bufferSize, ref returnLength);
-                    while (status == -1073741820) // STATUS_INFO_LENGTH_MISMATCH
-                    {
-                        Marshal.FreeHGlobal(buffer);
-                        bufferSize = returnLength + 65536;
-                        buffer = Marshal.AllocHGlobal(bufferSize);
-                        status = NtQuerySystemInformation(16, buffer, bufferSize, ref returnLength);
-                    }
-
-                    if (status == 0) // STATUS_SUCCESS
-                    {
-                        long count = Marshal.ReadIntPtr(buffer).ToInt64();
-                        IntPtr entryPtr = buffer + IntPtr.Size;
-                        int entrySize = Marshal.SizeOf<SYSTEM_HANDLE_TABLE_ENTRY_INFO>();
-
-                        for (long i = 0; i < count; i++)
-                        {
-                            var entry = Marshal.PtrToStructure<SYSTEM_HANDLE_TABLE_ENTRY_INFO>(entryPtr);
-                            entryPtr += entrySize;
-
-                            if (entry.UniqueProcessId == Environment.ProcessId || entry.UniqueProcessId <= 4)
-                                continue;
-
-                            // Filter to process handles using the resolved ObjectTypeIndex
-                            if (_processTypeIndex != null && _processTypeIndex != 0 && entry.ObjectTypeIndex != _processTypeIndex)
-                                continue;
-
-                            // Check if GrantedAccess contains PROCESS_VM_READ (0x0010)
-                            if ((entry.GrantedAccess & 0x0010) == 0)
-                                continue;
-
-                            var hSourceProcess = OpenProcess(PROCESS_DUP_HANDLE, false, entry.UniqueProcessId);
-                            if (hSourceProcess != IntPtr.Zero)
-                            {
-                                if (DuplicateHandle(hSourceProcess, (IntPtr)entry.HandleValue, GetCurrentProcess(), out var hTarget, 0, false, DUPLICATE_SAME_ACCESS))
-                                {
-                                    int targetPid = GetProcessId(hTarget);
-                                    CloseHandle(hTarget);
-
-                                    if (targetPid == lsassPid)
-                                    {
-                                        // Found a process holding a read handle to LSASS!
-                                        // Let's resolve its path and verify trust.
-                                        string? path = null;
-                                        string procName = $"PID_{entry.UniqueProcessId}";
-                                        try
-                                        {
-                                            using var targetProc = Process.GetProcessById(entry.UniqueProcessId);
-                                            procName = targetProc.ProcessName;
-                                            path = targetProc.MainModule?.FileName;
-                                        }
-                                        catch { }
-
-                                        bool isTrusted = false;
-                                        if (path != null)
-                                        {
-                                            foreach (var trusted in TrustedLsassAccessors)
-                                            {
-                                                if (path.StartsWith(trusted, StringComparison.OrdinalIgnoreCase))
-                                                {
-                                                    isTrusted = true;
-                                                    break;
-                                                }
-                                            }
-                                        }
-
-                                        if (!isTrusted)
-                                        {
-                                            _ = _detectionEngine.EmitAsync(new DetectionEvent
-                                            {
-                                                RuleName = "Credential Theft: LSASS Handle Opened",
-                                                Evidence = $"Process '{procName}' (PID {entry.UniqueProcessId}) opened a handle to LSASS.exe with read permissions (path: '{path ?? "unknown"}')",
-                                                Reasoning = "An unauthorized process opened a handle to LSASS with read memory access, indicating potential credential dumping.",
-                                                Confidence = 0.90,
-                                                Tier = DetectionTier.Tier1Behavioral,
-                                                AuthorizedResponse = ResponseAction.KillProcessTree,
-                                                ProcessName = procName,
-                                                ProcessId = entry.UniqueProcessId
-                                            });
-                                        }
-                                    }
-                                }
-                                CloseHandle(hSourceProcess);
-                            }
-                        }
-                    }
-                }
-                finally
-                {
-                    Marshal.FreeHGlobal(buffer);
-                }
+                CheckSysmonProcessAccess();
+                CheckDefenderAsrEvents();
+                PruneAlertHistory();
             }
             catch (Exception ex)
             {
                 _logger.LogDebug(ex, "[LsassDumpCanaryMonitor] Check error");
+            }
+        }
+
+        /// <summary>
+        /// Sysmon Event ID 10: ProcessAccess
+        /// Fires when a process opens a handle to another process.
+        /// We look for accesses to lsass.exe with read permissions from untrusted paths.
+        /// </summary>
+        private void CheckSysmonProcessAccess()
+        {
+            try
+            {
+                // Query Sysmon operational log for Event ID 10 (ProcessAccess) targeting lsass
+                var queryTime = _lastQueryTime;
+                _lastQueryTime = DateTime.UtcNow;
+
+                var query = new EventLogQuery(
+                    "Microsoft-Windows-Sysmon/Operational",
+                    PathType.LogName,
+                    $"*[System[EventID=10 and TimeCreated[timediff(@SystemTime) <= 35000]]]");
+
+                using var reader = new EventLogReader(query);
+                EventRecord? record;
+                while ((record = reader.ReadEvent()) != null)
+                {
+                    using (record)
+                    {
+                        if (record.TimeCreated <= queryTime) continue;
+
+                        var xml = record.ToXml();
+                        if (!xml.Contains("lsass.exe", StringComparison.OrdinalIgnoreCase)) continue;
+
+                        // Extract source process info
+                        var sourceImage = ExtractXmlField(xml, "SourceImage");
+                        var targetImage = ExtractXmlField(xml, "TargetImage");
+                        var grantedAccess = ExtractXmlField(xml, "GrantedAccess");
+                        var sourceProcessId = ExtractXmlField(xml, "SourceProcessId");
+
+                        if (string.IsNullOrEmpty(sourceImage)) continue;
+                        if (!targetImage?.Contains("lsass.exe", StringComparison.OrdinalIgnoreCase) == true) continue;
+
+                        // Check if granted access includes PROCESS_VM_READ (0x10)
+                        if (!string.IsNullOrEmpty(grantedAccess))
+                        {
+                            if (uint.TryParse(grantedAccess.Replace("0x", ""),
+                                System.Globalization.NumberStyles.HexNumber, null, out var access))
+                            {
+                                if ((access & 0x0010) == 0) continue; // No VM_READ — not a dump attempt
+                            }
+                        }
+
+                        // Verify trust by path
+                        if (IsTrustedPath(sourceImage)) continue;
+
+                        // Dedup by source process
+                        var dedupKey = $"{sourceImage}:{sourceProcessId}";
+                        if (_alertedProcesses.TryGetValue(dedupKey, out var lastAlert) &&
+                            DateTimeOffset.UtcNow - lastAlert < AlertCooldown)
+                            continue;
+                        _alertedProcesses[dedupKey] = DateTimeOffset.UtcNow;
+
+                        int.TryParse(sourceProcessId, out int pid);
+                        var processName = Path.GetFileNameWithoutExtension(sourceImage);
+
+                        _ = _detectionEngine.EmitAsync(new DetectionEvent
+                        {
+                            RuleName = "Credential Theft: LSASS Process Access",
+                            Evidence = $"Process '{processName}' (PID {pid}, path: '{sourceImage}') opened a handle to LSASS with access 0x{grantedAccess}",
+                            Reasoning = "An untrusted process opened a handle to LSASS with memory read permissions. This is the primary technique for credential dumping (T1003.001). Trust is verified by path — only System32 and Defender binaries are exempted.",
+                            Confidence = 0.92,
+                            Tier = DetectionTier.Tier1Behavioral,
+                            AuthorizedResponse = ResponseAction.KillProcessTree,
+                            ProcessName = processName,
+                            ProcessId = pid,
+                            Metadata = new Dictionary<string, string>
+                            {
+                                ["SourceImage"] = sourceImage,
+                                ["GrantedAccess"] = grantedAccess ?? "unknown"
+                            }
+                        });
+                    }
+                }
+            }
+            catch (EventLogNotFoundException)
+            {
+                // Sysmon not installed — fall back to Security event log
+                CheckSecurityAuditEvents();
+            }
+            catch (UnauthorizedAccessException)
+            {
+                _logger.LogDebug("[LsassDumpCanaryMonitor] Access denied to Sysmon log, trying Security log");
+                CheckSecurityAuditEvents();
+            }
+            catch { }
+        }
+
+        /// <summary>
+        /// Security Event ID 4656: A handle to an object was requested.
+        /// Requires "Audit Handle Manipulation" policy to be enabled.
+        /// Fallback when Sysmon is not installed.
+        /// </summary>
+        private void CheckSecurityAuditEvents()
+        {
+            try
+            {
+                var query = new EventLogQuery(
+                    "Security",
+                    PathType.LogName,
+                    "*[System[EventID=4656 and TimeCreated[timediff(@SystemTime) <= 35000]]]");
+
+                using var reader = new EventLogReader(query);
+                EventRecord? record;
+                while ((record = reader.ReadEvent()) != null)
+                {
+                    using (record)
+                    {
+                        var xml = record.ToXml();
+                        if (!xml.Contains("lsass", StringComparison.OrdinalIgnoreCase)) continue;
+
+                        var processName = ExtractXmlField(xml, "ProcessName") ?? "";
+                        if (IsTrustedPath(processName)) continue;
+
+                        var subjectPid = ExtractXmlField(xml, "ProcessId");
+                        int.TryParse(subjectPid, out int pid);
+                        var shortName = Path.GetFileNameWithoutExtension(processName);
+
+                        var dedupKey = $"sec:{processName}";
+                        if (_alertedProcesses.TryGetValue(dedupKey, out var lastAlert) &&
+                            DateTimeOffset.UtcNow - lastAlert < AlertCooldown)
+                            continue;
+                        _alertedProcesses[dedupKey] = DateTimeOffset.UtcNow;
+
+                        _ = _detectionEngine.EmitAsync(new DetectionEvent
+                        {
+                            RuleName = "Credential Theft: LSASS Handle Requested (Audit)",
+                            Evidence = $"Process '{shortName}' (PID {pid}, path: '{processName}') requested handle to LSASS",
+                            Reasoning = "Windows Security audit detected an untrusted process requesting a handle to the LSASS process. This is a credential dumping indicator.",
+                            Confidence = 0.85,
+                            Tier = DetectionTier.Tier1Behavioral,
+                            AuthorizedResponse = ResponseAction.KillProcessTree,
+                            ProcessName = shortName,
+                            ProcessId = pid
+                        });
+                    }
+                }
+            }
+            catch { }
+        }
+
+        /// <summary>
+        /// Defender ASR Event ID 1121: Attack Surface Reduction rule triggered.
+        /// If Defender's "Block credential stealing from lsass" ASR rule fires,
+        /// we get a free detection even if our other methods miss it.
+        /// </summary>
+        private void CheckDefenderAsrEvents()
+        {
+            try
+            {
+                var query = new EventLogQuery(
+                    "Microsoft-Windows-Windows Defender/Operational",
+                    PathType.LogName,
+                    "*[System[EventID=1121 and TimeCreated[timediff(@SystemTime) <= 35000]]]");
+
+                using var reader = new EventLogReader(query);
+                EventRecord? record;
+                while ((record = reader.ReadEvent()) != null)
+                {
+                    using (record)
+                    {
+                        var xml = record.ToXml();
+                        // ASR rule GUID for credential theft: 9e6c4e1f-7d60-472f-ba1a-a39ef669e4b2
+                        if (!xml.Contains("9e6c4e1f", StringComparison.OrdinalIgnoreCase)) continue;
+
+                        var processPath = ExtractXmlField(xml, "Path") ?? "unknown";
+                        var shortName = Path.GetFileNameWithoutExtension(processPath);
+
+                        var dedupKey = $"asr:{processPath}";
+                        if (_alertedProcesses.ContainsKey(dedupKey)) continue;
+                        _alertedProcesses[dedupKey] = DateTimeOffset.UtcNow;
+
+                        _ = _detectionEngine.EmitAsync(new DetectionEvent
+                        {
+                            RuleName = "Credential Theft: Defender ASR LSASS Block",
+                            Evidence = $"Windows Defender ASR blocked credential theft attempt by '{shortName}' (path: '{processPath}')",
+                            Reasoning = "Windows Defender's Attack Surface Reduction rule for LSASS credential theft was triggered. This confirms an active credential dumping attempt was blocked by Defender, and Sentinel independently corroborates the threat.",
+                            Confidence = 0.95,
+                            Tier = DetectionTier.Tier1Behavioral,
+                            AuthorizedResponse = ResponseAction.KillProcessTree,
+                            ProcessName = shortName,
+                            ProcessId = 0
+                        });
+                    }
+                }
+            }
+            catch { }
+        }
+
+        private static bool IsTrustedPath(string? path)
+        {
+            if (string.IsNullOrEmpty(path)) return false;
+            return TrustedLsassAccessorPaths.Any(t => path.StartsWith(t, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static string? ExtractXmlField(string xml, string fieldName)
+        {
+            // Simple extraction: look for Name="fieldName">value<
+            var marker = $"Name=\"{fieldName}\">";
+            var idx = xml.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+            if (idx < 0) return null;
+            idx += marker.Length;
+            var endIdx = xml.IndexOf('<', idx);
+            if (endIdx < 0) return null;
+            return xml[idx..endIdx];
+        }
+
+        private void PruneAlertHistory()
+        {
+            var cutoff = DateTimeOffset.UtcNow - AlertCooldown - AlertCooldown;
+            foreach (var key in _alertedProcesses.Keys.ToArray())
+            {
+                if (_alertedProcesses.TryGetValue(key, out var time) && time < cutoff)
+                    _alertedProcesses.TryRemove(key, out _);
             }
         }
 

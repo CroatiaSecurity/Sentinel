@@ -70,6 +70,14 @@ namespace WindowsSentinel.Core
                                 _baselineListeners.Add(listener);
                                 continue;
                             }
+
+                            // Skip well-known Windows service ports that can start/stop dynamically
+                            // 2869 = SSDP/UPnP event notification, 5357 = WSDAPI, 5985 = WinRM HTTP
+                            if (port is 2869 or 5357 or 5985 or 1900 or 3702)
+                            {
+                                _baselineListeners.Add(listener);
+                                continue;
+                            }
                         }
                     }
 

@@ -3,7 +3,7 @@
 **Status:** Architecture spec. Extends, does not replace, `requirements.md`,
 `design.md`, `constraints.md` (all v0.9.0).
 
-**Last updated:** v6.9.0 (June 2026) — Gaming & Casting False Positive Mitigation: added gaming path identification, beaconing rule allowlist bypasses, and phantom device monitor adjustments for smart TVs.
+**Last updated:** v0.8.1 (June 2026) — ScoringEngine refactored to use DetectionCategory enum (replaces string matching), ShellWatchdog startup race fixed (no more explorer window on launch), TelemetryFusionEngine chain retention extended to 10 minutes, detection metrics counting fixed (actual hits only).
 
 ---
 

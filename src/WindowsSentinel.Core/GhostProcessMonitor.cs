@@ -1,0 +1,479 @@
+using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using System.Net;
+using System.Runtime.InteropServices;
+using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+
+namespace WindowsSentinel.Core
+{
+    /// <summary>
+    /// Detects "ghost" processes — PIDs with active outbound network connections
+    /// whose process name cannot be resolved or was recorded as empty/unknown.
+    ///
+    /// This is the exact blind spot exploited by PlugX and similar RATs:
+    ///   1. RAT uses DLL sideloading via legitimate binary (e.g., GoogleUpdate.exe)
+    ///   2. The legitimate binary gets hollowed or the process exits quickly
+    ///   3. TCP connections persist under the original PID (or re-spawned PID)
+    ///   4. ProcessAncestryCache records empty name from hollowed ETW event
+    ///   5. BeaconingDetector fires but process name is empty — low forensic value
+    ///
+    /// This monitor catches the gap: any PID with established outbound connections
+    /// that cannot be resolved to a valid, signed process image is immediately
+    /// suspicious and investigated.
+    ///
+    /// Scan interval: 15 seconds (catches short-lived RAT processes between
+    /// BeaconingDetector's 30s analysis cycle).
+    /// </summary>
+    public sealed class GhostProcessMonitor : BackgroundService
+    {
+        private readonly DetectionEngine _detectionEngine;
+        private readonly ProcessAncestryCache _ancestryCache;
+        private readonly PhantomDeviceMonitor? _phantomDeviceMonitor;
+        private readonly ILogger<GhostProcessMonitor> _logger;
+
+        // Track already-alerted PIDs to avoid flooding
+        private readonly ConcurrentDictionary<int, DateTimeOffset> _alertedPids = new();
+
+        // Track PIDs seen with ghost connections across multiple scans for confidence building
+        private readonly ConcurrentDictionary<int, GhostProcessState> _ghostTracking = new();
+
+        private static readonly TimeSpan ScanInterval = TimeSpan.FromSeconds(15);
+        private static readonly TimeSpan AlertCooldown = TimeSpan.FromMinutes(5);
+        private static readonly TimeSpan StaleTimeout = TimeSpan.FromMinutes(10);
+
+        // Ports commonly abused by RATs masquerading as legitimate traffic
+        private static readonly HashSet<int> SuspiciousMasqueradePorts = new()
+        {
+            5228, // Google FCM — PlugX favorite
+            8009, // Chromecast — lateral movement indicator
+            4443, // Common C2 alt-HTTPS
+            8443, // Alt HTTPS
+            8080, // Alt HTTP
+            1194, // OpenVPN
+            6667, // IRC (C2)
+            6697, // IRC over TLS
+        };
+
+        public GhostProcessMonitor(
+            DetectionEngine detectionEngine,
+            ProcessAncestryCache ancestryCache,
+            ILogger<GhostProcessMonitor> logger,
+            PhantomDeviceMonitor? phantomDeviceMonitor = null)
+        {
+            _detectionEngine = detectionEngine;
+            _ancestryCache = ancestryCache;
+            _phantomDeviceMonitor = phantomDeviceMonitor;
+            _logger = logger;
+        }
+
+        protected override async Task ExecuteAsync(CancellationToken ct)
+        {
+            _logger.LogInformation("[GhostProcessMonitor] Started");
+
+            while (!ct.IsCancellationRequested)
+            {
+                try
+                {
+                    await Task.Delay(ScanInterval, ct);
+                    await ScanForGhostProcessesAsync(ct);
+                    PruneStaleEntries();
+                }
+                catch (OperationCanceledException) { break; }
+                catch (Exception ex) { _logger.LogDebug(ex, "[GhostProcessMonitor] Scan error"); }
+            }
+        }
+
+        private async Task ScanForGhostProcessesAsync(CancellationToken ct)
+        {
+            var connections = GetEstablishedOutboundConnections();
+
+            // Group by PID
+            var connectionsByPid = connections.GroupBy(c => c.OwningPid);
+
+            foreach (var group in connectionsByPid)
+            {
+                if (ct.IsCancellationRequested) break;
+
+                int pid = group.Key;
+                if (pid <= 4) continue;
+
+                // Skip if recently alerted
+                if (_alertedPids.TryGetValue(pid, out var lastAlert) &&
+                    DateTimeOffset.UtcNow - lastAlert < AlertCooldown)
+                    continue;
+
+                // Try to resolve the process
+                var resolution = ResolveProcess(pid);
+
+                if (resolution.IsGhost)
+                {
+                    // Track ghost across scans for confidence building
+                    var state = _ghostTracking.GetOrAdd(pid, _ => new GhostProcessState());
+                    state.SeenCount++;
+                    state.LastSeen = DateTimeOffset.UtcNow;
+                    state.Connections = group.ToList();
+
+                    // Need at least 2 sightings (30s window) to fire — avoids race with process startup
+                    if (state.SeenCount >= 2)
+                    {
+                        await EmitGhostDetection(pid, resolution, state, ct);
+                        _alertedPids[pid] = DateTimeOffset.UtcNow;
+                    }
+                }
+                else if (resolution.IsEmptyName)
+                {
+                    // Process exists but has empty name — ETW recorded it with blank ImageName
+                    // This is a strong indicator of process hollowing or image swap
+                    var conns = group.ToList();
+                    bool hasSuspiciousPort = conns.Any(c => SuspiciousMasqueradePorts.Contains(c.RemotePort));
+
+                    if (hasSuspiciousPort)
+                    {
+                        await EmitEmptyNameDetection(pid, resolution, conns, ct);
+                        _alertedPids[pid] = DateTimeOffset.UtcNow;
+                    }
+                    else
+                    {
+                        // Track across scans even for non-suspicious ports
+                        var state = _ghostTracking.GetOrAdd(pid, _ => new GhostProcessState());
+                        state.SeenCount++;
+                        state.LastSeen = DateTimeOffset.UtcNow;
+                        state.Connections = conns;
+
+                        if (state.SeenCount >= 3) // More conservative for non-suspicious ports
+                        {
+                            await EmitEmptyNameDetection(pid, resolution, conns, ct);
+                            _alertedPids[pid] = DateTimeOffset.UtcNow;
+                        }
+                    }
+                }
+            }
+        }
+
+        private async Task EmitGhostDetection(int pid, ProcessResolution resolution,
+            GhostProcessState state, CancellationToken ct)
+        {
+            var destinations = string.Join(", ",
+                state.Connections.Select(c => $"{c.RemoteAddress}:{c.RemotePort}").Distinct().Take(5));
+
+            bool hasSuspiciousPort = state.Connections.Any(c => SuspiciousMasqueradePorts.Contains(c.RemotePort));
+
+            // Escalation: if connecting to a device PhantomDeviceMonitor already blocked/flagged,
+            // this is confirmed C2 via a rogue LAN relay. Kill it + chain trace.
+            bool connectsToBlockedDevice = _phantomDeviceMonitor != null &&
+                state.Connections.Any(c => _phantomDeviceMonitor.IsBlockedDevice(c.RemoteAddress));
+            bool connectsToPhantomDevice = !connectsToBlockedDevice && _phantomDeviceMonitor != null &&
+                state.Connections.Any(c => IsPrivateIp(c.RemoteAddress) && _phantomDeviceMonitor.IsPhantomDevice(c.RemoteAddress));
+
+            double confidence;
+            ResponseAction response;
+
+            if (connectsToBlockedDevice)
+            {
+                confidence = 0.95;
+                response = ResponseAction.KillProcessTree;
+            }
+            else if (connectsToPhantomDevice && hasSuspiciousPort)
+            {
+                confidence = 0.92;
+                response = ResponseAction.KillProcessTree;
+            }
+            else if (hasSuspiciousPort)
+            {
+                confidence = 0.88;
+                response = ResponseAction.KillProcessTree;
+            }
+            else
+            {
+                confidence = 0.78;
+                response = ResponseAction.NetworkIsolate;
+            }
+
+            await _detectionEngine.EmitAsync(new DetectionEvent
+            {
+                RuleName = "Ghost Process: Unresolvable PID with Active Network",
+                Evidence = $"PID {pid} has {state.Connections.Count} established outbound connection(s) " +
+                           $"to [{destinations}] but cannot be resolved to a running process. " +
+                           $"Observed in {state.SeenCount} consecutive scans." +
+                           (connectsToBlockedDevice ? " TARGET IS A BLOCKED PHANTOM DEVICE." : ""),
+                Reasoning = "A process ID owns active outbound TCP connections but the process " +
+                            "cannot be resolved via Process.GetProcessById or the ancestry cache. " +
+                            "This occurs when a process exits but its connections persist (orphaned sockets), " +
+                            "or when a RAT uses process hollowing/DLL sideloading causing the host process " +
+                            "to terminate while the injected code's network activity continues under the original PID. " +
+                            (connectsToBlockedDevice
+                                ? "The target IP is a device already blocked by PhantomDeviceMonitor — confirmed C2 relay."
+                                : "PlugX, ShadowPad, and Mustang Panda specifically exploit this technique."),
+                Confidence = confidence,
+                Tier = DetectionTier.Tier1Behavioral,
+                AuthorizedResponse = response,
+                ProcessName = resolution.Name ?? "UNRESOLVABLE",
+                ProcessId = pid,
+                Metadata = new Dictionary<string, string>
+                {
+                    ["Destinations"] = destinations,
+                    ["ConnectionCount"] = state.Connections.Count.ToString(),
+                    ["ScansSeen"] = state.SeenCount.ToString(),
+                    ["HasSuspiciousPort"] = hasSuspiciousPort.ToString(),
+                    ["ConnectsToBlockedDevice"] = connectsToBlockedDevice.ToString()
+                }
+            });
+        }
+
+        private async Task EmitEmptyNameDetection(int pid, ProcessResolution resolution,
+            List<ConnectionInfo> connections, CancellationToken ct)
+        {
+            var destinations = string.Join(", ",
+                connections.Select(c => $"{c.RemoteAddress}:{c.RemotePort}").Distinct().Take(5));
+
+            bool hasSuspiciousPort = connections.Any(c => SuspiciousMasqueradePorts.Contains(c.RemotePort));
+
+            // Escalation: ghost + connecting to blocked/phantom device = confirmed C2
+            bool connectsToBlockedDevice = _phantomDeviceMonitor != null &&
+                connections.Any(c => _phantomDeviceMonitor.IsBlockedDevice(c.RemoteAddress));
+            bool connectsToPhantomOnCastPort = !connectsToBlockedDevice && _phantomDeviceMonitor != null &&
+                connections.Any(c => IsPrivateIp(c.RemoteAddress) &&
+                    (c.RemotePort == 8009 || c.RemotePort == 8008) &&
+                    _phantomDeviceMonitor.IsPhantomDevice(c.RemoteAddress));
+
+            double confidence;
+            ResponseAction response;
+
+            if (connectsToBlockedDevice || connectsToPhantomOnCastPort)
+            {
+                confidence = 0.95;
+                response = ResponseAction.KillProcessTree;
+            }
+            else if (hasSuspiciousPort)
+            {
+                confidence = 0.85;
+                response = ResponseAction.KillProcessTree;
+            }
+            else
+            {
+                confidence = 0.72;
+                response = ResponseAction.LogOnly;
+            }
+
+            await _detectionEngine.EmitAsync(new DetectionEvent
+            {
+                RuleName = "Ghost Process: Empty Name with Active Network",
+                Evidence = $"PID {pid} has {connections.Count} established outbound connection(s) " +
+                           $"to [{destinations}] but process name is empty/blank. " +
+                           $"Image path: '{resolution.ImagePath ?? "unknown"}'" +
+                           (connectsToBlockedDevice ? " TARGET IS A BLOCKED PHANTOM DEVICE." : ""),
+                Reasoning = "A process with an empty/unresolvable name is maintaining active outbound " +
+                            "network connections. Empty process names in ETW telemetry indicate the " +
+                            "ImageName field was blank at process creation — a hallmark of process hollowing " +
+                            "(T1055.012) where the original image is unmapped after spawn. " +
+                            (connectsToBlockedDevice || connectsToPhantomOnCastPort
+                                ? "The target is a confirmed rogue LAN device — kill authorized."
+                                : "RATs like PlugX use this to evade name-based allowlists in security tools."),
+                Confidence = confidence,
+                Tier = DetectionTier.Tier1Behavioral,
+                AuthorizedResponse = response,
+                ProcessName = string.IsNullOrEmpty(resolution.Name) ? "EMPTY_NAME" : resolution.Name,
+                ProcessId = pid,
+                Metadata = new Dictionary<string, string>
+                {
+                    ["Destinations"] = destinations,
+                    ["ImagePath"] = resolution.ImagePath ?? "unknown",
+                    ["HasSuspiciousPort"] = hasSuspiciousPort.ToString(),
+                    ["ConnectsToBlockedDevice"] = connectsToBlockedDevice.ToString()
+                }
+            });
+        }
+
+        private ProcessResolution ResolveProcess(int pid)
+        {
+            var resolution = new ProcessResolution();
+
+            // 1. Check ancestry cache
+            var (_, cachedName) = _ancestryCache.GetParent(pid);
+            if (cachedName != "unknown" && !string.IsNullOrEmpty(cachedName))
+            {
+                resolution.Name = cachedName;
+                resolution.Source = "cache";
+                return resolution;
+            }
+
+            // 2. Try direct process query
+            try
+            {
+                using var proc = Process.GetProcessById(pid);
+                resolution.Name = proc.ProcessName;
+                try { resolution.ImagePath = proc.MainModule?.FileName; } catch { }
+                resolution.Source = "direct";
+
+                if (string.IsNullOrEmpty(resolution.Name))
+                {
+                    resolution.IsEmptyName = true;
+                }
+                return resolution;
+            }
+            catch (ArgumentException)
+            {
+                // Process doesn't exist — true ghost
+                resolution.IsGhost = true;
+                resolution.Source = "none";
+                return resolution;
+            }
+            catch (InvalidOperationException)
+            {
+                resolution.IsGhost = true;
+                resolution.Source = "none";
+                return resolution;
+            }
+            catch (System.ComponentModel.Win32Exception)
+            {
+                // Access denied — process exists but we can't read it
+                // Still suspicious if ancestry cache has empty name
+                if (cachedName == "unknown" || string.IsNullOrEmpty(cachedName))
+                {
+                    resolution.IsEmptyName = true;
+                    resolution.Name = cachedName;
+                }
+                resolution.Source = "access_denied";
+                return resolution;
+            }
+        }
+
+        private static List<ConnectionInfo> GetEstablishedOutboundConnections()
+        {
+            var results = new List<ConnectionInfo>();
+
+            int size = 0;
+            uint ret = GetExtendedTcpTable(IntPtr.Zero, ref size, true, 2,
+                TCP_TABLE_CLASS.TCP_TABLE_OWNER_PID_ALL, 0);
+            if (ret != 122) return results;
+
+            IntPtr buffer = Marshal.AllocHGlobal(size);
+            try
+            {
+                ret = GetExtendedTcpTable(buffer, ref size, true, 2,
+                    TCP_TABLE_CLASS.TCP_TABLE_OWNER_PID_ALL, 0);
+                if (ret != 0) return results;
+
+                int numEntries = Marshal.ReadInt32(buffer);
+                int structSize = Marshal.SizeOf<MIB_TCPROW_OWNER_PID>();
+                int myPid = Environment.ProcessId;
+
+                for (int i = 0; i < numEntries; i++)
+                {
+                    IntPtr rowPtr = IntPtr.Add(buffer, 4 + i * structSize);
+                    var row = Marshal.PtrToStructure<MIB_TCPROW_OWNER_PID>(rowPtr);
+
+                    if (row.state != 5) continue; // Established only
+                    if (row.owningPid <= 4 || row.owningPid == myPid) continue;
+
+                    var remoteIp = new IPAddress(BitConverter.GetBytes(row.remoteAddr)).ToString();
+
+                    // Skip loopback and link-local
+                    if (remoteIp.StartsWith("127.") || remoteIp.StartsWith("0.") || remoteIp == "0.0.0.0")
+                        continue;
+
+                    var remotePort = (int)((row.remotePort >> 8) | ((row.remotePort & 0xFF) << 8));
+
+                    results.Add(new ConnectionInfo
+                    {
+                        OwningPid = (int)row.owningPid,
+                        RemoteAddress = remoteIp,
+                        RemotePort = remotePort
+                    });
+                }
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(buffer);
+            }
+
+            return results;
+        }
+
+        private void PruneStaleEntries()
+        {
+            var cutoff = DateTimeOffset.UtcNow - StaleTimeout;
+            foreach (var key in _ghostTracking.Keys.ToArray())
+            {
+                if (_ghostTracking.TryGetValue(key, out var state) && state.LastSeen < cutoff)
+                    _ghostTracking.TryRemove(key, out _);
+            }
+
+            foreach (var key in _alertedPids.Keys.ToArray())
+            {
+                if (_alertedPids.TryGetValue(key, out var time) && time < cutoff)
+                    _alertedPids.TryRemove(key, out _);
+            }
+        }
+
+        #region P/Invoke
+
+        [DllImport("iphlpapi.dll", SetLastError = true)]
+        private static extern uint GetExtendedTcpTable(IntPtr pTcpTable, ref int pdwSize,
+            bool bOrder, int ulAf, TCP_TABLE_CLASS tableClass, uint reserved);
+
+        private enum TCP_TABLE_CLASS
+        {
+            TCP_TABLE_OWNER_PID_ALL = 5
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct MIB_TCPROW_OWNER_PID
+        {
+            public uint state;
+            public uint localAddr;
+            public uint localPort;
+            public uint remoteAddr;
+            public uint remotePort;
+            public uint owningPid;
+        }
+
+        #endregion
+
+        #region Internal Types
+
+        private static bool IsPrivateIp(string ip)
+        {
+            if (ip.StartsWith("10.")) return true;
+            if (ip.StartsWith("192.168.")) return true;
+            if (ip.StartsWith("172."))
+            {
+                var parts = ip.Split('.');
+                if (parts.Length >= 2 && int.TryParse(parts[1], out int second))
+                    return second >= 16 && second <= 31;
+            }
+            return false;
+        }
+
+        private sealed class ConnectionInfo
+        {
+            public int OwningPid { get; set; }
+            public string RemoteAddress { get; set; } = "";
+            public int RemotePort { get; set; }
+        }
+
+        private sealed class GhostProcessState
+        {
+            public int SeenCount { get; set; }
+            public DateTimeOffset LastSeen { get; set; } = DateTimeOffset.UtcNow;
+            public List<ConnectionInfo> Connections { get; set; } = new();
+        }
+
+        private sealed class ProcessResolution
+        {
+            public string? Name { get; set; }
+            public string? ImagePath { get; set; }
+            public string Source { get; set; } = "none";
+            public bool IsGhost { get; set; }
+            public bool IsEmptyName { get; set; }
+        }
+
+        #endregion
+    }
+}

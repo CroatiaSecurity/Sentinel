@@ -7,6 +7,34 @@ using Microsoft.Extensions.Logging;
 namespace WindowsSentinel.Core
 {
     /// <summary>
+    /// Categorical classification of detection events.
+    /// Used by ScoringEngine for corroboration, boosting, and verdict determination.
+    /// Replaces fragile string-matching with compile-time safe categories.
+    /// </summary>
+    public enum DetectionCategory
+    {
+        Unknown,
+        CredentialDump,
+        ReverseShell,
+        ProcessInjection,
+        Ransomware,
+        SecurityEvasion,
+        C2Beaconing,
+        Persistence,
+        PrivilegeEscalation,
+        UnsignedBinary,
+        HighEntropy,
+        CampaignIoC,
+        AttackOnUser,
+        AntiTamper,
+        NetworkAnomaly,
+        DataExfiltration,
+        DnsAnomaly,
+        FilelessAttack,
+        LateralMovement
+    }
+
+    /// <summary>
     /// Multi-signal scoring engine. Aggregates per-process detection events into a
     /// composite threat score. Score increases with:
     ///   - Base confidence of the detection
@@ -42,52 +70,28 @@ namespace WindowsSentinel.Core
 
         private static bool IsAttackOnUserRule(DetectionEvent detection)
         {
-            var r = (detection.RuleName ?? string.Empty).ToLowerInvariant();
-            return r.Contains("audiohijack") || r.Contains("audio hijack") ||
-                   r.Contains("webcamhijack") || r.Contains("webcam hijack") ||
-                   r.Contains("keyscrambler") || r.Contains("keylogger") || r.Contains("keystroke") ||
-                   r.Contains("cursortakeover") || r.Contains("cursor takeover") ||
-                   r.Contains("fakeuac") || r.Contains("fake uac") ||
-                   r.Contains("lnkprotection") || r.Contains("lnk protection") ||
-                   r.Contains("cookiemonitor") || r.Contains("cookie monitor");
+            var category = CategorizeDetection(detection);
+            return category == DetectionCategory.AttackOnUser;
         }
 
+        /// <summary>
+        /// President's Law rules: high-severity detections that always receive boosted scoring.
+        /// These represent the most dangerous behaviors where immediate response is critical.
+        /// </summary>
         private static bool IsPresidentsLawRule(DetectionEvent detection)
         {
-            var rule = detection.RuleName ?? string.Empty;
-            var lower = rule.ToLowerInvariant();
-            return lower.Contains("lsass") ||
-                   lower.Contains("amsi") ||
-                   lower.Contains("etw") ||
-                   lower.Contains("ransomware") ||
-                   lower.Contains("shadow copy") ||
-                   lower.Contains("self-protection") ||
-                   lower.Contains("selfprotection") ||
-                   lower.Contains("honeypot") ||
-                   lower.Contains("chain-nuke") ||
-                   lower.Contains("composite") ||
-                   lower.Contains("verdictgate") ||
-                   lower.Contains("verdict gate") ||
-                   lower.Contains("webcamhijack") ||
-                   lower.Contains("webcam hijack") ||
-                   lower.Contains("audiohijack") ||
-                   lower.Contains("audio hijack") ||
-                   lower.Contains("antitamper") ||
-                   lower.Contains("anti-tamper") ||
-                   lower.Contains("tampering") ||
-                   lower.Contains("privilege") ||
-                   lower.Contains("attack") ||
-                   lower.Contains("badusb") ||
-                   lower.Contains("arp") ||
-                   lower.Contains("canary") ||
-                   lower.Contains("dns") ||
-                   lower.Contains("tls") ||
-                   lower.Contains("neuro") ||
-                   lower.Contains("beaconing") ||
-                   lower.Contains("hollowing") ||
-                   lower.Contains("reverseshell") ||
-                   lower.Contains("reverse shell") ||
-                   lower.Contains("threatintel");
+            var category = CategorizeDetection(detection);
+            return category is DetectionCategory.CredentialDump
+                or DetectionCategory.SecurityEvasion
+                or DetectionCategory.Ransomware
+                or DetectionCategory.ProcessInjection
+                or DetectionCategory.C2Beaconing
+                or DetectionCategory.ReverseShell
+                or DetectionCategory.AntiTamper
+                or DetectionCategory.AttackOnUser
+                or DetectionCategory.PrivilegeEscalation
+                or DetectionCategory.DnsAnomaly
+                or DetectionCategory.NetworkAnomaly;
         }
 
         /// <summary>
@@ -194,7 +198,7 @@ namespace WindowsSentinel.Core
             };
         }
 
-        public int GetCorroboratingCategoryCount(int processId, string currentCategory)
+        public int GetCorroboratingCategoryCount(int processId, DetectionCategory currentCategory)
         {
             if (_processStates.TryGetValue(processId, out var state))
                 return state.DetectedCategories.Count(c => c != currentCategory);
@@ -218,21 +222,29 @@ namespace WindowsSentinel.Core
             return null;
         }
 
-        private static string CategorizeDetection(DetectionEvent detection)
+        private static DetectionCategory CategorizeDetection(DetectionEvent detection)
         {
             var r = detection.RuleName.ToLowerInvariant();
-            if (r.Contains("lsass") || r.Contains("credential") || r.Contains("mimikatz")) return "credential_dump";
-            if (r.Contains("reverse shell") || r.Contains("c2") || r.Contains("callback")) return "reverse_shell";
-            if (r.Contains("injection") || r.Contains("hollowing")) return "process_injection";
-            if (r.Contains("ransomware") || r.Contains("shadow copy")) return "ransomware";
-            if (r.Contains("evasion") || r.Contains("tampering") || r.Contains("amsi") || r.Contains("etw")) return "security_evasion";
-            if (r.Contains("beacon")) return "c2_beaconing";
-            if (r.Contains("persistence") || r.Contains("scheduled task")) return "persistence";
-            if (r.Contains("privilege") || r.Contains("uac bypass")) return "privilege_escalation";
-            if (r.Contains("unsigned")) return "unsigned_binary";
-            if (r.Contains("entropy")) return "high_entropy";
-            if (r.Contains("campaign")) return "campaign_ioc";
-            return "unknown";
+            if (r.Contains("lsass") || r.Contains("credential") || r.Contains("credtool") || r.Contains("canary")) return DetectionCategory.CredentialDump;
+            if (r.Contains("reverse shell") || r.Contains("reverseshell") || r.Contains("c2") || r.Contains("callback")) return DetectionCategory.ReverseShell;
+            if (r.Contains("injection") || r.Contains("hollowing") || r.Contains("threatintel")) return DetectionCategory.ProcessInjection;
+            if (r.Contains("ransomware") || r.Contains("shadow copy")) return DetectionCategory.Ransomware;
+            if (r.Contains("evasion") || r.Contains("tampering") || r.Contains("amsi") || r.Contains("etw")) return DetectionCategory.SecurityEvasion;
+            if (r.Contains("beacon")) return DetectionCategory.C2Beaconing;
+            if (r.Contains("persistence") || r.Contains("scheduled task")) return DetectionCategory.Persistence;
+            if (r.Contains("privilege") || r.Contains("uac bypass")) return DetectionCategory.PrivilegeEscalation;
+            if (r.Contains("unsigned")) return DetectionCategory.UnsignedBinary;
+            if (r.Contains("entropy")) return DetectionCategory.HighEntropy;
+            if (r.Contains("campaign")) return DetectionCategory.CampaignIoC;
+            if (r.Contains("audiohijack") || r.Contains("audio hijack") || r.Contains("webcamhijack") || r.Contains("webcam hijack") ||
+                r.Contains("keystroke") || r.Contains("keylogger") || r.Contains("phantom") || r.Contains("cursor") ||
+                r.Contains("fakeuac") || r.Contains("fake uac") || r.Contains("cookie") || r.Contains("neuro")) return DetectionCategory.AttackOnUser;
+            if (r.Contains("anti-tamper") || r.Contains("antitamper") || r.Contains("self-protection") || r.Contains("selfprotection") ||
+                r.Contains("verdictgate") || r.Contains("verdict gate") || r.Contains("chain-nuke") || r.Contains("composite")) return DetectionCategory.AntiTamper;
+            if (r.Contains("dns") || r.Contains("dga")) return DetectionCategory.DnsAnomaly;
+            if (r.Contains("arp") || r.Contains("route") || r.Contains("tls") || r.Contains("badusb") || r.Contains("network")) return DetectionCategory.NetworkAnomaly;
+            if (r.Contains("exfil")) return DetectionCategory.DataExfiltration;
+            return DetectionCategory.Unknown;
         }
 
         private static Verdict DetermineVerdict(double score) => score switch
@@ -244,13 +256,13 @@ namespace WindowsSentinel.Core
             _ => Verdict.Clean
         };
 
-        private void UpdateProcessState(int processId, string category, double confidence)
+        private void UpdateProcessState(int processId, DetectionCategory category, double confidence)
         {
             _processStates.AddOrUpdate(processId,
                 _ => new ProcessScoreState
                 {
                     ProcessId = processId,
-                    DetectedCategories = new HashSet<string> { category },
+                    DetectedCategories = new HashSet<DetectionCategory> { category },
                     MaxConfidence = confidence,
                     FirstSeen = DateTimeOffset.UtcNow,
                     LastSeen = DateTimeOffset.UtcNow,
@@ -284,7 +296,7 @@ namespace WindowsSentinel.Core
     {
         public int Score { get; set; }
         public Verdict Verdict { get; set; }
-        public string Category { get; set; } = "unknown";
+        public DetectionCategory Category { get; set; } = DetectionCategory.Unknown;
         public double OriginalConfidence { get; set; }
         public List<ScoreAdjustment> Adjustments { get; set; } = new();
         public int CorroboratingSources { get; set; }
@@ -305,7 +317,7 @@ namespace WindowsSentinel.Core
     public sealed class ProcessScoreState
     {
         public int ProcessId { get; set; }
-        public HashSet<string> DetectedCategories { get; set; } = new();
+        public HashSet<DetectionCategory> DetectedCategories { get; set; } = new();
         public double MaxConfidence { get; set; }
         public DateTimeOffset FirstSeen { get; set; }
         public DateTimeOffset LastSeen { get; set; }
@@ -315,7 +327,7 @@ namespace WindowsSentinel.Core
     public sealed class ProcessThreatProfile
     {
         public int ProcessId { get; set; }
-        public List<string> DetectedCategories { get; set; } = new();
+        public List<DetectionCategory> DetectedCategories { get; set; } = new();
         public double MaxConfidence { get; set; }
         public DateTimeOffset FirstSeen { get; set; }
         public DateTimeOffset LastSeen { get; set; }

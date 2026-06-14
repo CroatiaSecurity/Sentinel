@@ -9,7 +9,6 @@ namespace WindowsSentinel.Core
     {
         private readonly ConcurrentQueue<double> _detectionLatencies = new();
         private readonly ConcurrentQueue<double> _responseLatencies = new();
-        private readonly ConcurrentQueue<double> _deceptionLatencies = new();
         private int _falsePositivesCount;
         private int _detectionsCount;
         private int _responsesCount;
@@ -28,12 +27,6 @@ namespace WindowsSentinel.Core
             TrimQueue(_responseLatencies);
         }
 
-        public void RecordDeception(double latencyMs)
-        {
-            _deceptionLatencies.Enqueue(latencyMs);
-            TrimQueue(_deceptionLatencies);
-        }
-
         public void RecordFalsePositive()
         {
             System.Threading.Interlocked.Increment(ref _falsePositivesCount);
@@ -47,11 +40,6 @@ namespace WindowsSentinel.Core
         public (double p50, double p90, double p95, double p99) GetResponseLatencyPercentiles()
         {
             return CalculatePercentiles(_responseLatencies.ToList());
-        }
-
-        public (double p50, double p90, double p95, double p99) GetDeceptionLatencyPercentiles()
-        {
-            return CalculatePercentiles(_deceptionLatencies.ToList());
         }
 
         public int GetDetectionsCount() => _detectionsCount;

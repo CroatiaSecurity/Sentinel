@@ -26,13 +26,13 @@ namespace WindowsSentinel.Service
         private readonly NetworkMonitor _networkMonitor;
         private readonly LsassDumpCanaryMonitor _lsassDumpCanaryMonitor;
         private readonly RouteTableMonitor _routeTableMonitor;
-        private readonly HollowProcessMonitor _hollowProcessMonitor;
         private readonly MemoryBehaviorAnalyzer _memoryBehaviorAnalyzer;
         private readonly TokenIntegrityMonitor _tokenIntegrityMonitor;
         private readonly CredentialCanaryMonitor _credentialCanaryMonitor;
         private readonly LocalServerMonitor _localServerMonitor;
         private readonly ParentPidSpoofDetector _parentPidSpoofDetector;
         private readonly ChainTracer _chainTracer;
+        private readonly string _version;
 
         public SentinelService(
             ILogger<SentinelService> logger,
@@ -48,7 +48,6 @@ namespace WindowsSentinel.Service
             NetworkMonitor networkMonitor,
             LsassDumpCanaryMonitor lsassDumpCanaryMonitor,
             RouteTableMonitor routeTableMonitor,
-            HollowProcessMonitor hollowProcessMonitor,
             MemoryBehaviorAnalyzer memoryBehaviorAnalyzer,
             TokenIntegrityMonitor tokenIntegrityMonitor,
             CredentialCanaryMonitor credentialCanaryMonitor,
@@ -77,13 +76,25 @@ namespace WindowsSentinel.Service
             _networkMonitor = networkMonitor;
             _lsassDumpCanaryMonitor = lsassDumpCanaryMonitor;
             _routeTableMonitor = routeTableMonitor;
-            _hollowProcessMonitor = hollowProcessMonitor;
             _memoryBehaviorAnalyzer = memoryBehaviorAnalyzer;
             _tokenIntegrityMonitor = tokenIntegrityMonitor;
             _credentialCanaryMonitor = credentialCanaryMonitor;
             _localServerMonitor = localServerMonitor;
             _parentPidSpoofDetector = parentPidSpoofDetector;
             _chainTracer = chainTracer;
+            _version = LoadVersion();
+        }
+
+        private static string LoadVersion()
+        {
+            var exeDir = AppContext.BaseDirectory;
+            var versionFile = System.IO.Path.Combine(exeDir, "version.txt");
+            if (System.IO.File.Exists(versionFile))
+            {
+                var text = System.IO.File.ReadAllText(versionFile).Trim();
+                if (!string.IsNullOrEmpty(text)) return text;
+            }
+            return typeof(SentinelService).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
         }
 
 
@@ -117,7 +128,7 @@ namespace WindowsSentinel.Service
             await _eventLogger.LogEventAsync("service_start", new
             {
                 Status = "started",
-                Version = "6.9.0",
+                Version = _version,
                 Timestamp = DateTime.UtcNow
             }, stoppingToken);
 

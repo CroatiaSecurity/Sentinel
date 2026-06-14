@@ -39,7 +39,7 @@ namespace WindowsSentinel.Tests
         [Fact]
         public void DetectionEvent_UnloadDllAndKillOwner_IsKillAuthorized()
         {
-            var evt = new DetectionEvent { AuthorizedResponse = ResponseAction.UnloadDllAndKillOwner };
+            var evt = new DetectionEvent { AuthorizedResponse = ResponseAction.QuarantineAndKill };
             Assert.True(evt.KillAuthorized);
         }
 
@@ -89,8 +89,8 @@ namespace WindowsSentinel.Tests
             Assert.True(ResponseAction.LogOnly < ResponseAction.KillProcess);
             Assert.True(ResponseAction.KillProcess < ResponseAction.KillProcessTree);
             Assert.True(ResponseAction.KillProcessTree < ResponseAction.Quarantine);
-            Assert.True(ResponseAction.Quarantine < ResponseAction.UnloadDllAndKillOwner);
-            Assert.True(ResponseAction.UnloadDllAndKillOwner < ResponseAction.RemoveCertAndKillAdder);
+            Assert.True(ResponseAction.Quarantine < ResponseAction.QuarantineAndKill);
+            Assert.True(ResponseAction.QuarantineAndKill < ResponseAction.RemoveCertAndKillAdder);
         }
 
         // ── ThreatScore ─────────────────────────────────────────────────────
@@ -126,7 +126,7 @@ namespace WindowsSentinel.Tests
         [Fact]
         public void ThreatScore_ToString_IncludesVerdict()
         {
-            var score = new ThreatScore { Verdict = Verdict.Critical, Score = 150, Category = "ransomware" };
+            var score = new ThreatScore { Verdict = Verdict.Critical, Score = 150, Category = DetectionCategory.Ransomware };
             var str = score.ToString();
             Assert.Contains("Critical", str);
             Assert.Contains("150", str);

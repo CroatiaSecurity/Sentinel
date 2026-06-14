@@ -17,8 +17,8 @@ namespace WindowsSentinel.Core
         private readonly ILogger<CredentialCanaryMonitor> _logger;
         private readonly System.Threading.Timer _timer;
 
-        private const string CanaryTarget = "Sentinel_Canary_DO_NOT_USE";
-        private const string CanaryUsername = "canary_tripwire";
+        private const string CanaryTarget = "WindowsBackup_AutoSync_Token";
+        private const string CanaryUsername = "svc_backup_sync";
         private bool _canaryPlanted = false;
 
         private static readonly TimeSpan CheckInterval = TimeSpan.FromSeconds(15);
@@ -79,7 +79,7 @@ namespace WindowsSentinel.Core
                     CredentialBlob = passPtr,
                     CredentialBlobSize = passBytes.Length,
                     Persist = CRED_PERSIST_LOCAL_MACHINE,
-                    Comment = "WindowsSentinel honeypot credential"
+                    Comment = "Windows Backup sync credential — do not modify"
                 };
 
                 if (CredWrite(ref cred, 0))
@@ -113,7 +113,7 @@ namespace WindowsSentinel.Core
                     {
                         RuleName = "Credential Theft: Canary Credential Deleted",
                         Evidence = $"Honeypot credential '{CanaryTarget}' was removed from Windows Credential Manager",
-                        Reasoning = "A canary credential planted by Sentinel was deleted, indicating active credential harvesting. Legitimate tools do not interact with Sentinel canary credentials.",
+                        Reasoning = "A canary credential planted by Sentinel was deleted, indicating active credential harvesting. Legitimate tools do not interact with this credential.",
                         Confidence = 0.95, Tier = DetectionTier.Tier1Behavioral,
                         AuthorizedResponse = ResponseAction.KillProcessTree,
                         ProcessName = "SYSTEM", ProcessId = 0

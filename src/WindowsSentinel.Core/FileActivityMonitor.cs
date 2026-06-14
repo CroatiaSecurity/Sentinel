@@ -11,6 +11,7 @@ namespace WindowsSentinel.Core
     {
         private readonly TelemetryFusionEngine _fusionEngine;
         private readonly DetectionEngine _detectionEngine;
+        private readonly RansomwareIoMonitor? _ransomwareIoMonitor;
         private readonly SentinelConfig _config;
         private readonly ILogger<FileActivityMonitor> _logger;
         private readonly List<FileSystemWatcher> _watchers = new();
@@ -65,10 +66,12 @@ namespace WindowsSentinel.Core
             TelemetryFusionEngine fusionEngine,
             DetectionEngine detectionEngine,
             SentinelConfig config,
-            ILogger<FileActivityMonitor> logger)
+            ILogger<FileActivityMonitor> logger,
+            RansomwareIoMonitor? ransomwareIoMonitor = null)
         {
             _fusionEngine = fusionEngine;
             _detectionEngine = detectionEngine;
+            _ransomwareIoMonitor = ransomwareIoMonitor;
             _config = config;
             _logger = logger;
 
@@ -131,6 +134,13 @@ namespace WindowsSentinel.Core
                     paths.Add(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
                 }
             }
+
+            // Always monitor critical OS directories for unauthorized writes
+            var system32 = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "System32");
+            var sysWOW64 = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "SysWOW64");
+            if (Directory.Exists(system32)) paths.Add(system32);
+            if (Directory.Exists(sysWOW64)) paths.Add(sysWOW64);
+
             return paths;
         }
 
@@ -217,6 +227,35 @@ namespace WindowsSentinel.Core
             }
 
             var processInfo = GetProcessUsingFile(e.FullPath);
+
+            // Critical: detect writes to System32/SysWOW64 by non-OS processes
+            if ((e.ChangeType == WatcherChangeTypes.Created || e.ChangeType == WatcherChangeTypes.Changed) &&
+                IsProtectedOsDirectory(pathLower))
+            {
+                // Only alert if the writer is NOT TrustedInstaller, Windows Update, or Defender
+                if (!IsTrustedSystemWriter(processInfo.pid, processInfo.name))
+                {
+                    _ = _detectionEngine.EmitAsync(new DetectionEvent
+                    {
+                        RuleName = "System Integrity: Unauthorized Write to System Directory",
+                        Evidence = $"File '{e.FullPath}' was {e.ChangeType.ToString().ToLowerInvariant()}d by process '{processInfo.name}' (PID {processInfo.pid})",
+                        Reasoning = "A non-system process wrote to a protected OS directory (System32/SysWOW64). " +
+                                    "Only Windows Update (TrustedInstaller) and Defender should write here. " +
+                                    "Unauthorized writes indicate DLL planting, backdoor installation, or system binary replacement.",
+                        Confidence = 0.92,
+                        Tier = DetectionTier.Tier1Behavioral,
+                        AuthorizedResponse = ResponseAction.KillProcessTree,
+                        ProcessName = processInfo.name,
+                        ProcessId = processInfo.pid,
+                        Metadata = new Dictionary<string, string>
+                        {
+                            ["FilePath"] = e.FullPath,
+                            ["Operation"] = e.ChangeType.ToString()
+                        }
+                    });
+                }
+            }
+
             SubmitEvent(e.FullPath, e.ChangeType.ToString().ToUpperInvariant(), null, processInfo.pid, processInfo.name);
         }
 
@@ -229,6 +268,10 @@ namespace WindowsSentinel.Core
             }
 
             var processInfo = GetProcessUsingFile(e.FullPath);
+
+            // Feed mass-rename counter for ransomware behavioral detection
+            _ransomwareIoMonitor?.RecordRename(processInfo.pid, processInfo.name);
+
             SubmitEvent(e.OldFullPath, "RENAME", e.FullPath, processInfo.pid, processInfo.name);
         }
 
@@ -316,6 +359,60 @@ namespace WindowsSentinel.Core
             }
 
             return (0, "unknown");
+        }
+
+        private static bool IsProtectedOsDirectory(string pathLower)
+        {
+            return pathLower.Contains(@"\windows\system32\") ||
+                   pathLower.Contains(@"\windows\syswow64\");
+        }
+
+        private static bool IsTrustedSystemWriter(int pid, string processName)
+        {
+            // TrustedInstaller (Windows Modules Installer), Windows Update, Defender, DISM
+            var trustedNames = new[] { "trustedinstaller", "tiworker", "msiexec",
+                "wuauclt", "usoclient", "musnotification",
+                "msmpeng", "nissrv", "securityhealthservice",
+                "dism", "dismhost", "sfc", "poqexec",
+                // Critical system processes that legitimately modify System32
+                "csrss", "smss", "wininit", "services", "lsass", "svchost",
+                "lsaiso", "cng key isolation", "credential guard",
+                "vbs key protection", "keyiso",
+                // Sentinel itself
+                "windowssentinel.service", "windowssentinel.agent",
+                "windows sentinel" };
+
+            var lowerName = processName.ToLowerInvariant();
+            if (trustedNames.Any(t => lowerName.Contains(t))) return true;
+
+            // PID 4 = SYSTEM kernel, PID 0 = Idle (driver loads, legitimate)
+            if (pid == 4 || pid == 0) return true;
+
+            // Own PID = Sentinel itself writing (e.g., quarantine lock files)
+            if (pid == Environment.ProcessId) return true;
+
+            // Verify by path — only trust if running from System32/Windows or Defender folder
+            try
+            {
+                using var proc = System.Diagnostics.Process.GetProcessById(pid);
+                var imagePath = proc.MainModule?.FileName;
+                if (!string.IsNullOrEmpty(imagePath))
+                {
+                    return imagePath.StartsWith(@"C:\Windows\", StringComparison.OrdinalIgnoreCase) ||
+                           imagePath.Contains(@"\Windows Defender\", StringComparison.OrdinalIgnoreCase) ||
+                           imagePath.Contains(@"\Microsoft Security Client\", StringComparison.OrdinalIgnoreCase) ||
+                           imagePath.Contains(@"\WindowsSentinel\", StringComparison.OrdinalIgnoreCase);
+                }
+            }
+            catch (System.ComponentModel.Win32Exception)
+            {
+                // Access denied — likely a protected system process (csrss, smss, lsass)
+                // If we can't read it but it has a system-like name, trust it
+                return lowerName == "system" || pid <= 4;
+            }
+            catch { }
+
+            return false;
         }
 
         public void Dispose()

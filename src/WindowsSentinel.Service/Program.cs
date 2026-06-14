@@ -104,7 +104,6 @@ namespace WindowsSentinel.Service
                     services.AddSingleton<NetworkMonitor>();
                     services.AddSingleton<LsassDumpCanaryMonitor>();
                     services.AddSingleton<RouteTableMonitor>();
-                    services.AddSingleton<HollowProcessMonitor>();
                     services.AddSingleton<MemoryBehaviorAnalyzer>();
                     services.AddSingleton<TokenIntegrityMonitor>();
                     services.AddSingleton<CredentialCanaryMonitor>();
@@ -118,20 +117,17 @@ namespace WindowsSentinel.Service
                     // BackgroundService monitors
                     services.AddHostedService<SentinelService>();
                     services.AddHostedService<AntiTamperGuard>();
-                    services.AddHostedService<RansomwareIoMonitor>();
+                    services.AddSingleton<RansomwareIoMonitor>();
+                    services.AddHostedService<RansomwareIoMonitor>(sp => sp.GetRequiredService<RansomwareIoMonitor>());
                     services.AddHostedService<ArpSpoofMonitor>();
                     services.AddHostedService<BluetoothMonitor>();
                     services.AddHostedService<CanaryFileMonitor>();
-                    services.AddHostedService<ChromeCredentialGuardMonitor>();
-                    services.AddHostedService<ChromeSessionGuardMonitor>();
+                    services.AddHostedService<BrowserCredentialGuard>();
                     services.AddHostedService<DataExfiltrationMonitor>();
-                    services.AddHostedService<DeviceInstallMonitor>();
                     services.AddHostedService<DllEntropyAnalyzer>();
                     services.AddHostedService<DllLoadFailureMonitor>();
                     services.AddHostedService<DnsResponseValidationMonitor>();
-                    services.AddHostedService<FirefoxCredentialGuardMonitor>();
                     services.AddHostedService<FirewallIntegrityMonitor>();
-                    services.AddHostedService<GatewayFingerprintMonitor>();
                     services.AddHostedService<MicrosoftAccountGuardMonitor>();
                     services.AddHostedService<PublicIpMonitor>();
                     services.AddHostedService<RemoteAccessMonitor>();
@@ -152,11 +148,13 @@ namespace WindowsSentinel.Service
                     services.AddHostedService<DiskWideDllScanner>();
                     services.AddSingleton<BehavioralBaselineService>();
                     services.AddHostedService<BehavioralBaselineService>(sp => sp.GetRequiredService<BehavioralBaselineService>());
-                    services.AddHostedService<PhantomDeviceMonitor>();
+                    services.AddSingleton<PhantomDeviceMonitor>();
+                    services.AddHostedService<PhantomDeviceMonitor>(sp => sp.GetRequiredService<PhantomDeviceMonitor>());
                     services.AddHostedService<FileVerdictScanner>();
-                    services.AddHostedService<WebcamHijackMonitor>();
                     services.AddHostedService<ConsultantSignalIngestor>();
                     services.AddHostedService<RegistryMonitor>();
+                    services.AddHostedService<GhostProcessMonitor>();
+                    services.AddHostedService<CriticalServiceGuard>();
                 });
     }
 }

@@ -61,13 +61,22 @@ namespace WindowsSentinel.Core
                     {
                         if (proc.Id <= 4) continue;
                         if (_alertedPids.Contains(proc.Id)) continue;
-                        if (_allowlist.IsDevelopmentProcess(proc.ProcessName)) continue;
 
-                        // Browsers spawn many child processes (renderers, GPU, utility) with
-                        // complex parent-child chains. ETW ancestry can lag, causing false PPID mismatch.
+                        // Get image path for trust verification (name alone is spoofable)
+                        string? imagePath = null;
+                        try { imagePath = proc.MainModule?.FileName; } catch { }
+
+                        // Dev tools: only skip if name matches AND path is in a trusted location
+                        if (_allowlist.IsDevelopmentProcess(proc.ProcessName) && IsInTrustedDevPath(imagePath))
+                            continue;
+
+                        // Browsers: only skip if name matches AND path is a real browser install
                         var lowerName = proc.ProcessName.ToLowerInvariant();
                         if (lowerName is "chrome" or "msedge" or "firefox" or "brave" or "opera" or "vivaldi")
-                            continue;
+                        {
+                            if (IsInBrowserPath(imagePath))
+                                continue;
+                        }
 
                         var pbi = new PROCESS_BASIC_INFORMATION();
                         int status = NtQueryInformationProcess(proc.Handle, ProcessBasicInformation,
@@ -109,5 +118,26 @@ namespace WindowsSentinel.Core
         }
 
         public void Dispose() => _timer.Dispose();
+
+        private static bool IsInTrustedDevPath(string? path)
+        {
+            if (string.IsNullOrEmpty(path)) return false;
+            return path.StartsWith(@"C:\Program Files", StringComparison.OrdinalIgnoreCase) ||
+                   path.StartsWith(@"C:\Windows\", StringComparison.OrdinalIgnoreCase) ||
+                   path.Contains(@"\dotnet\", StringComparison.OrdinalIgnoreCase) ||
+                   path.Contains(@"\Git\", StringComparison.OrdinalIgnoreCase) ||
+                   path.Contains(@"\Microsoft Visual Studio\", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsInBrowserPath(string? path)
+        {
+            if (string.IsNullOrEmpty(path)) return false;
+            return path.Contains(@"\Google\Chrome\", StringComparison.OrdinalIgnoreCase) ||
+                   path.Contains(@"\Microsoft\Edge\", StringComparison.OrdinalIgnoreCase) ||
+                   path.Contains(@"\Mozilla Firefox\", StringComparison.OrdinalIgnoreCase) ||
+                   path.Contains(@"\BraveSoftware\", StringComparison.OrdinalIgnoreCase) ||
+                   path.Contains(@"\Opera", StringComparison.OrdinalIgnoreCase) ||
+                   path.Contains(@"\Vivaldi\", StringComparison.OrdinalIgnoreCase);
+        }
     }
 }

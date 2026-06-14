@@ -17,10 +17,27 @@ namespace WindowsSentinel.Agent
         private ContextMenuStrip? _contextMenu;
         private Thread? _uiThread;
         private readonly CancellationTokenSource _cts = new();
+        private readonly string _version;
 
         public TrayIconService(SentinelConfig config)
         {
             _config = config;
+            _version = LoadVersion();
+        }
+
+        private static string LoadVersion()
+        {
+            // 1. Try version.txt next to the executable (single source of truth)
+            var exeDir = AppContext.BaseDirectory;
+            var versionFile = Path.Combine(exeDir, "version.txt");
+            if (File.Exists(versionFile))
+            {
+                var text = File.ReadAllText(versionFile).Trim();
+                if (!string.IsNullOrEmpty(text)) return text;
+            }
+
+            // 2. Fallback to assembly version
+            return typeof(TrayIconService).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
         }
 
         public Task StartAsync(CancellationToken cancellationToken)
@@ -74,7 +91,7 @@ namespace WindowsSentinel.Agent
             {
                 Icon = appIcon ?? System.Drawing.SystemIcons.Shield,
                 ContextMenuStrip = _contextMenu,
-                Text = "Windows Sentinel v6.3.0 — Protection Active",
+                Text = $"Windows Sentinel v{_version} — Protection Active",
                 Visible = true
             };
 
@@ -149,7 +166,7 @@ namespace WindowsSentinel.Agent
         {
             _config.ActiveResponse = !_config.ActiveResponse;
             var status = _config.ActiveResponse ? "Active" : "Disabled";
-            _notifyIcon!.Text = $"Windows Sentinel v6.3.0 — Protection {status}";
+            _notifyIcon!.Text = $"Windows Sentinel v{_version} — Protection {status}";
             _notifyIcon.ShowBalloonTip(2000, "Windows Sentinel", $"Protection mode set to {status}.", ToolTipIcon.Warning);
         }
 
@@ -275,7 +292,18 @@ namespace WindowsSentinel.Agent
                                             statusText = "Logged (No Action)";
                                         }
 
-                                        if (rateLimiter.AllowRequest())
+                                        if (tierVal == 0 && killAuthorized && _config.ActiveResponse)
+                                        {
+                                            // Critical kills: ALWAYS show, bypass rate limiter
+                                            _notifyIcon?.ShowBalloonTip(
+                                                5000,
+                                                title,
+                                                $"Process: {processName} ({statusText})\nConfidence: {confidence:P0}\n{evidence}",
+                                                ToolTipIcon.Error
+                                            );
+                                            isSilenced = false;
+                                        }
+                                        else if (rateLimiter.AllowRequest())
                                         {
                                             isSilenced = false;
                                             _notifyIcon?.ShowBalloonTip(

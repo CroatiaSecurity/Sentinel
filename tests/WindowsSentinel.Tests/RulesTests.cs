@@ -441,7 +441,7 @@ namespace WindowsSentinel.Tests
             var result = rule.Evaluate(ctx);
             Assert.NotNull(result);
             Assert.Equal("ThreatIntelInjectionRule", result!.RuleName);
-            Assert.Equal(ResponseAction.UnloadDllAndKillOwner, result.AuthorizedResponse);
+            Assert.Equal(ResponseAction.QuarantineAndKill, result.AuthorizedResponse);
             Assert.Equal("2000", result.Metadata["TargetProcessId"]);
         }
 

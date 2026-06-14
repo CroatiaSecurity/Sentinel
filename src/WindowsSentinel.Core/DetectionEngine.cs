@@ -134,11 +134,11 @@ namespace WindowsSentinel.Core
                         {
                             var startTime = DateTime.UtcNow;
                             var detection = rule.Evaluate(context);
-                            var duration = (DateTime.UtcNow - startTime).TotalMilliseconds;
-                            _metrics.RecordDetection(duration);
 
                             if (detection != null)
                             {
+                                var duration = (DateTime.UtcNow - startTime).TotalMilliseconds;
+                                _metrics.RecordDetection(duration);
                                 await ProcessDetectionAsync(detection);
                             }
                         }

@@ -1,6 +1,6 @@
 # Windows Sentinel — Constraints
 
-**Version: 6.9.0**
+**Version: 0.8.1**
 
 ---
 

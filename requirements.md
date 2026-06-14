@@ -1,6 +1,6 @@
 # Windows Sentinel — Requirements
 
-**Version: 6.9.0**
+**Version: 0.8.1**
 
 ---
 
@@ -168,7 +168,7 @@ The CLI must support:
 ## Non-Functional Requirements
 
 ### NFR-1: Safety
-- Active response must be disabled by default
+- Active response is enabled by default (President's Law rules fire immediately)
 - The tool must not persist, self-replicate, or hide itself
 - No kernel drivers, no direct syscalls
 

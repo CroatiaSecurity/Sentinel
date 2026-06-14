@@ -14,7 +14,7 @@ namespace WindowsSentinel.Core
         private readonly System.Threading.Timer _cleanupTimer;
 
         private const int MaxEventsPerChain = 100;
-        private static readonly TimeSpan ChainRetention = TimeSpan.FromMinutes(2);
+        private static readonly TimeSpan ChainRetention = TimeSpan.FromMinutes(10);
 
         public TelemetryFusionEngine(EventGraph eventGraph)
         {

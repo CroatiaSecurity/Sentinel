@@ -27,11 +27,25 @@ namespace WindowsSentinel.Core
         private readonly ILogger<ArpSpoofMonitor> _logger;
         private string? _baselineGatewayMac;
         private string? _gatewayIp;
+        private readonly ConcurrentDictionary<string, string> _arpBaseline = new(); // IP → MAC
 
         public ArpSpoofMonitor(DetectionEngine de, ILogger<ArpSpoofMonitor> l) { _detectionEngine = de; _logger = l; }
 
         [DllImport("iphlpapi.dll", ExactSpelling = true)]
         private static extern int SendARP(uint destIp, uint srcIp, byte[] macAddr, ref int macLen);
+
+        [DllImport("iphlpapi.dll", SetLastError = true)]
+        private static extern int GetIpNetTable(IntPtr pIpNetTable, ref int pdwSize, bool bOrder);
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct MIB_IPNETROW
+        {
+            public int dwIndex;
+            public int dwPhysAddrLen;
+            public byte mac0, mac1, mac2, mac3, mac4, mac5, mac6, mac7;
+            public int dwAddr;
+            public int dwType;
+        }
 
         protected override async Task ExecuteAsync(CancellationToken ct)
         {
@@ -39,31 +53,133 @@ namespace WindowsSentinel.Core
             _gatewayIp = GetDefaultGateway();
             if (_gatewayIp != null) _baselineGatewayMac = ResolveMac(_gatewayIp);
 
+            // Baseline ARP table
+            var initial = GetArpTable();
+            foreach (var (ip, mac) in initial)
+                _arpBaseline[ip] = mac;
+
             while (!ct.IsCancellationRequested)
             {
                 try
                 {
-                    await Task.Delay(30000, ct);
-                    if (_gatewayIp == null) continue;
-                    var currentMac = ResolveMac(_gatewayIp);
-                    if (_baselineGatewayMac != null && currentMac != null && currentMac != _baselineGatewayMac)
+                    await Task.Delay(15000, ct);
+
+                    // === Check 1: Gateway MAC change ===
+                    if (_gatewayIp != null)
                     {
+                        var currentMac = ResolveMac(_gatewayIp);
+                        if (_baselineGatewayMac != null && currentMac != null && currentMac != _baselineGatewayMac)
+                        {
+                            await _detectionEngine.EmitAsync(new DetectionEvent
+                            {
+                                RuleName = "ARP Spoof: Gateway MAC Changed",
+                                Evidence = $"Gateway {_gatewayIp} MAC changed from {_baselineGatewayMac} to {currentMac}",
+                                Reasoning = "The default gateway MAC address changed at runtime, indicating a possible ARP spoofing or MitM attack on the local network.",
+                                Confidence = 0.88, Tier = DetectionTier.Tier1Behavioral,
+                                AuthorizedResponse = ResponseAction.NetworkIsolate,
+                                ProcessName = "SYSTEM", ProcessId = 0,
+                                Metadata = new Dictionary<string, string> { { "TargetIP", _gatewayIp ?? "" } }
+                            });
+                            _baselineGatewayMac = currentMac;
+                        }
+                    }
+
+                    // === Check 2: Multiple IPs sharing same MAC (ARP table poisoning) ===
+                    var currentArp = GetArpTable();
+                    var macToIps = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var (ip, mac) in currentArp)
+                    {
+                        if (!macToIps.ContainsKey(mac)) macToIps[mac] = new List<string>();
+                        macToIps[mac].Add(ip);
+                    }
+
+                    foreach (var (mac, ips) in macToIps)
+                    {
+                        if (ips.Count < 3) continue; // Normal: 1 IP per MAC. 2 = maybe DHCP transition. 3+ = poisoning
+                        if (mac == "FF-FF-FF-FF-FF-FF") continue;
+                        if (mac.StartsWith("01-00-5E")) continue; // Multicast
+
+                        // Is the gateway IP one of them? That's the worst case.
+                        bool includesGateway = _gatewayIp != null && ips.Contains(_gatewayIp);
+
                         await _detectionEngine.EmitAsync(new DetectionEvent
                         {
-                            RuleName = "ARP Spoof: Gateway MAC Changed",
-                            Evidence = $"Gateway {_gatewayIp} MAC changed from {_baselineGatewayMac} to {currentMac}",
-                            Reasoning = "The default gateway MAC address changed at runtime, indicating a possible ARP spoofing or MitM attack on the local network.",
-                            Confidence = 0.85, Tier = DetectionTier.Tier1Behavioral,
-                            AuthorizedResponse = ResponseAction.NetworkIsolate,
+                            RuleName = "ARP Spoof: Multiple IPs Sharing MAC",
+                            Evidence = $"MAC {mac} is associated with {ips.Count} IPs: [{string.Join(", ", ips.Take(5))}]{(includesGateway ? " (INCLUDES GATEWAY)" : "")}",
+                            Reasoning = "Multiple IP addresses resolve to the same MAC address in the ARP table. " +
+                                        "This is a strong indicator of ARP table poisoning, where an attacker responds " +
+                                        "to ARP requests for multiple IPs with their own MAC to intercept traffic. " +
+                                        (includesGateway ? "The gateway IP is affected — all outbound traffic may be intercepted." : ""),
+                            Confidence = includesGateway ? 0.92 : 0.80,
+                            Tier = DetectionTier.Tier1Behavioral,
+                            AuthorizedResponse = includesGateway ? ResponseAction.NetworkIsolate : ResponseAction.LogOnly,
                             ProcessName = "SYSTEM", ProcessId = 0,
-                            Metadata = new Dictionary<string, string> { { "TargetIP", _gatewayIp ?? "" } }
+                            Metadata = new Dictionary<string, string>
+                            {
+                                ["MAC"] = mac,
+                                ["AffectedIPs"] = string.Join(";", ips),
+                                ["IncludesGateway"] = includesGateway.ToString(),
+                                ["TargetIP"] = includesGateway ? (_gatewayIp ?? "") : ""
+                            }
                         });
-                        _baselineGatewayMac = currentMac;
+                    }
+
+                    // === Check 3: IP-to-MAC change for known hosts ===
+                    foreach (var (ip, mac) in currentArp)
+                    {
+                        if (_arpBaseline.TryGetValue(ip, out var prevMac) && prevMac != mac)
+                        {
+                            // Skip gateway (handled above with higher confidence)
+                            if (ip == _gatewayIp) continue;
+
+                            // MAC changed for a known host — possible targeted spoof
+                            await _detectionEngine.EmitAsync(new DetectionEvent
+                            {
+                                RuleName = "ARP Spoof: Host MAC Changed",
+                                Evidence = $"Host {ip} MAC changed from {prevMac} to {mac}",
+                                Reasoning = "A known network host's MAC address changed, which may indicate ARP spoofing targeting that specific host for traffic interception.",
+                                Confidence = 0.65, Tier = DetectionTier.Tier2Indicator,
+                                AuthorizedResponse = ResponseAction.LogOnly,
+                                ProcessName = "SYSTEM", ProcessId = 0
+                            });
+                        }
+                        _arpBaseline[ip] = mac;
                     }
                 }
                 catch (OperationCanceledException) { break; }
                 catch (Exception ex) { _logger.LogDebug(ex, "[ArpSpoofMonitor] Error"); }
             }
+        }
+
+        private static List<(string Ip, string Mac)> GetArpTable()
+        {
+            var results = new List<(string, string)>();
+            try
+            {
+                int size = 0;
+                GetIpNetTable(IntPtr.Zero, ref size, false);
+                if (size == 0) return results;
+                var buffer = Marshal.AllocHGlobal(size);
+                try
+                {
+                    if (GetIpNetTable(buffer, ref size, false) != 0) return results;
+                    int entries = Marshal.ReadInt32(buffer);
+                    int entrySize = Marshal.SizeOf<MIB_IPNETROW>();
+                    for (int i = 0; i < entries; i++)
+                    {
+                        var row = Marshal.PtrToStructure<MIB_IPNETROW>(IntPtr.Add(buffer, 4 + i * entrySize));
+                        if (row.dwType == 2) continue; // Invalid entry
+                        var ip = new IPAddress(BitConverter.GetBytes(row.dwAddr)).ToString();
+                        if (ip.StartsWith("224.") || ip == "255.255.255.255") continue;
+                        var mac = $"{row.mac0:X2}-{row.mac1:X2}-{row.mac2:X2}-{row.mac3:X2}-{row.mac4:X2}-{row.mac5:X2}";
+                        if (mac == "00-00-00-00-00-00") continue;
+                        results.Add((ip, mac));
+                    }
+                }
+                finally { Marshal.FreeHGlobal(buffer); }
+            }
+            catch { }
+            return results;
         }
 
         private static string? GetDefaultGateway()
@@ -219,112 +335,92 @@ namespace WindowsSentinel.Core
     }
 
     // ──────────────────────────────────────────────
-    // Chrome Credential Guard — detects unauthorized reads of Login Data
+    // Browser Credential Guard — unified monitor for browser credential/session theft
+    // Covers Chrome, Edge, and Firefox credential stores and cookie databases
     // ──────────────────────────────────────────────
-    public sealed class ChromeCredentialGuardMonitor : BackgroundService
+    public sealed class BrowserCredentialGuard : BackgroundService
     {
         private readonly DetectionEngine _detectionEngine;
-        private readonly ILogger<ChromeCredentialGuardMonitor> _logger;
-        private DateTime _lastModified;
+        private readonly ILogger<BrowserCredentialGuard> _logger;
+        private readonly Dictionary<string, DateTime> _baselines = new();
 
-        public ChromeCredentialGuardMonitor(DetectionEngine de, ILogger<ChromeCredentialGuardMonitor> l) { _detectionEngine = de; _logger = l; }
+        public BrowserCredentialGuard(DetectionEngine de, ILogger<BrowserCredentialGuard> l) { _detectionEngine = de; _logger = l; }
 
         protected override async Task ExecuteAsync(CancellationToken ct)
         {
-            _logger.LogInformation("[ChromeCredentialGuardMonitor] Started");
-            var loginDataPath = GetChromeLoginDataPath();
-            if (loginDataPath != null && File.Exists(loginDataPath))
-                _lastModified = File.GetLastWriteTimeUtc(loginDataPath);
+            _logger.LogInformation("[BrowserCredentialGuard] Started");
 
-            while (!ct.IsCancellationRequested)
+            var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            var roamingAppData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+
+            // Define all browser targets: (BrowserName, FilePath, ProcessName, Description)
+            var targets = new List<(string BrowserName, string FilePath, string ProcessName, string Description)>();
+
+            // Chrome Login Data (credential theft)
+            if (!string.IsNullOrEmpty(localAppData))
             {
-                try
-                {
-                    await Task.Delay(30000, ct);
-                    if (loginDataPath == null || !File.Exists(loginDataPath)) continue;
-                    var current = File.GetLastWriteTimeUtc(loginDataPath);
-                    if (_lastModified != default && current != _lastModified)
-                    {
-                        await _detectionEngine.EmitAsync(new DetectionEvent
-                        {
-                            RuleName = "Browser Credential Theft: Chrome Login Data Modified",
-                            Evidence = $"Chrome Login Data file modified at {current:O}",
-                            Reasoning = "The Chrome credential database was modified outside of normal browser operation, indicating possible credential theft.",
-                            Confidence = 0.80, Tier = DetectionTier.Tier1Behavioral,
-                            AuthorizedResponse = ResponseAction.KillProcessTree,
-                            ProcessName = "SYSTEM", ProcessId = 0
-                        });
-                    }
-                    _lastModified = current;
-                }
-                catch (OperationCanceledException) { break; }
-                catch (Exception ex) { _logger.LogDebug(ex, "[ChromeCredentialGuardMonitor] Error"); }
+                targets.Add(("Chrome", Path.Combine(localAppData, @"Google\Chrome\User Data\Default\Login Data"), "chrome", "credential theft"));
+                targets.Add(("Chrome", Path.Combine(localAppData, @"Google\Chrome\User Data\Default\Network\Cookies"), "chrome", "session theft"));
+                targets.Add(("Edge", Path.Combine(localAppData, @"Microsoft\Edge\User Data\Default\Login Data"), "msedge", "credential theft"));
+                targets.Add(("Edge", Path.Combine(localAppData, @"Microsoft\Edge\User Data\Default\Network\Cookies"), "msedge", "session theft"));
             }
-        }
 
-        private static string? GetChromeLoginDataPath()
-        {
-            var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            if (string.IsNullOrEmpty(local)) return null;
-            var path = Path.Combine(local, @"Google\Chrome\User Data\Default\Login Data");
-            return File.Exists(path) ? path : null;
-        }
-    }
+            // Firefox logins.json — multiple profiles possible
+            if (!string.IsNullOrEmpty(roamingAppData))
+            {
+                var profilesDir = Path.Combine(roamingAppData, @"Mozilla\Firefox\Profiles");
+                if (Directory.Exists(profilesDir))
+                {
+                    foreach (var prof in Directory.GetDirectories(profilesDir))
+                    {
+                        var loginJson = Path.Combine(prof, "logins.json");
+                        targets.Add(("Firefox", loginJson, "firefox", "credential theft"));
+                    }
+                }
+            }
 
-    // ──────────────────────────────────────────────
-    // Chrome Session Guard — detects cookie DB theft
-    // ──────────────────────────────────────────────
-    public sealed class ChromeSessionGuardMonitor : BackgroundService
-    {
-        private readonly DetectionEngine _detectionEngine;
-        private readonly ILogger<ChromeSessionGuardMonitor> _logger;
-        private DateTime _lastModified;
-
-        public ChromeSessionGuardMonitor(DetectionEngine de, ILogger<ChromeSessionGuardMonitor> l) { _detectionEngine = de; _logger = l; }
-
-        protected override async Task ExecuteAsync(CancellationToken ct)
-        {
-            _logger.LogInformation("[ChromeSessionGuardMonitor] Started");
-            var cookiePath = GetChromeCookiePath();
-            if (cookiePath != null && File.Exists(cookiePath))
-                _lastModified = File.GetLastWriteTimeUtc(cookiePath);
+            // Baseline all existing files
+            foreach (var (_, filePath, _, _) in targets)
+            {
+                if (File.Exists(filePath))
+                    _baselines[filePath] = File.GetLastWriteTimeUtc(filePath);
+            }
 
             while (!ct.IsCancellationRequested)
             {
                 try
                 {
                     await Task.Delay(30000, ct);
-                    if (cookiePath == null || !File.Exists(cookiePath)) continue;
-                    var current = File.GetLastWriteTimeUtc(cookiePath);
-                    if (_lastModified != default && current != _lastModified)
+
+                    foreach (var (browserName, filePath, processName, description) in targets)
                     {
-                        var chromeRunning = Process.GetProcessesByName("chrome").Length > 0;
-                        if (!chromeRunning)
+                        if (!File.Exists(filePath)) continue;
+
+                        var current = File.GetLastWriteTimeUtc(filePath);
+                        if (_baselines.TryGetValue(filePath, out var prev) && current != prev)
                         {
-                            await _detectionEngine.EmitAsync(new DetectionEvent
+                            var browserRunning = Process.GetProcessesByName(processName).Length > 0;
+                            if (!browserRunning)
                             {
-                                RuleName = "Browser Session Theft: Chrome Cookies Modified While Browser Closed",
-                                Evidence = $"Chrome Cookies file modified at {current:O} while chrome.exe is not running",
-                                Reasoning = "Chrome cookie database was written to while the browser was not running, indicating session hijacking.",
-                                Confidence = 0.85, Tier = DetectionTier.Tier1Behavioral,
-                                AuthorizedResponse = ResponseAction.KillProcessTree,
-                                ProcessName = "SYSTEM", ProcessId = 0
-                            });
+                                var dataType = description == "session theft" ? "Session" : "Credential";
+                                var fileName = Path.GetFileName(filePath);
+                                await _detectionEngine.EmitAsync(new DetectionEvent
+                                {
+                                    RuleName = $"Browser {dataType} Theft: {browserName} {fileName} Modified While Browser Closed",
+                                    Evidence = $"{browserName} {fileName} modified at {current:O} while {processName}.exe is not running",
+                                    Reasoning = $"{browserName} {description} store was modified while the browser was not running, indicating {description}.",
+                                    Confidence = 0.85, Tier = DetectionTier.Tier1Behavioral,
+                                    AuthorizedResponse = ResponseAction.KillProcessTree,
+                                    ProcessName = "SYSTEM", ProcessId = 0
+                                });
+                            }
                         }
+                        _baselines[filePath] = current;
                     }
-                    _lastModified = current;
                 }
                 catch (OperationCanceledException) { break; }
-                catch (Exception ex) { _logger.LogDebug(ex, "[ChromeSessionGuardMonitor] Error"); }
+                catch (Exception ex) { _logger.LogDebug(ex, "[BrowserCredentialGuard] Error"); }
             }
-        }
-
-        private static string? GetChromeCookiePath()
-        {
-            var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            if (string.IsNullOrEmpty(local)) return null;
-            var path = Path.Combine(local, @"Google\Chrome\User Data\Default\Network\Cookies");
-            return File.Exists(path) ? path : null;
         }
     }
 
@@ -719,67 +815,6 @@ namespace WindowsSentinel.Core
         }
     }
 
-    // ──────────────────────────────────────────────
-    // Firefox Credential Guard — detects unauthorized reads of logins.json
-    // ──────────────────────────────────────────────
-    public sealed class FirefoxCredentialGuardMonitor : BackgroundService
-    {
-        private readonly DetectionEngine _detectionEngine;
-        private readonly ILogger<FirefoxCredentialGuardMonitor> _logger;
-
-        public FirefoxCredentialGuardMonitor(DetectionEngine de, ILogger<FirefoxCredentialGuardMonitor> l) { _detectionEngine = de; _logger = l; }
-
-        protected override async Task ExecuteAsync(CancellationToken ct)
-        {
-            _logger.LogInformation("[FirefoxCredentialGuardMonitor] Started");
-            var profilesDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), @"Mozilla\Firefox\Profiles");
-            var lastModified = new Dictionary<string, DateTime>();
-
-            // Baseline
-            if (Directory.Exists(profilesDir))
-            {
-                foreach (var prof in Directory.GetDirectories(profilesDir))
-                {
-                    var loginJson = Path.Combine(prof, "logins.json");
-                    if (File.Exists(loginJson)) lastModified[loginJson] = File.GetLastWriteTimeUtc(loginJson);
-                }
-            }
-
-            while (!ct.IsCancellationRequested)
-            {
-                try
-                {
-                    await Task.Delay(30000, ct);
-                    if (!Directory.Exists(profilesDir)) continue;
-                    foreach (var prof in Directory.GetDirectories(profilesDir))
-                    {
-                        var loginJson = Path.Combine(prof, "logins.json");
-                        if (!File.Exists(loginJson)) continue;
-                        var current = File.GetLastWriteTimeUtc(loginJson);
-                        if (lastModified.TryGetValue(loginJson, out var prev) && current != prev)
-                        {
-                            var ffRunning = Process.GetProcessesByName("firefox").Length > 0;
-                            if (!ffRunning)
-                            {
-                                await _detectionEngine.EmitAsync(new DetectionEvent
-                                {
-                                    RuleName = "Browser Credential Theft: Firefox logins.json Modified While Browser Closed",
-                                    Evidence = $"Firefox logins.json modified while firefox.exe is not running",
-                                    Reasoning = "Firefox credential store was modified while the browser was not running, indicating credential theft.",
-                                    Confidence = 0.85, Tier = DetectionTier.Tier1Behavioral,
-                                    AuthorizedResponse = ResponseAction.KillProcessTree,
-                                    ProcessName = "SYSTEM", ProcessId = 0
-                                });
-                            }
-                        }
-                        lastModified[loginJson] = current;
-                    }
-                }
-                catch (OperationCanceledException) { break; }
-                catch (Exception ex) { _logger.LogDebug(ex, "[FirefoxCredentialGuardMonitor] Error"); }
-            }
-        }
-    }
 
     // ──────────────────────────────────────────────
     // Firewall Integrity Monitor — detects firewall rule tampering
@@ -899,6 +934,7 @@ namespace WindowsSentinel.Core
     {
         private readonly DetectionEngine _detectionEngine;
         private readonly ILogger<MicrosoftAccountGuardMonitor> _logger;
+        private readonly HashSet<string> _alertedFiles = new(StringComparer.OrdinalIgnoreCase);
 
         public MicrosoftAccountGuardMonitor(DetectionEngine de, ILogger<MicrosoftAccountGuardMonitor> l) { _detectionEngine = de; _logger = l; }
 
@@ -915,13 +951,57 @@ namespace WindowsSentinel.Core
                 {
                     await Task.Delay(30000, ct);
                     if (!Directory.Exists(tokenCachePath)) continue;
+
                     foreach (var file in Directory.EnumerateFiles(tokenCachePath, "*.tbres"))
                     {
                         var fi = new FileInfo(file);
                         if (fi.LastWriteTimeUtc > lastScan)
                         {
-                            // Check if any non-browser process is reading token files
-                            _logger.LogDebug("[MicrosoftAccountGuardMonitor] Token cache updated: {File}", file);
+                            // Check which process has the token file open
+                            // If a non-browser, non-system process is touching token files, alert
+                            var fileName = Path.GetFileName(file);
+                            if (_alertedFiles.Contains(fileName)) continue;
+
+                            // Look for processes that might be reading token files
+                            foreach (var proc in Process.GetProcesses())
+                            {
+                                try
+                                {
+                                    var name = proc.ProcessName;
+                                    // Skip known legitimate token consumers
+                                    if (name.Contains("RuntimeBroker", StringComparison.OrdinalIgnoreCase) ||
+                                        name.Contains("svchost", StringComparison.OrdinalIgnoreCase) ||
+                                        name.Contains("TokenBroker", StringComparison.OrdinalIgnoreCase) ||
+                                        name.Contains("msedge", StringComparison.OrdinalIgnoreCase) ||
+                                        name.Contains("chrome", StringComparison.OrdinalIgnoreCase) ||
+                                        name.Contains("Teams", StringComparison.OrdinalIgnoreCase) ||
+                                        name.Contains("OneDrive", StringComparison.OrdinalIgnoreCase) ||
+                                        name.Contains("explorer", StringComparison.OrdinalIgnoreCase))
+                                        continue;
+
+                                    // Check if process is from temp/suspicious path
+                                    string? imagePath = null;
+                                    try { imagePath = proc.MainModule?.FileName; } catch { }
+                                    if (!string.IsNullOrEmpty(imagePath) &&
+                                        (imagePath.Contains(@"\Temp\", StringComparison.OrdinalIgnoreCase) ||
+                                         imagePath.Contains(@"\Downloads\", StringComparison.OrdinalIgnoreCase)))
+                                    {
+                                        _alertedFiles.Add(fileName);
+                                        await _detectionEngine.EmitAsync(new DetectionEvent
+                                        {
+                                            RuleName = "Credential Theft: Microsoft Token Cache Accessed",
+                                            Evidence = $"Token cache file '{fileName}' modified while suspicious process '{name}' (PID {proc.Id}) from '{imagePath}' is running",
+                                            Reasoning = "The Microsoft TokenBroker cache was accessed while a process from a suspicious path is active, which may indicate token theft.",
+                                            Confidence = 0.70, Tier = DetectionTier.Tier1Behavioral,
+                                            AuthorizedResponse = ResponseAction.KillProcessTree,
+                                            ProcessName = name, ProcessId = proc.Id
+                                        });
+                                        break;
+                                    }
+                                }
+                                catch { }
+                                finally { proc.Dispose(); }
+                            }
                         }
                     }
                     lastScan = DateTime.UtcNow;
@@ -1054,13 +1134,44 @@ namespace WindowsSentinel.Core
         private readonly DetectionEngine _detectionEngine;
         private readonly ILogger<RemoteAccessMonitor> _logger;
 
-        private static readonly string[] RatListenerNames = { "vnc", "teamviewer", "anydesk", "rustdesk", "radmin" };
+        // 35+ known remote access tools — both legitimate and commonly abused
+        // Detection is Tier2 (LogOnly) because running these isn't proof of compromise.
+        // Trust model: detect presence, let correlation engine decide if suspicious context exists.
+        private static readonly string[] RemoteAccessProcessNames =
+        {
+            // Commercial remote desktop/support
+            "teamviewer", "teamviewer_service", "tv_w32", "tv_x64",
+            "anydesk", "anydesk.exe",
+            "rustdesk", "rustdesk-service",
+            "radmin", "rserver3", "radminserver",
+            "logmein", "logmeinrescue", "lmi_rescue",
+            "bomgar", "bomgar-scc", "bomgar-rdp",
+            "connectwise", "screenconnect",
+            "splashtop", "splashtopstreamer", "srmanager",
+            "supremo", "supremoservice",
+            "ammyy", "ammyyadmin", "aa_v3",
+            "ultraviewer", "ultraviewerservice",
+            "parsec", "parsecd",
+            "chrome remote desktop", "remoting_host",
+            "dwservice", "dwagent",
+            "meshagent", "meshcentral",
+            "getscreen", "getscreen.me",
+            // VNC implementations
+            "vnc", "vncserver", "vncviewer", "winvnc", "tvnserver", "uvnc",
+            "tightvnc", "tigervnc", "realvnc",
+            // RDP-related (non-standard)
+            "rdpwrap", "rdpcheck", "rdpclip",
+            // Potentially unwanted — often deployed by attackers
+            "ngrok", "frpc", "frps", "cloudflared", // Tunneling
+            "chisel", "rathole", "bore", // Reverse tunnels
+            "mstsc", // Standard RDP client - context matters
+        };
 
         public RemoteAccessMonitor(DetectionEngine de, ILogger<RemoteAccessMonitor> l) { _detectionEngine = de; _logger = l; }
 
         protected override async Task ExecuteAsync(CancellationToken ct)
         {
-            _logger.LogInformation("[RemoteAccessMonitor] Started");
+            _logger.LogInformation("[RemoteAccessMonitor] Started — monitoring {Count} known remote access tools", RemoteAccessProcessNames.Length);
 
             while (!ct.IsCancellationRequested)
             {
@@ -1072,14 +1183,40 @@ namespace WindowsSentinel.Core
                         try
                         {
                             var name = proc.ProcessName.ToLowerInvariant();
-                            if (RatListenerNames.Any(r => name.Contains(r)))
+                            if (RemoteAccessProcessNames.Any(r => name.Contains(r)))
                             {
+                                // Higher confidence for tunneling tools (ngrok, frpc, chisel)
+                                // — these are almost never legitimate on endpoints
+                                bool isTunnel = name.Contains("ngrok") || name.Contains("frpc") ||
+                                                name.Contains("chisel") || name.Contains("rathole") ||
+                                                name.Contains("bore") || name.Contains("cloudflared");
+
+                                string? imagePath = null;
+                                try { imagePath = proc.MainModule?.FileName; } catch { }
+
+                                // Tunneling from Temp/Downloads = very suspicious
+                                bool fromSuspiciousPath = imagePath != null &&
+                                    (imagePath.Contains(@"\Temp\", StringComparison.OrdinalIgnoreCase) ||
+                                     imagePath.Contains(@"\Downloads\", StringComparison.OrdinalIgnoreCase));
+
+                                var confidence = isTunnel ? (fromSuspiciousPath ? 0.85 : 0.75) : 0.55;
+                                var tier = (isTunnel && fromSuspiciousPath)
+                                    ? DetectionTier.Tier1Behavioral
+                                    : DetectionTier.Tier2Indicator;
+
                                 await _detectionEngine.EmitAsync(new DetectionEvent
                                 {
-                                    RuleName = "Remote Access: Known RAT Process Running",
-                                    Evidence = $"Process '{proc.ProcessName}' (PID {proc.Id}) is running",
-                                    Reasoning = "A remote access tool process was detected. While some are legitimate, they are commonly abused by attackers.",
-                                    Confidence = 0.60, Tier = DetectionTier.Tier2Indicator,
+                                    RuleName = isTunnel
+                                        ? "Remote Access: Tunneling Tool Detected"
+                                        : "Remote Access: Known RAT Process Running",
+                                    Evidence = $"Process '{proc.ProcessName}' (PID {proc.Id}) running{(imagePath != null ? $" from '{imagePath}'" : "")}",
+                                    Reasoning = isTunnel
+                                        ? "A reverse tunneling tool was detected. These are rarely legitimate on endpoints and are commonly used to bypass firewalls for C2 or unauthorized access."
+                                        : "A remote access tool process was detected. While some are legitimate, they are commonly abused for unauthorized access.",
+                                    Confidence = confidence, Tier = tier,
+                                    AuthorizedResponse = (isTunnel && fromSuspiciousPath)
+                                        ? ResponseAction.KillProcessTree
+                                        : ResponseAction.LogOnly,
                                     ProcessName = proc.ProcessName, ProcessId = proc.Id
                                 });
                             }
@@ -1333,19 +1470,19 @@ namespace WindowsSentinel.Core
 
         protected override async Task ExecuteAsync(CancellationToken ct)
         {
-            _logger.LogInformation("[TlsCertificateMonitor] Started — performing startup full-store scan");
+            _logger.LogInformation("[TlsCertificateMonitor] Started — performing startup full-store audit");
 
-            // Phase 1: Startup scan — score every existing cert
+            // Phase 1: Startup scan — audit every existing cert, flag unknowns
             try
             {
-                await ScanAndBaselineStoreAsync(ct);
+                await AuditAndBaselineStoreAsync(ct);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "[TlsCertificateMonitor] Startup scan failed");
+                _logger.LogError(ex, "[TlsCertificateMonitor] Startup audit failed");
             }
 
-            _logger.LogInformation("[TlsCertificateMonitor] Baseline established: {Count} trusted root certs", _baselineThumbprints.Count);
+            _logger.LogInformation("[TlsCertificateMonitor] Audit complete: {Count} certs baselined", _baselineThumbprints.Count);
 
             // Phase 2: Runtime polling — detect new certs
             while (!ct.IsCancellationRequested)
@@ -1361,10 +1498,12 @@ namespace WindowsSentinel.Core
         }
 
         /// <summary>
-        /// Scans every cert in the Root store and silently baselines all existing certs.
-        /// No detections are emitted and no certs are removed during startup.
+        /// Startup audit: score every existing cert. Known public CAs are silently baselined.
+        /// Unknown/suspicious certs that were present before Sentinel started get flagged as
+        /// Tier2 indicators (can't auto-remove because we don't know if user installed them).
+        /// This prevents the "race the baseline" attack from going completely unnoticed.
         /// </summary>
-        private async Task ScanAndBaselineStoreAsync(CancellationToken ct)
+        private async Task AuditAndBaselineStoreAsync(CancellationToken ct)
         {
             using var store = new System.Security.Cryptography.X509Certificates.X509Store(
                 System.Security.Cryptography.X509Certificates.StoreName.Root,
@@ -1375,47 +1514,241 @@ namespace WindowsSentinel.Core
             {
                 if (ct.IsCancellationRequested) break;
                 _baselineThumbprints.Add(cert.Thumbprint);
-            }
 
-            _logger.LogInformation("[TlsCertificateMonitor] Baselined {Count} existing root certs silently", _baselineThumbprints.Count);
-        }
-
-        /// <summary>
-        /// Polls the Root store for new certs that weren't in the baseline.
-        /// Emits log-only detections for new certs; never removes anything.
-        /// </summary>
-        private async Task PollForNewCertsAsync(CancellationToken ct)
-        {
-            using var store = new System.Security.Cryptography.X509Certificates.X509Store(
-                System.Security.Cryptography.X509Certificates.StoreName.Root,
-                System.Security.Cryptography.X509Certificates.StoreLocation.LocalMachine);
-            store.Open(System.Security.Cryptography.X509Certificates.OpenFlags.ReadOnly);
-
-            foreach (var cert in store.Certificates)
-            {
-                if (ct.IsCancellationRequested) break;
-                if (_baselineThumbprints.Contains(cert.Thumbprint)) continue;
-
-                // New cert detected — analyze it
                 var analysis = AnalyzeCert(cert);
-                var adderInfo = TraceAdderProcess(cert.Thumbprint);
 
-                // Known public root CAs: baseline silently (no alert)
-                if (analysis.IsPublicRootCa && analysis.Confidence <= 0.50)
+                // Known public root CAs: fully trusted, no alert
+                if (analysis.IsPublicRootCa) continue;
+
+                // Known enterprise/dev tool CAs: log as Tier2 for visibility but no action
+                if (analysis.IsEnterpriseCa || analysis.IsDevTool)
                 {
-                    _baselineThumbprints.Add(cert.Thumbprint);
+                    await EmitCertDetectionAsync(cert, analysis, null, isStartupScan: true);
                     continue;
                 }
 
-                _logger.LogWarning("[TlsCertificateMonitor] New root cert detected: Subject={Subject}, Thumbprint={Thumb}, Confidence={Conf:F2}",
-                    cert.Subject, cert.Thumbprint, analysis.Confidence);
+                // Unknown cert with suspicious signals: flag it even though it was pre-existing
+                // This catches the "install cert before Sentinel starts" attack
+                if (analysis.Confidence >= 0.70)
+                {
+                    _logger.LogWarning("[TlsCertificateMonitor] Startup: suspicious pre-existing cert: {Subject} (confidence {Conf:F2})",
+                        cert.Subject, analysis.Confidence);
 
-                // Emit detection for the newly added cert (log-only, never auto-remove)
-                await EmitCertDetectionAsync(cert, analysis, adderInfo, isStartupScan: false);
+                    // Very high confidence at startup (>=0.90): actively remove
+                    // These are almost certainly attacker MitM certs planted before Sentinel started
+                    ResponseAction? startupResponse = null;
+                    if (analysis.Confidence >= 0.90 && _config.ActiveResponse)
+                    {
+                        startupResponse = ResponseAction.RemoveCert;
+                        _logger.LogWarning("[TlsCertificateMonitor] REMOVING malicious pre-existing cert: {Subject}", cert.Subject);
+                    }
 
-                // Baseline after first alert so we don't spam
-                _baselineThumbprints.Add(cert.Thumbprint);
+                    await EmitCertDetectionAsync(cert, analysis, null, isStartupScan: false, startupResponse);
+                    // Note: isStartupScan=false here so the response engine actually processes the removal
+                }
             }
+        }
+
+        /// <summary>
+        /// Runtime polling: detect new certs added after baseline.
+        /// New unknown certs with high confidence → remove + notify.
+        /// New known public CAs → baseline silently.
+        /// Monitors Root AND TrustedPublisher stores (BYOVD attack vector).
+        /// </summary>
+        private async Task PollForNewCertsAsync(CancellationToken ct)
+        {
+            await PollStoreAsync(
+                System.Security.Cryptography.X509Certificates.StoreName.Root,
+                "Root", ct);
+            await PollStoreAsync(
+                System.Security.Cryptography.X509Certificates.StoreName.TrustedPublisher,
+                "TrustedPublisher", ct);
+        }
+
+        private async Task PollStoreAsync(
+            System.Security.Cryptography.X509Certificates.StoreName storeName,
+            string storeLabel,
+            CancellationToken ct)
+        {
+            try
+            {
+                using var store = new System.Security.Cryptography.X509Certificates.X509Store(
+                    storeName,
+                    System.Security.Cryptography.X509Certificates.StoreLocation.LocalMachine);
+                store.Open(System.Security.Cryptography.X509Certificates.OpenFlags.ReadOnly);
+
+                foreach (var cert in store.Certificates)
+                {
+                    if (ct.IsCancellationRequested) break;
+                    var key = $"{storeLabel}:{cert.Thumbprint}";
+                    if (_baselineThumbprints.Contains(key)) continue;
+
+                    var analysis = AnalyzeCert(cert);
+                    var adderInfo = TraceAdderProcess(cert.Thumbprint);
+
+                    // Known public root CAs: baseline silently
+                    if (analysis.IsPublicRootCa && analysis.Confidence <= 0.50)
+                    {
+                        _baselineThumbprints.Add(key);
+                        continue;
+                    }
+
+                    // TrustedPublisher additions are extra suspicious — used for BYOVD
+                    if (storeLabel == "TrustedPublisher")
+                    {
+                        analysis.Confidence = Math.Max(analysis.Confidence, 0.75);
+                        analysis.Reasons.Add("Added to TrustedPublisher store (BYOVD/driver signing attack vector)");
+                    }
+
+                    _logger.LogWarning("[TlsCertificateMonitor] New cert in {Store}: Subject={Subject}, Confidence={Conf:F2}",
+                        storeLabel, cert.Subject, analysis.Confidence);
+
+                    ResponseAction response;
+                    if (analysis.Confidence >= 0.80)
+                    {
+                        response = adderInfo != null ? ResponseAction.RemoveCertAndKillAdder : ResponseAction.RemoveCert;
+                    }
+                    else if (analysis.Confidence >= 0.65 && !analysis.IsEnterpriseCa && !analysis.IsDevTool)
+                    {
+                        response = ResponseAction.RemoveCert;
+                    }
+                    else
+                    {
+                        response = ResponseAction.LogOnly;
+                    }
+
+                    await EmitCertDetectionAsync(cert, analysis, adderInfo, isStartupScan: false, response);
+
+                    // BYOVD chain trace: if a TrustedPublisher cert was removed,
+                    // scan for drivers signed by this cert and quarantine them.
+                    if (storeLabel == "TrustedPublisher" && response != ResponseAction.LogOnly)
+                    {
+                        await ScanAndQuarantineSignedDriversAsync(cert.Thumbprint, cert.Subject);
+                    }
+
+                    _baselineThumbprints.Add(key);
+                }
+            }
+            catch { }
+        }
+
+        /// <summary>
+        /// After removing a malicious code-signing cert from TrustedPublisher,
+        /// scan the drivers directory for any .sys files signed by that cert.
+        /// Quarantine the driver + remove its service registration.
+        /// </summary>
+        private async Task ScanAndQuarantineSignedDriversAsync(string certThumbprint, string certSubject)
+        {
+            try
+            {
+                var driversDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "System32", "drivers");
+                if (!Directory.Exists(driversDir)) return;
+
+                foreach (var driverPath in Directory.EnumerateFiles(driversDir, "*.sys"))
+                {
+                    try
+                    {
+                        // Check if this driver is signed by the removed cert
+                        var signerCert = GetFileCertificate(driverPath);
+                        if (signerCert == null) continue;
+
+                        bool matchesThumbprint = signerCert.Thumbprint?.Equals(certThumbprint, StringComparison.OrdinalIgnoreCase) == true;
+                        bool matchesSubject = signerCert.Subject?.Contains(ExtractCN(certSubject), StringComparison.OrdinalIgnoreCase) == true;
+
+                        if (!matchesThumbprint && !matchesSubject) continue;
+
+                        var driverName = Path.GetFileNameWithoutExtension(driverPath);
+
+                        _logger.LogWarning("[TlsCertificateMonitor] BYOVD: driver '{Driver}' signed by removed cert. Quarantining.", driverName);
+
+                        // Quarantine the driver file
+                        await _eventLogger.LogEventAsync("response", new ResponseEvent
+                        {
+                            ProcessId = 0,
+                            ProcessName = "TlsCertificateMonitor",
+                            ActionTaken = "QUARANTINE_BYOVD_DRIVER",
+                            Reason = $"Driver '{driverPath}' signed by removed TrustedPublisher cert '{certSubject}'. Quarantining."
+                        });
+
+                        // Try to stop the driver service first
+                        try
+                        {
+                            using var sc = new System.ServiceProcess.ServiceController(driverName);
+                            if (sc.Status == System.ServiceProcess.ServiceControllerStatus.Running)
+                                sc.Stop();
+                        }
+                        catch { }
+
+                        // Remove the service registration
+                        try
+                        {
+                            using var servicesKey = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(
+                                @"SYSTEM\CurrentControlSet\Services", writable: true);
+                            servicesKey?.DeleteSubKeyTree(driverName, throwOnMissingSubKey: false);
+                        }
+                        catch { }
+
+                        // Quarantine the driver file (small delay for handle release)
+                        await Task.Delay(500);
+                        try
+                        {
+                            if (File.Exists(driverPath))
+                            {
+                                var quarantinePath = Path.Combine(
+                                    Path.GetDirectoryName(_eventLogger.LogFilePath) ?? "",
+                                    "Quarantine",
+                                    $"byovd_{driverName}_{DateTime.UtcNow:yyyyMMddHHmmss}.sys.quarantine");
+                                Directory.CreateDirectory(Path.GetDirectoryName(quarantinePath)!);
+
+                                // XOR encrypt to quarantine
+                                var bytes = await File.ReadAllBytesAsync(driverPath);
+                                for (int i = 0; i < bytes.Length; i++) bytes[i] ^= 0x5A;
+                                await File.WriteAllBytesAsync(quarantinePath, bytes);
+
+                                File.SetAttributes(driverPath, FileAttributes.Normal);
+                                File.Delete(driverPath);
+
+                                _logger.LogWarning("[TlsCertificateMonitor] BYOVD driver quarantined: {Driver} → {Quarantine}",
+                                    driverPath, quarantinePath);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, "[TlsCertificateMonitor] Failed to quarantine BYOVD driver: {Driver}", driverPath);
+                        }
+
+                        await _detectionEngine.EmitAsync(new DetectionEvent
+                        {
+                            RuleName = "BYOVD: Vulnerable Driver Quarantined",
+                            Evidence = $"Driver '{driverName}.sys' was signed by removed TrustedPublisher cert '{ExtractCN(certSubject)}'. Service registration removed, driver quarantined.",
+                            Reasoning = "A driver signed by a cert that was just removed from TrustedPublisher has been neutralized. " +
+                                        "BYOVD (Bring Your Own Vulnerable Driver) attacks plant a signed-but-vulnerable driver " +
+                                        "to gain kernel access. Removing the cert + driver + service registration closes the attack path.",
+                            Confidence = 0.95,
+                            Tier = DetectionTier.Tier1Behavioral,
+                            AuthorizedResponse = ResponseAction.LogOnly, // Already handled
+                            ProcessName = driverName,
+                            ProcessId = 0
+                        });
+                    }
+                    catch { }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "[TlsCertificateMonitor] BYOVD driver scan error");
+            }
+        }
+
+        private static System.Security.Cryptography.X509Certificates.X509Certificate2? GetFileCertificate(string filePath)
+        {
+            try
+            {
+                var cert = new System.Security.Cryptography.X509Certificates.X509Certificate2(
+                    System.Security.Cryptography.X509Certificates.X509Certificate.CreateFromSignedFile(filePath));
+                return cert;
+            }
+            catch { return null; }
         }
 
         // Known legitimate public root CA patterns — these are trusted global CAs
@@ -1557,10 +1890,54 @@ namespace WindowsSentinel.Core
                     confidence += 0.10;
                     reasons.Add("Suspicious keywords in Subject");
                 }
+
+                // 11. Machine-name CN (hostname pattern) — MitM certs generated by RDP/attack tools
+                // Real CAs never have bare hostnames as their CN
+                if (!string.IsNullOrEmpty(cn) && IsHostnameLike(cn))
+                {
+                    confidence += 0.25;
+                    reasons.Add($"CN looks like a machine hostname: '{cn}'");
+                }
+
+                // 12. Absurd validity (>100 years) — attack certs use 999-year validity
+                // No legitimate CA issues certs for more than 25 years
+                if (validity.TotalDays > 36500) // >100 years
+                {
+                    confidence += 0.20;
+                    reasons.Add($"Absurd validity period ({validity.TotalDays / 365:F0} years)");
+                }
+
+                // 13. Server Authentication EKU in root store — root CAs should NOT have
+                // server auth EKU. Only leaf/intermediate certs need it. A root cert with
+                // server auth EKU is designed for direct TLS interception.
+                bool hasServerAuthEku = false;
+                foreach (var ext in cert.Extensions)
+                {
+                    if (ext.Oid?.Value == "2.5.29.37") // Enhanced Key Usage
+                    {
+                        var ekuText = ext.Format(false);
+                        if (ekuText.Contains("Server Authentication") || ekuText.Contains("1.3.6.1.5.5.7.3.1"))
+                        {
+                            hasServerAuthEku = true;
+                            break;
+                        }
+                    }
+                }
+                if (hasServerAuthEku)
+                {
+                    confidence += 0.20;
+                    reasons.Add("Root cert has Server Authentication EKU (designed for TLS interception)");
+                }
             }
 
             // Cap confidence at 0.99
             confidence = Math.Min(confidence, 0.99);
+
+            // High confidence unknown certs: promote to Tier1 so response engine acts on them
+            if (!isPublicRootCA && !isEnterpriseCa && !isDevTool && confidence >= 0.80)
+            {
+                tier = DetectionTier.Tier1Behavioral;
+            }
 
             return new CertAnalysisResult
             {
@@ -1603,6 +1980,43 @@ namespace WindowsSentinel.Core
                     hexChars++;
             }
             return hexChars > s.Length * 0.7;
+        }
+
+        /// <summary>
+        /// Checks if a CN looks like a machine hostname rather than a CA organization name.
+        /// Hostnames are typically: DESKTOP-XXXXXXX, WIN-XXXXXXX, LAPTOP-XXXXXXX, or short
+        /// uppercase alphanumeric strings without spaces or organization-like structure.
+        /// </summary>
+        private static bool IsHostnameLike(string cn)
+        {
+            if (string.IsNullOrEmpty(cn)) return false;
+            // Contains spaces/commas/dots = org name, not hostname
+            if (cn.Contains(' ') || cn.Contains(',') || cn.Contains('.')) return false;
+            // Contains CA-like words = not a hostname
+            var lower = cn.ToLowerInvariant();
+            if (lower.Contains("root") || lower.Contains("ca") || lower.Contains("cert") ||
+                lower.Contains("authority") || lower.Contains("trust") || lower.Contains("sign"))
+                return false;
+
+            var upper = cn.ToUpperInvariant();
+            // Common Windows auto-generated hostname prefixes
+            if (upper.StartsWith("WIN-") || upper.StartsWith("DESKTOP-") ||
+                upper.StartsWith("LAPTOP-") || upper.StartsWith("WORKSTATION-") ||
+                upper.StartsWith("PC-") || upper.StartsWith("SERVER-"))
+                return true;
+            // Matches local machine name — definitely a self-signed MitM cert
+            try
+            {
+                var machineName = Environment.MachineName;
+                if (cn.Equals(machineName, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+            catch { }
+            // All-caps with dash, 8-15 chars = likely Windows auto-generated hostname
+            if (cn.Length >= 8 && cn.Length <= 15 && cn.Contains('-') &&
+                cn.All(c => char.IsLetterOrDigit(c) || c == '-'))
+                return true;
+            return false;
         }
 
         /// <summary>
@@ -1700,7 +2114,8 @@ namespace WindowsSentinel.Core
             System.Security.Cryptography.X509Certificates.X509Certificate2 cert,
             CertAnalysisResult analysis,
             AdderProcessInfo? adderInfo,
-            bool isStartupScan)
+            bool isStartupScan,
+            ResponseAction? overrideResponse = null)
         {
             var cn = ExtractCN(cert.Subject);
             var scanPhase = isStartupScan ? "Startup scan" : "Runtime detection";
@@ -1740,7 +2155,10 @@ namespace WindowsSentinel.Core
                 metadata["AdderProcessName"] = adderInfo.ProcessName;
             }
 
-            var authorizedResponse = ResponseAction.LogOnly;
+            var authorizedResponse = overrideResponse ?? ResponseAction.LogOnly;
+
+            // Startup scans never auto-remove (user may have installed them intentionally)
+            if (isStartupScan) authorizedResponse = ResponseAction.LogOnly;
 
             await _detectionEngine.EmitAsync(new DetectionEvent
             {
@@ -1837,6 +2255,13 @@ namespace WindowsSentinel.Core
     {
         private readonly DetectionEngine _detectionEngine;
         private readonly ILogger<WifiSecurityMonitor> _logger;
+        private readonly HashSet<string> _alertedProfiles = new(StringComparer.OrdinalIgnoreCase);
+        private readonly List<DateTimeOffset> _disconnectHistory = new();
+        private string? _baselineBssid;
+        private string? _baselineSsid;
+
+        private const int DeauthThreshold = 4;         // 4+ disconnects in window = deauth flood
+        private static readonly TimeSpan DeauthWindow = TimeSpan.FromMinutes(2);
 
         public WifiSecurityMonitor(DetectionEngine de, ILogger<WifiSecurityMonitor> l) { _detectionEngine = de; _logger = l; }
 
@@ -1844,22 +2269,206 @@ namespace WindowsSentinel.Core
         {
             _logger.LogInformation("[WifiSecurityMonitor] Started");
 
+            // Capture initial SSID/BSSID baseline
+            var initial = GetCurrentWifiState();
+            _baselineSsid = initial.ssid;
+            _baselineBssid = initial.bssid;
+
             while (!ct.IsCancellationRequested)
             {
                 try
                 {
-                    await Task.Delay(60000, ct);
-                    // Check connected WiFi authentication type via WMI
-                    try
+                    await Task.Delay(15000, ct); // 15s scan interval
+
+                    var current = GetCurrentWifiState();
+
+                    // === Check 1: Deauth flood detection ===
+                    // If we were connected and now disconnected, record it
+                    if (_baselineSsid != null && current.ssid == null)
                     {
-                        using var searcher = new ManagementObjectSearcher("SELECT * FROM MSNdis_80211_AuthenticationMode");
-                        // On most systems the WMI class may not be available; degrade gracefully
+                        _disconnectHistory.Add(DateTimeOffset.UtcNow);
+
+                        // Prune old disconnects
+                        var cutoff = DateTimeOffset.UtcNow - DeauthWindow;
+                        _disconnectHistory.RemoveAll(t => t < cutoff);
+
+                        if (_disconnectHistory.Count >= DeauthThreshold)
+                        {
+                            await _detectionEngine.EmitAsync(new DetectionEvent
+                            {
+                                RuleName = "WiFi Security: Deauthentication Flood Detected",
+                                Evidence = $"Wi-Fi disconnected {_disconnectHistory.Count} times in {DeauthWindow.TotalMinutes} minutes (SSID: '{_baselineSsid}')",
+                                Reasoning = "Repeated Wi-Fi disconnections in rapid succession indicate a deauthentication flood attack. " +
+                                            "Attackers send forged deauth frames to force clients off the network, often as a precursor " +
+                                            "to evil twin AP deployment or WPA handshake capture.",
+                                Confidence = 0.85, Tier = DetectionTier.Tier1Behavioral,
+                                AuthorizedResponse = ResponseAction.LogOnly,
+                                ProcessName = "SYSTEM", ProcessId = 0,
+                                Metadata = new Dictionary<string, string>
+                                {
+                                    ["SSID"] = _baselineSsid ?? "",
+                                    ["DisconnectCount"] = _disconnectHistory.Count.ToString()
+                                }
+                            });
+                            _disconnectHistory.Clear(); // Reset after alert
+                        }
                     }
-                    catch { }
+
+                    // === Check 2: BSSID change on same SSID (evil twin) ===
+                    if (current.ssid != null && current.bssid != null &&
+                        current.ssid == _baselineSsid && _baselineBssid != null &&
+                        current.bssid != _baselineBssid)
+                    {
+                        await _detectionEngine.EmitAsync(new DetectionEvent
+                        {
+                            RuleName = "WiFi Security: BSSID Changed (Possible Evil Twin)",
+                            Evidence = $"BSSID changed from {_baselineBssid} to {current.bssid} while SSID remains '{current.ssid}'",
+                            Reasoning = "The access point's hardware address (BSSID) changed while connected to the same SSID. " +
+                                        "This can indicate an evil twin attack where the attacker creates a fake AP with the same name, " +
+                                        "or a legitimate roaming event between APs. Correlate with deauth events.",
+                            Confidence = 0.60, Tier = DetectionTier.Tier2Indicator,
+                            AuthorizedResponse = ResponseAction.LogOnly,
+                            ProcessName = "SYSTEM", ProcessId = 0,
+                            Metadata = new Dictionary<string, string>
+                            {
+                                ["SSID"] = current.ssid,
+                                ["OldBSSID"] = _baselineBssid,
+                                ["NewBSSID"] = current.bssid
+                            }
+                        });
+                        _baselineBssid = current.bssid;
+                    }
+
+                    // === Check 3: Encryption downgrade ===
+                    if (current.ssid != null && current.auth != null)
+                    {
+                        bool isInsecure = current.auth.Contains("Open", StringComparison.OrdinalIgnoreCase) ||
+                                          current.auth.Contains("WEP", StringComparison.OrdinalIgnoreCase);
+                        if (isInsecure && !_alertedProfiles.Contains(current.ssid))
+                        {
+                            _alertedProfiles.Add(current.ssid);
+                            await _detectionEngine.EmitAsync(new DetectionEvent
+                            {
+                                RuleName = "WiFi Security: Insecure/Open Network Connected",
+                                Evidence = $"Connected to '{current.ssid}' with authentication: {current.auth}",
+                                Reasoning = "System is connected to a Wi-Fi network with weak or no encryption. " +
+                                            "Open and WEP networks allow trivial traffic interception. If this was previously " +
+                                            "a WPA2 network, it may indicate an encryption downgrade attack.",
+                                Confidence = 0.55, Tier = DetectionTier.Tier2Indicator,
+                                AuthorizedResponse = ResponseAction.LogOnly,
+                                ProcessName = "SYSTEM", ProcessId = 0
+                            });
+                        }
+                    }
+
+                    // === Check 4: Public network profile (registry-based, original check) ===
+                    CheckPublicNetworkProfiles();
+
+                    // Update baseline
+                    if (current.ssid != null)
+                    {
+                        _baselineSsid = current.ssid;
+                        if (current.bssid != null) _baselineBssid = current.bssid;
+                    }
                 }
                 catch (OperationCanceledException) { break; }
                 catch (Exception ex) { _logger.LogDebug(ex, "[WifiSecurityMonitor] Error"); }
             }
+        }
+
+        private void CheckPublicNetworkProfiles()
+        {
+            try
+            {
+                using var key = Registry.LocalMachine.OpenSubKey(
+                    @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\NetworkList\Profiles");
+                if (key == null) return;
+
+                foreach (var profileName in key.GetSubKeyNames())
+                {
+                    try
+                    {
+                        using var profile = key.OpenSubKey(profileName);
+                        if (profile == null) continue;
+
+                        var name = profile.GetValue("ProfileName")?.ToString();
+                        var category = profile.GetValue("Category");
+
+                        if (category is int cat && cat == 0 && !string.IsNullOrEmpty(name))
+                        {
+                            if (_alertedProfiles.Contains(name)) continue;
+                            _alertedProfiles.Add(name);
+
+                            _ = _detectionEngine.EmitAsync(new DetectionEvent
+                            {
+                                RuleName = "WiFi Security: Public/Unsecured Network Connected",
+                                Evidence = $"Connected to public network profile: '{name}'",
+                                Reasoning = "System is connected to a network categorized as Public, which may lack encryption and be vulnerable to traffic interception.",
+                                Confidence = 0.45, Tier = DetectionTier.Tier2Indicator,
+                                ProcessName = "SYSTEM", ProcessId = 0
+                            });
+                        }
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+        }
+
+        /// <summary>
+        /// Gets current Wi-Fi state from the WLAN interface registry.
+        /// Uses the Windows WLAN AutoConfig service state stored in registry.
+        /// </summary>
+        private static (string? ssid, string? bssid, string? auth) GetCurrentWifiState()
+        {
+            try
+            {
+                // Read current wireless connection from the Wlansvc Interfaces registry
+                using var key = Registry.LocalMachine.OpenSubKey(
+                    @"SYSTEM\CurrentControlSet\Services\Wlansvc\Parameters\Interfaces");
+                if (key == null) return (null, null, null);
+
+                foreach (var ifGuid in key.GetSubKeyNames())
+                {
+                    using var ifKey = key.OpenSubKey(ifGuid);
+                    if (ifKey == null) continue;
+
+                    // CurrentConnection subkey has SSID and BSSID
+                    using var connKey = ifKey.OpenSubKey("CurrentConnection");
+                    if (connKey == null) continue;
+
+                    var ssidBytes = connKey.GetValue("SSID") as byte[];
+                    var bssidBytes = connKey.GetValue("BSSID") as byte[];
+                    var authMode = connKey.GetValue("AuthMode")?.ToString();
+
+                    string? ssid = ssidBytes != null
+                        ? System.Text.Encoding.UTF8.GetString(ssidBytes).TrimEnd('\0')
+                        : null;
+                    string? bssid = bssidBytes != null && bssidBytes.Length >= 6
+                        ? BitConverter.ToString(bssidBytes, 0, 6)
+                        : null;
+
+                    if (!string.IsNullOrEmpty(ssid))
+                        return (ssid, bssid, authMode);
+                }
+            }
+            catch { }
+
+            // Fallback: check NetworkList for connected interface info
+            try
+            {
+                foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
+                {
+                    if (ni.NetworkInterfaceType == NetworkInterfaceType.Wireless80211 &&
+                        ni.OperationalStatus == OperationalStatus.Up)
+                    {
+                        return (ni.Name, null, null); // At least we know we're connected to Wi-Fi
+                    }
+                }
+            }
+            catch { }
+
+            return (null, null, null);
         }
     }
 
@@ -1970,24 +2579,60 @@ namespace WindowsSentinel.Core
     {
         private readonly DetectionEngine _detectionEngine;
         private readonly ILogger<WorkFoldersExfilMonitor> _logger;
+        private long _baselineFileCount;
 
         public WorkFoldersExfilMonitor(DetectionEngine de, ILogger<WorkFoldersExfilMonitor> l) { _detectionEngine = de; _logger = l; }
 
         protected override async Task ExecuteAsync(CancellationToken ct)
         {
             _logger.LogInformation("[WorkFoldersExfilMonitor] Started");
+            var workFolders = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Work Folders");
+
+            // Baseline file count
+            if (Directory.Exists(workFolders))
+            {
+                try { _baselineFileCount = Directory.EnumerateFiles(workFolders, "*", SearchOption.AllDirectories).LongCount(); }
+                catch { _baselineFileCount = 0; }
+            }
 
             while (!ct.IsCancellationRequested)
             {
                 try
                 {
                     await Task.Delay(30000, ct);
-                    // Check if Work Folders sync is active and copying large volumes
-                    var workFolders = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Work Folders");
-                    if (Directory.Exists(workFolders))
+                    if (!Directory.Exists(workFolders)) continue;
+
+                    long currentCount = 0;
+                    try { currentCount = Directory.EnumerateFiles(workFolders, "*", SearchOption.AllDirectories).LongCount(); }
+                    catch { continue; }
+
+                    // If file count suddenly drops by 50+ files, possible bulk exfiltration/deletion
+                    if (_baselineFileCount > 50 && currentCount < _baselineFileCount - 50)
                     {
-                        _logger.LogDebug("[WorkFoldersExfilMonitor] Work Folders directory exists, monitoring sync activity");
+                        await _detectionEngine.EmitAsync(new DetectionEvent
+                        {
+                            RuleName = "Data Exfiltration: Work Folders Mass File Removal",
+                            Evidence = $"Work Folders file count dropped from {_baselineFileCount} to {currentCount} ({_baselineFileCount - currentCount} files removed)",
+                            Reasoning = "A large number of files were removed from the Work Folders sync directory in a short period, which may indicate data exfiltration via sync or ransomware activity.",
+                            Confidence = 0.70, Tier = DetectionTier.Tier1Behavioral,
+                            AuthorizedResponse = ResponseAction.LogOnly,
+                            ProcessName = "SYSTEM", ProcessId = 0
+                        });
                     }
+                    // If file count increases dramatically (100+ new files added quickly) — staging for sync exfil
+                    else if (currentCount > _baselineFileCount + 100)
+                    {
+                        await _detectionEngine.EmitAsync(new DetectionEvent
+                        {
+                            RuleName = "Data Exfiltration: Work Folders Mass File Addition",
+                            Evidence = $"Work Folders file count increased from {_baselineFileCount} to {currentCount} ({currentCount - _baselineFileCount} files added)",
+                            Reasoning = "A large number of files were rapidly added to the Work Folders sync directory, which may indicate data staging for cloud exfiltration.",
+                            Confidence = 0.60, Tier = DetectionTier.Tier2Indicator,
+                            ProcessName = "SYSTEM", ProcessId = 0
+                        });
+                    }
+
+                    _baselineFileCount = currentCount;
                 }
                 catch (OperationCanceledException) { break; }
                 catch (Exception ex) { _logger.LogDebug(ex, "[WorkFoldersExfilMonitor] Error"); }
@@ -2002,6 +2647,28 @@ namespace WindowsSentinel.Core
     {
         private readonly DetectionEngine _detectionEngine;
         private readonly ILogger<AdsDataStagingMonitor> _logger;
+        private readonly HashSet<string> _alertedFiles = new(StringComparer.OrdinalIgnoreCase);
+
+        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        private static extern IntPtr FindFirstStreamW(string lpFileName, int infoLevel, out WIN32_FIND_STREAM_DATA lpFindStreamData, int dwFlags);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool FindNextStreamW(IntPtr hFindStream, out WIN32_FIND_STREAM_DATA lpFindStreamData);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool FindClose(IntPtr hFindFile);
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        private struct WIN32_FIND_STREAM_DATA
+        {
+            public long StreamSize;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 296)]
+            public string cStreamName;
+        }
+
+        private static readonly IntPtr INVALID_HANDLE_VALUE = new(-1);
 
         public AdsDataStagingMonitor(DetectionEngine de, ILogger<AdsDataStagingMonitor> l) { _detectionEngine = de; _logger = l; }
 
@@ -2014,24 +2681,74 @@ namespace WindowsSentinel.Core
                 try
                 {
                     await Task.Delay(30000, ct);
-                    // Scan temp + downloads for files with ADS streams
+                    // Scan temp + downloads for files with suspicious ADS streams
                     var tempDir = Path.GetTempPath();
-                    if (Directory.Exists(tempDir))
+                    var downloadsDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
+
+                    foreach (var dir in new[] { tempDir, downloadsDir })
                     {
-                        foreach (var file in Directory.EnumerateFiles(tempDir, "*.*", SearchOption.TopDirectoryOnly))
+                        if (!Directory.Exists(dir)) continue;
+                        try
                         {
-                            try
+                            foreach (var file in Directory.EnumerateFiles(dir, "*.*", SearchOption.TopDirectoryOnly))
                             {
-                                // Check for Zone.Identifier (normal) vs other ADS streams
-                                // Full implementation uses FindFirstStreamW / FindNextStreamW
+                                if (_alertedFiles.Contains(file)) continue;
+                                try
+                                {
+                                    var streams = GetAlternateDataStreams(file);
+                                    // Zone.Identifier is normal (Mark of the Web). Others are suspicious.
+                                    foreach (var stream in streams)
+                                    {
+                                        if (stream.Name.Contains("Zone.Identifier", StringComparison.OrdinalIgnoreCase)) continue;
+                                        if (stream.Name == "::$DATA") continue; // Primary data stream
+
+                                        if (stream.Size > 1024) // Only flag ADS > 1KB (payload-sized)
+                                        {
+                                            _alertedFiles.Add(file);
+                                            await _detectionEngine.EmitAsync(new DetectionEvent
+                                            {
+                                                RuleName = "ADS Staging: Hidden Data in Alternate Data Stream",
+                                                Evidence = $"File '{file}' has a suspicious ADS '{stream.Name}' ({stream.Size} bytes)",
+                                                Reasoning = "A file in a user-writable directory has a non-standard Alternate Data Stream larger than 1KB. ADS is used to hide payloads, exfiltration data, or persistence mechanisms from normal file listings.",
+                                                Confidence = 0.65, Tier = DetectionTier.Tier2Indicator,
+                                                ProcessName = "SYSTEM", ProcessId = 0
+                                            });
+                                            break;
+                                        }
+                                    }
+                                }
+                                catch { }
                             }
-                            catch { }
                         }
+                        catch { }
                     }
+
+                    // Limit alertedFiles growth
+                    if (_alertedFiles.Count > 500) _alertedFiles.Clear();
                 }
                 catch (OperationCanceledException) { break; }
                 catch (Exception ex) { _logger.LogDebug(ex, "[AdsDataStagingMonitor] Error"); }
             }
+        }
+
+        private static List<(string Name, long Size)> GetAlternateDataStreams(string filePath)
+        {
+            var streams = new List<(string, long)>();
+            var handle = FindFirstStreamW(filePath, 0, out var data, 0);
+            if (handle == INVALID_HANDLE_VALUE) return streams;
+
+            try
+            {
+                do
+                {
+                    streams.Add((data.cStreamName, data.StreamSize));
+                } while (FindNextStreamW(handle, out data));
+            }
+            finally
+            {
+                FindClose(handle);
+            }
+            return streams;
         }
     }
 
@@ -2047,6 +2764,19 @@ namespace WindowsSentinel.Core
         private readonly ConcurrentDictionary<string, NetworkDevice> _knownDevices = new(StringComparer.OrdinalIgnoreCase);
         private readonly ConcurrentDictionary<string, DateTime> _blockedIps = new(StringComparer.OrdinalIgnoreCase);
         private readonly HashSet<string> _trustedIps = new(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// Returns true if the given IP has been identified and blocked as a phantom/rogue device.
+        /// Used by GhostProcessMonitor to escalate ghost processes connecting to blocked devices
+        /// from NetworkIsolate to KillProcessTree.
+        /// </summary>
+        public bool IsBlockedDevice(string ip) => _blockedIps.ContainsKey(ip);
+
+        /// <summary>
+        /// Returns true if the given IP belongs to a device that was detected after startup
+        /// (regardless of whether it was blocked). Used for correlation.
+        /// </summary>
+        public bool IsPhantomDevice(string ip) => _knownDevices.Values.Any(d => d.Ip == ip) && !_trustedIps.Contains(ip);
 
         private static readonly int[] SuspiciousPorts = { 8008, 8009, 8443, 5555, 5353, 9222, 2323, 4443 };
 
@@ -2112,8 +2842,7 @@ namespace WindowsSentinel.Core
 
                             if (suspiciousService != null)
                             {
-                                // Only promote confidence to 0.90 (which triggers Active Response blocking)
-                                // for high-risk remote access/debugging ports (ADB, Telnet, DevTools, Pharos)
+                                // High-risk ports that always warrant blocking
                                 bool isHighRisk = suspiciousService.Contains("ADB", StringComparison.OrdinalIgnoreCase) || 
                                                   suspiciousService.Contains("Telnet", StringComparison.OrdinalIgnoreCase) || 
                                                   suspiciousService.Contains("DevTools", StringComparison.OrdinalIgnoreCase) || 
@@ -2123,6 +2852,22 @@ namespace WindowsSentinel.Core
                                 {
                                     confidence = 0.90;
                                 }
+
+                                // Cast ports (8008/8009) on a new device: check if any ghost/empty-name
+                                // process is actively connecting to this device IP. If yes, this isn't a
+                                // Chromecast — it's a C2 relay masquerading as one (PlugX technique).
+                                // If no ghost connection, treat as normal consumer device (log only).
+                                if (!isHighRisk && 
+                                    (suspiciousService.Contains("Cast", StringComparison.OrdinalIgnoreCase) ||
+                                     suspiciousService.Contains("8008", StringComparison.OrdinalIgnoreCase)))
+                                {
+                                    if (HasGhostConnectionTo(dev.Ip))
+                                    {
+                                        confidence = 0.92;
+                                        reasoning += " CORRELATED: An unresolvable/empty-name process has active connections to this device, indicating C2 relay masquerading as a casting device.";
+                                    }
+                                }
+
                                 reasoning += $" Device has an open {suspiciousService} port, which is commonly used for screen casting, debugging, or remote access.";
                             }
 
@@ -2161,21 +2906,12 @@ namespace WindowsSentinel.Core
                 if (_blockedIps.ContainsKey(ip)) return;
                 var ruleName = $"Sentinel-Block-PhantomDevice-{ip.Replace('.', '_')}";
 
-                // 1. Firewall block — prevent all traffic to/from this IP
-                RunHidden("netsh", $"advfirewall firewall add rule name=\"{ruleName}-OUT\" dir=out action=block remoteip={ip} enable=yes");
-                RunHidden("netsh", $"advfirewall firewall add rule name=\"{ruleName}-IN\" dir=in action=block remoteip={ip} enable=yes");
-
-                // 2. Flush ARP entry — force our PC to stop talking to it immediately
-                RunHidden("netsh", $"interface ip delete arpcache");
-                RunHidden("arp", $"-d {ip}");
-
-                // 3. Kill any existing TCP connections to the rogue device
-                KillConnectionsTo(ip);
-
-                // 4. Disable mDNS/SSDP discovery responses to prevent auto-reconnection
-                //    (Edge/Chrome auto-discover Cast devices via mDNS on 224.0.0.251:5353)
-                RunHidden("netsh", $"advfirewall firewall add rule name=\"{ruleName}-MDNS\" dir=out action=block remoteip=224.0.0.251 remoteport=5353 protocol=udp enable=yes");
-                RunHidden("netsh", $"advfirewall firewall add rule name=\"{ruleName}-SSDP\" dir=out action=block remoteip=239.255.255.250 remoteport=1900 protocol=udp enable=yes");
+                // Use Windows Firewall COM API instead of shelling to netsh
+                AddFirewallRule($"{ruleName}-OUT", ip, 2); // Outbound block
+                AddFirewallRule($"{ruleName}-IN", ip, 1);  // Inbound block
+                // Block mDNS/SSDP discovery to prevent auto-reconnection
+                AddFirewallRule($"{ruleName}-MDNS", "224.0.0.251", 2, protocol: 17, remotePort: 5353);
+                AddFirewallRule($"{ruleName}-SSDP", "239.255.255.250", 2, protocol: 17, remotePort: 1900);
 
                 _blockedIps[ip] = DateTime.UtcNow;
 
@@ -2183,11 +2919,11 @@ namespace WindowsSentinel.Core
                 {
                     ProcessId = 0,
                     ProcessName = "PhantomDeviceMonitor",
-                    ActionTaken = "FIREWALL_BLOCK+ARP_FLUSH+CONN_KILL+DISCOVERY_BLOCK",
+                    ActionTaken = "FIREWALL_BLOCK+DISCOVERY_BLOCK",
                     Reason = $"Blocked phantom device IP={ip} MAC={mac} Manufacturer={manufacturer} SuspiciousPort={suspiciousService ?? "none"}"
                 });
 
-                _logger.LogWarning("[PhantomDeviceMonitor] BLOCKED+ISOLATED device IP={Ip} MAC={Mac} Manufacturer={Mfg}", ip, mac, manufacturer);
+                _logger.LogWarning("[PhantomDeviceMonitor] BLOCKED device IP={Ip} MAC={Mac} Manufacturer={Mfg}", ip, mac, manufacturer);
             }
             catch (Exception ex)
             {
@@ -2195,25 +2931,48 @@ namespace WindowsSentinel.Core
             }
         }
 
-        private static void KillConnectionsTo(string ip)
+        private static void AddFirewallRule(string name, string remoteIp, int direction, int protocol = 256, int remotePort = 0)
         {
-            // Kill all TCP connections to the rogue device by finding and terminating
-            // the owning processes' connections via netstat + established filter
             try
             {
-                var psi = new ProcessStartInfo("powershell", $"-NoProfile -Command \"Get-NetTCPConnection -RemoteAddress '{ip}' -ErrorAction SilentlyContinue | ForEach-Object {{ $_.OwningProcess }} | Sort-Object -Unique | ForEach-Object {{ Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }}\"")
-                { CreateNoWindow = true, UseShellExecute = false };
-                Process.Start(psi)?.WaitForExit(10000);
+                var policyType = Type.GetTypeFromProgID("HNetCfg.FwPolicy2");
+                if (policyType == null) return;
+                dynamic? policy = Activator.CreateInstance(policyType);
+                if (policy == null) return;
+
+                var ruleType = Type.GetTypeFromProgID("HNetCfg.FWRule");
+                if (ruleType == null) return;
+
+                dynamic? rule = Activator.CreateInstance(ruleType);
+                if (rule == null) return;
+
+                rule.Name = name;
+                rule.Direction = direction;
+                rule.Action = 0; // Block
+                rule.RemoteAddresses = remoteIp;
+                rule.Enabled = true;
+                rule.Profiles = 0x7FFFFFFF; // All profiles
+
+                if (protocol != 256) // 256 = Any
+                {
+                    rule.Protocol = protocol; // 17 = UDP, 6 = TCP
+                    if (remotePort > 0) rule.RemotePorts = remotePort.ToString();
+                }
+
+                policy.Rules.Add(rule);
             }
             catch { }
         }
 
-        private static void RunHidden(string exe, string args)
+        private static void RemoveFirewallRule(string name)
         {
             try
             {
-                Process.Start(new ProcessStartInfo(exe, args)
-                { CreateNoWindow = true, UseShellExecute = false })?.WaitForExit(5000);
+                var policyType = Type.GetTypeFromProgID("HNetCfg.FwPolicy2");
+                if (policyType == null) return;
+                dynamic? policy = Activator.CreateInstance(policyType);
+                if (policy == null) return;
+                policy.Rules.Remove(name);
             }
             catch { }
         }
@@ -2229,10 +2988,10 @@ namespace WindowsSentinel.Core
                     try
                     {
                         var ruleName = $"Sentinel-Block-PhantomDevice-{kvp.Key.Replace('.', '_')}";
-                        RunHidden("netsh", $"advfirewall firewall delete rule name=\"{ruleName}-OUT\"");
-                        RunHidden("netsh", $"advfirewall firewall delete rule name=\"{ruleName}-IN\"");
-                        RunHidden("netsh", $"advfirewall firewall delete rule name=\"{ruleName}-MDNS\"");
-                        RunHidden("netsh", $"advfirewall firewall delete rule name=\"{ruleName}-SSDP\"");
+                        RemoveFirewallRule($"{ruleName}-OUT");
+                        RemoveFirewallRule($"{ruleName}-IN");
+                        RemoveFirewallRule($"{ruleName}-MDNS");
+                        RemoveFirewallRule($"{ruleName}-SSDP");
                         toRemove.Add(kvp.Key);
                         _logger.LogInformation("[PhantomDeviceMonitor] Removed block for departed device {Ip}", kvp.Key);
                     }
@@ -2338,6 +3097,64 @@ namespace WindowsSentinel.Core
                     yield return ua.Address.ToString();
             }
         }
+
+        /// <summary>
+        /// Checks if any unresolvable/empty-name process has active TCP connections to the given IP.
+        /// This correlates phantom device detection with ghost process behavior — if a process we
+        /// can't identify is talking to the new device, it's likely C2, not a Chromecast.
+        /// </summary>
+        private static bool HasGhostConnectionTo(string targetIp)
+        {
+            try
+            {
+                int size = 0;
+                var ret = GetExtendedTcpTable(IntPtr.Zero, ref size, true, 2, 5 /* TCP_TABLE_OWNER_PID_ALL */, 0);
+                if (ret != 122) return false;
+
+                var buffer = Marshal.AllocHGlobal(size);
+                try
+                {
+                    ret = GetExtendedTcpTable(buffer, ref size, true, 2, 5, 0);
+                    if (ret != 0) return false;
+
+                    int numEntries = Marshal.ReadInt32(buffer);
+                    int structSize = 24; // sizeof MIB_TCPROW_OWNER_PID (6 uint = 24 bytes)
+                    int myPid = Environment.ProcessId;
+
+                    for (int i = 0; i < numEntries; i++)
+                    {
+                        var rowPtr = IntPtr.Add(buffer, 4 + i * structSize);
+                        uint state = (uint)Marshal.ReadInt32(rowPtr, 0);
+                        uint remoteAddr = (uint)Marshal.ReadInt32(rowPtr, 12);
+                        uint owningPid = (uint)Marshal.ReadInt32(rowPtr, 20);
+
+                        if (state != 5) continue; // Established only
+                        if (owningPid <= 4 || owningPid == myPid) continue;
+
+                        var remoteIp = new IPAddress(BitConverter.GetBytes(remoteAddr)).ToString();
+                        if (!remoteIp.Equals(targetIp, StringComparison.Ordinal)) continue;
+
+                        // Found a connection to the target IP — check if the owning process is resolvable
+                        try
+                        {
+                            using var proc = Process.GetProcessById((int)owningPid);
+                            var name = proc.ProcessName;
+                            if (string.IsNullOrEmpty(name)) return true; // Empty name = ghost
+                        }
+                        catch (ArgumentException) { return true; } // Process doesn't exist = ghost
+                        catch (InvalidOperationException) { return true; }
+                        catch { }
+                    }
+                }
+                finally { Marshal.FreeHGlobal(buffer); }
+            }
+            catch { }
+            return false;
+        }
+
+        [DllImport("iphlpapi.dll", SetLastError = true)]
+        private static extern uint GetExtendedTcpTable(IntPtr pTcpTable, ref int pdwSize,
+            bool bOrder, int ulAf, int tableClass, uint reserved);
 
         [StructLayout(LayoutKind.Sequential)]
         private struct MIB_IPNETROW

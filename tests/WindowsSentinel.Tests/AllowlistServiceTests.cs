@@ -31,17 +31,12 @@ namespace WindowsSentinel.Tests
         }
 
         [Fact]
-        public void ShouldSuppress_ReturnsTrue_ForGamingProcess()
+        public void ShouldSuppress_ReturnsFalse_ForGamingProcess_WithoutAllowlist()
         {
             var svc = CreateService();
-            Assert.True(svc.ShouldSuppress("steam", null, "UnsignedBinaryRule"));
-        }
-
-        [Fact]
-        public void ShouldSuppress_ReturnsTrue_ForGamingProcess_AntiCheat()
-        {
-            var svc = CreateService();
-            Assert.True(svc.ShouldSuppress("EasyAntiCheat", null, "SomeRule"));
+            // Gaming processes get NO special treatment — only user allowlist matters
+            Assert.False(svc.ShouldSuppress("steam", @"D:\Steam\steam.exe", "UnsignedBinaryRule"));
+            Assert.False(svc.ShouldSuppress("EasyAntiCheat", @"D:\Games\EasyAntiCheat.exe", "SomeRule"));
         }
 
         [Fact]
@@ -61,33 +56,18 @@ namespace WindowsSentinel.Tests
             Assert.Equal(0.0, reduction);
         }
 
-
         [Fact]
-        public void GetConfidenceReduction_ReducesForDevelopmentProcess()
+        public void GetConfidenceReduction_OnlyReducesForUserAllowlisted()
         {
             var svc = CreateService();
+            // Not allowlisted — no reduction
             double reduction = svc.GetConfidenceReduction("dotnet", null, null, "UnsignedBinaryRule");
-            Assert.True(reduction >= 0.2);
-        }
+            Assert.Equal(0.0, reduction);
 
-        [Fact]
-        public void GetConfidenceReduction_ReducesForTrustedPath()
-        {
-            var svc = CreateService();
-            double reduction = svc.GetConfidenceReduction("app.exe",
-                @"C:\Program Files\MyApp\app.exe", null, "SomeRule");
-            Assert.True(reduction >= 0.1);
-        }
-
-        [Fact]
-        public void GetConfidenceReduction_CapsAt50Percent()
-        {
-            var svc = CreateService();
-            svc.AddToUserAllowlist("dotnet", @"C:\Program Files\dotnet\dotnet.exe", "User trust");
-            // dev process + trusted path + user allowlist = 0.2 + 0.1 + 0.4 = 0.7, capped at 0.5
-            double reduction = svc.GetConfidenceReduction("dotnet",
-                @"C:\Program Files\dotnet\dotnet.exe", null, "SomeRule");
-            Assert.Equal(0.5, reduction);
+            // User-allowlisted — gets reduction
+            svc.AddToUserAllowlist("dotnet", null, "Dev tool");
+            reduction = svc.GetConfidenceReduction("dotnet", null, null, "UnsignedBinaryRule");
+            Assert.Equal(0.3, reduction);
         }
 
         [Fact]
@@ -109,16 +89,6 @@ namespace WindowsSentinel.Tests
             Assert.True(svc.IsDevelopmentProcess("cargo"));
             Assert.False(svc.IsDevelopmentProcess("malware"));
         }
-
-        [Fact]
-        public void IsGamingProcess_Recognizes_Games()
-        {
-            var svc = CreateService();
-            Assert.True(svc.IsGamingProcess("steam"));
-            Assert.True(svc.IsGamingProcess("EpicGamesLauncher"));
-            Assert.False(svc.IsGamingProcess("malware"));
-        }
-
 
         // ── User allowlist ──────────────────────────────────────────────────
 
@@ -152,29 +122,16 @@ namespace WindowsSentinel.Tests
         }
 
         [Fact]
-        public void IsGamingPath_Recognizes_GamingPaths()
+        public void ShouldSuppress_NoBuiltInExemptions_ForBeaconing()
         {
             var svc = CreateService();
-            Assert.True(svc.IsGamingPath(@"D:\SteamLibrary\steamapps\common\game.exe"));
-            Assert.True(svc.IsGamingPath(@"C:\Riot Games\League of Legends\game.exe"));
-            Assert.True(svc.IsGamingPath(@"C:\Program Files (x86)\Epic Games\Launcher.exe"));
-            Assert.True(svc.IsGamingPath(@"D:\games\lotroclient.exe"));
-            Assert.False(svc.IsGamingPath(@"C:\Windows\System32\cmd.exe"));
-        }
-
-        [Fact]
-        public void ShouldSuppress_AllowsSuppressingBeaconing_ForGamingProcess()
-        {
-            var svc = CreateService();
-            // Typically beaconing is a President's Law rule, but we added an exception to allow suppression for gaming processes
-            Assert.True(svc.ShouldSuppress("steam", null, "C2 Beaconing Behavior (Statistical)"));
-        }
-
-        [Fact]
-        public void ShouldSuppress_AllowsSuppressingBeaconing_ForGamingPath()
-        {
-            var svc = CreateService();
-            Assert.True(svc.ShouldSuppress("lotroclient", @"D:\StandingStoneGames\LOTRO\lotroclient.exe", "C2 Beaconing Behavior (Statistical)"));
+            // No built-in gaming/path exemptions exist anymore
+            Assert.False(svc.ShouldSuppress("steam", @"D:\Steam\steam.exe", "C2 Beaconing Behavior (Statistical)"));
+            // Even user allowlist cannot suppress President's Law rules (beaconing is one)
+            svc.AddToUserAllowlist("steam", @"D:\Steam\steam.exe", "Game launcher");
+            Assert.False(svc.ShouldSuppress("steam", @"D:\Steam\steam.exe", "C2 Beaconing Behavior (Statistical)"));
+            // But user allowlist CAN suppress non-President's-Law rules
+            Assert.True(svc.ShouldSuppress("steam", @"D:\Steam\steam.exe", "UnsignedBinaryRule"));
         }
     }
 }

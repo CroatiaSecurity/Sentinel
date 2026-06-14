@@ -1,12 +1,12 @@
 # Windows Sentinel — Design Document
 
-**Version: 6.9.0**
+**Version: 0.8.1**
 
 ---
 
 ## Platform
 
-- .NET 8, Windows only (`net8.0-windows`)
+- .NET 10, Windows only (`net10.0-windows`)
 - Self-contained single-file publish for distribution
 - Targets x64 and arm64
 
@@ -87,6 +87,9 @@ The fusion layer is PASSIVE â€” it never blocks, kills, or modifies telemet
 | `FirewallIntegrityMonitor` | **3.6.0** Polls firewall profiles via netsh advfirewall. Detects profile disabled, bulk rules, service stopped. Scans every 30s | No |
 | `ScheduledTaskMonitor` | **3.6.0** Polls scheduled tasks via schtasks. Detects malicious task creation with suspicious command/path analysis. Scans every 30s | No |
 | `WindowsUpdateIntegrityMonitor` | **3.6.0** Monitors WU/BITS services and auto-update registry. Detects update suppression, Defender staleness. Checks every 2min | No |
+| `GhostProcessMonitor` | **0.7.1** Detects PIDs with active outbound TCP connections whose process name is empty or unresolvable. Catches PlugX/ShadowPad DLL sideloading blind spot where RAT connections persist under hollowed PIDs. Network-isolates on masquerade ports (5228, 8009, 4443). Scans every 15s | No |
+| `ShellWatchdog` | **0.7.1** Monitors explorer.exe responsiveness via `SendMessageTimeout`. Auto-restarts shell on death. Detects cross-process hangs (AppHangXProcB1) and repeated crashes indicating active shell attack. Scans every 5s | No |
+| `CriticalServiceGuard` | **0.7.1** Monitors 15 critical Windows services for repeated crash patterns via SCM event log polling (Event 7034/7031). Detects exploitation indicators (STATUS_STACK_BUFFER_OVERRUN). Monitors BSOD-critical processes for debugger kill switches. Scans every 10s | No |
 
 ### Engine
 
@@ -375,6 +378,9 @@ Composite detections are emitted as Tier1 `DetectionEvent`s directly into the de
 | `FirewallIntegrityMonitor` | Windows Firewall integrity via netsh advfirewall. Detects profile disabled, bulk inbound rule additions, firewall service stopped. |
 | `ScheduledTaskMonitor` | Scheduled task persistence detection via schtasks. Detects malicious task creation with multi-indicator analysis (suspicious paths, encoded commands, SYSTEM from user paths, script execution). |
 | `WindowsUpdateIntegrityMonitor` | Update service integrity monitoring. Detects WU/BITS service stopped, automatic updates disabled via registry/GPO, Defender definitions stale (>7 days). |
+| `GhostProcessMonitor` | **0.7.1** Detects PIDs with active outbound TCP but empty/unresolvable process names. Covers PlugX/ShadowPad DLL sideloading blind spot. Network-isolates connections to masquerade ports (5228, 8009). Requires 2+ sightings to avoid startup races. |
+| `ShellWatchdog` | **0.7.1** Explorer.exe health monitor. SendMessageTimeout responsiveness check every 5s. Auto-restarts dead shell. Detects AppHangXProcB1 cross-process hangs and repeated crash patterns (active shell attack). |
+| `CriticalServiceGuard` | **0.7.1** Monitors critical Windows services (TokenBroker, Defender, Firewall, EventLog, etc.) for crash storms via SCM events. Detects exploitation patterns (0xC0000409 stack buffer overrun). Monitors BSOD-critical processes for debugger kill switches. |
 
 ## Added in 5.5.0
 

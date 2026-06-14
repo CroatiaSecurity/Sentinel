@@ -9,6 +9,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Win32;
 
 namespace WindowsSentinel.Core
 {
@@ -84,9 +85,16 @@ namespace WindowsSentinel.Core
             // Build baselines before starting watchers
             BuildBaselines();
 
-            StartWatchers();
+            bool wmiAvailable = StartWatchers();
 
-            _logger.LogInformation("[RegistryMonitor] Registry watchers active. Baselines captured.");
+            if (!wmiAvailable)
+            {
+                _logger.LogWarning("[RegistryMonitor] WMI unavailable — falling back to registry polling mode (15s interval)");
+            }
+            else
+            {
+                _logger.LogInformation("[RegistryMonitor] WMI watchers active. Baselines captured.");
+            }
 
             // Periodic CLSID scan (every 30 seconds)
             using var clsidTimer = new System.Timers.Timer(30000);
@@ -101,7 +109,12 @@ namespace WindowsSentinel.Core
             {
                 while (!stoppingToken.IsCancellationRequested)
                 {
-                    await Task.Delay(1000, stoppingToken);
+                    // If WMI failed, poll registry directly as fallback
+                    if (!wmiAvailable)
+                    {
+                        PollRegistryForChanges();
+                    }
+                    await Task.Delay(wmiAvailable ? 5000 : 15000, stoppingToken);
                 }
             }
             catch (OperationCanceledException)
@@ -114,6 +127,63 @@ namespace WindowsSentinel.Core
                 clsidTimer.Stop();
                 _logger.LogInformation("[RegistryMonitor] Stopped.");
             }
+        }
+
+        /// <summary>
+        /// Polling fallback: compare current registry state against baseline.
+        /// Used when WMI is unavailable (debloated/custom Windows builds).
+        /// </summary>
+        private void PollRegistryForChanges()
+        {
+            try
+            {
+                // Check Run keys
+                PollRunKey(Registry.LocalMachine, @"Software\Microsoft\Windows\CurrentVersion\Run", true);
+                PollRunKey(Registry.LocalMachine, @"Software\Microsoft\Windows\CurrentVersion\RunOnce", true);
+                PollRunKey(Registry.CurrentUser, @"Software\Microsoft\Windows\CurrentVersion\Run", false);
+
+                // Check Services
+                PollServicesKey();
+            }
+            catch { }
+        }
+
+        private void PollRunKey(RegistryKey hive, string subPath, bool isHklm)
+        {
+            try
+            {
+                var current = SnapshotRegistryValues(hive, subPath);
+                var baseline = isHklm ? _runHklmBaseline : _runHkcuBaseline;
+
+                foreach (var (name, value) in current)
+                {
+                    if (!baseline.ContainsKey(name))
+                    {
+                        // New entry since baseline
+                        EvaluateAutorunEntry(name, value ?? "", isHklm, subPath);
+                        baseline[name] = value;
+                    }
+                }
+            }
+            catch { }
+        }
+
+        private void PollServicesKey()
+        {
+            try
+            {
+                var current = SnapshotServiceNames();
+                foreach (var (serviceName, imagePath) in current)
+                {
+                    if (!_servicesBaseline.ContainsKey(serviceName))
+                    {
+                        // New service since baseline
+                        EvaluateNewService(serviceName, imagePath ?? "");
+                        _servicesBaseline[serviceName] = imagePath;
+                    }
+                }
+            }
+            catch { }
         }
 
         private void BuildBaselines()
@@ -166,14 +236,16 @@ namespace WindowsSentinel.Core
             return result;
         }
 
-        private void StartWatchers()
+        private bool StartWatchers()
         {
+            int successCount = 0;
             try
             {
                 _runHklmWatcher = CreateRegistryWatcher("HKEY_LOCAL_MACHINE",
                     @"Software\Microsoft\Windows\CurrentVersion\Run");
                 _runHklmWatcher.EventArrived += OnRunKeyChanged;
                 _runHklmWatcher.Start();
+                successCount++;
             }
             catch (Exception ex) { _logger.LogDebug(ex, "[RegistryMonitor] Failed to start HKLM Run watcher"); }
 
@@ -183,6 +255,7 @@ namespace WindowsSentinel.Core
                     @"Software\Microsoft\Windows\CurrentVersion\Run");
                 _runHkcuWatcher.EventArrived += OnRunKeyChanged;
                 _runHkcuWatcher.Start();
+                successCount++;
             }
             catch (Exception ex) { _logger.LogDebug(ex, "[RegistryMonitor] Failed to start HKCU Run watcher"); }
 
@@ -192,6 +265,7 @@ namespace WindowsSentinel.Core
                     @"Software\Microsoft\Windows\CurrentVersion\RunOnce");
                 _runOnceHklmWatcher.EventArrived += OnRunKeyChanged;
                 _runOnceHklmWatcher.Start();
+                successCount++;
             }
             catch (Exception ex) { _logger.LogDebug(ex, "[RegistryMonitor] Failed to start RunOnce watcher"); }
 
@@ -201,6 +275,7 @@ namespace WindowsSentinel.Core
                     @"System\CurrentControlSet\Services");
                 _servicesWatcher.EventArrived += OnServicesChanged;
                 _servicesWatcher.Start();
+                successCount++;
             }
             catch (Exception ex) { _logger.LogDebug(ex, "[RegistryMonitor] Failed to start Services watcher"); }
 
@@ -212,8 +287,11 @@ namespace WindowsSentinel.Core
                 _processWatcher = new ManagementEventWatcher(processQuery);
                 _processWatcher.EventArrived += OnProcessCreated;
                 _processWatcher.Start();
+                successCount++;
             }
             catch (Exception ex) { _logger.LogDebug(ex, "[RegistryMonitor] Failed to start process watcher"); }
+
+            return successCount > 0; // At least one WMI watcher succeeded
         }
 
         private static ManagementEventWatcher CreateRegistryWatcher(string hive, string rootPath)

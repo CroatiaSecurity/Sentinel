@@ -24,6 +24,7 @@ namespace WindowsSentinel.Core
         private readonly TelemetryFusionEngine _fusionEngine;
         private readonly ProcessAncestryCache _ancestryCache;
         private readonly BehavioralBaselineService? _behavioralBaseline;
+        private readonly WmiProcessMonitor? _wmiProcessMonitor;
         private readonly ILogger<EtwProcessMonitor> _logger;
         private CancellationTokenSource? _cts;
         private TraceEventSession? _session;
@@ -34,12 +35,14 @@ namespace WindowsSentinel.Core
             TelemetryFusionEngine fusionEngine,
             ProcessAncestryCache ancestryCache,
             ILogger<EtwProcessMonitor> logger,
-            BehavioralBaselineService? behavioralBaseline = null)
+            BehavioralBaselineService? behavioralBaseline = null,
+            WmiProcessMonitor? wmiProcessMonitor = null)
         {
             _detectionEngine = detectionEngine;
             _fusionEngine = fusionEngine;
             _ancestryCache = ancestryCache;
             _behavioralBaseline = behavioralBaseline;
+            _wmiProcessMonitor = wmiProcessMonitor;
             _logger = logger;
         }
 
@@ -109,6 +112,8 @@ namespace WindowsSentinel.Core
                 };
 
                 _logger.LogInformation("[{Monitor}] ETW session '{Session}' processing events", Name, SessionName);
+                // ETW is live — disable WMI fallback to prevent duplicate telemetry
+                _wmiProcessMonitor?.Disable();
                 _session.Source.Process(); // Blocks until session stops
             }
             catch (UnauthorizedAccessException)
