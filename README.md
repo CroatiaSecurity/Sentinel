@@ -2,7 +2,7 @@
 
 **Userland IDS/EDR for Windows — Behavioral Threat Detection & Automated Response**
 
-> Version: 0.8.1 | Author: [Gorstak](https://gorstak.eu) | License: MIT
+> Version: 0.8.2 | Author: [Gorstak](https://gorstak.eu) | License: MIT
 
 [![Release](https://img.shields.io/github/v/release/CroatiaSecurity/Sentinel?style=flat-square)](https://github.com/CroatiaSecurity/Sentinel/releases/latest)
 [![License](https://img.shields.io/github/license/CroatiaSecurity/Sentinel?style=flat-square)](LICENSE)
@@ -23,7 +23,7 @@ No signatures. No blocklists. No name-based detection. Pure behavioral analysis.
 
 ```powershell
 # Run as Administrator
-.\WindowsSentinelSetup-0.8.1.exe
+.\WindowsSentinelSetup-0.8.2.exe
 ```
 
 Installs a Windows Service (SYSTEM) + user Agent (tray icon). Active response is enabled by default.
@@ -91,6 +91,7 @@ Both communicate through shared detection/response pipeline via the `DetectionEn
 - **No name-based trust** — process names are trivially spoofed. All exemptions require verified install paths
 - **No built-in allowlists** — only user-managed allowlist can suppress (and never for President's Law rules)
 - **President's Law** — LSASS, ransomware, injection, credential theft ALWAYS fire regardless of any allowlist
+- **Authenticode-based trust** — C2 beaconing detector uses WinVerifyTrust (multi-factor: signature + path + diversity + baseline) to demote responses for legitimate signed software. Unforgeable without the publisher's private key
 - **AV-clean** — no CreateRemoteThread, no ReadProcessMemory, no netsh shell-outs. Uses COM APIs and event logs
 - **Graceful degradation** — works on custom/debloated Windows without WMI (falls back to registry polling)
 - **Open source** — attackers can read the code, but behavioral detection can't be bypassed by renaming

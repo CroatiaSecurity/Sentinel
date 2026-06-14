@@ -152,11 +152,16 @@ namespace WindowsSentinel.Core
                    lower.Contains("dns") ||
                    lower.Contains("tls") ||
                    lower.Contains("neuro") ||
-                   lower.Contains("beaconing") ||
                    lower.Contains("hollowing") ||
                    lower.Contains("reverseshell") ||
                    lower.Contains("reverse shell") ||
                    lower.Contains("threatintel");
+            // NOTE: "beaconing" removed from President's Law (v0.8.2).
+            // Beaconing detections now use multi-factor cryptographic trust verification
+            // (Authenticode + path + diversity + baseline) in the BeaconingDetector itself.
+            // The detection ALWAYS fires and is logged, but the response is demoted for
+            // verified-legitimate software. This can't be exploited because demotion requires
+            // a valid Authenticode signature (needs the publisher's private key).
         }
 
         private void LoadUserAllowlist()

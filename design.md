@@ -1,6 +1,6 @@
 # Windows Sentinel — Design Document
 
-**Version: 0.8.1**
+**Version: 0.8.2**
 
 ---
 
@@ -102,7 +102,7 @@ The fusion layer is PASSIVE â€” it never blocks, kills, or modifies telemet
 | `MemoryBehaviorAnalyzer` | **1.0.0** Scans process memory regions every 45s for RWX, unbacked executables, and shellcode prologues. |
 | `ProcessAncestryCache` | `CreateToolhelp32Snapshot` refreshed every 2s (WMI/CIM fallback for Server Core/IoT). Provides parent name resolution for all monitors and rules. |
 | `BehavioralCorrelationEngine` | Time-windowed (120s) multi-signal correlator. Fires composite `DetectionEvent`s via `IDetectionEngine.EmitAsync`. |
-| `BeaconingDetector` | Statistical C2 beacon detection. Tracks inter-connection intervals per `(ProcessId, RemoteAddress, Port)`. Fires when CV < 0.40 with 5+ observations. |
+| `BeaconingDetector` | Statistical C2 beacon detection. Tracks inter-connection intervals per `(ProcessId, RemoteAddress, Port)`. Fires when CV < 0.40 with 5+ observations. **v0.8.2:** Multi-factor Authenticode trust verification (WinVerifyTrust + path + diversity + baseline) demotes response for verified-legitimate software. Detection always fires and logs. |
 | `ScoringEngine` | Weighted multi-factor threat scoring with source weights, category base scores, corroboration bonuses. |
 | `DeceptionEngine` | **1.7.0** Pre-kill attacker punishment. Executes hostile tactics (memory flooding, DLL stomping, stack corruption, handle pollution, beacon flooding, protocol confusion, clipboard poisoning, sparse file bombs, symlink loops, polyglot files, corrupted archives, file locking, environment poisoning, honeypot deployment, network honeypot listeners) within 2s budget before ChainTracer kills. |
 

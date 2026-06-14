@@ -68,12 +68,16 @@ namespace WindowsSentinel.Core
                    lower.Contains("dns") ||
                    lower.Contains("tls") ||
                    lower.Contains("neuro") ||
-                   lower.Contains("beaconing") ||
                    lower.Contains("hollowing") ||
                    lower.Contains("reverseshell") ||
                    lower.Contains("reverse shell") ||
                    lower.Contains("threatintel") ||
                    lower.Contains("registry");
+            // NOTE: "beaconing" removed from President's Law (v0.8.2).
+            // The BeaconingDetector now handles response demotion internally using
+            // multi-factor trust (Authenticode + path + diversity + baseline).
+            // Detections always fire and log, but verified-legitimate apps get demoted
+            // response actions directly from the detector.
         }
 
         public async Task HandleAsync(DetectionEvent detection)

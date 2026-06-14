@@ -122,15 +122,17 @@ namespace WindowsSentinel.Tests
         }
 
         [Fact]
-        public void ShouldSuppress_NoBuiltInExemptions_ForBeaconing()
+        public void ShouldSuppress_BeaconingNoLongerPresidentsLaw()
         {
             var svc = CreateService();
-            // No built-in gaming/path exemptions exist anymore
+            // Without user allowlist — not suppressed (no built-in gaming exemptions)
             Assert.False(svc.ShouldSuppress("steam", @"D:\Steam\steam.exe", "C2 Beaconing Behavior (Statistical)"));
-            // Even user allowlist cannot suppress President's Law rules (beaconing is one)
+            // With user allowlist — NOW suppressible since beaconing is no longer President's Law.
+            // The BeaconingDetector itself handles trust verification via Authenticode + multi-factor,
+            // so the allowlist suppression is an additional user-controlled safety valve.
             svc.AddToUserAllowlist("steam", @"D:\Steam\steam.exe", "Game launcher");
-            Assert.False(svc.ShouldSuppress("steam", @"D:\Steam\steam.exe", "C2 Beaconing Behavior (Statistical)"));
-            // But user allowlist CAN suppress non-President's-Law rules
+            Assert.True(svc.ShouldSuppress("steam", @"D:\Steam\steam.exe", "C2 Beaconing Behavior (Statistical)"));
+            // User allowlist CAN suppress non-President's-Law rules
             Assert.True(svc.ShouldSuppress("steam", @"D:\Steam\steam.exe", "UnsignedBinaryRule"));
         }
     }
