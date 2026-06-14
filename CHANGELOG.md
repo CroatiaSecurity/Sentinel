@@ -2,6 +2,35 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [0.8.2] - 2026-06-14
+
+### Fixed — C2 Beaconing False Positive Kill on Legitimate Software
+
+- **`BeaconingDetector` multi-factor Authenticode trust verification** — The previous binary trust model used path-only checks: if a binary wasn't in `Program Files\`, it was killed unconditionally. This caused false-positive kills on Steam, torrent clients (qBittorrent, Deluge), FTP clients (FileZilla, WinSCP), Discord, and any legitimate application with periodic network connections installed outside Program Files. The detector now uses a multi-factor trust scoring system with independently non-forgeable signals:
+  - **Authenticode signature verification** via `WinVerifyTrust` P/Invoke (+3 trust points) — requires the publisher's HSM-protected private key to pass
+  - **Protected install path** (Program Files, System32) (+2 points) — requires admin elevation to write
+  - **Destination diversity** (3+ unique remote endpoints) (+1 point) — increases attacker forensic footprint
+  - **Behavioral baseline established** (+1 point) — requires surviving multiple observation cycles
+  - **FileVerdictAds Safe hash** (+2 points) — HMAC-protected, admin-only writable
+  
+  Response mapping: Score 0–2 → Kill | Score 3–4 → NetworkIsolate | Score 5+ → LogOnly
+  
+  The detection ALWAYS fires and is logged regardless of trust score. Only the response action is demoted. An attacker reading this code gains nothing because they cannot forge a valid Authenticode signature.
+
+- **`BeaconingDetector` destination diversity tracking** — Added per-PID tracking of unique remote endpoints (`IP:Port`). Legitimate software (Steam, torrent clients, game launchers) connects to many different servers simultaneously; C2 beacons typically target one or two. Diversity alone contributes only +1 point, making it useless without a valid code signature.
+
+- **Beaconing removed from President's Law** — The "C2 Beaconing Behavior (Statistical)" rule is no longer classified as a President's Law rule in `AllowlistService`, `AdvancedResponseEngine`, and `ScoringEngine`. This allows the user-managed allowlist to suppress beaconing detections for known-good software. The BeaconingDetector itself handles trust verification internally via Authenticode + multi-factor scoring, making external President's Law enforcement redundant and harmful (it prevented all demotion paths, causing false kills).
+
+### Why This Is Not Exploitable
+
+An attacker reading this source code cannot exploit the trust demotion because:
+1. **Authenticode** requires the publisher's private key (stored in HSMs, not extractable)
+2. **Protected paths** require admin elevation (caught by privilege escalation rules)
+3. **Diversity** requires connecting to 3+ distinct IPs, exponentially increasing forensic surface
+4. **Baseline** requires surviving multiple 30s observation cycles without triggering any other detection
+5. **Even if ALL demotion conditions are met**, the detection still fires and is permanently logged
+6. **Unsafe FileVerdictAds hash** always results in Kill regardless of all other trust signals
+
 ## [0.8.1] - 2026-06-14
 
 ### Fixed — Shell Stability, Detection Accuracy & Notification Reliability

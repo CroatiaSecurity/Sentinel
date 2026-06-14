@@ -77,6 +77,11 @@ namespace WindowsSentinel.Core
         /// <summary>
         /// President's Law rules: high-severity detections that always receive boosted scoring.
         /// These represent the most dangerous behaviors where immediate response is critical.
+        /// 
+        /// NOTE (v0.8.2): C2Beaconing removed from President's Law. The BeaconingDetector now
+        /// handles trust verification internally using Authenticode + multi-factor scoring.
+        /// This prevents false-positive kills on legitimate software (Steam, torrent clients, etc.)
+        /// while remaining unexploitable since demotion requires a valid code signature.
         /// </summary>
         private static bool IsPresidentsLawRule(DetectionEvent detection)
         {
@@ -85,7 +90,6 @@ namespace WindowsSentinel.Core
                 or DetectionCategory.SecurityEvasion
                 or DetectionCategory.Ransomware
                 or DetectionCategory.ProcessInjection
-                or DetectionCategory.C2Beaconing
                 or DetectionCategory.ReverseShell
                 or DetectionCategory.AntiTamper
                 or DetectionCategory.AttackOnUser
