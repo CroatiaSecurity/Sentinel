@@ -601,8 +601,14 @@ namespace WindowsSentinel.Core
     {
         private readonly DetectionEngine _detectionEngine;
         private readonly ILogger<PhantomKeystrokeGuard> _logger;
+        private readonly SentinelConfig _config;
         private System.Threading.Timer? _timer;
         private DateTime _lastAlertTime = DateTime.MinValue;
+
+        private Thread? _hookThread;
+        private IntPtr _hookId = IntPtr.Zero;
+        private LowLevelKeyboardProc? _hookProc;
+        private uint _hookThreadId;
 
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
@@ -619,15 +625,102 @@ namespace WindowsSentinel.Core
         private uint _previousInputTime;
         private int _noInputChangeCount;
 
-        public PhantomKeystrokeGuard(DetectionEngine de, ILogger<PhantomKeystrokeGuard> l)
+        // Hook P/Invokes
+        [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+        private static extern IntPtr SetWindowsHookEx(int idHook, LowLevelKeyboardProc lpfn, IntPtr hMod, uint dwThreadId);
+
+        [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool UnhookWindowsHookEx(IntPtr hhk);
+
+        [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+        private static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+        private static extern IntPtr GetModuleHandle(IntPtr lpModuleName);
+
+        [DllImport("kernel32.dll")]
+        private static extern uint GetCurrentThreadId();
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool PostThreadMessage(uint idThread, uint Msg, IntPtr wParam, IntPtr lParam);
+
+        [DllImport("user32.dll")]
+        private static extern int GetMessage(out MSG lpMsg, IntPtr hWnd, uint wMsgFilterMin, uint wMsgFilterMax);
+
+        [DllImport("user32.dll")]
+        private static extern bool TranslateMessage(ref MSG lpMsg);
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr DispatchMessage(ref MSG lpMsg);
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr GetForegroundWindow();
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+        [DllImport("user32.dll")]
+        private static extern int GetSystemMetrics(int nIndex);
+
+        private delegate IntPtr LowLevelKeyboardProc(int nCode, IntPtr wParam, IntPtr lParam);
+
+        private const int WH_KEYBOARD_LL = 13;
+        private const int WM_QUIT = 0x0012;
+        private const int LLKHF_INJECTED = 0x10;
+        private const int LLKHF_LOWER_IL_INJECTED = 0x02;
+        private const int VK_BACK = 0x08;
+        private const int VK_DELETE = 0x2E;
+        private const int SM_REMOTESESSION = 0x1000;
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct MSG
+        {
+            public IntPtr hwnd;
+            public uint message;
+            public IntPtr wParam;
+            public IntPtr lParam;
+            public uint time;
+            public POINT pt;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct POINT
+        {
+            public int X;
+            public int Y;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct KBDLLHOOKSTRUCT
+        {
+            public uint vkCode;
+            public uint scanCode;
+            public uint flags;
+            public uint time;
+            public IntPtr dwExtraInfo;
+        }
+
+        public PhantomKeystrokeGuard(DetectionEngine de, ILogger<PhantomKeystrokeGuard> l, SentinelConfig config)
         {
             _detectionEngine = de;
             _logger = l;
+            _config = config;
         }
 
         public Task StartAsync(CancellationToken cancellationToken)
         {
             _logger.LogInformation("[PhantomKeystrokeGuard] Started");
+
+            // Start hook message loop thread
+            _hookProc = HookCallback;
+            _hookThread = new Thread(RunHookLoop);
+            _hookThread.SetApartmentState(ApartmentState.STA);
+            _hookThread.IsBackground = true;
+            _hookThread.Start();
+
+            // Run heuristic timer as fallback
             _timer = new System.Threading.Timer(Check, null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
             return Task.CompletedTask;
         }
@@ -635,7 +728,114 @@ namespace WindowsSentinel.Core
         public Task StopAsync(CancellationToken cancellationToken)
         {
             _timer?.Change(Timeout.Infinite, Timeout.Infinite);
+
+            if (_hookId != IntPtr.Zero)
+            {
+                UnhookWindowsHookEx(_hookId);
+                _hookId = IntPtr.Zero;
+            }
+
+            if (_hookThreadId != 0)
+            {
+                PostThreadMessage(_hookThreadId, WM_QUIT, IntPtr.Zero, IntPtr.Zero);
+            }
+
             return Task.CompletedTask;
+        }
+
+        private void RunHookLoop()
+        {
+            _hookThreadId = GetCurrentThreadId();
+            _hookId = SetHook(_hookProc!);
+            if (_hookId == IntPtr.Zero)
+            {
+                _logger.LogError("[PhantomKeystrokeGuard] Failed to install low-level keyboard hook");
+                return;
+            }
+            _logger.LogInformation("[PhantomKeystrokeGuard] Global keyboard hook installed successfully");
+
+            MSG msg;
+            while (GetMessage(out msg, IntPtr.Zero, 0, 0) > 0)
+            {
+                TranslateMessage(ref msg);
+                DispatchMessage(ref msg);
+            }
+        }
+
+        private static IntPtr SetHook(LowLevelKeyboardProc proc)
+        {
+            return SetWindowsHookEx(WH_KEYBOARD_LL, proc, GetModuleHandle(IntPtr.Zero), 0);
+        }
+
+        private IntPtr HookCallback(int nCode, IntPtr wParam, IntPtr lParam)
+        {
+            if (nCode >= 0)
+            {
+                var kb = Marshal.PtrToStructure<KBDLLHOOKSTRUCT>(lParam);
+                bool isInjected = (kb.flags & LLKHF_INJECTED) != 0 || (kb.flags & LLKHF_LOWER_IL_INJECTED) != 0;
+
+                if (isInjected)
+                {
+                    bool isDeletion = kb.vkCode == VK_BACK || kb.vkCode == VK_DELETE;
+                    string keyName = ((System.Windows.Forms.Keys)kb.vkCode).ToString();
+
+                    ReportInjectedKeystroke(kb.vkCode, isDeletion, keyName);
+
+                    if (_config.ActiveResponse && !IsRemoteSession())
+                    {
+                        return (IntPtr)1; // Block software-injected key press
+                    }
+                }
+            }
+            return CallNextHookEx(_hookId, nCode, wParam, lParam);
+        }
+
+        private void ReportInjectedKeystroke(uint vkCode, bool isDeletion, string keyName)
+        {
+            var now = DateTime.UtcNow;
+            if ((now - _lastAlertTime).TotalSeconds < 5) return;
+            _lastAlertTime = now;
+
+            string targetProcName = "Unknown";
+            int targetPid = 0;
+            try
+            {
+                IntPtr fgWnd = GetForegroundWindow();
+                if (fgWnd != IntPtr.Zero)
+                {
+                    GetWindowThreadProcessId(fgWnd, out uint pid);
+                    targetPid = (int)pid;
+                    using var p = Process.GetProcessById(targetPid);
+                    targetProcName = p.ProcessName;
+                }
+            }
+            catch { }
+
+            string threatName = isDeletion ? "Phantom Keystrokes: Key Deletion Prevented" : "Phantom Keystrokes: Software Input Prevented";
+            string evidence = isDeletion 
+                ? $"Blocked software-injected deletion key: {keyName} (VK: 0x{vkCode:X2}) targeting '{targetProcName}' (PID {targetPid}). Keys are prevented from being deleted when typed."
+                : $"Blocked software-injected character insertion key: {keyName} (VK: 0x{vkCode:X2}) targeting '{targetProcName}' (PID {targetPid}).";
+
+            _ = _detectionEngine.EmitAsync(new DetectionEvent
+            {
+                RuleName = threatName,
+                Evidence = evidence,
+                Reasoning = "A software-injected keystroke event was intercepted and blocked by the low-level keyboard hook. " +
+                            (isDeletion 
+                                ? "This prevents background/automated processes from deleting characters typed by the user (input deletion protection)."
+                                : "This prevents background/automated processes from typing phantom commands or injecting text."),
+                Confidence = 0.95,
+                Tier = DetectionTier.Tier1Behavioral,
+                AuthorizedResponse = ResponseAction.LogOnly, // Blocked in-line, no immediate process tree kill required
+                ProcessName = targetProcName,
+                ProcessId = targetPid,
+                SignalType = SignalType.PhantomKeystroke
+            });
+        }
+
+        private static bool IsRemoteSession()
+        {
+            return GetSystemMetrics(SM_REMOTESESSION) != 0;
         }
 
         private async void Check(object? state)
@@ -647,12 +847,8 @@ namespace WindowsSentinel.Core
 
                 var currentTick = (uint)Environment.TickCount;
 
-                // Detect scenario: input events claim to be happening (dwTime advancing)
-                // but when checked rapidly, dwTime stays the same (no real physical input)
-                // while keyboard-heavy processes are running from suspicious paths
                 if (_lastInputTime == info.dwTime && _previousInputTime == _lastInputTime)
                 {
-                    // No physical input change for 2 consecutive checks (10 seconds)
                     _noInputChangeCount++;
                 }
                 else
@@ -663,14 +859,8 @@ namespace WindowsSentinel.Core
                 _previousInputTime = _lastInputTime;
                 _lastInputTime = info.dwTime;
 
-                // If there's been no real physical input for 30+ seconds (6 checks)
-                // but the system is receiving keyboard events (check via active foreground window changes)
-                // that's a potential phantom keystroke scenario
-                // Note: Full implementation with WH_KEYBOARD_LL hook requires STA thread (in Agent)
-                // This SYSTEM-service version uses heuristic timing analysis only
                 if (_noInputChangeCount >= 6)
                 {
-                    // Check if any suspicious automation processes are running
                     foreach (var proc in Process.GetProcesses())
                     {
                         try
@@ -679,7 +869,6 @@ namespace WindowsSentinel.Core
                             string? imagePath = null;
                             try { imagePath = proc.MainModule?.FileName; } catch { }
 
-                            // Look for keystroke injection tools running from suspicious paths
                             if ((name.Contains("sendinput") || name.Contains("autoit") ||
                                  name.Contains("nircmd") || name.Contains("inputsimulator")) &&
                                 !string.IsNullOrEmpty(imagePath) &&
@@ -696,7 +885,8 @@ namespace WindowsSentinel.Core
                                     Reasoning = "A known input automation/injection tool is running from a suspicious path while no physical keyboard input has been detected for an extended period, indicating programmatic keystroke injection.",
                                     Confidence = 0.80, Tier = DetectionTier.Tier1Behavioral,
                                     AuthorizedResponse = ResponseAction.KillProcessTree,
-                                    ProcessName = proc.ProcessName, ProcessId = proc.Id
+                                    ProcessName = proc.ProcessName, ProcessId = proc.Id,
+                                    SignalType = SignalType.PhantomKeystroke
                                 });
                                 break;
                             }
@@ -705,7 +895,7 @@ namespace WindowsSentinel.Core
                         finally { proc.Dispose(); }
                     }
 
-                    _noInputChangeCount = 0; // Reset after check
+                    _noInputChangeCount = 0;
                 }
             }
             catch { }

@@ -1,9 +1,9 @@
 # Sentinel â€” Council of Elders Architecture
 
 **Status:** Architecture spec. Extends, does not replace, `requirements.md`,
-`design.md`, `constraints.md` (all v0.9.0).
+`design.md`, `constraints.md` (all v0.8.3).
 
-**Last updated:** v0.8.1 (June 2026) — ScoringEngine refactored to use DetectionCategory enum (replaces string matching), ShellWatchdog startup race fixed (no more explorer window on launch), TelemetryFusionEngine chain retention extended to 10 minutes, detection metrics counting fixed (actual hits only).
+**Last updated:** v0.8.3 (June 2026) — Implemented global low-level keyboard hook (WH_KEYBOARD_LL) to actively block software-injected keystrokes/deletions in PhantomKeystrokeGuard, refactored signature verification into SecurityValidation utility, replaced string-based correlation checking with strongly-typed SignalType enums, and hardened BehavioralCorrelationEngine allowlist validations via signature verification.
 
 ---
 

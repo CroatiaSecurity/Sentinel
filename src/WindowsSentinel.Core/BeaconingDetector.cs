@@ -185,6 +185,7 @@ namespace WindowsSentinel.Core
                     AuthorizedResponse = responseAction,
                     ProcessName = history.ProcessName,
                     ProcessId = history.ProcessId,
+                    SignalType = SignalType.NetworkC2,
                     Metadata = new()
                     {
                         ["TargetIP"] = history.RemoteAddress,
@@ -255,7 +256,7 @@ namespace WindowsSentinel.Core
 
             // Step 4: Gather trust signals (each independently non-forgeable)
             bool isProtectedPath = IsInProtectedDirectory(imagePath);
-            bool hasValidAuthenticode = VerifyAuthenticodeSignature(imagePath);
+            bool hasValidAuthenticode = SecurityValidation.VerifyAuthenticodeSignature(imagePath, _logger);
             bool hasDestinationDiversity = GetDestinationDiversityCount(history.ProcessId) >= 3;
             bool isBaselineEstablished = _baseline != null &&
                 !string.IsNullOrEmpty(history.ProcessName) &&
@@ -313,125 +314,6 @@ namespace WindowsSentinel.Core
                 return destinations.Count;
             }
             return 0;
-        }
-
-        // ─── Authenticode Verification via WinVerifyTrust ────────────────────────
-        // This calls the Windows WinVerifyTrust API which validates:
-        //   1. The PE file has an embedded or catalog signature
-        //   2. The signature is mathematically valid (RSA/ECDSA)
-        //   3. The certificate chains to a trusted root CA in the machine store
-        //   4. The certificate was valid at signing time (timestamp countersignature)
-        //   5. The file content has not been modified since signing
-        //
-        // An attacker CANNOT bypass this without:
-        //   - Stealing a code-signing certificate's private key (HSM-protected)
-        //   - Compromising a CA (nation-state level)
-        //   - Replacing the entire binary with a legitimately-signed one (then it's not malware)
-
-        private static readonly Guid WINTRUST_ACTION_GENERIC_VERIFY_V2 =
-            new("00AAC56B-CD44-11d0-8CC2-00C04FC295EE");
-
-        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-        private struct WINTRUST_FILE_INFO
-        {
-            public int cbStruct;
-            public string pcwszFilePath;
-            public IntPtr hFile;
-            public IntPtr pgKnownSubject;
-        }
-
-        [StructLayout(LayoutKind.Sequential)]
-        private struct WINTRUST_DATA
-        {
-            public int cbStruct;
-            public IntPtr pPolicyCallbackData;
-            public IntPtr pSIPClientData;
-            public int dwUIChoice;
-            public int fdwRevocationChecks;
-            public int dwUnionChoice;
-            public IntPtr pFile;
-            public int dwStateAction;
-            public IntPtr hWVTStateData;
-            public IntPtr pwszURLReference;
-            public int dwProvFlags;
-            public int dwUIContext;
-            public IntPtr pSignatureSettings;
-        }
-
-        [DllImport("wintrust.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-        private static extern int WinVerifyTrust(IntPtr hwnd, ref Guid pgActionID, ref WINTRUST_DATA pWVTData);
-
-        private const int WTD_UI_NONE = 2;
-        private const int WTD_REVOKE_NONE = 0;
-        private const int WTD_CHOICE_FILE = 1;
-        private const int WTD_STATEACTION_VERIFY = 1;
-        private const int WTD_STATEACTION_CLOSE = 2;
-        // Lifetime signing: don't fail if the cert is expired but has a valid timestamp
-        private const int WTD_REVOCATION_CHECK_NONE = 0x00000010;
-        private const int WTD_LIFETIME_SIGNING_FLAG = 0x00000800;
-
-        /// <summary>
-        /// Verifies the Authenticode signature of a PE file using WinVerifyTrust.
-        /// Returns true only if the signature is valid AND chains to a trusted root.
-        /// Returns false for unsigned files, tampered files, or files with untrusted certificates.
-        /// 
-        /// This is the same API that Windows SmartScreen, WDAC, and AppLocker use.
-        /// It cannot be bypassed by renaming files, changing paths, or modifying metadata.
-        /// The ONLY way to pass this check is to have the publisher's private signing key.
-        /// </summary>
-        private bool VerifyAuthenticodeSignature(string filePath)
-        {
-            if (string.IsNullOrEmpty(filePath) || !File.Exists(filePath))
-                return false;
-
-            IntPtr fileInfoPtr = IntPtr.Zero;
-            try
-            {
-                var fileInfo = new WINTRUST_FILE_INFO
-                {
-                    cbStruct = Marshal.SizeOf<WINTRUST_FILE_INFO>(),
-                    pcwszFilePath = filePath,
-                    hFile = IntPtr.Zero,
-                    pgKnownSubject = IntPtr.Zero
-                };
-
-                fileInfoPtr = Marshal.AllocHGlobal(Marshal.SizeOf<WINTRUST_FILE_INFO>());
-                Marshal.StructureToPtr(fileInfo, fileInfoPtr, false);
-
-                var trustData = new WINTRUST_DATA
-                {
-                    cbStruct = Marshal.SizeOf<WINTRUST_DATA>(),
-                    dwUIChoice = WTD_UI_NONE,
-                    fdwRevocationChecks = WTD_REVOKE_NONE,
-                    dwUnionChoice = WTD_CHOICE_FILE,
-                    pFile = fileInfoPtr,
-                    dwStateAction = WTD_STATEACTION_VERIFY,
-                    // Allow lifetime signing (valid timestamp countersignature) so that
-                    // binaries signed with expired certs still pass if timestamped.
-                    // Skip revocation checks to avoid network dependency during analysis.
-                    dwProvFlags = WTD_REVOCATION_CHECK_NONE | WTD_LIFETIME_SIGNING_FLAG
-                };
-
-                var actionId = WINTRUST_ACTION_GENERIC_VERIFY_V2;
-                int result = WinVerifyTrust(IntPtr.Zero, ref actionId, ref trustData);
-
-                // Close the state handle
-                trustData.dwStateAction = WTD_STATEACTION_CLOSE;
-                WinVerifyTrust(IntPtr.Zero, ref actionId, ref trustData);
-
-                // 0 = signature valid and trusted
-                return result == 0;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogDebug(ex, "[BeaconingDetector] Authenticode verification failed for '{Path}'", filePath);
-                return false;
-            }
-            finally
-            {
-                if (fileInfoPtr != IntPtr.Zero)
-                    Marshal.FreeHGlobal(fileInfoPtr);
-            }
         }
 
         /// <summary>
