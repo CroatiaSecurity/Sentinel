@@ -3,7 +3,9 @@ using System.Collections.Generic;
 using System.IO;
 using System.Net;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
+using Microsoft.Extensions.Logging;
 
 namespace WindowsSentinel.Core
 {
@@ -169,6 +171,102 @@ namespace WindowsSentinel.Core
                 result |= a[i] ^ b[i];
             }
             return result == 0;
+        }
+
+        private static readonly Guid WINTRUST_ACTION_GENERIC_VERIFY_V2 =
+            new("00AAC56B-CD44-11d0-8CC2-00C04FC295EE");
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        private struct WINTRUST_FILE_INFO
+        {
+            public int cbStruct;
+            public string pcwszFilePath;
+            public IntPtr hFile;
+            public IntPtr pgKnownSubject;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct WINTRUST_DATA
+        {
+            public int cbStruct;
+            public IntPtr pPolicyCallbackData;
+            public IntPtr pSIPClientData;
+            public int dwUIChoice;
+            public int fdwRevocationChecks;
+            public int dwUnionChoice;
+            public IntPtr pFile;
+            public int dwStateAction;
+            public IntPtr hWVTStateData;
+            public IntPtr pwszURLReference;
+            public int dwProvFlags;
+            public int dwUIContext;
+            public IntPtr pSignatureSettings;
+        }
+
+        [DllImport("wintrust.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern int WinVerifyTrust(IntPtr hwnd, ref Guid pgActionID, ref WINTRUST_DATA pWVTData);
+
+        private const int WTD_UI_NONE = 2;
+        private const int WTD_REVOKE_NONE = 0;
+        private const int WTD_CHOICE_FILE = 1;
+        private const int WTD_STATEACTION_VERIFY = 1;
+        private const int WTD_STATEACTION_CLOSE = 2;
+        private const int WTD_REVOCATION_CHECK_NONE = 0x00000010;
+        private const int WTD_LIFETIME_SIGNING_FLAG = 0x00000800;
+
+        /// <summary>
+        /// Verifies the Authenticode signature of a PE file using WinVerifyTrust.
+        /// Returns true only if the signature is valid AND chains to a trusted root.
+        /// </summary>
+        public static bool VerifyAuthenticodeSignature(string filePath, Microsoft.Extensions.Logging.ILogger? logger = null)
+        {
+            if (string.IsNullOrEmpty(filePath) || !File.Exists(filePath))
+                return false;
+
+            IntPtr fileInfoPtr = IntPtr.Zero;
+            try
+            {
+                var fileInfo = new WINTRUST_FILE_INFO
+                {
+                    cbStruct = Marshal.SizeOf<WINTRUST_FILE_INFO>(),
+                    pcwszFilePath = filePath,
+                    hFile = IntPtr.Zero,
+                    pgKnownSubject = IntPtr.Zero
+                };
+
+                fileInfoPtr = Marshal.AllocHGlobal(Marshal.SizeOf<WINTRUST_FILE_INFO>());
+                Marshal.StructureToPtr(fileInfo, fileInfoPtr, false);
+
+                var trustData = new WINTRUST_DATA
+                {
+                    cbStruct = Marshal.SizeOf<WINTRUST_DATA>(),
+                    dwUIChoice = WTD_UI_NONE,
+                    fdwRevocationChecks = WTD_REVOKE_NONE,
+                    dwUnionChoice = WTD_CHOICE_FILE,
+                    pFile = fileInfoPtr,
+                    dwStateAction = WTD_STATEACTION_VERIFY,
+                    dwProvFlags = WTD_REVOCATION_CHECK_NONE | WTD_LIFETIME_SIGNING_FLAG
+                };
+
+                var actionId = WINTRUST_ACTION_GENERIC_VERIFY_V2;
+                int result = WinVerifyTrust(IntPtr.Zero, ref actionId, ref trustData);
+
+                // Close the state handle
+                trustData.dwStateAction = WTD_STATEACTION_CLOSE;
+                WinVerifyTrust(IntPtr.Zero, ref actionId, ref trustData);
+
+                return result == 0;
+            }
+            catch (Exception ex)
+            {
+                logger?.LogDebug(ex, "[SecurityValidation] Authenticode verification failed for '{Path}'", filePath);
+                return false;
+            }
+            finally
+            {
+                if (fileInfoPtr != IntPtr.Zero)
+                    Marshal.FreeHGlobal(fileInfoPtr);
+            }
         }
     }
 }

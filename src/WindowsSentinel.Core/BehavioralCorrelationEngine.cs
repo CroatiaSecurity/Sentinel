@@ -41,7 +41,12 @@ namespace WindowsSentinel.Core
             var stem = signal.ProcessName.Replace(".exe", "", StringComparison.OrdinalIgnoreCase);
             if (ElectronAndJitApps.Contains(stem))
             {
-                return; // Exclude from composite correlation
+                // Verify the process is legitimately signed
+                var path = ResolveImagePath(pid);
+                if (!string.IsNullOrEmpty(path) && SecurityValidation.VerifyAuthenticodeSignature(path))
+                {
+                    return; // Exclude from composite correlation ONLY if signed
+                }
             }
 
             var buffer = _signalBuffers.GetOrAdd(pid, _ => new List<DetectionEvent>());
@@ -75,7 +80,7 @@ namespace WindowsSentinel.Core
 
             // Composite 1: Active Ransomware Chain (0.99)
             // 2+ distinct ransomware signals (process + file)
-            var rwSignals = currentSignals.Where(s => s.RuleName.Contains("Ransomware", StringComparison.OrdinalIgnoreCase)).ToList();
+            var rwSignals = currentSignals.Where(s => s.SignalType == SignalType.Ransomware).ToList();
             if (rwSignals.Select(s => s.RuleName).Distinct().Count() >= 2)
             {
                 await EmitCompositeAsync(pid, "Active Ransomware Chain", 0.99,
@@ -86,8 +91,8 @@ namespace WindowsSentinel.Core
 
             // Composite 2: Fileless Attack Chain (0.95)
             // AMSI/ETW evasion + encoded PS or C2 network
-            var hasEvasion = currentSignals.Any(s => s.RuleName.Contains("EtwTampering", StringComparison.OrdinalIgnoreCase) || s.RuleName.Contains("Amsi", StringComparison.OrdinalIgnoreCase));
-            var hasShellOrC2 = currentSignals.Any(s => s.RuleName.Contains("ReverseShell", StringComparison.OrdinalIgnoreCase) || s.RuleName.Contains("Beacon", StringComparison.OrdinalIgnoreCase));
+            var hasEvasion = currentSignals.Any(s => s.SignalType == SignalType.AmsiTampering || s.SignalType == SignalType.EtwTampering || s.SignalType == SignalType.SecurityEvasion);
+            var hasShellOrC2 = currentSignals.Any(s => s.SignalType == SignalType.ReverseShell || s.SignalType == SignalType.NetworkC2);
             if (hasEvasion && hasShellOrC2)
             {
                 await EmitCompositeAsync(pid, "Fileless Attack Chain", 0.95,
@@ -97,8 +102,8 @@ namespace WindowsSentinel.Core
             }
 
             // Composite 3: Credential Dump + Exfiltration (0.96)
-            var hasCredDump = currentSignals.Any(s => s.RuleName.Contains("Lsass", StringComparison.OrdinalIgnoreCase) || s.RuleName.Contains("Credential", StringComparison.OrdinalIgnoreCase));
-            var hasNetwork = currentSignals.Any(s => s.RuleName.Contains("Network", StringComparison.OrdinalIgnoreCase) || s.RuleName.Contains("C2", StringComparison.OrdinalIgnoreCase));
+            var hasCredDump = currentSignals.Any(s => s.SignalType == SignalType.LsassAccess || s.SignalType == SignalType.CredentialTheft);
+            var hasNetwork = currentSignals.Any(s => s.SignalType == SignalType.NetworkC2);
             if (hasCredDump && hasNetwork)
             {
                 await EmitCompositeAsync(pid, "Credential Dump + Exfiltration", 0.96,
@@ -133,6 +138,19 @@ namespace WindowsSentinel.Core
             };
 
             await _emitCallback!(compositeEvent);
+        }
+
+        private static string? ResolveImagePath(int pid)
+        {
+            try
+            {
+                using var proc = System.Diagnostics.Process.GetProcessById(pid);
+                return proc.MainModule?.FileName;
+            }
+            catch
+            {
+                return null;
+            }
         }
     }
 }

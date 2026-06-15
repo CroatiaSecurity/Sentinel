@@ -55,6 +55,7 @@ namespace WindowsSentinel.Tests
             var result = rule.Evaluate(ctx);
             Assert.NotNull(result);
             Assert.Equal(DetectionTier.Tier1Behavioral, result!.Tier);
+            Assert.Equal(SignalType.LsassAccess, result.SignalType);
             Assert.True(result.KillAuthorized);
         }
 
@@ -122,6 +123,7 @@ namespace WindowsSentinel.Tests
             var result = rule.Evaluate(ctx);
             Assert.NotNull(result);
             Assert.Equal(DetectionTier.Tier1Behavioral, result!.Tier);
+            Assert.Equal(SignalType.Ransomware, result.SignalType);
             Assert.True(result.Confidence >= 0.95);
             Assert.True(result.KillAuthorized);
         }
@@ -202,6 +204,7 @@ namespace WindowsSentinel.Tests
             var result = rule.Evaluate(ctx);
             Assert.NotNull(result);
             Assert.Equal(DetectionTier.Tier1Behavioral, result!.Tier);
+            Assert.Equal(SignalType.ReverseShell, result.SignalType);
             Assert.True(result.KillAuthorized);
         }
 
@@ -357,6 +360,7 @@ namespace WindowsSentinel.Tests
             var result = rule.Evaluate(ctx);
             Assert.NotNull(result);
             Assert.Equal("PrivilegeEscalationRule", result!.RuleName);
+            Assert.Equal(SignalType.SecurityEvasion, result.SignalType);
             Assert.True(result.KillAuthorized);
         }
 
@@ -441,6 +445,7 @@ namespace WindowsSentinel.Tests
             var result = rule.Evaluate(ctx);
             Assert.NotNull(result);
             Assert.Equal("ThreatIntelInjectionRule", result!.RuleName);
+            Assert.Equal(SignalType.ProcessInjection, result.SignalType);
             Assert.Equal(ResponseAction.QuarantineAndKill, result.AuthorizedResponse);
             Assert.Equal("2000", result.Metadata["TargetProcessId"]);
         }

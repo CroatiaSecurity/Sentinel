@@ -2,6 +2,20 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [0.8.3] - 2026-06-15
+
+### Added — Active Response Blocking for Software-Injected Input
+
+- **`PhantomKeystrokeGuard` active keyboard blocking** — Implemented global `WH_KEYBOARD_LL` low-level keyboard hook running in a dedicated STA thread message loop within the Agent. It actively blocks software-injected keystrokes (e.g. from automated typing or credential-harvesting tools) when active response is enabled.
+- **Key Deletion Prevention** — Added prevention of programmatic backspace/delete inputs (`VK_BACK`, `VK_DELETE`) to safeguard text input fields from automated deletion.
+- **RDP/Remote Session Compatibility** — Conditionally bypasses active keyboard blocking in Remote Desktop (RDP) sessions using Win32 `GetSystemMetrics(SM_REMOTESESSION)`. This ensures that remote user keystrokes (which carry the `LLKHF_INJECTED` flag) are forwarded correctly.
+- **Telemetry Rate Limiting** — Added a log-throttling cache to limit telemetry events (`ReportInjectedKeystroke`) to prevent logging pipeline saturation during rapid automated keyboard input.
+
+### Improved — EDR Robustness & Strongly-Typed Detection Architecture
+
+- **Strongly-Typed Threat Correlation** — Refactored the threat correlation engine to replace brittle string comparisons with the strongly-typed `SignalType` enum. Applied it across all Rules, background monitors, and `BehavioralCorrelationEngine`.
+- **Exclusion Hardening & Signature Verification** — Hardened allowed process checking by moving Authenticode signature verification to a shared helper `SecurityValidation.VerifyAuthenticodeSignature` and validating digital signatures of allowed processes in `BehavioralCorrelationEngine` to prevent process renaming bypasses.
+
 ## [0.8.2] - 2026-06-14
 
 ### Fixed — C2 Beaconing False Positive Kill on Legitimate Software

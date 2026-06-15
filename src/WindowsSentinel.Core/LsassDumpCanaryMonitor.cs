@@ -144,6 +144,7 @@ namespace WindowsSentinel.Core
                             AuthorizedResponse = ResponseAction.KillProcessTree,
                             ProcessName = processName,
                             ProcessId = pid,
+                            SignalType = SignalType.LsassAccess,
                             Metadata = new Dictionary<string, string>
                             {
                                 ["SourceImage"] = sourceImage,
@@ -211,7 +212,8 @@ namespace WindowsSentinel.Core
                             Tier = DetectionTier.Tier1Behavioral,
                             AuthorizedResponse = ResponseAction.KillProcessTree,
                             ProcessName = shortName,
-                            ProcessId = pid
+                            ProcessId = pid,
+                            SignalType = SignalType.LsassAccess
                         });
                     }
                 }
@@ -259,7 +261,8 @@ namespace WindowsSentinel.Core
                             Tier = DetectionTier.Tier1Behavioral,
                             AuthorizedResponse = ResponseAction.KillProcessTree,
                             ProcessName = shortName,
-                            ProcessId = 0
+                            ProcessId = 0,
+                            SignalType = SignalType.LsassAccess
                         });
                     }
                 }

@@ -77,6 +77,7 @@ namespace WindowsSentinel.Core
                                 AuthorizedResponse = ResponseAction.KillProcessTree,
                                 ProcessName = name ?? "unknown",
                                 ProcessId = kvp.Key,
+                                SignalType = SignalType.Ransomware,
                                 Timestamp = DateTime.UtcNow
                             });
                         }

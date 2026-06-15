@@ -224,5 +224,20 @@ namespace WindowsSentinel.Tests
             Assert.False(SecurityValidation.SecureCompare(null, a));
             Assert.False(SecurityValidation.SecureCompare(null, null));
         }
+
+        // ── VerifyAuthenticodeSignature ─────────────────────────────────────
+
+        [Fact]
+        public void VerifyAuthenticodeSignature_ReturnsFalseForNullOrEmpty()
+        {
+            Assert.False(SecurityValidation.VerifyAuthenticodeSignature(null!));
+            Assert.False(SecurityValidation.VerifyAuthenticodeSignature(""));
+        }
+
+        [Fact]
+        public void VerifyAuthenticodeSignature_ReturnsFalseForNonExistentFile()
+        {
+            Assert.False(SecurityValidation.VerifyAuthenticodeSignature(@"C:\non_existent_file_123456789.exe"));
+        }
     }
 }

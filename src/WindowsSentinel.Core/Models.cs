@@ -22,6 +22,23 @@ namespace WindowsSentinel.Core
         RemoveRegistryEntry
     }
 
+    public enum SignalType
+    {
+        Generic,
+        LsassAccess,
+        AmsiTampering,
+        EtwTampering,
+        Ransomware,
+        ReverseShell,
+        NetworkC2,
+        CredentialTheft,
+        ProcessInjection,
+        SuspiciousProcess,
+        AntiTamper,
+        SecurityEvasion,
+        PhantomKeystroke
+    }
+
     public class SentinelConfig
     {
         public bool ActiveResponse { get; set; } = true;
@@ -88,6 +105,7 @@ namespace WindowsSentinel.Core
         public DetectionTier Tier { get; set; }
         public string ProcessName { get; set; } = string.Empty;
         public int ProcessId { get; set; }
+        public SignalType SignalType { get; set; } = SignalType.Generic;
         public Dictionary<string, string> Metadata { get; set; } = new();
         public DateTime Timestamp { get; set; } = DateTime.UtcNow;
         public ResponseAction AuthorizedResponse { get; set; } = ResponseAction.LogOnly;
