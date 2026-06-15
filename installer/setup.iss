@@ -78,8 +78,10 @@ end;
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
   Result := '';
-  // If upgrading, stop existing service and reset ACLs
-  if RegValueExists(HKLM, 'SOFTWARE\Microsoft\Windows\CurrentVersion\Run', 'WindowsSentinelAgent') then
+  // If upgrading (service exists, run key exists, or folder exists), stop existing service and reset ACLs
+  if RegValueExists(HKLM, 'SOFTWARE\Microsoft\Windows\CurrentVersion\Run', 'WindowsSentinelAgent') or
+     RegKeyExists(HKLM, 'SYSTEM\CurrentControlSet\Services\Windows Sentinel') or
+     DirExists(ExpandConstant('{app}')) then
   begin
     StopExistingService();
   end;

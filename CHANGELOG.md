@@ -15,6 +15,7 @@ All notable changes to Windows Sentinel are documented in this file.
 
 - **Strongly-Typed Threat Correlation** — Refactored the threat correlation engine to replace brittle string comparisons with the strongly-typed `SignalType` enum. Applied it across all Rules, background monitors, and `BehavioralCorrelationEngine`.
 - **Exclusion Hardening & Signature Verification** — Hardened allowed process checking by moving Authenticode signature verification to a shared helper `SecurityValidation.VerifyAuthenticodeSignature` and validating digital signatures of allowed processes in `BehavioralCorrelationEngine` to prevent process renaming bypasses.
+- **Installer Upgrade Resiliency** — Fixed Inno Setup `setup.iss` upgrade and reinstallation logic to automatically stop running services/agents and reset folder ACLs (removing anti-tamper Deny permissions) when upgrading, even if the agent run registry key is missing.
 
 ## [0.8.2] - 2026-06-14
 
