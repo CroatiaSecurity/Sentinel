@@ -1,6 +1,6 @@
 # Windows Sentinel — Design Document
 
-**Version: 0.8.3**
+**Version: 0.8.4**
 
 ---
 
@@ -82,6 +82,7 @@ The fusion layer is PASSIVE â€” it never blocks, kills, or modifies telemet
 | `DnsResponseValidationMonitor` | **3.6.0** Resolves canary domains and validates against expected CIDR ranges. Detects DNS poisoning, captive portal. Checks every 1min | No |
 | `TlsCertificateMonitor` | **6.3.0** Monitors the Windows `LocalMachine\Root` certificate store. Baselines existing certs silently at startup; alerts on new root CAs added after baseline. Never auto-removes. Polls every 60s | No |
 | `WifiSecurityMonitor` | **3.6.0** Polls Wi-Fi state via netsh. Detects deauth flood, open network, encryption downgrade, BSSID change. Scans every 10s | No |
+| `NetworkInterfaceGuard` | **0.8.4** Periodically (every 15s) scans adapters, removes bridges via SetupAPI, restores disabled physical adapters via WMI, locks NameServer settings, and enforces DoH. | No |
 | `BluetoothMonitor` | **3.6.0** Monitors BT device registry and service state. Detects BadBT HID pairing, unauthorized devices, BT activation. Scans every 15s | No |
 | `SecureBootIntegrityMonitor` | **3.6.0** Checks Secure Boot, test signing, kernel debug via registry+bcdedit. Scans every 5min | Yes (bcdedit) |
 | `FirewallIntegrityMonitor` | **3.6.0** Polls firewall profiles via netsh advfirewall. Detects profile disabled, bulk rules, service stopped. Scans every 30s | No |
@@ -381,6 +382,14 @@ Composite detections are emitted as Tier1 `DetectionEvent`s directly into the de
 | `GhostProcessMonitor` | **0.7.1** Detects PIDs with active outbound TCP but empty/unresolvable process names. Covers PlugX/ShadowPad DLL sideloading blind spot. Network-isolates connections to masquerade ports (5228, 8009). Requires 2+ sightings to avoid startup races. |
 | `ShellWatchdog` | **0.7.1** Explorer.exe health monitor. SendMessageTimeout responsiveness check every 5s. Auto-restarts dead shell. Detects AppHangXProcB1 cross-process hangs and repeated crash patterns (active shell attack). |
 | `CriticalServiceGuard` | **0.7.1** Monitors critical Windows services (TokenBroker, Defender, Firewall, EventLog, etc.) for crash storms via SCM events. Detects exploitation patterns (0xC0000409 stack buffer overrun). Monitors BSOD-critical processes for debugger kill switches. |
+
+## Added in 0.8.4
+
+| Component | Purpose |
+|-----------|---------|
+| `NetworkInterfaceGuard` | Monitors and protects network adapters: uninstalls bridges via SetupAPI, re-enables disabled primary physical adapters via WMI, and locks DNS registry NameServer settings. |
+| `ArpSpoofMonitor` lock | Dynamic static gateway ARP cache lock via `CreateIpNetEntry` to prevent ARP redirection/spoofing attacks. |
+| `WifiSecurityMonitor` toggle | Wi-Fi adapter toggling via WMI to recover from deauthentication floods. |
 
 ## Added in 5.5.0
 
