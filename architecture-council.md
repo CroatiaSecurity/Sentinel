@@ -1,9 +1,9 @@
 # Sentinel â€” Council of Elders Architecture
 
 **Status:** Architecture spec. Extends, does not replace, `requirements.md`,
-`design.md`, `constraints.md` (all v0.8.3).
+`design.md`, `constraints.md` (all v0.8.4).
 
-**Last updated:** v0.8.3 (June 2026) — Implemented global low-level keyboard hook (WH_KEYBOARD_LL) to actively block software-injected keystrokes/deletions in PhantomKeystrokeGuard, refactored signature verification into SecurityValidation utility, replaced string-based correlation checking with strongly-typed SignalType enums, and hardened BehavioralCorrelationEngine allowlist validations via signature verification.
+**Last updated:** v0.8.4 (June 2026) — Implemented static Gateway ARP lock to prevent ARP spoofing, a new NetworkInterfaceGuard to detect/remove network bridges and re-enable disabled interfaces, active Wi-Fi reconnect / adapter toggling to mitigate deauth floods, and DNS registry integrity monitoring/restoration.
 
 ---
 

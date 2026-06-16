@@ -138,6 +138,7 @@ namespace WindowsSentinel.Service
                     services.AddHostedService<TlsCertificateMonitor>();
                     services.AddHostedService<UacBypassSurfaceMonitor>();
                     services.AddHostedService<WifiSecurityMonitor>();
+                    services.AddHostedService<NetworkInterfaceGuard>();
                     services.AddHostedService<WindowsUpdateIntegrityMonitor>();
                     services.AddHostedService<WmiPersistenceMonitor>();
                     services.AddHostedService<WorkFoldersExfilMonitor>();

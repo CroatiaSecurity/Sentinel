@@ -1,6 +1,6 @@
 # Windows Sentinel — Threat Model
 
-**Version: 0.8.3**
+**Version: 0.8.4**
 
 This document assumes the attacker has read the source code.
 
@@ -311,5 +311,16 @@ The attacker could theoretically:
 - **Trusted Writer Verification:** If the writing process is untrusted, Sentinel immediately deletes the file and terminates the writer process.
 - **Containment without Crashing:** Since the malicious DLL is deleted before the target application is executed, the target application runs cleanly by falling back to the system's DLL in `System32` (no crash or hijack).
 **Residual risk:** LOW. Untrusted droppers are blocked, and target applications remain uncompromised and operational.
+
+---
+
+### B19: Network Egress Hijacking, Adapter Disabling, and Bridging
+**Attack (v0.8.4):** Attacker creates a network bridge to pivot into secure networks, disables active physical adapters to boot the user offline/evade monitoring, poisons local gateway ARP mappings, or overrides NameServer configuration registry keys to hijack DNS.
+**Mitigation:** 
+- **SetupAPI Bridge Removal:** `NetworkInterfaceGuard` detects virtual network bridges and uninstalls the MAC Bridge virtual device via SetupAPI (`DIF_REMOVE`), restoring normal physical interface routing.
+- **WMI Adapter Recovery:** Physical adapters are baselined at startup. If disabled, WMI `MSFT_NetAdapter.Enable` is invoked to bring them back online.
+- **Static ARP Cache Lock:** Locks the baseline gateway IP/MAC mapping as static (`CreateIpNetEntry`), preventing ARP spoofing.
+- **DNS Lock & DoH Enforcement:** Registry `NameServer` keys are locked to secure default baselines and global DNS-over-HTTPS is enforced.
+**Residual risk:** LOW. Actions are automatically reverted, modifying processes are trace-killed and quarantined, and remote attacker IPs are blocked in Windows Firewall.
 
 

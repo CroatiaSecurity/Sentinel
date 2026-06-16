@@ -2,6 +2,18 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [0.8.4] - 2026-06-16
+
+### Added — Network Hardening & Self-Healing (Active Revert & Lock)
+
+- **Static Gateway ARP Lock** — `ArpSpoofMonitor` now locks the default gateway IP/MAC mapping as `static` using native `CreateIpNetEntry` (dwType = 4). This structurally blocks ARP redirection/spoofing attacks targeting the default gateway. Establishes dynamic teardown and re-locking on default gateway IP transitions and performs full cleanup on service stop.
+- **`NetworkInterfaceGuard` background service** — A new background service that monitors active network adapter statuses:
+  - **SetupAPI Bridge Removal:** Detects virtual network bridges and uninstalls the MAC Bridge virtual device via SetupAPI (`DIF_REMOVE`), automatically restoring normal routing to original physical adapters.
+  - **WMI Adapter Recovery:** Re-enables disabled primary physical network adapters using WMI (`MSFT_NetAdapter.Enable`) to ensure the user cannot be booted offline.
+  - **DNS Registry Lock:** Monitors and locks NameServer configuration registry keys to baseline settings, preventing DNS hijacking, and enforces global DNS-over-HTTPS (DoH).
+- **Wi-Fi Deauth Recovery** — Automatically toggles the wireless adapter (disable/enable via WMI) in `WifiSecurityMonitor` when a Wi-Fi deauth flood is detected, clearing hung network states and forcing clean re-association.
+- **Trace-Containment Integration** — Integrated network-tampering events with `ChainTracer` for process tree termination, binary quarantine, and remote attacker IP blocking.
+
 ## [0.8.3] - 2026-06-15
 
 ### Added — Active Response Blocking for Software-Injected Input

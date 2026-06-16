@@ -1,6 +1,6 @@
 # Windows Sentinel — Requirements
 
-**Version: 0.8.3**
+**Version: 0.8.4**
 
 ---
 
@@ -53,6 +53,9 @@ The system must detect the following behavioral threats:
 | T1-11 | Known attack tools | C2 frameworks, credential tools, network attack tools, AD attack tools, LOLBin abuse |
 | T1-12 | Campaign IOCs | Known malicious hashes, domains, IPs, file names, threat campaign patterns |
 | T1-13 | Phantom keystrokes | Injected keystrokes detected via `LLKHF_INJECTED` flag and blocked via `WH_KEYBOARD_LL` |
+| T1-14 | Network: Unauthorized Network Bridge Detected | Virtual bridge detection and active SetupAPI uninstallation |
+| T1-15 | Network: Primary Adapter Disabled | Baselined physical adapter disabled state detection and active WMI restoration |
+| T1-16 | Network: Unauthorized DNS Change | NameServer configuration registry lock and global DoH enforcement |
 
 ### FR-3: Tier 2 Detection Rules
 

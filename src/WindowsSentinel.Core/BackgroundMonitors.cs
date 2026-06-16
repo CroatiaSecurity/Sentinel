@@ -37,6 +37,15 @@ namespace WindowsSentinel.Core
         [DllImport("iphlpapi.dll", SetLastError = true)]
         private static extern int GetIpNetTable(IntPtr pIpNetTable, ref int pdwSize, bool bOrder);
 
+        [DllImport("iphlpapi.dll", SetLastError = true)]
+        private static extern int CreateIpNetEntry(ref MIB_IPNETROW pArpEntry);
+
+        [DllImport("iphlpapi.dll", SetLastError = true)]
+        private static extern int DeleteIpNetEntry(ref MIB_IPNETROW pArpEntry);
+
+        [DllImport("iphlpapi.dll", SetLastError = true)]
+        private static extern int GetBestInterface(uint dwDestAddr, out int pdwBestIfIndex);
+
         [StructLayout(LayoutKind.Sequential)]
         private struct MIB_IPNETROW
         {
@@ -47,11 +56,102 @@ namespace WindowsSentinel.Core
             public int dwType;
         }
 
+        private void SetStaticGatewayArp(string ip, string mac)
+        {
+            try
+            {
+                var ipAddr = IPAddress.Parse(ip);
+                var ipBytes = ipAddr.GetAddressBytes();
+                uint ipInt = BitConverter.ToUInt32(ipBytes, 0);
+
+                if (GetBestInterface(ipInt, out int ifIndex) != 0)
+                {
+                    _logger.LogWarning("[ArpSpoofMonitor] Failed to get best interface for Gateway IP {IP}", ip);
+                    return;
+                }
+
+                var macBytes = mac.Split('-').Select(b => Convert.ToByte(b, 16)).ToArray();
+                if (macBytes.Length < 6) return;
+
+                var row = new MIB_IPNETROW
+                {
+                    dwIndex = ifIndex,
+                    dwPhysAddrLen = 6,
+                    mac0 = macBytes[0],
+                    mac1 = macBytes[1],
+                    mac2 = macBytes[2],
+                    mac3 = macBytes[3],
+                    mac4 = macBytes[4],
+                    mac5 = macBytes[5],
+                    dwAddr = (int)ipInt,
+                    dwType = 4 // 4 = Static
+                };
+
+                // Delete any existing entry to prevent duplicates
+                DeleteIpNetEntry(ref row);
+                int ret = CreateIpNetEntry(ref row);
+                if (ret == 0)
+                {
+                    _logger.LogInformation("[ArpSpoofMonitor] Static ARP lock established for Gateway {IP} -> {MAC} on interface {Index}", ip, mac, ifIndex);
+                }
+                else
+                {
+                    _logger.LogWarning("[ArpSpoofMonitor] CreateIpNetEntry failed: {Error}", ret);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "[ArpSpoofMonitor] Failed to set static ARP");
+            }
+        }
+
+        private void DeleteStaticGatewayArp(string ip)
+        {
+            try
+            {
+                var ipAddr = IPAddress.Parse(ip);
+                var ipBytes = ipAddr.GetAddressBytes();
+                uint ipInt = BitConverter.ToUInt32(ipBytes, 0);
+
+                if (GetBestInterface(ipInt, out int ifIndex) != 0) return;
+
+                var row = new MIB_IPNETROW
+                {
+                    dwIndex = ifIndex,
+                    dwAddr = (int)ipInt
+                };
+                DeleteIpNetEntry(ref row);
+                _logger.LogInformation("[ArpSpoofMonitor] Static ARP lock removed for Gateway {IP}", ip);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "[ArpSpoofMonitor] Failed to delete static ARP");
+            }
+        }
+
+        public override async Task StopAsync(CancellationToken ct)
+        {
+            if (_gatewayIp != null)
+            {
+                DeleteStaticGatewayArp(_gatewayIp);
+            }
+            await base.StopAsync(ct);
+        }
+
         protected override async Task ExecuteAsync(CancellationToken ct)
         {
             _logger.LogInformation("[ArpSpoofMonitor] Started");
-            _gatewayIp = GetDefaultGateway();
-            if (_gatewayIp != null) _baselineGatewayMac = ResolveMac(_gatewayIp);
+            var initialGatewayIp = GetDefaultGateway();
+            if (initialGatewayIp != null)
+            {
+                _gatewayIp = initialGatewayIp;
+                var initialGatewayMac = ResolveMac(initialGatewayIp);
+                if (initialGatewayMac != null)
+                {
+                    _baselineGatewayMac = initialGatewayMac;
+                    SetStaticGatewayArp(initialGatewayIp, initialGatewayMac);
+                }
+            }
 
             // Baseline ARP table
             var initial = GetArpTable();
@@ -64,23 +164,47 @@ namespace WindowsSentinel.Core
                 {
                     await Task.Delay(15000, ct);
 
-                    // === Check 1: Gateway MAC change ===
-                    if (_gatewayIp != null)
+                    // === Check Gateway IP changes ===
+                    var currentGatewayIp = GetDefaultGateway();
+                    if (currentGatewayIp != _gatewayIp)
                     {
-                        var currentMac = ResolveMac(_gatewayIp);
-                        if (_baselineGatewayMac != null && currentMac != null && currentMac != _baselineGatewayMac)
+                        var oldGatewayIp = _gatewayIp;
+                        if (oldGatewayIp != null)
+                        {
+                            DeleteStaticGatewayArp(oldGatewayIp);
+                        }
+                        _gatewayIp = currentGatewayIp;
+                        if (currentGatewayIp != null)
+                        {
+                            var currentGatewayMac = ResolveMac(currentGatewayIp);
+                            if (currentGatewayMac != null)
+                            {
+                                _baselineGatewayMac = currentGatewayMac;
+                                SetStaticGatewayArp(currentGatewayIp, currentGatewayMac);
+                            }
+                        }
+                    }
+
+                    // === Check 1: Gateway MAC change ===
+                    var gwIpForMacCheck = _gatewayIp;
+                    if (gwIpForMacCheck != null)
+                    {
+                        var currentMac = ResolveMac(gwIpForMacCheck);
+                        var baseMac = _baselineGatewayMac;
+                        if (baseMac != null && currentMac != null && currentMac != baseMac)
                         {
                             await _detectionEngine.EmitAsync(new DetectionEvent
                             {
                                 RuleName = "ARP Spoof: Gateway MAC Changed",
-                                Evidence = $"Gateway {_gatewayIp} MAC changed from {_baselineGatewayMac} to {currentMac}",
+                                Evidence = $"Gateway {gwIpForMacCheck} MAC changed from {baseMac} to {currentMac}",
                                 Reasoning = "The default gateway MAC address changed at runtime, indicating a possible ARP spoofing or MitM attack on the local network.",
                                 Confidence = 0.88, Tier = DetectionTier.Tier1Behavioral,
                                 AuthorizedResponse = ResponseAction.NetworkIsolate,
                                 ProcessName = "SYSTEM", ProcessId = 0,
-                                Metadata = new Dictionary<string, string> { { "TargetIP", _gatewayIp ?? "" } }
+                                Metadata = new Dictionary<string, string> { { "TargetIP", gwIpForMacCheck } }
                             });
                             _baselineGatewayMac = currentMac;
+                            SetStaticGatewayArp(gwIpForMacCheck, currentMac);
                         }
                     }
 
@@ -2311,6 +2435,7 @@ namespace WindowsSentinel.Core
                                 }
                             });
                             _disconnectHistory.Clear(); // Reset after alert
+                            _ = ToggleWifiAdapterAsync(ct);
                         }
                     }
 
@@ -2469,6 +2594,38 @@ namespace WindowsSentinel.Core
             catch { }
 
             return (null, null, null);
+        }
+
+        private async Task ToggleWifiAdapterAsync(CancellationToken ct)
+        {
+            try
+            {
+                var wifiInterface = NetworkInterface.GetAllNetworkInterfaces()
+                    .FirstOrDefault(ni => ni.NetworkInterfaceType == NetworkInterfaceType.Wireless80211);
+                
+                if (wifiInterface == null) return;
+                
+                int ifIndex = wifiInterface.GetIPProperties().GetIPv4Properties().Index;
+                _logger.LogInformation("[WifiSecurityMonitor] Deauth flood recovery: Toggling Wi-Fi adapter '{Name}' (Index {Index})", wifiInterface.Name, ifIndex);
+
+                // Use WMI to disable and enable the adapter
+                var scope = new ManagementScope(@"root\StandardCimv2");
+                scope.Connect();
+                var query = new ObjectQuery($"SELECT * FROM MSFT_NetAdapter WHERE InterfaceIndex = {ifIndex}");
+                using var searcher = new ManagementObjectSearcher(scope, query);
+                foreach (ManagementObject obj in searcher.Get())
+                {
+                    _logger.LogInformation("[WifiSecurityMonitor] Disabling adapter...");
+                    obj.InvokeMethod("Disable", null);
+                    await Task.Delay(2000, ct);
+                    _logger.LogInformation("[WifiSecurityMonitor] Re-enabling adapter...");
+                    obj.InvokeMethod("Enable", null);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[WifiSecurityMonitor] Failed to toggle Wi-Fi adapter");
+            }
         }
     }
 
