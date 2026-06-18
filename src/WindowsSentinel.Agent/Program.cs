@@ -45,6 +45,7 @@ namespace WindowsSentinel.Agent
 
                     // Infrastructure required by monitors
                     services.AddSingleton<SentinelMetrics>();
+                    services.AddSingleton<ThreatReportService>();
                     services.AddSingleton<JsonlEventLogger>(_ => new JsonlEventLogger(config.LogPath));
                     services.AddSingleton<EventGraph>();
                     services.AddSingleton<ProcessAncestryCache>();

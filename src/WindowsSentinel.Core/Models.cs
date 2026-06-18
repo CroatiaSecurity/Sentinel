@@ -54,6 +54,13 @@ namespace WindowsSentinel.Core
         public string? MalwareBazaarApiKey { get; set; }
         public bool ReportToMalwareBazaar { get; set; } = true;
         public bool ReportToUrlhaus { get; set; } = true;
+
+        /// <summary>
+        /// URL of the Cloudflare Worker proxy that holds API keys server-side.
+        /// When set, reports go to this endpoint instead of directly to abuse.ch.
+        /// This allows open-source distribution without leaking API keys.
+        /// </summary>
+        public string? ProxyEndpoint { get; set; }
     }
 
     public class TelemetryEvent

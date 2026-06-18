@@ -2,6 +2,21 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [0.8.5] - 2026-06-18
+
+### Added — Community Threat Reporting via Cloudflare Worker Proxy
+
+- **`ThreatReportService`** — New service that reports detected threats (malicious hashes, URLs, IPs) to threat intelligence platforms (MalwareBazaar, URLhaus, AbuseIPDB) via a Cloudflare Worker proxy.
+- **Cloudflare Worker proxy** (`worker/`) — Serverless endpoint that holds API keys server-side so they never appear in the open-source repo. Users install Sentinel and reporting works automatically with zero configuration.
+- **`ProxyEndpoint` config** — New `ThreatReporting.ProxyEndpoint` setting in appsettings.json. When set, all reports route through the proxy instead of requiring local API keys.
+- **Worker endpoints**: `/report/hash`, `/report/url`, `/report/ip`, `/health`
+- **Free tier**: 100,000 reports/day on Cloudflare Workers free plan (no credit card)
+
+### Changed
+- All appsettings.json files now include `ProxyEndpoint` pointing to the live Worker
+- `ThreatReportingConfig` model extended with `ProxyEndpoint` field
+- Registered `ThreatReportService` in both Agent and Service DI containers
+
 ## [0.8.4] - 2026-06-16
 
 ### Added — Network Hardening & Self-Healing (Active Revert & Lock)
