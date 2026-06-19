@@ -229,8 +229,10 @@ namespace WindowsSentinel.Core
             var processInfo = GetProcessUsingFile(e.FullPath);
 
             // Critical: detect writes to System32/SysWOW64 by non-OS processes
+            // Exclude drivers\etc — managed by HostsFileGuard directly
             if ((e.ChangeType == WatcherChangeTypes.Created || e.ChangeType == WatcherChangeTypes.Changed) &&
-                IsProtectedOsDirectory(pathLower))
+                IsProtectedOsDirectory(pathLower) &&
+                !pathLower.Contains(@"\drivers\etc\"))
             {
                 // Only alert if the writer is NOT TrustedInstaller, Windows Update, or Defender
                 if (!IsTrustedSystemWriter(processInfo.pid, processInfo.name))

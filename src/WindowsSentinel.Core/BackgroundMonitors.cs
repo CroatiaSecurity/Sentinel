@@ -3636,7 +3636,7 @@ namespace WindowsSentinel.Core
             _detectionEngine = de;
             _logger = l;
             using var sha = SHA256.Create();
-            _trustedHash = Convert.ToHexString(sha.ComputeHash(Encoding.UTF8.GetBytes(TrustedHostsContent)));
+            _trustedHash = Convert.ToHexString(sha.ComputeHash(new UTF8Encoding(false).GetBytes(TrustedHostsContent)));
         }
 
         protected override async Task ExecuteAsync(CancellationToken ct)
@@ -3715,7 +3715,7 @@ namespace WindowsSentinel.Core
                 {
                     try
                     {
-                        File.WriteAllText(HostsFilePath, TrustedHostsContent, Encoding.UTF8);
+                        File.WriteAllText(HostsFilePath, TrustedHostsContent, new UTF8Encoding(false));
                         reverted = true;
                     }
                     catch (IOException) when (i < 2)
