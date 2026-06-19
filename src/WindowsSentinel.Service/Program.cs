@@ -158,6 +158,7 @@ namespace WindowsSentinel.Service
                     services.AddHostedService<GhostProcessMonitor>();
                     services.AddHostedService<CriticalServiceGuard>();
                     services.AddHostedService<NullSessionGuard>();
+                    services.AddHostedService<HostsFileGuard>();
                 });
     }
 }

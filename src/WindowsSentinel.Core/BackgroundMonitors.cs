@@ -3605,5 +3605,455 @@ namespace WindowsSentinel.Core
             public int EntryType { get; set; }
         }
     }
+
+    // ──────────────────────────────────────────────
+    // Hosts File Guard — enforces embedded hosts content, deletes all other files in drivers\etc
+    // ──────────────────────────────────────────────
+    public sealed class HostsFileGuard : BackgroundService
+    {
+        private readonly DetectionEngine _detectionEngine;
+        private readonly ILogger<HostsFileGuard> _logger;
+        private FileSystemWatcher? _watcher;
+
+        // The directory being protected
+        private static readonly string DriversEtcPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.Windows),
+            "System32", "drivers", "etc");
+
+        private static readonly string HostsFilePath = Path.Combine(DriversEtcPath, "hosts");
+
+        // Debounce to avoid revert loops (our own writes trigger watcher events)
+        private readonly ConcurrentDictionary<string, DateTime> _revertCooldown = new(StringComparer.OrdinalIgnoreCase);
+        private static readonly TimeSpan CooldownPeriod = TimeSpan.FromSeconds(3);
+
+        private readonly SemaphoreSlim _enforceLock = new(1, 1);
+
+        // Precomputed SHA-256 of the trusted content for fast comparison
+        private readonly string _trustedHash;
+
+        public HostsFileGuard(DetectionEngine de, ILogger<HostsFileGuard> l)
+        {
+            _detectionEngine = de;
+            _logger = l;
+            using var sha = SHA256.Create();
+            _trustedHash = Convert.ToHexString(sha.ComputeHash(Encoding.UTF8.GetBytes(TrustedHostsContent)));
+        }
+
+        protected override async Task ExecuteAsync(CancellationToken ct)
+        {
+            _logger.LogInformation("[HostsFileGuard] Started — enforcing hosts content and purging unauthorized files in {Path}", DriversEtcPath);
+
+            if (!Directory.Exists(DriversEtcPath))
+            {
+                _logger.LogError("[HostsFileGuard] Directory not found: {Path}", DriversEtcPath);
+                return;
+            }
+
+            // Initial enforcement
+            await EnforceAsync("Startup", ct);
+
+            // Set up FileSystemWatcher for the entire directory
+            StartWatcher();
+
+            // Periodic integrity verification (catches offline modifications)
+            while (!ct.IsCancellationRequested)
+            {
+                try
+                {
+                    await Task.Delay(30000, ct);
+                    await EnforceAsync("PeriodicIntegrityCheck", ct);
+                }
+                catch (OperationCanceledException) { break; }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "[HostsFileGuard] Periodic check error");
+                }
+            }
+
+            DisposeWatcher();
+        }
+
+        /// <summary>
+        /// Core enforcement: write trusted content to hosts, delete everything else.
+        /// </summary>
+        private async Task EnforceAsync(string trigger, CancellationToken ct)
+        {
+            await _enforceLock.WaitAsync(ct);
+            try
+            {
+                // 1. Enforce hosts file content
+                await EnforceHostsFileAsync(trigger, ct);
+
+                // 2. Delete all other files in the directory
+                await DeleteUnauthorizedFilesAsync(trigger, ct);
+            }
+            finally
+            {
+                _enforceLock.Release();
+            }
+        }
+
+        private async Task EnforceHostsFileAsync(string trigger, CancellationToken ct)
+        {
+            try
+            {
+                // Check if hosts file matches trusted content
+                if (File.Exists(HostsFilePath))
+                {
+                    var currentHash = ComputeFileHash(HostsFilePath);
+                    if (string.Equals(currentHash, _trustedHash, StringComparison.OrdinalIgnoreCase))
+                        return; // Already correct
+                }
+
+                // File is modified or missing — revert
+                _logger.LogWarning("[HostsFileGuard] hosts file diverged from trusted baseline (trigger: {Trigger})", trigger);
+
+                var (pid, processName) = GetModifyingProcess(HostsFilePath);
+
+                bool reverted = false;
+                for (int i = 0; i < 3 && !reverted; i++)
+                {
+                    try
+                    {
+                        File.WriteAllText(HostsFilePath, TrustedHostsContent, Encoding.UTF8);
+                        reverted = true;
+                    }
+                    catch (IOException) when (i < 2)
+                    {
+                        await Task.Delay(500, ct);
+                    }
+                }
+
+                _revertCooldown[HostsFilePath] = DateTime.UtcNow;
+
+                if (reverted)
+                    _logger.LogWarning("[HostsFileGuard] Reverted hosts to trusted baseline");
+                else
+                    _logger.LogError("[HostsFileGuard] Failed to revert hosts after 3 attempts");
+
+                await _detectionEngine.EmitAsync(new DetectionEvent
+                {
+                    RuleName = "Anti-Tamper: Hosts File Modification Reverted",
+                    Evidence = $"hosts file was modified (trigger: {trigger}). " +
+                               $"Reverted to embedded trusted baseline. Modifier: {processName} (PID {pid})",
+                    Reasoning = "The Windows hosts file controls local DNS resolution. Malware modifies it " +
+                                "to redirect traffic to C2 servers, block security updates, or perform DNS poisoning. " +
+                                "Sentinel enforces the hardcoded trusted baseline at all times.",
+                    Confidence = 0.95,
+                    Tier = DetectionTier.Tier1Behavioral,
+                    AuthorizedResponse = pid > 0 ? ResponseAction.KillProcessTree : ResponseAction.LogOnly,
+                    ProcessName = processName,
+                    ProcessId = pid,
+                    SignalType = SignalType.AntiTamper,
+                    Metadata = new Dictionary<string, string>
+                    {
+                        { "File", "hosts" },
+                        { "Trigger", trigger },
+                        { "Reverted", reverted.ToString() }
+                    }
+                });
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "[HostsFileGuard] EnforceHostsFile error");
+            }
+        }
+
+        private async Task DeleteUnauthorizedFilesAsync(string trigger, CancellationToken ct)
+        {
+            try
+            {
+                foreach (var file in Directory.GetFiles(DriversEtcPath))
+                {
+                    var fileName = Path.GetFileName(file);
+                    if (string.Equals(fileName, "hosts", StringComparison.OrdinalIgnoreCase))
+                        continue; // This is the one we enforce, not delete
+
+                    // Delete it
+                    try
+                    {
+                        File.Delete(file);
+                        _logger.LogWarning("[HostsFileGuard] Deleted unauthorized file: {File}", fileName);
+
+                        _revertCooldown[file] = DateTime.UtcNow;
+
+                        await _detectionEngine.EmitAsync(new DetectionEvent
+                        {
+                            RuleName = "Anti-Tamper: Unauthorized File Deleted from drivers\\etc",
+                            Evidence = $"File '{fileName}' existed in drivers\\etc and was deleted (trigger: {trigger}). " +
+                                       "Only the 'hosts' file is permitted in this directory.",
+                            Reasoning = "Files like hosts.ics, lmhosts.sam, and others in drivers\\etc can be " +
+                                        "abused as DNS resolution bypass vectors. hosts.ics is loaded by the DNS " +
+                                        "client alongside hosts and is a known attack surface. Sentinel removes " +
+                                        "all files except the enforced hosts file.",
+                            Confidence = 0.90,
+                            Tier = DetectionTier.Tier1Behavioral,
+                            AuthorizedResponse = ResponseAction.LogOnly,
+                            ProcessName = "SYSTEM",
+                            ProcessId = 0,
+                            SignalType = SignalType.AntiTamper,
+                            Metadata = new Dictionary<string, string>
+                            {
+                                { "File", fileName },
+                                { "Trigger", trigger },
+                                { "Action", "Deleted" }
+                            }
+                        });
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug(ex, "[HostsFileGuard] Failed to delete {File}", fileName);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "[HostsFileGuard] DeleteUnauthorizedFiles error");
+            }
+        }
+
+        private void StartWatcher()
+        {
+            try
+            {
+                _watcher = new FileSystemWatcher(DriversEtcPath)
+                {
+                    NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName |
+                                   NotifyFilters.CreationTime | NotifyFilters.Size,
+                    Filter = "*",
+                    IncludeSubdirectories = false,
+                    EnableRaisingEvents = true
+                };
+
+                _watcher.Changed += OnFileEvent;
+                _watcher.Created += OnFileEvent;
+                _watcher.Renamed += (s, e) => OnFileEvent(s, e);
+
+                _logger.LogInformation("[HostsFileGuard] Watcher active on {Path}", DriversEtcPath);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[HostsFileGuard] Failed to start watcher");
+            }
+        }
+
+        private async void OnFileEvent(object sender, FileSystemEventArgs e)
+        {
+            try
+            {
+                // Cooldown check
+                if (_revertCooldown.TryGetValue(e.FullPath, out var lastAction) &&
+                    DateTime.UtcNow - lastAction < CooldownPeriod)
+                    return;
+
+                await EnforceAsync(e.ChangeType.ToString(), CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "[HostsFileGuard] OnFileEvent error for {File}", e.FullPath);
+            }
+        }
+
+        private static (int pid, string name) GetModifyingProcess(string filePath)
+        {
+            try
+            {
+                if (!File.Exists(filePath)) return (0, "Unknown");
+                var lastWrite = File.GetLastWriteTimeUtc(filePath);
+                foreach (var proc in Process.GetProcesses())
+                {
+                    try
+                    {
+                        if (proc.StartTime.ToUniversalTime() <= lastWrite &&
+                            proc.StartTime.ToUniversalTime() > lastWrite.AddSeconds(-5) &&
+                            proc.Id > 4)
+                        {
+                            return (proc.Id, proc.ProcessName);
+                        }
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+            return (0, "Unknown");
+        }
+
+        private static string ComputeFileHash(string path)
+        {
+            try
+            {
+                using var stream = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                using var sha = SHA256.Create();
+                return Convert.ToHexString(sha.ComputeHash(stream));
+            }
+            catch { return string.Empty; }
+        }
+
+        private void DisposeWatcher()
+        {
+            if (_watcher != null)
+            {
+                _watcher.EnableRaisingEvents = false;
+                _watcher.Dispose();
+                _watcher = null;
+            }
+        }
+
+        public override async Task StopAsync(CancellationToken ct)
+        {
+            DisposeWatcher();
+            await base.StopAsync(ct);
+        }
+
+        // ── Embedded trusted hosts file content (no external file dependency) ──
+        private const string TrustedHostsContent =
+            "# Windows Sentinel hosts file\r\n" +
+            "127.0.0.1 localhost\r\n" +
+            "127.0.0.1 localhost.localdomain\r\n" +
+            "127.0.0.1 local\r\n" +
+            "255.255.255.255 broadcasthost\r\n" +
+            "::1 localhost\r\n" +
+            "::1 ip6-localhost\r\n" +
+            "::1 ip6-loopback\r\n" +
+            "fe80::1%lo0 localhost\r\n" +
+            "ff00::0 ip6-localnet\r\n" +
+            "ff00::0 ip6-mcastprefix\r\n" +
+            "ff02::1 ip6-allnodes\r\n" +
+            "ff02::2 ip6-allrouters\r\n" +
+            "ff02::3 ip6-allhosts\r\n" +
+            "0.0.0.0 0.0.0.0\r\n" +
+            "0.0.0.0 forum.hr\r\n" +
+            "0.0.0.0 adtago.s3.amazonaws.com\r\n" +
+            "0.0.0.0 analyticsengine.s3.amazonaws.com\r\n" +
+            "0.0.0.0 advice-ads.s3.amazonaws.com\r\n" +
+            "0.0.0.0 affiliationjs.s3.amazonaws.com\r\n" +
+            "0.0.0.0 advertising-api-eu.amazon.com\r\n" +
+            "0.0.0.0 ssl.google-analytics.com\r\n" +
+            "0.0.0.0 fastclick.com\r\n" +
+            "0.0.0.0 fastclick.net\r\n" +
+            "0.0.0.0 media.fastclick.net\r\n" +
+            "0.0.0.0 cdn.fastclick.net\r\n" +
+            "0.0.0.0 analytics.yahoo.com\r\n" +
+            "0.0.0.0 global.adserver.yahoo.com\r\n" +
+            "0.0.0.0 ads.yap.yahoo.com\r\n" +
+            "0.0.0.0 appmetrica.yandex.com\r\n" +
+            "0.0.0.0 yandexadexchange.net\r\n" +
+            "0.0.0.0 analytics.mobile.yandex.net\r\n" +
+            "0.0.0.0 extmaps-api.yandex.net\r\n" +
+            "0.0.0.0 adsdk.yandex.ru\r\n" +
+            "0.0.0.0 appmetrica.yandex.com\r\n" +
+            "0.0.0.0 hotjar.com\r\n" +
+            "0.0.0.0 static.hotjar.com\r\n" +
+            "0.0.0.0 api-hotjar.com\r\n" +
+            "0.0.0.0 jotjar-analytics.com\r\n" +
+            "0.0.0.0 mouseflow.com\r\n" +
+            "0.0.0.0 freshmarketer.com\r\n" +
+            "0.0.0.0 luckyorange.com\r\n" +
+            "0.0.0.0 cdn.luckyorange.com\r\n" +
+            "0.0.0.0 w1.luckyorange.com\r\n" +
+            "0.0.0.0 upload.luckyorange.com\r\n" +
+            "0.0.0.0 cs.luckyorange.com\r\n" +
+            "0.0.0.0 settings.luckyorange.com\r\n" +
+            "0.0.0.0 stats.wp.com\r\n" +
+            "0.0.0.0 app.bugsnag.com\r\n" +
+            "0.0.0.0 api.bugsnag.com\r\n" +
+            "0.0.0.0 notify.bugsnag.com\r\n" +
+            "0.0.0.0 sessions.bugsnag.com\r\n" +
+            "0.0.0.0 browser.sentry-cdn.com\r\n" +
+            "0.0.0.0 app.getsentry.com\r\n" +
+            "0.0.0.0 amazonaws.com\r\n" +
+            "0.0.0.0 amazonaax.com\r\n" +
+            "0.0.0.0 amazonclix.com\r\n" +
+            "0.0.0.0 assoc-amazon.com\r\n" +
+            "0.0.0.0 ads.google.com\r\n" +
+            "0.0.0.0 pagead2.googlesyndication.com\r\n" +
+            "0.0.0.0 pagead2.googleadservices.com\r\n" +
+            "# 0.0.0.0 facebook.com\r\n" +
+            "0.0.0.0 amazon-adsystem.com\r\n" +
+            "0.0.0.0 googleadservices.com\r\n" +
+            "0.0.0.0 doubleclick.net\r\n" +
+            "0.0.0.0 ad.doubleclick.net\r\n" +
+            "0.0.0.0 static.doubleclick.net\r\n" +
+            "0.0.0.0 m.doubleclick.net\r\n" +
+            "0.0.0.0 mediavisor.doubleclick.net\r\n" +
+            "0.0.0.0 googleads.g.doubleclick.net\r\n" +
+            "0.0.0.0 adclick.g.doubleclick.net\r\n" +
+            "0.0.0.0 carbonads.net\r\n" +
+            "0.0.0.0 advertising.amazon.com\r\n" +
+            "0.0.0.0 advertising.amazon.ca\r\n" +
+            "0.0.0.0 google-analytics.com\r\n" +
+            "0.0.0.0 doubleclick.net\r\n" +
+            "0.0.0.0 doubleclick.com\r\n" +
+            "0.0.0.0 doubleclick.de\r\n" +
+            "0.0.0.0 partner.googleadservices.com\r\n" +
+            "0.0.0.0 googlesyndication.com\r\n" +
+            "0.0.0.0 google-analytics.com\r\n" +
+            "0.0.0.0 zedo.com\r\n" +
+            "0.0.0.0 amazon.ae\r\n" +
+            "0.0.0.0 amazon.cn\r\n" +
+            "0.0.0.0 advertising.amazon.co.jp\r\n" +
+            "0.0.0.0 amazon.co.uk\r\n" +
+            "0.0.0.0 advertising.amazon.com.au\r\n" +
+            "0.0.0.0 advertising.amazon.com.mx\r\n" +
+            "0.0.0.0 advertising.amazon.de\r\n" +
+            "0.0.0.0 advertising.amazon.es\r\n" +
+            "0.0.0.0 advertising.amazon.fr\r\n" +
+            "0.0.0.0 advertising.amazon.in\r\n" +
+            "0.0.0.0 advertising.amazon.it\r\n" +
+            "0.0.0.0 advertising.amazon.sa\r\n" +
+            "0.0.0.0 bingads.microsoft.com\r\n" +
+            "0.0.0.0 adcash.com\r\n" +
+            "0.0.0.0 taboola.com\r\n" +
+            "0.0.0.0 outbrain.com\r\n" +
+            "0.0.0.0 smartyads.com\r\n" +
+            "0.0.0.0 popads.net\r\n" +
+            "0.0.0.0 adpushup.com\r\n" +
+            "0.0.0.0 trafficforce.com\r\n" +
+            "0.0.0.0 adsterra.com\r\n" +
+            "0.0.0.0 creative.ak.fbcdn.net\r\n" +
+            "0.0.0.0 adbrite.com\r\n" +
+            "0.0.0.0 exponential.com\r\n" +
+            "0.0.0.0 quantserve.com\r\n" +
+            "0.0.0.0 scorecardresearch.com\r\n" +
+            "0.0.0.0 propellerads.com\r\n" +
+            "0.0.0.0 admedia.net\r\n" +
+            "0.0.0.0 admedia.com\r\n" +
+            "0.0.0.0 bidvertiser.com\r\n" +
+            "0.0.0.0 undertone.com\r\n" +
+            "0.0.0.0 web.adblade.com\r\n" +
+            "0.0.0.0 revenuehits.com\r\n" +
+            "0.0.0.0 infolinks.com\r\n" +
+            "0.0.0.0 vibrantmedia.com\r\n" +
+            "0.0.0.0 ads.yahoosmallbusiness.com\r\n" +
+            "0.0.0.0 ads.yahoo.com\r\n" +
+            "0.0.0.0 hilltopads.net\r\n" +
+            "0.0.0.0 clickadu.com\r\n" +
+            "0.0.0.0 citysex.com\r\n" +
+            "0.0.0.0 ad-maven.com\r\n" +
+            "0.0.0.0 propelmedia.com\r\n" +
+            "0.0.0.0 enginemediaexchange.com\r\n" +
+            "0.0.0.0 advertisers.adversense.com\r\n" +
+            "0.0.0.0 a.adtng.com\r\n" +
+            "0.0.0.0 ads.facebook.com\r\n" +
+            "0.0.0.0 an.facebook.com\r\n" +
+            "0.0.0.0 analytics.facebook.com\r\n" +
+            "0.0.0.0 pixel.facebook.com\r\n" +
+            "0.0.0.0 ads.youtube.com\r\n" +
+            "0.0.0.0 youtube.cleverads.vn\r\n" +
+            "0.0.0.0 ads-twitter.com\r\n" +
+            "0.0.0.0 ads-api.twitter.com\r\n" +
+            "0.0.0.0 advertising.twitter.com\r\n" +
+            "0.0.0.0 ads.linkedin.com\r\n" +
+            "0.0.0.0 analytics.pointdrive.linkedin.com\r\n" +
+            "0.0.0.0 ads.reddit.com\r\n" +
+            "0.0.0.0 d.reddit.com\r\n" +
+            "0.0.0.0 rereddit.com\r\n" +
+            "0.0.0.0 events.redditmedia.com\r\n" +
+            "0.0.0.0 analytics.tiktok.com\r\n" +
+            "0.0.0.0 ads.tiktok.com\r\n" +
+            "0.0.0.0 analytics-sg.tiktok.com\r\n" +
+            "0.0.0.0 ads-sg.tiktok.com\r\n";
+    }
 }
 
