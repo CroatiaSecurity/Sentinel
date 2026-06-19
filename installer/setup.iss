@@ -61,17 +61,27 @@ procedure StopExistingService();
 var
   ResultCode: Integer;
 begin
-  // Stop the service before upgrading � handles antitamper ACL-locked files
+  // Stop the service before upgrading
   Exec(ExpandConstant('{sys}\sc.exe'), 'stop "Windows Sentinel"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   // Wait for service to stop
-  Sleep(2000);
+  Sleep(3000);
   // Kill any remaining agent processes
   Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM WindowsSentinel.Agent.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM WindowsSentinel.Service.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Sleep(1000);
-  // Reset directory ACLs so installer can overwrite files (antitamper hardens ACLs)
+  // Take ownership of the directory (required if antitamper changed owner)
+  Exec(ExpandConstant('{sys}\takeown.exe'),
+    ExpandConstant('/F "{app}" /R /A /D Y'),
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  // Remove all Deny ACEs and grant Administrators full control
   Exec(ExpandConstant('{sys}\icacls.exe'),
     ExpandConstant('"{app}" /reset /T /C /Q'),
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{sys}\icacls.exe'),
+    ExpandConstant('"{app}" /grant Administrators:F /T /C /Q'),
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{sys}\icacls.exe'),
+    ExpandConstant('"{app}" /grant SYSTEM:F /T /C /Q'),
     '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
 
