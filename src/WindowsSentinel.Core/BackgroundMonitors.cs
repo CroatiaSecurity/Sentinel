@@ -4053,7 +4053,18 @@ namespace WindowsSentinel.Core
             "0.0.0.0 analytics.tiktok.com\r\n" +
             "0.0.0.0 ads.tiktok.com\r\n" +
             "0.0.0.0 analytics-sg.tiktok.com\r\n" +
-            "0.0.0.0 ads-sg.tiktok.com\r\n";
+            "0.0.0.0 ads-sg.tiktok.com\r\n" +
+            "# Google FCM push channel (blocks 443 fallback for Send Tab to Self attack)\r\n" +
+            "0.0.0.0 mtalk.google.com\r\n" +
+            "0.0.0.0 mobile-gtalk.l.google.com\r\n" +
+            "0.0.0.0 alt1-mtalk.google.com\r\n" +
+            "0.0.0.0 alt2-mtalk.google.com\r\n" +
+            "0.0.0.0 alt3-mtalk.google.com\r\n" +
+            "0.0.0.0 alt4-mtalk.google.com\r\n" +
+            "0.0.0.0 alt5-mtalk.google.com\r\n" +
+            "0.0.0.0 alt6-mtalk.google.com\r\n" +
+            "0.0.0.0 alt7-mtalk.google.com\r\n" +
+            "0.0.0.0 alt8-mtalk.google.com\r\n";
     }
 }
 
