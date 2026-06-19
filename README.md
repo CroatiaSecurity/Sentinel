@@ -2,7 +2,7 @@
 
 **Userland IDS/EDR for Windows — Behavioral Threat Detection & Automated Response**
 
-> Version: 0.8.4 | Author: [Gorstak](https://gorstak.eu) | License: MIT
+> Version: 0.8.6 | Author: [Gorstak](https://gorstak.eu) | License: MIT
 
 [![Release](https://img.shields.io/github/v/release/CroatiaSecurity/Sentinel?style=flat-square)](https://github.com/CroatiaSecurity/Sentinel/releases/latest)
 [![License](https://img.shields.io/github/license/CroatiaSecurity/Sentinel?style=flat-square)](LICENSE)
@@ -23,7 +23,7 @@ No signatures. No blocklists. No name-based detection. Pure behavioral analysis.
 
 ```powershell
 # Run as Administrator
-.\WindowsSentinelSetup-0.8.4.exe
+.\WindowsSentinelSetup-0.8.6.exe
 ```
 
 Installs a Windows Service (SYSTEM) + user Agent (tray icon). Active response is enabled by default.
@@ -60,6 +60,7 @@ Telemetry → Fusion → Rules → Scoring → Response → Chain Trace
 | 🔒 **Certificate Attacks** | MitM root CA, BYOVD driver signing | Root + TrustedPublisher store monitoring |
 | 🖥️ **DLL Sideloading** | System DLL in app directory | Module enumeration + in-memory FreeLibrary unload + quarantine + lock file |
 | 🛑 **Anti-Tamper** | Process suspend, binary deletion, service removal | 2s timing tick, binary integrity, SCM monitoring |
+| 🔒 **Null Session** | Blank-password network auth, SMB null-session | Registry policy enforcement + FCM push block |
 
 ---
 

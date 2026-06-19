@@ -2910,6 +2910,281 @@ namespace WindowsSentinel.Core
     }
 
     // ──────────────────────────────────────────────
+    // Null Session Guard — actively blocks blank-password network logon exposure
+    // by enforcing security policy that restricts network access without credentials.
+    // Also hardens against FCM push-triggered tab opens following MitM cert attacks.
+    // ──────────────────────────────────────────────
+    public sealed class NullSessionGuard : BackgroundService
+    {
+        private readonly DetectionEngine _detectionEngine;
+        private readonly ILogger<NullSessionGuard> _logger;
+        private bool _policyApplied;
+        private bool _fcmBlocked;
+
+        private const string LimitBlankPasswordUseKey = @"SYSTEM\CurrentControlSet\Control\Lsa";
+        private const string LimitBlankPasswordUseValue = "LimitBlankPasswordUse";
+        private const string RestrictNullSessAccessValue = "RestrictAnonymous";
+        private const string EveryoneIncludesAnonValue = "EveryoneIncludesAnonymous";
+        private const string RestrictRemoteSamKey = @"SYSTEM\CurrentControlSet\Control\Lsa";
+
+        // Google FCM/GCM IPs use port 5228. Blocking this port via Windows Firewall
+        // prevents push-triggered tab opens ("Send Tab to Self") that attackers can
+        // abuse after stealing Chrome session tokens via MitM cert interception.
+        private const string FcmFirewallRuleName = "Sentinel-FCM-Push-Block";
+        private const int FcmPort = 5228;
+
+        public NullSessionGuard(DetectionEngine de, ILogger<NullSessionGuard> l)
+        {
+            _detectionEngine = de;
+            _logger = l;
+        }
+
+        protected override async Task ExecuteAsync(CancellationToken ct)
+        {
+            _logger.LogInformation("[NullSessionGuard] Started — enforcing blank-password network restrictions and FCM push protection");
+
+            // Initial delay to let other monitors start
+            await Task.Delay(15000, ct);
+
+            while (!ct.IsCancellationRequested)
+            {
+                try
+                {
+                    await EnforceNullSessionProtection(ct);
+                    await EnforceFcmPushBlock(ct);
+                }
+                catch (OperationCanceledException) { break; }
+                catch (Exception ex) { _logger.LogDebug(ex, "[NullSessionGuard] Error"); }
+
+                // Re-check every 60s (policy may be reverted by attacker/GPO)
+                await Task.Delay(60000, ct);
+            }
+        }
+
+        /// <summary>
+        /// Enforces Windows security policies that prevent blank-password accounts from
+        /// being accessed over the network. This is the ACTIVE protection:
+        /// 
+        /// 1. LimitBlankPasswordUse = 1 — blocks network logon for accounts with empty passwords
+        ///    (prevents SMB null-session, RDP without password, WinRM without password)
+        /// 2. RestrictAnonymous = 1 — prevents anonymous enumeration of SAM accounts and shares
+        /// 3. EveryoneIncludesAnonymous = 0 — anonymous tokens excluded from Everyone group
+        ///
+        /// If an attacker reverts these, the monitor detects and re-applies within 60s.
+        /// </summary>
+        private async Task EnforceNullSessionProtection(CancellationToken ct)
+        {
+            bool anyChanged = false;
+
+            try
+            {
+                using var lsaKey = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(LimitBlankPasswordUseKey, true);
+                if (lsaKey != null)
+                {
+                    // Enforce LimitBlankPasswordUse = 1
+                    var current = lsaKey.GetValue(LimitBlankPasswordUseValue);
+                    if (current == null || (int)current != 1)
+                    {
+                        lsaKey.SetValue(LimitBlankPasswordUseValue, 1, Microsoft.Win32.RegistryValueKind.DWord);
+                        anyChanged = true;
+                        _logger.LogWarning("[NullSessionGuard] Enforced LimitBlankPasswordUse=1 (was {Old})", current);
+                    }
+
+                    // Enforce RestrictAnonymous = 1
+                    var restrictAnon = lsaKey.GetValue(RestrictNullSessAccessValue);
+                    if (restrictAnon == null || (int)restrictAnon < 1)
+                    {
+                        lsaKey.SetValue(RestrictNullSessAccessValue, 1, Microsoft.Win32.RegistryValueKind.DWord);
+                        anyChanged = true;
+                        _logger.LogWarning("[NullSessionGuard] Enforced RestrictAnonymous=1 (was {Old})", restrictAnon);
+                    }
+
+                    // Enforce EveryoneIncludesAnonymous = 0
+                    var everyoneAnon = lsaKey.GetValue(EveryoneIncludesAnonValue);
+                    if (everyoneAnon != null && (int)everyoneAnon != 0)
+                    {
+                        lsaKey.SetValue(EveryoneIncludesAnonValue, 0, Microsoft.Win32.RegistryValueKind.DWord);
+                        anyChanged = true;
+                        _logger.LogWarning("[NullSessionGuard] Enforced EveryoneIncludesAnonymous=0 (was {Old})", everyoneAnon);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "[NullSessionGuard] Failed to enforce LSA policy");
+            }
+
+            if (anyChanged && !_policyApplied)
+            {
+                _policyApplied = true;
+                await _detectionEngine.EmitAsync(new DetectionEvent
+                {
+                    RuleName = "Hardening: Null Session Network Access Blocked",
+                    Evidence = "Enforced LimitBlankPasswordUse=1, RestrictAnonymous=1, EveryoneIncludesAnonymous=0",
+                    Reasoning = "Active protection applied: blank-password accounts are now blocked from network logon " +
+                                "(SMB, RDP, WinRM). Anonymous enumeration of user accounts and shares is restricted. " +
+                                "This prevents attackers from exploiting the blank local password via null-session authentication, " +
+                                "pass-the-hash with the well-known empty NTLM hash (31D6CFE0D16AE931B73C59D7E0C089C0), " +
+                                "or anonymous share/user enumeration for lateral movement.",
+                    Confidence = 0.99,
+                    Tier = DetectionTier.Tier2Indicator,
+                    AuthorizedResponse = ResponseAction.LogOnly,
+                    ProcessName = "SYSTEM",
+                    ProcessId = 0,
+                    SignalType = SignalType.SecurityEvasion,
+                    Metadata = new Dictionary<string, string>
+                    {
+                        { "Action", "PolicyEnforced" },
+                        { "LimitBlankPasswordUse", "1" },
+                        { "RestrictAnonymous", "1" }
+                    }
+                });
+            }
+            else if (anyChanged)
+            {
+                // Policy was reverted by something — attacker or GPO. Re-applied.
+                await _detectionEngine.EmitAsync(new DetectionEvent
+                {
+                    RuleName = "Anti-Tamper: Null Session Policy Reverted and Re-Applied",
+                    Evidence = "Null-session restriction policy was found reverted and has been re-enforced",
+                    Reasoning = "The LimitBlankPasswordUse or RestrictAnonymous policy was found in a weakened state. " +
+                                "This could indicate an attacker disabling the protection to enable null-session access, " +
+                                "or a Group Policy override. Sentinel has re-applied the hardened settings.",
+                    Confidence = 0.85,
+                    Tier = DetectionTier.Tier1Behavioral,
+                    AuthorizedResponse = ResponseAction.LogOnly,
+                    ProcessName = "SYSTEM",
+                    ProcessId = 0,
+                    SignalType = SignalType.SecurityEvasion
+                });
+            }
+        }
+
+        /// <summary>
+        /// Blocks outbound traffic to Google FCM port 5228 via Windows Firewall.
+        ///
+        /// Attack chain:
+        ///   1. Attacker plants MitM root cert → intercepts HTTPS → steals Chrome sync tokens
+        ///   2. With stolen tokens, attacker uses "Send Tab to Self" via FCM push
+        ///   3. Chrome receives FCM push on port 5228 → opens attacker-controlled URL
+        ///   4. URL exploits browser or phishes credentials
+        ///
+        /// By blocking port 5228, we sever the FCM push channel completely.
+        /// Chrome still functions normally (browsing, sync of bookmarks/passwords works
+        /// via HTTPS on 443). Only real-time push notifications are lost.
+        ///
+        /// This is acceptable because:
+        ///   - No AV/EDR is installed (Defender removed on debloated Windows)
+        ///   - MitM certs WERE detected and removed, but token theft may have already occurred
+        ///   - The user's Google account is "well secured" but tokens can outlive password changes
+        ///   - Better to lose push notifications than allow remote tab injection
+        /// </summary>
+        private async Task EnforceFcmPushBlock(CancellationToken ct)
+        {
+            if (_fcmBlocked) return;
+
+            try
+            {
+                // Check if the firewall rule already exists
+                bool ruleExists = false;
+                try
+                {
+                    var policyType = Type.GetTypeFromProgID("HNetCfg.FwPolicy2");
+                    if (policyType == null) throw new InvalidOperationException("COM type not found");
+                    dynamic? policy = Activator.CreateInstance(policyType);
+                    if (policy == null) throw new InvalidOperationException("COM instance failed");
+
+                    foreach (dynamic rule in policy.Rules)
+                    {
+                        if ((string)rule.Name == FcmFirewallRuleName)
+                        {
+                            ruleExists = true;
+                            break;
+                        }
+                    }
+
+                    if (!ruleExists)
+                    {
+                        var ruleType = Type.GetTypeFromProgID("HNetCfg.FWRule");
+                        if (ruleType == null) throw new InvalidOperationException("COM rule type not found");
+                        dynamic? newRule = Activator.CreateInstance(ruleType);
+                        if (newRule == null) throw new InvalidOperationException("COM rule instance failed");
+
+                        newRule.Name = FcmFirewallRuleName;
+                        newRule.Description = "Sentinel: Blocks Google FCM push notifications (port 5228) " +
+                                              "to prevent remote tab injection via stolen sync tokens";
+                        newRule.Protocol = 6; // TCP
+                        newRule.RemotePorts = FcmPort.ToString();
+                        newRule.Direction = 2; // Outbound
+                        newRule.Action = 0; // Block
+                        newRule.Enabled = true;
+                        newRule.Profiles = 0x7FFFFFFF; // All profiles
+
+                        policy.Rules.Add(newRule);
+
+                        _logger.LogWarning("[NullSessionGuard] BLOCKED outbound port {Port} (Google FCM push) — prevents remote tab injection", FcmPort);
+
+                        await _detectionEngine.EmitAsync(new DetectionEvent
+                        {
+                            RuleName = "Hardening: FCM Push Channel Blocked",
+                            Evidence = $"Firewall rule '{FcmFirewallRuleName}' created blocking outbound TCP port {FcmPort}",
+                            Reasoning = "Blocked Google Firebase Cloud Messaging (FCM) port 5228 outbound. " +
+                                        "Attack chain: MitM cert → HTTPS intercept → Chrome token theft → FCM 'Send Tab to Self' → " +
+                                        "arbitrary URL opens on this machine. Blocking FCM severs this attack vector permanently. " +
+                                        "Chrome browsing, bookmark sync, and password sync continue to work normally via HTTPS (port 443). " +
+                                        "Only real-time push notifications are disabled.",
+                            Confidence = 0.99,
+                            Tier = DetectionTier.Tier2Indicator,
+                            AuthorizedResponse = ResponseAction.LogOnly,
+                            ProcessName = "SYSTEM",
+                            ProcessId = 0,
+                            SignalType = SignalType.NetworkC2,
+                            Metadata = new Dictionary<string, string>
+                            {
+                                { "Action", "FirewallBlock" },
+                                { "Port", FcmPort.ToString() },
+                                { "RuleName", FcmFirewallRuleName },
+                                { "Impact", "Push notifications disabled; browsing unaffected" }
+                            }
+                        });
+                    }
+                    else
+                    {
+                        _logger.LogInformation("[NullSessionGuard] FCM block rule already exists");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "[NullSessionGuard] Failed to create FCM block via COM, falling back to netsh");
+
+                    // Fallback: use netsh directly
+                    var psi = new ProcessStartInfo("netsh",
+                        $"advfirewall firewall add rule name=\"{FcmFirewallRuleName}\" " +
+                        $"dir=out action=block protocol=tcp remoteport={FcmPort}")
+                    {
+                        CreateNoWindow = true,
+                        UseShellExecute = false,
+                        WindowStyle = ProcessWindowStyle.Hidden
+                    };
+                    using var proc = Process.Start(psi);
+                    proc?.WaitForExit(5000);
+
+                    if (proc?.ExitCode == 0)
+                    {
+                        _logger.LogWarning("[NullSessionGuard] BLOCKED FCM port {Port} via netsh fallback", FcmPort);
+                    }
+                }
+
+                _fcmBlocked = true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "[NullSessionGuard] FCM block enforcement failed");
+            }
+        }
+    }
+
+    // ──────────────────────────────────────────────
     // Phantom Device Monitor — detects & blocks unauthorized network devices
     // ──────────────────────────────────────────────
     public sealed class PhantomDeviceMonitor : BackgroundService

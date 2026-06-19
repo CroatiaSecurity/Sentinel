@@ -2,6 +2,35 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [0.8.6] - 2026-06-19
+
+### Added — Null Session Guard & FCM Push Channel Protection
+
+- **`NullSessionGuard` active hardening monitor** — Continuously enforces Windows security policies that block blank-password network exposure:
+  - **LimitBlankPasswordUse = 1** — Blocks network logon (SMB, RDP, WinRM) for accounts with empty passwords. Prevents null-session authentication and pass-the-hash with the well-known empty NTLM hash (31D6CFE0D16AE931B73C59D7E0C089C0).
+  - **RestrictAnonymous = 1** — Prevents anonymous enumeration of SAM accounts and network shares.
+  - **EveryoneIncludesAnonymous = 0** — Excludes anonymous tokens from the Everyone security group.
+  - **Self-healing**: If an attacker or Group Policy reverts these settings, Sentinel re-applies within 60 seconds and emits a tamper detection event.
+
+- **FCM Push Channel Block** — Blocks outbound TCP port 5228 (Google Firebase Cloud Messaging) via Windows Firewall to prevent remote tab injection attacks:
+  - **Attack chain mitigated**: MitM root cert → HTTPS intercept → Chrome sync token theft → attacker uses "Send Tab to Self" via FCM push → arbitrary URLs open on victim's machine.
+  - **Impact**: Only real-time push notifications are disabled. Chrome browsing, bookmark sync, password sync, and all HTTPS traffic on port 443 continue to function normally.
+  - **Rationale**: MitM certificates were detected and removed on June 14, but stolen OAuth/sync tokens can outlive password changes. Blocking FCM permanently severs this attack vector.
+
+### Attack Chain Analysis (Motivating This Release)
+
+The following attack chain was observed June 13–14 and is documented for threat model accuracy:
+
+1. **Two self-signed root certificates planted** (CN=WINDOWS-PC, CN=WIN-0M9R8BJOBHS) with 1000-year validity and Server Authentication EKU — designed for TLS interception
+2. **Sentinel detected and removed both certs** on startup (confidence 0.99, REMOVE_CERT response)
+3. **However**: between cert installation (Jun 13) and Sentinel startup (Jun 14 03:55 UTC), the attacker had a window to intercept all HTTPS traffic and steal Chrome sync tokens
+4. **Ghost process (empty name) beaconing** to Google FCM IPs (142.251.x.x:5228) — Chrome's network utility process
+5. **Phantom device** (192.168.1.100, Google Chromecast) detected on port 8009 — potential C2 relay
+6. **FCM push** can trigger "Send Tab to Self" which opens URLs without user interaction
+7. **Blank local password + AutoAdminLogon** compounds exposure — no authentication barrier at any layer
+
+The `NullSessionGuard` addresses vectors 6 and 7 with active, self-healing protection.
+
 ## [0.8.5] - 2026-06-18
 
 ### Added — Community Threat Reporting via Cloudflare Worker Proxy
