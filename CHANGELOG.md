@@ -2,6 +2,27 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [0.8.7] - 2026-06-19
+
+### Added — Hosts File Guard (Embedded Baseline Enforcement & Directory Purge)
+
+- **`HostsFileGuard` self-healing monitor** — Monitors `C:\Windows\System32\drivers\etc\` with two enforcement actions:
+  1. **`hosts` file enforcement** — Content is hardcoded in the binary (embedded trusted baseline with ad/tracker blocklist). Any modification is instantly reverted by overwriting with the embedded content. No external file dependency — the baseline travels with the binary and cannot be tampered with on disk.
+  2. **Directory purge** — ALL other files in `drivers\etc` are deleted on sight (`hosts.ics`, `lmhosts.sam`, `networks`, `protocol`, `services`, and anything else). Only `hosts` is permitted to exist.
+
+- **Why delete everything else:**
+  - `hosts.ics` is loaded by the Windows DNS client alongside `hosts` — a known bypass vector where malware writes poisoned entries to a file nobody monitors.
+  - `lmhosts.sam`, `networks`, `protocol`, `services` are legacy files with no modern utility on a hardened single-machine setup.
+  - Any new file dropped into this directory by malware (e.g., `hosts.bak`, `.txt` files) is eliminated immediately.
+
+- **Implementation details:**
+  - **FileSystemWatcher real-time detection** — Catches writes, renames, and creations instantly.
+  - **30-second periodic integrity check** — Catches offline modifications or watcher saturation.
+  - **SHA-256 comparison** — Only rewrites `hosts` when content actually differs (precomputed hash of embedded content vs file on disk).
+  - **KillProcessTree response** — When the modifying process is identified, the entire process tree is killed.
+  - **3-second cooldown** — Prevents infinite loops from reacting to its own enforcement writes.
+  - **3-retry with 500ms backoff** — Handles locked-file scenarios gracefully.
+
 ## [0.8.6] - 2026-06-19
 
 ### Added — Null Session Guard & FCM Push Channel Protection
