@@ -294,35 +294,15 @@ namespace WindowsSentinel.Agent
 
                                         if (tierVal == 0 && killAuthorized && _config.ActiveResponse)
                                         {
-                                            // Critical kills: ALWAYS show, bypass rate limiter
+                                            // Only show toasts for actual kills/blocks/quarantine
                                             _notifyIcon?.ShowBalloonTip(
                                                 5000,
                                                 title,
                                                 $"Process: {processName} ({statusText})\nConfidence: {confidence:P0}\n{evidence}",
                                                 ToolTipIcon.Error
                                             );
-                                            isSilenced = false;
                                         }
-                                        else if (rateLimiter.AllowRequest())
-                                        {
-                                            isSilenced = false;
-                                            _notifyIcon?.ShowBalloonTip(
-                                                5000,
-                                                title,
-                                                $"Process: {processName} ({statusText})\nConfidence: {confidence:P0}\n{evidence}",
-                                                ToolTipIcon.Warning
-                                            );
-                                        }
-                                        else if (!isSilenced)
-                                        {
-                                            isSilenced = true;
-                                            _notifyIcon?.ShowBalloonTip(
-                                                3000,
-                                                "Notifications Silenced",
-                                                "Multiple alerts received in a short time. Alerts are suppressed to prevent spam. Check console or events.jsonl for complete logs.",
-                                                ToolTipIcon.Info
-                                            );
-                                        }
+                                        // All other detections: silent (logged only)
                                     }
                                     catch { }
                                 }

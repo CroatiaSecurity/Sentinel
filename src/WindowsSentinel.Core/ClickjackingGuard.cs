@@ -188,10 +188,37 @@ namespace WindowsSentinel.Core
 
         #region Mouse Injection Detection
 
+        [DllImport("user32.dll")]
+        private static extern int GetMessage(out MSG lpMsg, IntPtr hWnd, uint wMsgFilterMin, uint wMsgFilterMax);
+
+        [DllImport("user32.dll")]
+        private static extern bool TranslateMessage(ref MSG lpMsg);
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr DispatchMessage(ref MSG lpMsg);
+
+        [DllImport("user32.dll")]
+        private static extern void PostThreadMessage(int idThread, uint Msg, IntPtr wParam, IntPtr lParam);
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct MSG
+        {
+            public IntPtr hwnd;
+            public uint message;
+            public IntPtr wParam;
+            public IntPtr lParam;
+            public uint time;
+            public POINT pt;
+        }
+
+        private const uint WM_QUIT = 0x0012;
+        private int _hookThreadId;
+
         private void RunMouseHook(CancellationToken ct)
         {
             try
             {
+                _hookThreadId = Environment.CurrentManagedThreadId;
                 _mouseHookProc = MouseHookCallback;
                 using var curProcess = Process.GetCurrentProcess();
                 using var curModule = curProcess.MainModule!;
@@ -205,11 +232,18 @@ namespace WindowsSentinel.Core
 
                 _logger.LogInformation("[ClickjackingGuard] Mouse hook installed");
 
-                // Message pump required for hook to work
-                while (!ct.IsCancellationRequested)
+                // Register cancellation to post WM_QUIT and break the message loop
+                ct.Register(() =>
                 {
-                    Thread.Sleep(100);
-                    // PeekMessage to keep the hook alive without blocking
+                    try { PostThreadMessage(_hookThreadId, WM_QUIT, IntPtr.Zero, IntPtr.Zero); } catch { }
+                });
+
+                // Proper Win32 message pump — required for low-level hooks to work without lag
+                MSG msg;
+                while (GetMessage(out msg, IntPtr.Zero, 0, 0) > 0)
+                {
+                    TranslateMessage(ref msg);
+                    DispatchMessage(ref msg);
                 }
             }
             catch (Exception ex)
