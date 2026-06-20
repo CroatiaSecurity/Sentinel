@@ -2,6 +2,27 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [0.8.9] - 2026-06-20
+
+### Added — Boot Integrity Guard (Rootkit Persistence Detection)
+
+- **`BootIntegrityGuard` monitor** — Monitors boot-level persistence vectors every 60 seconds:
+  - **BCD monitoring** — Detects runtime changes to Boot Configuration Data (testsigning, debug mode, nointegritychecks, new/modified boot entries)
+  - **Boot driver registration** — Baselines all boot-start (Start=0) and system-start (Start=1) kernel drivers at startup, alerts on new untrusted drivers registered after boot
+  - **EFI partition inspection** — Checks for bootkit indicators: bootmgfw.efi.bak (replaced boot manager), unknown .efi binaries, unknown directories in ESP
+  - **Attack vectors detected**: BlackLotus, ESPecter, FinSpy EFI persistence, unsigned driver loading via test signing, kernel debug attachment
+
+### Added — forum.hr Full Subdomain Coverage
+
+- Expanded hosts blocklist to cover all forum.hr subdomains: `www`, `m`, `cdn`, `static`, `api`, `img`, `mail`, `ads`, `tracker`
+- Previously only bare `forum.hr` was blocked — any subdomain (especially `www.forum.hr`) bypassed the block entirely
+
+### Fixed — HostsFileGuard Critical Process Kill Prevention
+
+- `GetModifyingProcess` now excludes BSOD-critical processes (csrss, wininit, services, smss, lsass, svchost, winlogon, dwm, explorer, msiexec, TrustedInstaller) from kill targeting
+- HostsFileGuard no longer issues `KillProcessTree` on startup enforcement trigger — first-boot divergence is expected, not hostile
+- `SafeKillProcessTree` now has a final safeguard refusing to kill any BSOD-critical process regardless of detection source
+
 ## [0.8.8] - 2026-06-20
 
 ### Added — MTP Transfer Guard (Bidirectional Phone/PC Firewall)
