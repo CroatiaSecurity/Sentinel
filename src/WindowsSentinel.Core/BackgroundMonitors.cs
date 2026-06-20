@@ -3607,6 +3607,127 @@ namespace WindowsSentinel.Core
     }
 
     // ──────────────────────────────────────────────
+    // Browser DNS Policy Guard — forces browsers to use OS DNS resolver (respects hosts file)
+    // ──────────────────────────────────────────────
+    public sealed class BrowserDnsPolicyGuard : BackgroundService
+    {
+        private readonly DetectionEngine _detectionEngine;
+        private readonly ILogger<BrowserDnsPolicyGuard> _logger;
+        private bool _initialEnforcement;
+
+        // Chrome/Chromium policy keys
+        private const string ChromePolicyKey = @"SOFTWARE\Policies\Google\Chrome";
+        private const string EdgePolicyKey = @"SOFTWARE\Policies\Microsoft\Edge";
+        private const string BravePolicyKey = @"SOFTWARE\Policies\BraveSoftware\Brave";
+
+        public BrowserDnsPolicyGuard(DetectionEngine de, ILogger<BrowserDnsPolicyGuard> l)
+        {
+            _detectionEngine = de;
+            _logger = l;
+        }
+
+        protected override async Task ExecuteAsync(CancellationToken ct)
+        {
+            _logger.LogInformation("[BrowserDnsPolicyGuard] Started — enforcing OS DNS resolver usage for all Chromium browsers");
+
+            await Task.Delay(10000, ct);
+
+            while (!ct.IsCancellationRequested)
+            {
+                try
+                {
+                    bool anyChanged = false;
+                    anyChanged |= EnforcePolicyForBrowser(ChromePolicyKey, "Chrome");
+                    anyChanged |= EnforcePolicyForBrowser(EdgePolicyKey, "Edge");
+                    anyChanged |= EnforcePolicyForBrowser(BravePolicyKey, "Brave");
+
+                    if (anyChanged && !_initialEnforcement)
+                    {
+                        _initialEnforcement = true;
+                        await _detectionEngine.EmitAsync(new DetectionEvent
+                        {
+                            RuleName = "Hardening: Browser DNS Policy Enforced",
+                            Evidence = "Disabled built-in DNS client and DNS-over-HTTPS in Chromium browsers via policy. " +
+                                       "Browsers now use the OS DNS resolver which respects the hosts file.",
+                            Reasoning = "Chromium browsers have a built-in async DNS resolver that bypasses the Windows " +
+                                        "hosts file entirely when Secure DNS (DoH) is active. This means hosts-file-based " +
+                                        "blocking (ad servers, trackers, malicious domains) has zero effect in the browser. " +
+                                        "Forcing the OS resolver ensures all DNS goes through the system stack where the " +
+                                        "hosts file is authoritative.",
+                            Confidence = 0.99,
+                            Tier = DetectionTier.Tier2Indicator,
+                            AuthorizedResponse = ResponseAction.LogOnly,
+                            ProcessName = "SYSTEM",
+                            ProcessId = 0,
+                            SignalType = SignalType.SecurityEvasion,
+                            Metadata = new Dictionary<string, string>
+                            {
+                                { "Action", "PolicyEnforced" },
+                                { "BuiltInDnsClientEnabled", "0" },
+                                { "DnsOverHttpsMode", "off" }
+                            }
+                        });
+                    }
+                    else if (anyChanged)
+                    {
+                        await _detectionEngine.EmitAsync(new DetectionEvent
+                        {
+                            RuleName = "Anti-Tamper: Browser DNS Policy Reverted and Re-Applied",
+                            Evidence = "Browser DNS policy was found reverted (DoH re-enabled or built-in DNS client active). Re-enforced.",
+                            Reasoning = "Something re-enabled the browser's built-in DNS resolver or DoH, bypassing the hosts file. " +
+                                        "This could be a browser update resetting policies, user action, or malware attempting " +
+                                        "to circumvent DNS-level blocking. Sentinel has re-applied the hardened settings.",
+                            Confidence = 0.80,
+                            Tier = DetectionTier.Tier1Behavioral,
+                            AuthorizedResponse = ResponseAction.LogOnly,
+                            ProcessName = "SYSTEM",
+                            ProcessId = 0,
+                            SignalType = SignalType.SecurityEvasion
+                        });
+                    }
+                }
+                catch (OperationCanceledException) { break; }
+                catch (Exception ex) { _logger.LogDebug(ex, "[BrowserDnsPolicyGuard] Error"); }
+
+                await Task.Delay(60000, ct);
+            }
+        }
+
+        private bool EnforcePolicyForBrowser(string policyKey, string browserName)
+        {
+            bool changed = false;
+            try
+            {
+                using var key = Registry.LocalMachine.CreateSubKey(policyKey, true);
+                if (key == null) return false;
+
+                // Disable built-in DNS client — forces use of OS resolver (which reads hosts file)
+                var dnsClient = key.GetValue("BuiltInDnsClientEnabled");
+                if (dnsClient == null || (int)dnsClient != 0)
+                {
+                    key.SetValue("BuiltInDnsClientEnabled", 0, RegistryValueKind.DWord);
+                    changed = true;
+                    _logger.LogWarning("[BrowserDnsPolicyGuard] Enforced BuiltInDnsClientEnabled=0 for {Browser}", browserName);
+                }
+
+                // Disable DNS-over-HTTPS in the browser
+                var dohMode = key.GetValue("DnsOverHttpsMode") as string;
+                if (dohMode == null || !string.Equals(dohMode, "off", StringComparison.OrdinalIgnoreCase))
+                {
+                    key.SetValue("DnsOverHttpsMode", "off", RegistryValueKind.String);
+                    changed = true;
+                    _logger.LogWarning("[BrowserDnsPolicyGuard] Enforced DnsOverHttpsMode=off for {Browser}", browserName);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "[BrowserDnsPolicyGuard] Failed to enforce policy for {Browser}", browserName);
+            }
+            return changed;
+        }
+    }
+
+    // ──────────────────────────────────────────────
     // Hosts File Guard — enforces embedded hosts content, deletes all other files in drivers\etc
     // ──────────────────────────────────────────────
     public sealed class HostsFileGuard : BackgroundService
