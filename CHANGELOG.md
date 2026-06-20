@@ -4,6 +4,16 @@ All notable changes to Windows Sentinel are documented in this file.
 
 ## [0.9.2] - 2026-06-21
 
+### Fixed — Mouse Cursor Lag After Install
+
+- **Root cause:** `ClickjackingGuard` mouse hook thread used `Thread.Sleep(100)` instead of a Win32 message pump. Low-level hooks (`WH_MOUSE_LL`) require `GetMessage`/`DispatchMessage` — without it, Windows queues mouse events waiting for the hook to respond, causing visible lag on every mouse movement.
+- **Fix:** Replaced with proper `GetMessage`/`TranslateMessage`/`DispatchMessage` loop. `WM_QUIT` posted on cancellation for clean shutdown. Zero cursor lag now.
+
+### Changed — Toast Notifications (Kill/Block/Quarantine Only)
+
+- **Agent (TrayIconService):** Balloon notifications now only appear when a threat is actually terminated (`KillAuthorized && ActiveResponse`). Tier2 indicators and informational detections are logged silently.
+- **Service (ToastService):** Added `CriticalOnly` mode (default: `true`). Regular `ShowToast()` calls are suppressed. Only `ShowCriticalToast()` produces visible notifications. This eliminates the popup spam from registry monitoring, DNS policy re-application, etc.
+
 ### Added — SignerTrustService (Authenticode-Based Trust)
 
 - **`SignerTrustService`** — Centralized signer-based trust evaluation that replaces scattered process-name allowlists:
