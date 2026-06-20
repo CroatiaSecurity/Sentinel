@@ -2,6 +2,36 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [0.9.0] - 2026-06-20
+
+### Added — Persistent Connection Monitor (C2 Webhook/Pairing Detection)
+
+- **`PersistentConnectionMonitor`** — Detects malware that maintains long-lived connections (webhooks, WebSocket pairing, long-poll C2) and reacts aggressively when severed:
+
+  **What it tracks:**
+  - All established TCP connections, their owning process, and how long they've been held
+  - Connections held >5 minutes are flagged as "persistent" (webhook/pairing pattern)
+
+  **What it detects when a persistent connection drops:**
+  - **C2 Failover** — Process immediately connects to 3+ new endpoints after losing its primary (backup C2 servers)
+  - **DNS Reconnect Burst** — Process floods 10+ DNS queries within 30s of drop (hammering resolution to re-establish)
+  - **Defensive Process Spawn** — Process spawns 2+ children within 10s of drop (launching recovery/persistence routines)
+
+  **Response:** `KillProcessTree` for all three patterns
+
+  **Attack model mitigated:**
+  - Rootkit/implant holds persistent WebSocket to relay (e.g., forum.hr)
+  - Hosts file block severs connection
+  - Implant panics: tries failover servers, hammers DNS, spawns persistence tools, or crashes system
+  - Sentinel detects the panic behavior and kills the process tree before recovery completes
+
+  **Design:**
+  - Ignores known-legitimate long-connection holders (browsers, Steam, Discord, OneDrive, etc.)
+  - 10-second scan interval for near-real-time drop detection
+  - 30-second post-drop observation window for behavioral correlation
+  - Exposes `RecordDnsQuery(pid, domain)` for integration with DnsQueryMonitor ETW feed
+  - Exposes `HasRecentDrop(pid)` for cross-monitor correlation
+
 ## [0.8.9] - 2026-06-20
 
 ### Added — Boot Integrity Guard (Rootkit Persistence Detection)

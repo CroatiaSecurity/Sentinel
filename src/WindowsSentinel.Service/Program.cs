@@ -162,6 +162,8 @@ namespace WindowsSentinel.Service
                     services.AddHostedService<BrowserDnsPolicyGuard>();
                     services.AddHostedService<MtpTransferGuard>();
                     services.AddHostedService<BootIntegrityGuard>();
+                    services.AddSingleton<PersistentConnectionMonitor>();
+                    services.AddHostedService<PersistentConnectionMonitor>(sp => sp.GetRequiredService<PersistentConnectionMonitor>());
                 });
     }
 }
