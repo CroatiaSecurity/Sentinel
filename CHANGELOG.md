@@ -2,6 +2,40 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [0.9.2] - 2026-06-21
+
+### Added — SignerTrustService (Authenticode-Based Trust)
+
+- **`SignerTrustService`** — Centralized signer-based trust evaluation that replaces scattered process-name allowlists:
+  - Verifies Authenticode signatures via WinVerifyTrust (same as BeaconingDetector)
+  - Extracts signer CN from certificate subject
+  - Maintains a curated list of trusted publishers (Microsoft, Google, Mozilla, Valve, Discord, Spotify, etc.)
+  - Caches results per file path for performance
+  - Cannot be spoofed by renaming binaries — requires the publisher's private signing key
+  - `IsTrustedProcess(pid)` — check running process by PID
+  - `IsTrustedFile(path)` — check file on disk
+  - `IsTrustedProcessByPath(path)` — fast path for System32 + full verification for others
+  - `GetSignerName(path)` — extract signer CN for logging
+
+- **`PersistentConnectionMonitor` updated** — now uses `SignerTrustService` as primary trust mechanism, falling back to process-name list only for the fast path
+
+### Added — Attack Pattern Integration Tests
+
+- 20 new integration tests verifying detection rules against real attack tool patterns:
+  - **Credential theft**: procdump lsass dump, renamed tool with lsass target
+  - **PowerShell stagers**: -encodedcommand, -WindowStyle Hidden, download cradle
+  - **LOLBin abuse**: certutil download, mshta javascript, regsvr32 scrobj
+  - **Ransomware**: vssadmin shadow delete, wmic shadowcopy
+  - **Process masquerading**: fake svchost from temp path
+  - **Reverse shells**: PowerShell TCP client with -enc
+  - **SignerTrustService**: System32 fast path, null path handling, real binary verification
+
+### Improved — Detection Quality Focus
+
+- Shifted focus from feature breadth to detection depth (addressing ChatGPT code review feedback)
+- Signer-based trust is now the pattern for all future allowlist decisions
+- All 275 tests pass
+
 ## [0.9.1] - 2026-06-20
 
 ### Added — Clickjacking Guard (UI Manipulation & Credential Theft Protection)

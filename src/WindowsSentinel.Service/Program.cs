@@ -74,6 +74,7 @@ namespace WindowsSentinel.Service
                     services.AddSingleton<AdvancedResponseEngine>();
                     services.AddSingleton<BehavioralCorrelationEngine>();
                     services.AddSingleton<AllowlistService>();
+                    services.AddSingleton<SignerTrustService>();
                     services.AddSingleton<ScoringEngine>();
                     services.AddSingleton<ChainTracer>();
                     services.AddSingleton<DllUnloadEngine>();
