@@ -161,6 +161,7 @@ namespace WindowsSentinel.Service
                     services.AddHostedService<HostsFileGuard>();
                     services.AddHostedService<BrowserDnsPolicyGuard>();
                     services.AddHostedService<MtpTransferGuard>();
+                    services.AddHostedService<BootIntegrityGuard>();
                 });
     }
 }

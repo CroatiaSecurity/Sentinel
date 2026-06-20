@@ -4501,7 +4501,9 @@ namespace WindowsSentinel.Core
                                 "Sentinel enforces the hardcoded trusted baseline at all times.",
                     Confidence = 0.95,
                     Tier = DetectionTier.Tier1Behavioral,
-                    AuthorizedResponse = pid > 0 ? ResponseAction.KillProcessTree : ResponseAction.LogOnly,
+                    // Never kill on Startup — hosts file is expected to differ on first boot/install.
+                    // Only kill if we have a valid PID and this isn't the initial enforcement.
+                    AuthorizedResponse = (pid > 0 && trigger != "Startup") ? ResponseAction.KillProcessTree : ResponseAction.LogOnly,
                     ProcessName = processName,
                     ProcessId = pid,
                     SignalType = SignalType.AntiTamper,
@@ -4625,11 +4627,29 @@ namespace WindowsSentinel.Core
                 {
                     try
                     {
+                        // Never target critical system processes — killing these causes BSOD
+                        var name = proc.ProcessName;
+                        if (string.Equals(name, "csrss", StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(name, "wininit", StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(name, "services", StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(name, "smss", StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(name, "lsass", StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(name, "svchost", StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(name, "winlogon", StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(name, "explorer", StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(name, "dwm", StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(name, "System", StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(name, "msiexec", StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(name, "TrustedInstaller", StringComparison.OrdinalIgnoreCase))
+                        {
+                            continue;
+                        }
+
                         if (proc.StartTime.ToUniversalTime() <= lastWrite &&
                             proc.StartTime.ToUniversalTime() > lastWrite.AddSeconds(-5) &&
                             proc.Id > 4)
                         {
-                            return (proc.Id, proc.ProcessName);
+                            return (proc.Id, name);
                         }
                     }
                     catch { }
@@ -4685,6 +4705,14 @@ namespace WindowsSentinel.Core
             "0.0.0.0 0.0.0.0\r\n" +
             "0.0.0.0 forum.hr\r\n" +
             "0.0.0.0 www.forum.hr\r\n" +
+            "0.0.0.0 m.forum.hr\r\n" +
+            "0.0.0.0 cdn.forum.hr\r\n" +
+            "0.0.0.0 static.forum.hr\r\n" +
+            "0.0.0.0 api.forum.hr\r\n" +
+            "0.0.0.0 img.forum.hr\r\n" +
+            "0.0.0.0 mail.forum.hr\r\n" +
+            "0.0.0.0 ads.forum.hr\r\n" +
+            "0.0.0.0 tracker.forum.hr\r\n" +
             "0.0.0.0 adtago.s3.amazonaws.com\r\n" +
             "0.0.0.0 analyticsengine.s3.amazonaws.com\r\n" +
             "0.0.0.0 advice-ads.s3.amazonaws.com\r\n" +
@@ -4826,6 +4854,374 @@ namespace WindowsSentinel.Core
             "0.0.0.0 alt6-mtalk.google.com\r\n" +
             "0.0.0.0 alt7-mtalk.google.com\r\n" +
             "0.0.0.0 alt8-mtalk.google.com\r\n";
+    }
+
+    // ──────────────────────────────────────────────
+    // Boot Integrity Guard — monitors bcdedit, EFI, and driver load order for rootkit persistence
+    // ──────────────────────────────────────────────
+    public sealed class BootIntegrityGuard : BackgroundService
+    {
+        private readonly DetectionEngine _detectionEngine;
+        private readonly ILogger<BootIntegrityGuard> _logger;
+
+        private Dictionary<string, string> _baselineBcd = new();
+        private List<string> _baselineBootDrivers = new();
+        private bool _baselineCaptured;
+
+        private static readonly HashSet<string> TrustedBootDrivers = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "WdBoot", "WdFilter", "Wof", "EhStorClass", "FileInfo",
+            "hwpolicy", "SgrmAgent", "WindowsTrustedRT", "WindowsTrustedRTProxy",
+            "iorate", "dam", "pcw", "volmgrx", "pdc", "CEA",
+            "intelpep", "IntelPMT", "CLFS", "Fs_Rec", "Ntfs",
+            "CimFS", "msisadrv", "pci", "vdrvroot", "partmgr", "volmgr",
+            "mountmgr", "storahci", "stornvme", "EhStorTcgDrv",
+            "fvevol", "rdyboost", "mup", "disk", "CLASSPNP",
+            "crashdmp", "cdrom", "filecrypt", "tbs", "Null",
+            "Beep", "dxgkrnl", "watchdog", "BasicDisplay", "BasicRender",
+            "Npfs", "Msfs", "tdx", "TDI", "netbt", "afunix",
+            "IKEEXT", "PolicyAgent", "BFE", "wfplwfs", "Dhcp",
+            "Dnscache", "nsi", "Tcpip", "NDIS", "afd", "spaceport",
+        };
+
+        private static readonly string[] SuspiciousDriverPaths = new[]
+        {
+            @"\temp\", @"\tmp\", @"\downloads\", @"\appdata\",
+            @"\users\", @"\desktop\", @"\documents\"
+        };
+
+        public BootIntegrityGuard(DetectionEngine de, ILogger<BootIntegrityGuard> l)
+        {
+            _detectionEngine = de;
+            _logger = l;
+        }
+
+        protected override async Task ExecuteAsync(CancellationToken ct)
+        {
+            _logger.LogInformation("[BootIntegrityGuard] Started — monitoring boot configuration, EFI, and driver load order");
+
+            await Task.Delay(30000, ct);
+            await CaptureBaselineAsync();
+
+            while (!ct.IsCancellationRequested)
+            {
+                try
+                {
+                    await Task.Delay(60000, ct);
+                    await CheckBcdIntegrityAsync();
+                    await CheckBootDriversAsync();
+                    await CheckEfiPartitionAsync();
+                }
+                catch (OperationCanceledException) { break; }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "[BootIntegrityGuard] Error");
+                }
+            }
+        }
+
+        private Task CaptureBaselineAsync()
+        {
+            try
+            {
+                _baselineBcd = CaptureBcdEntries();
+                _baselineBootDrivers = CaptureBootDriverList();
+                _baselineCaptured = true;
+                _logger.LogInformation("[BootIntegrityGuard] Baseline: {Bcd} BCD entries, {Drv} boot drivers",
+                    _baselineBcd.Count, _baselineBootDrivers.Count);
+            }
+            catch (Exception ex) { _logger.LogDebug(ex, "[BootIntegrityGuard] Baseline capture failed"); }
+            return Task.CompletedTask;
+        }
+
+        private async Task CheckBcdIntegrityAsync()
+        {
+            try
+            {
+                var current = CaptureBcdEntries();
+
+                if (current.TryGetValue("testsigning", out var ts) &&
+                    string.Equals(ts, "Yes", StringComparison.OrdinalIgnoreCase))
+                {
+                    await _detectionEngine.EmitAsync(new DetectionEvent
+                    {
+                        RuleName = "Boot Integrity: Test Signing Enabled",
+                        Evidence = "bcdedit testsigning=Yes — unsigned kernel drivers can load.",
+                        Reasoning = "Rootkits enable test signing to load unsigned kernel components.",
+                        Confidence = 0.95, Tier = DetectionTier.Tier1Behavioral,
+                        AuthorizedResponse = ResponseAction.LogOnly,
+                        ProcessName = "SYSTEM", ProcessId = 0, SignalType = SignalType.AntiTamper,
+                        Metadata = new Dictionary<string, string> { { "Setting", "testsigning" }, { "Value", "Yes" } }
+                    });
+                }
+
+                if (current.TryGetValue("debug", out var dbg) &&
+                    string.Equals(dbg, "Yes", StringComparison.OrdinalIgnoreCase))
+                {
+                    await _detectionEngine.EmitAsync(new DetectionEvent
+                    {
+                        RuleName = "Boot Integrity: Kernel Debug Mode Enabled",
+                        Evidence = "bcdedit debug=Yes — kernel debugger can attach.",
+                        Reasoning = "Kernel debug mode allows remote kernel access. Rootkits enable this for persistent control.",
+                        Confidence = 0.90, Tier = DetectionTier.Tier1Behavioral,
+                        AuthorizedResponse = ResponseAction.LogOnly,
+                        ProcessName = "SYSTEM", ProcessId = 0, SignalType = SignalType.AntiTamper,
+                        Metadata = new Dictionary<string, string> { { "Setting", "debug" }, { "Value", "Yes" } }
+                    });
+                }
+
+                if (current.TryGetValue("nointegritychecks", out var nic) &&
+                    string.Equals(nic, "Yes", StringComparison.OrdinalIgnoreCase))
+                {
+                    await _detectionEngine.EmitAsync(new DetectionEvent
+                    {
+                        RuleName = "Boot Integrity: Integrity Checks Disabled",
+                        Evidence = "bcdedit nointegritychecks=Yes — boot code integrity bypassed.",
+                        Reasoning = "Disabling integrity checks allows tampered boot components to load unchallenged.",
+                        Confidence = 0.95, Tier = DetectionTier.Tier1Behavioral,
+                        AuthorizedResponse = ResponseAction.LogOnly,
+                        ProcessName = "SYSTEM", ProcessId = 0, SignalType = SignalType.AntiTamper,
+                        Metadata = new Dictionary<string, string> { { "Setting", "nointegritychecks" }, { "Value", "Yes" } }
+                    });
+                }
+
+                if (_baselineCaptured)
+                {
+                    foreach (var kvp in current)
+                    {
+                        if (!_baselineBcd.ContainsKey(kvp.Key))
+                        {
+                            await _detectionEngine.EmitAsync(new DetectionEvent
+                            {
+                                RuleName = "Boot Integrity: New BCD Entry",
+                                Evidence = $"New boot config: {kvp.Key}={kvp.Value}",
+                                Reasoning = "Bootkits add BCD entries for persistence.",
+                                Confidence = 0.75, Tier = DetectionTier.Tier1Behavioral,
+                                AuthorizedResponse = ResponseAction.LogOnly,
+                                ProcessName = "SYSTEM", ProcessId = 0, SignalType = SignalType.AntiTamper,
+                                Metadata = new Dictionary<string, string> { { "Entry", kvp.Key }, { "Value", kvp.Value } }
+                            });
+                        }
+                        else if (_baselineBcd[kvp.Key] != kvp.Value)
+                        {
+                            await _detectionEngine.EmitAsync(new DetectionEvent
+                            {
+                                RuleName = "Boot Integrity: BCD Entry Modified",
+                                Evidence = $"{kvp.Key}: '{_baselineBcd[kvp.Key]}' → '{kvp.Value}'",
+                                Reasoning = "Boot configuration was modified at runtime — possible bootkit activity.",
+                                Confidence = 0.80, Tier = DetectionTier.Tier1Behavioral,
+                                AuthorizedResponse = ResponseAction.LogOnly,
+                                ProcessName = "SYSTEM", ProcessId = 0, SignalType = SignalType.AntiTamper,
+                                Metadata = new Dictionary<string, string> { { "Entry", kvp.Key }, { "Old", _baselineBcd[kvp.Key] }, { "New", kvp.Value } }
+                            });
+                        }
+                    }
+                }
+            }
+            catch (Exception ex) { _logger.LogDebug(ex, "[BootIntegrityGuard] BCD check error"); }
+        }
+
+        private async Task CheckBootDriversAsync()
+        {
+            try
+            {
+                if (!_baselineCaptured) return;
+                var current = CaptureBootDriverList();
+                var newDrivers = current.Except(_baselineBootDrivers, StringComparer.OrdinalIgnoreCase).ToList();
+
+                foreach (var driver in newDrivers)
+                {
+                    if (TrustedBootDrivers.Contains(driver)) continue;
+
+                    var imagePath = GetDriverImagePath(driver);
+                    bool suspicious = !string.IsNullOrEmpty(imagePath) &&
+                        SuspiciousDriverPaths.Any(p => imagePath.Contains(p, StringComparison.OrdinalIgnoreCase));
+
+                    await _detectionEngine.EmitAsync(new DetectionEvent
+                    {
+                        RuleName = "Boot Integrity: New Boot Driver Registered",
+                        Evidence = $"New boot driver '{driver}' — ImagePath: {imagePath ?? "unknown"}",
+                        Reasoning = "Rootkits register kernel drivers for boot-start to load before security software.",
+                        Confidence = suspicious ? 0.95 : 0.80,
+                        Tier = DetectionTier.Tier1Behavioral,
+                        AuthorizedResponse = ResponseAction.LogOnly,
+                        ProcessName = "SYSTEM", ProcessId = 0, SignalType = SignalType.AntiTamper,
+                        Metadata = new Dictionary<string, string>
+                        {
+                            { "Driver", driver },
+                            { "ImagePath", imagePath ?? "unknown" },
+                            { "SuspiciousPath", suspicious.ToString() }
+                        }
+                    });
+                }
+            }
+            catch (Exception ex) { _logger.LogDebug(ex, "[BootIntegrityGuard] Driver check error"); }
+        }
+
+        private async Task CheckEfiPartitionAsync()
+        {
+            try
+            {
+                var efiDir = FindEfiMountPoint();
+                if (string.IsNullOrEmpty(efiDir)) return;
+
+                // Check for bootmgfw.efi.bak — classic bootkit signature
+                var bakPath = Path.Combine(efiDir, "EFI", "Microsoft", "Boot", "bootmgfw.efi.bak");
+                if (File.Exists(bakPath))
+                {
+                    await _detectionEngine.EmitAsync(new DetectionEvent
+                    {
+                        RuleName = "Boot Integrity: EFI Boot Manager Backup Found",
+                        Evidence = $"File: {bakPath} — original boot manager may have been replaced.",
+                        Reasoning = "EFI bootkits (BlackLotus, ESPecter) rename bootmgfw.efi to .bak and replace it.",
+                        Confidence = 0.92, Tier = DetectionTier.Tier1Behavioral,
+                        AuthorizedResponse = ResponseAction.LogOnly,
+                        ProcessName = "SYSTEM", ProcessId = 0, SignalType = SignalType.AntiTamper,
+                        Metadata = new Dictionary<string, string> { { "File", bakPath } }
+                    });
+                }
+
+                // Unknown .efi binaries in boot directory
+                var bootDir = Path.Combine(efiDir, "EFI", "Microsoft", "Boot");
+                if (Directory.Exists(bootDir))
+                {
+                    var known = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                    { "bootmgfw.efi", "memtest.efi", "bootmgr.efi", "cdboot.efi" };
+
+                    foreach (var file in Directory.GetFiles(bootDir, "*.efi"))
+                    {
+                        var name = Path.GetFileName(file);
+                        if (!known.Contains(name) && !name.StartsWith("boot", StringComparison.OrdinalIgnoreCase))
+                        {
+                            await _detectionEngine.EmitAsync(new DetectionEvent
+                            {
+                                RuleName = "Boot Integrity: Unknown EFI Binary",
+                                Evidence = $"Unknown EFI file: {file} ({new FileInfo(file).Length} bytes)",
+                                Reasoning = "EFI bootkits place payloads in the Microsoft Boot directory to execute before the OS kernel.",
+                                Confidence = 0.88, Tier = DetectionTier.Tier1Behavioral,
+                                AuthorizedResponse = ResponseAction.LogOnly,
+                                ProcessName = "SYSTEM", ProcessId = 0, SignalType = SignalType.AntiTamper,
+                                Metadata = new Dictionary<string, string> { { "File", file } }
+                            });
+                        }
+                    }
+                }
+
+                // Unknown directories in EFI root
+                var efiRoot = Path.Combine(efiDir, "EFI");
+                if (Directory.Exists(efiRoot))
+                {
+                    var knownDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                    { "Microsoft", "Boot", "HP", "Dell", "Lenovo", "ASUS", "Acer", "Intel", "OEM", "ubuntu", "grub", "refind" };
+
+                    foreach (var dir in Directory.GetDirectories(efiRoot))
+                    {
+                        var dirName = Path.GetFileName(dir);
+                        if (!knownDirs.Contains(dirName))
+                        {
+                            await _detectionEngine.EmitAsync(new DetectionEvent
+                            {
+                                RuleName = "Boot Integrity: Unknown EFI Directory",
+                                Evidence = $"Unknown EFI partition directory: {dir}",
+                                Reasoning = "Advanced bootkits create directories in ESP to store payloads.",
+                                Confidence = 0.70, Tier = DetectionTier.Tier2Indicator,
+                                AuthorizedResponse = ResponseAction.LogOnly,
+                                ProcessName = "SYSTEM", ProcessId = 0, SignalType = SignalType.AntiTamper,
+                                Metadata = new Dictionary<string, string> { { "Directory", dir } }
+                            });
+                        }
+                    }
+                }
+            }
+            catch (Exception ex) { _logger.LogDebug(ex, "[BootIntegrityGuard] EFI check error"); }
+        }
+
+        private static Dictionary<string, string> CaptureBcdEntries()
+        {
+            var entries = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                var psi = new ProcessStartInfo("bcdedit.exe", "/enum all")
+                { CreateNoWindow = true, UseShellExecute = false, RedirectStandardOutput = true };
+                using var proc = Process.Start(psi);
+                if (proc == null) return entries;
+                var output = proc.StandardOutput.ReadToEnd();
+                proc.WaitForExit(10000);
+
+                foreach (var line in output.Split('\n'))
+                {
+                    var trimmed = line.Trim();
+                    var idx = trimmed.IndexOf(' ');
+                    if (idx > 0)
+                    {
+                        var key = trimmed[..idx].Trim();
+                        var val = trimmed[(idx + 1)..].Trim();
+                        if (!string.IsNullOrEmpty(key))
+                            entries.TryAdd(key, val);
+                    }
+                }
+            }
+            catch { }
+            return entries;
+        }
+
+        private static List<string> CaptureBootDriverList()
+        {
+            var drivers = new List<string>();
+            try
+            {
+                using var svcKey = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Services");
+                if (svcKey == null) return drivers;
+
+                foreach (var name in svcKey.GetSubKeyNames())
+                {
+                    try
+                    {
+                        using var dk = svcKey.OpenSubKey(name);
+                        if (dk == null) continue;
+                        var start = dk.GetValue("Start");
+                        var type = dk.GetValue("Type");
+                        if (start is int s && type is int t && s <= 1 && (t == 1 || t == 2))
+                            drivers.Add(name);
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+            return drivers;
+        }
+
+        private static string? GetDriverImagePath(string driverName)
+        {
+            try
+            {
+                using var key = Registry.LocalMachine.OpenSubKey($@"SYSTEM\CurrentControlSet\Services\{driverName}");
+                return key?.GetValue("ImagePath") as string;
+            }
+            catch { return null; }
+        }
+
+        private static string? FindEfiMountPoint()
+        {
+            try
+            {
+                // Check if EFI partition is already mounted
+                var paths = new[] { @"S:\", @"T:\", @"Z:\", @"Y:\", @"X:\", @"W:\" };
+                foreach (var p in paths)
+                    if (Directory.Exists(Path.Combine(p, "EFI")))
+                        return p;
+
+                // Try mounting via mountvol S: /S
+                var psi = new ProcessStartInfo("mountvol.exe", @"S: /S")
+                { CreateNoWindow = true, UseShellExecute = false };
+                using var proc = Process.Start(psi);
+                proc?.WaitForExit(5000);
+
+                if (Directory.Exists(@"S:\EFI")) return @"S:\";
+            }
+            catch { }
+            return null;
+        }
     }
 }
 

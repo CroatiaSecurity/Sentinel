@@ -39,6 +39,22 @@ namespace WindowsSentinel.Core
             try
             {
                 using var proc = Process.GetProcessById(processId);
+
+                // Final safeguard: never kill BSOD-critical processes regardless of what triggered the kill
+                var name = proc.ProcessName;
+                if (string.Equals(name, "csrss", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(name, "wininit", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(name, "services", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(name, "smss", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(name, "lsass", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(name, "winlogon", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(name, "dwm", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(name, "System", StringComparison.OrdinalIgnoreCase))
+                {
+                    Debug.WriteLine($"SafeKillProcessTree: REFUSED to kill critical process {name} (PID {processId})");
+                    return;
+                }
+
                 proc.Kill(entireProcessTree: true);
             }
             catch (Exception ex)
