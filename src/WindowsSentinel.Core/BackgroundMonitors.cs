@@ -4156,6 +4156,7 @@ namespace WindowsSentinel.Core
         private readonly DetectionEngine _detectionEngine;
         private readonly ILogger<BrowserDnsPolicyGuard> _logger;
         private bool _initialEnforcement;
+        private DateTime _lastTamperAlert = DateTime.MinValue;
 
         // Chromium-based browser policy keys (HKLM\SOFTWARE\Policies\...)
         private static readonly (string Key, string Name)[] ChromiumBrowsers = new[]
@@ -4233,8 +4234,9 @@ namespace WindowsSentinel.Core
                             }
                         });
                     }
-                    else if (anyChanged)
+                    else if (anyChanged && DateTime.UtcNow - _lastTamperAlert > TimeSpan.FromMinutes(5))
                     {
+                        _lastTamperAlert = DateTime.UtcNow;
                         await _detectionEngine.EmitAsync(new DetectionEvent
                         {
                             RuleName = "Anti-Tamper: DNS Policy Reverted and Re-Applied",
@@ -4294,24 +4296,31 @@ namespace WindowsSentinel.Core
             bool changed = false;
             try
             {
-                using var key = Registry.LocalMachine.CreateSubKey(policyKey, true);
+                // Only create the policy key if the browser is actually installed
+                // (check if the parent policy path or browser exe exists)
+                using var existingKey = Registry.LocalMachine.OpenSubKey(policyKey, true);
+                var key = existingKey ?? Registry.LocalMachine.CreateSubKey(policyKey, true);
                 if (key == null) return false;
+                // If we created the key fresh, don't report as "changed" (avoids alert spam for uninstalled browsers)
+                bool isNewKey = existingKey == null;
 
                 var dnsClient = key.GetValue("BuiltInDnsClientEnabled");
                 if (dnsClient == null || (int)dnsClient != 0)
                 {
                     key.SetValue("BuiltInDnsClientEnabled", 0, RegistryValueKind.DWord);
-                    changed = true;
-                    _logger.LogWarning("[BrowserDnsPolicyGuard] Enforced BuiltInDnsClientEnabled=0 for {Browser}", browserName);
+                    if (!isNewKey) changed = true;
+                    else _logger.LogDebug("[BrowserDnsPolicyGuard] Set BuiltInDnsClientEnabled=0 for {Browser} (new key)", browserName);
                 }
 
                 var dohMode = key.GetValue("DnsOverHttpsMode") as string;
                 if (dohMode == null || !string.Equals(dohMode, "off", StringComparison.OrdinalIgnoreCase))
                 {
                     key.SetValue("DnsOverHttpsMode", "off", RegistryValueKind.String);
-                    changed = true;
-                    _logger.LogWarning("[BrowserDnsPolicyGuard] Enforced DnsOverHttpsMode=off for {Browser}", browserName);
+                    if (!isNewKey) changed = true;
+                    else _logger.LogDebug("[BrowserDnsPolicyGuard] Set DnsOverHttpsMode=off for {Browser} (new key)", browserName);
                 }
+
+                if (existingKey == null) key.Dispose();
             }
             catch (Exception ex)
             {
