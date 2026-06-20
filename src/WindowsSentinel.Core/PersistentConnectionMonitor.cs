@@ -32,6 +32,7 @@ namespace WindowsSentinel.Core
     {
         private readonly DetectionEngine _detectionEngine;
         private readonly ILogger<PersistentConnectionMonitor> _logger;
+        private readonly SignerTrustService? _signerTrust;
 
         // Tracks established connections: key = "pid:remoteIp:remotePort", value = first-seen time
         private readonly ConcurrentDictionary<string, ConnectionState> _trackedConnections = new();
@@ -88,10 +89,11 @@ namespace WindowsSentinel.Core
             IntPtr pTcpTable, ref int pdwSize, bool bOrder,
             uint ulAf, TCP_TABLE_CLASS tableClass, uint reserved);
 
-        public PersistentConnectionMonitor(DetectionEngine de, ILogger<PersistentConnectionMonitor> l)
+        public PersistentConnectionMonitor(DetectionEngine de, ILogger<PersistentConnectionMonitor> l, SignerTrustService? signerTrust = null)
         {
             _detectionEngine = de;
             _logger = l;
+            _signerTrust = signerTrust;
         }
 
         protected override async Task ExecuteAsync(CancellationToken ct)
@@ -154,7 +156,7 @@ namespace WindowsSentinel.Core
                 if (_trackedConnections.TryRemove(key, out var state))
                 {
                     var duration = state.LastSeen - state.FirstSeen;
-                    if (duration >= PersistentThreshold && !IsLegitimate(state.ProcessName))
+                    if (duration >= PersistentThreshold && !IsLegitimate(state.ProcessName, state.Pid))
                     {
                         // Long-lived connection just dropped — monitor for defensive behavior
                         _droppedConnections[key] = new DroppedConnection
@@ -372,10 +374,21 @@ namespace WindowsSentinel.Core
                 d.State.Pid == pid && DateTime.UtcNow - d.DroppedAt < PostDropWindow);
         }
 
-        private bool IsLegitimate(string? processName)
+        private bool IsLegitimate(string? processName, int pid = 0)
         {
             if (string.IsNullOrEmpty(processName)) return false;
-            return LegitimateProcesses.Contains(processName);
+
+            // Fast path: known-good names (still check, but also verify signature if available)
+            if (LegitimateProcesses.Contains(processName)) return true;
+
+            // Signer-based trust: if the binary is signed by a known publisher, it's legitimate
+            if (_signerTrust != null && pid > 4)
+            {
+                try { return _signerTrust.IsTrustedProcess(pid); }
+                catch { }
+            }
+
+            return false;
         }
 
         private List<ActiveConnection> GetEstablishedConnections()
