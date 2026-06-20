@@ -4234,7 +4234,7 @@ namespace WindowsSentinel.Core
                             }
                         });
                     }
-                    else if (anyChanged && DateTime.UtcNow - _lastTamperAlert > TimeSpan.FromMinutes(5))
+                    else if (anyChanged && DateTime.UtcNow - _lastTamperAlert > TimeSpan.FromHours(1))
                     {
                         _lastTamperAlert = DateTime.UtcNow;
                         await _detectionEngine.EmitAsync(new DetectionEvent
