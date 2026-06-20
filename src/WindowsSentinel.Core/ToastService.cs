@@ -16,6 +16,12 @@ namespace WindowsSentinel.Core
         private static readonly Guid CLSID_ShellLink = new("00021401-0000-0000-C000-000000000046");
         private bool _hasAppId = false;
 
+        /// <summary>
+        /// When true, only ShowCriticalToast calls produce notifications.
+        /// Regular ShowToast calls are suppressed (log only).
+        /// </summary>
+        public bool CriticalOnly { get; set; } = true;
+
         [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
         private static extern int SetCurrentProcessExplicitAppUserModelID([MarshalAs(UnmanagedType.LPWStr)] string appId);
 
@@ -24,8 +30,6 @@ namespace WindowsSentinel.Core
             _logger = logger;
             try
             {
-                // Attempt to register an explicit AppUserModelID for toasts.
-                // This is required for Win32 desktop apps to show modern toasts.
                 SetCurrentProcessExplicitAppUserModelID("Gorstak.WindowsSentinel");
                 _hasAppId = true;
             }
@@ -35,7 +39,28 @@ namespace WindowsSentinel.Core
             }
         }
 
+        /// <summary>
+        /// Shows a toast only if CriticalOnly is false. Used for informational detections.
+        /// </summary>
         public void ShowToast(string title, string message, string? tag = null)
+        {
+            if (CriticalOnly)
+            {
+                _logger.LogDebug("ToastService: Suppressed non-critical toast — {Title}", title);
+                return;
+            }
+            ShowToastInternal(title, message);
+        }
+
+        /// <summary>
+        /// Always shows a toast regardless of CriticalOnly setting. Used for kills, blocks, quarantine.
+        /// </summary>
+        public void ShowCriticalToast(string title, string message)
+        {
+            ShowToastInternal(title, message);
+        }
+
+        private void ShowToastInternal(string title, string message)
         {
             try
             {
