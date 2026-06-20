@@ -3607,7 +3607,7 @@ namespace WindowsSentinel.Core
     }
 
     // ──────────────────────────────────────────────
-    // Browser DNS Policy Guard — forces browsers to use OS DNS resolver (respects hosts file)
+    // Browser DNS Policy Guard — forces ALL apps to use OS DNS resolver (respects hosts file)
     // ──────────────────────────────────────────────
     public sealed class BrowserDnsPolicyGuard : BackgroundService
     {
@@ -3615,10 +3615,24 @@ namespace WindowsSentinel.Core
         private readonly ILogger<BrowserDnsPolicyGuard> _logger;
         private bool _initialEnforcement;
 
-        // Chrome/Chromium policy keys
-        private const string ChromePolicyKey = @"SOFTWARE\Policies\Google\Chrome";
-        private const string EdgePolicyKey = @"SOFTWARE\Policies\Microsoft\Edge";
-        private const string BravePolicyKey = @"SOFTWARE\Policies\BraveSoftware\Brave";
+        // Chromium-based browser policy keys (HKLM\SOFTWARE\Policies\...)
+        private static readonly (string Key, string Name)[] ChromiumBrowsers = new[]
+        {
+            (@"SOFTWARE\Policies\Google\Chrome", "Chrome"),
+            (@"SOFTWARE\Policies\Microsoft\Edge", "Edge"),
+            (@"SOFTWARE\Policies\BraveSoftware\Brave", "Brave"),
+            (@"SOFTWARE\Policies\Vivaldi", "Vivaldi"),
+            (@"SOFTWARE\Policies\Opera Software\Opera", "Opera"),
+            (@"SOFTWARE\Policies\Chromium", "Chromium"),
+        };
+
+        // Windows system-level DoH registry
+        private const string DnsCacheParamsKey = @"SYSTEM\CurrentControlSet\Services\Dnscache\Parameters";
+        private const string EnableAutoDohValue = "EnableAutoDoh";
+
+        // Firefox uses a different mechanism — policies.json or registry
+        private const string FirefoxPolicyKey = @"SOFTWARE\Policies\Mozilla\Firefox";
+        private const string FirefoxDnsOverHttpsKey = @"SOFTWARE\Policies\Mozilla\Firefox\DNSOverHTTPS";
 
         public BrowserDnsPolicyGuard(DetectionEngine de, ILogger<BrowserDnsPolicyGuard> l)
         {
@@ -3628,7 +3642,7 @@ namespace WindowsSentinel.Core
 
         protected override async Task ExecuteAsync(CancellationToken ct)
         {
-            _logger.LogInformation("[BrowserDnsPolicyGuard] Started — enforcing OS DNS resolver usage for all Chromium browsers");
+            _logger.LogInformation("[BrowserDnsPolicyGuard] Started — enforcing OS DNS resolver for all browsers and disabling system DoH");
 
             await Task.Delay(10000, ct);
 
@@ -3637,23 +3651,30 @@ namespace WindowsSentinel.Core
                 try
                 {
                     bool anyChanged = false;
-                    anyChanged |= EnforcePolicyForBrowser(ChromePolicyKey, "Chrome");
-                    anyChanged |= EnforcePolicyForBrowser(EdgePolicyKey, "Edge");
-                    anyChanged |= EnforcePolicyForBrowser(BravePolicyKey, "Brave");
+
+                    // 1. Disable Windows system-level DoH (EnableAutoDoh = 0)
+                    anyChanged |= EnforceSystemDoh();
+
+                    // 2. Enforce all Chromium browsers
+                    foreach (var (key, name) in ChromiumBrowsers)
+                        anyChanged |= EnforceChromiumPolicy(key, name);
+
+                    // 3. Enforce Firefox
+                    anyChanged |= EnforceFirefoxPolicy();
 
                     if (anyChanged && !_initialEnforcement)
                     {
                         _initialEnforcement = true;
                         await _detectionEngine.EmitAsync(new DetectionEvent
                         {
-                            RuleName = "Hardening: Browser DNS Policy Enforced",
-                            Evidence = "Disabled built-in DNS client and DNS-over-HTTPS in Chromium browsers via policy. " +
-                                       "Browsers now use the OS DNS resolver which respects the hosts file.",
-                            Reasoning = "Chromium browsers have a built-in async DNS resolver that bypasses the Windows " +
-                                        "hosts file entirely when Secure DNS (DoH) is active. This means hosts-file-based " +
-                                        "blocking (ad servers, trackers, malicious domains) has zero effect in the browser. " +
-                                        "Forcing the OS resolver ensures all DNS goes through the system stack where the " +
-                                        "hosts file is authoritative.",
+                            RuleName = "Hardening: System-Wide DNS Policy Enforced",
+                            Evidence = "Disabled DNS-over-HTTPS system-wide (Windows DoH + all browser policies). " +
+                                       "All DNS resolution now goes through the OS resolver which respects the hosts file.",
+                            Reasoning = "DNS-over-HTTPS in browsers and at the OS level bypasses the local hosts file entirely. " +
+                                        "Any hosts-file-based blocking (ads, trackers, malware domains) has zero effect when " +
+                                        "DoH is active. Sentinel disables DoH at every layer: Windows DNS client, Chrome, Edge, " +
+                                        "Brave, Vivaldi, Opera, Chromium, and Firefox. The hosts file becomes the single " +
+                                        "authoritative DNS override point.",
                             Confidence = 0.99,
                             Tier = DetectionTier.Tier2Indicator,
                             AuthorizedResponse = ResponseAction.LogOnly,
@@ -3663,8 +3684,10 @@ namespace WindowsSentinel.Core
                             Metadata = new Dictionary<string, string>
                             {
                                 { "Action", "PolicyEnforced" },
+                                { "EnableAutoDoh", "0" },
                                 { "BuiltInDnsClientEnabled", "0" },
-                                { "DnsOverHttpsMode", "off" }
+                                { "DnsOverHttpsMode", "off" },
+                                { "Firefox.DNSOverHTTPS.Enabled", "false" }
                             }
                         });
                     }
@@ -3672,11 +3695,10 @@ namespace WindowsSentinel.Core
                     {
                         await _detectionEngine.EmitAsync(new DetectionEvent
                         {
-                            RuleName = "Anti-Tamper: Browser DNS Policy Reverted and Re-Applied",
-                            Evidence = "Browser DNS policy was found reverted (DoH re-enabled or built-in DNS client active). Re-enforced.",
-                            Reasoning = "Something re-enabled the browser's built-in DNS resolver or DoH, bypassing the hosts file. " +
-                                        "This could be a browser update resetting policies, user action, or malware attempting " +
-                                        "to circumvent DNS-level blocking. Sentinel has re-applied the hardened settings.",
+                            RuleName = "Anti-Tamper: DNS Policy Reverted and Re-Applied",
+                            Evidence = "DNS-over-HTTPS was found re-enabled (system or browser level). Re-enforced.",
+                            Reasoning = "Something re-enabled DoH, bypassing the hosts file. Could be a Windows update, " +
+                                        "browser update, user action, or malware circumventing DNS-level blocking.",
                             Confidence = 0.80,
                             Tier = DetectionTier.Tier1Behavioral,
                             AuthorizedResponse = ResponseAction.LogOnly,
@@ -3693,7 +3715,39 @@ namespace WindowsSentinel.Core
             }
         }
 
-        private bool EnforcePolicyForBrowser(string policyKey, string browserName)
+        /// <summary>
+        /// Disables Windows system-level DNS-over-HTTPS.
+        /// EnableAutoDoh: 0 = disabled, 2 = enabled.
+        /// This ensures the OS DNS client uses plain DNS which reads the hosts file first.
+        /// </summary>
+        private bool EnforceSystemDoh()
+        {
+            try
+            {
+                using var key = Registry.LocalMachine.OpenSubKey(DnsCacheParamsKey, true);
+                if (key == null) return false;
+
+                var current = key.GetValue(EnableAutoDohValue);
+                if (current != null && (int)current != 0)
+                {
+                    key.SetValue(EnableAutoDohValue, 0, RegistryValueKind.DWord);
+                    _logger.LogWarning("[BrowserDnsPolicyGuard] Disabled system-level DoH (EnableAutoDoh=0)");
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "[BrowserDnsPolicyGuard] Failed to enforce system DoH");
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Enforces Chromium-based browser policies:
+        /// - BuiltInDnsClientEnabled = 0 (use OS resolver)
+        /// - DnsOverHttpsMode = "off"
+        /// </summary>
+        private bool EnforceChromiumPolicy(string policyKey, string browserName)
         {
             bool changed = false;
             try
@@ -3701,7 +3755,6 @@ namespace WindowsSentinel.Core
                 using var key = Registry.LocalMachine.CreateSubKey(policyKey, true);
                 if (key == null) return false;
 
-                // Disable built-in DNS client — forces use of OS resolver (which reads hosts file)
                 var dnsClient = key.GetValue("BuiltInDnsClientEnabled");
                 if (dnsClient == null || (int)dnsClient != 0)
                 {
@@ -3710,7 +3763,6 @@ namespace WindowsSentinel.Core
                     _logger.LogWarning("[BrowserDnsPolicyGuard] Enforced BuiltInDnsClientEnabled=0 for {Browser}", browserName);
                 }
 
-                // Disable DNS-over-HTTPS in the browser
                 var dohMode = key.GetValue("DnsOverHttpsMode") as string;
                 if (dohMode == null || !string.Equals(dohMode, "off", StringComparison.OrdinalIgnoreCase))
                 {
@@ -3722,6 +3774,42 @@ namespace WindowsSentinel.Core
             catch (Exception ex)
             {
                 _logger.LogDebug(ex, "[BrowserDnsPolicyGuard] Failed to enforce policy for {Browser}", browserName);
+            }
+            return changed;
+        }
+
+        /// <summary>
+        /// Enforces Firefox DNS policy via registry:
+        /// - DNSOverHTTPS\Enabled = 0 (disable DoH)
+        /// - DNSOverHTTPS\Locked = 1 (prevent user from re-enabling)
+        /// </summary>
+        private bool EnforceFirefoxPolicy()
+        {
+            bool changed = false;
+            try
+            {
+                using var key = Registry.LocalMachine.CreateSubKey(FirefoxDnsOverHttpsKey, true);
+                if (key == null) return false;
+
+                var enabled = key.GetValue("Enabled");
+                if (enabled == null || (int)enabled != 0)
+                {
+                    key.SetValue("Enabled", 0, RegistryValueKind.DWord);
+                    changed = true;
+                    _logger.LogWarning("[BrowserDnsPolicyGuard] Enforced DNSOverHTTPS.Enabled=0 for Firefox");
+                }
+
+                var locked = key.GetValue("Locked");
+                if (locked == null || (int)locked != 1)
+                {
+                    key.SetValue("Locked", 1, RegistryValueKind.DWord);
+                    changed = true;
+                    _logger.LogWarning("[BrowserDnsPolicyGuard] Enforced DNSOverHTTPS.Locked=1 for Firefox");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "[BrowserDnsPolicyGuard] Failed to enforce Firefox policy");
             }
             return changed;
         }
