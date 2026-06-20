@@ -1,6 +1,6 @@
 # Windows Sentinel — Design Document
 
-**Version: 0.8.7**
+**Version: 0.8.8**
 
 ---
 
@@ -93,6 +93,7 @@ The fusion layer is PASSIVE â€” it never blocks, kills, or modifies telemet
 | `CriticalServiceGuard` | **0.7.1** Monitors 15 critical Windows services for repeated crash patterns via SCM event log polling (Event 7034/7031). Detects exploitation indicators (STATUS_STACK_BUFFER_OVERRUN). Monitors BSOD-critical processes for debugger kill switches. Scans every 10s | No |
 | `HostsFileGuard` | **0.8.7** Monitors `drivers\etc` directory. Enforces embedded hosts file content (SHA-256 verified). Deletes all other files (hosts.ics, lmhosts.sam, etc.) as bypass vectors. FileSystemWatcher + 30s periodic check. KillProcessTree on modifier. | Yes (SYSTEM write to System32) |
 | `BrowserDnsPolicyGuard` | **0.8.7** Disables DNS-over-HTTPS system-wide: Windows OS (EnableAutoDoh=0), Chrome, Edge, Brave, Vivaldi, Opera, Chromium (BuiltInDnsClientEnabled=0, DnsOverHttpsMode=off), Firefox (DNSOverHTTPS.Enabled=0, Locked=1). 15s self-healing. Ensures hosts file is authoritative. | Yes (registry write) |
+| `MtpTransferGuard` | **0.8.8** Blocks non-media file transfers to MTP devices (phones/tablets). Allows only images, video, audio, and mobile app packages (APK/IPA). Kills transferring process on violation. Detects WPD API usage via loaded module scanning + WPDNSE staging directory monitoring. 5s scan interval. | No |
 
 ### Engine
 
@@ -384,6 +385,12 @@ Composite detections are emitted as Tier1 `DetectionEvent`s directly into the de
 | `GhostProcessMonitor` | **0.7.1** Detects PIDs with active outbound TCP but empty/unresolvable process names. Covers PlugX/ShadowPad DLL sideloading blind spot. Network-isolates connections to masquerade ports (5228, 8009). Requires 2+ sightings to avoid startup races. |
 | `ShellWatchdog` | **0.7.1** Explorer.exe health monitor. SendMessageTimeout responsiveness check every 5s. Auto-restarts dead shell. Detects AppHangXProcB1 cross-process hangs and repeated crash patterns (active shell attack). |
 | `CriticalServiceGuard` | **0.7.1** Monitors critical Windows services (TokenBroker, Defender, Firewall, EventLog, etc.) for crash storms via SCM events. Detects exploitation patterns (0xC0000409 stack buffer overrun). Monitors BSOD-critical processes for debugger kill switches. |
+
+## Added in 0.8.8
+
+| Component | Purpose |
+|-----------|---------|
+| `MtpTransferGuard` | Bidirectional MTP firewall. Outbound (PC→Phone): blocks non-media/app file transfers by killing WPD processes transferring dangerous content. Inbound (Phone→PC): deletes executables, scripts, archives, macros arriving from MTP devices via WPDNSE staging + drop target monitoring. 5s scan interval. |
 
 ## Added in 0.8.7
 

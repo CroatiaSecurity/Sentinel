@@ -2,6 +2,31 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [0.8.8] - 2026-06-20
+
+### Added — MTP Transfer Guard (Bidirectional Phone/PC Firewall)
+
+- **`MtpTransferGuard` monitor** — Bidirectional file transfer protection for connected MTP devices (phones, tablets):
+
+  **PC → Phone (outbound):**
+  - Only media files (images, video, audio), PDFs, text, and mobile app packages (APK, IPA) are allowed
+  - Any other file type (executables, scripts, DLLs, archives, macros) triggers process kill
+  - Detects WPD API usage by scanning loaded modules (PortableDeviceApi.dll, wpdshext.dll)
+  - Monitors WPDNSE staging directory for non-media files being staged for transfer
+  - 5-second scan interval
+
+  **Phone → PC (inbound):**
+  - Dangerous file types are deleted on arrival before they can be executed
+  - Monitors WPDNSE staging directory for executables, scripts, archives, macro documents, certificates, shortcuts arriving from MTP
+  - Also monitors Downloads/Desktop/Documents for dangerous files created by WPD-related processes while MTP devices are connected
+  - Blocked extensions: .exe, .dll, .sys, .bat, .cmd, .ps1, .vbs, .js, .msi, .hta, .lnk, .reg, .zip, .rar, .7z, .iso, .docm, .xlsm, .jar, .py, and 50+ more
+
+  **Attack vectors mitigated:**
+  - Compromised PC pushing malware to phone (PC→Phone direction)
+  - Compromised phone pushing malware to PC during sync/transfer (Phone→PC direction)
+  - USB-based malware propagation via MTP protocol
+  - Malicious APK sideloading from infected PC (still allowed as legitimate use — only non-app executables blocked)
+
 ## [0.8.7] - 2026-06-19
 
 ### Added — Hosts File Guard (Embedded Baseline Enforcement & Directory Purge)
