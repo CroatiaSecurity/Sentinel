@@ -27,6 +27,11 @@ All notable changes to Windows Sentinel are documented in this file.
   - USB-based malware propagation via MTP protocol
   - Malicious APK sideloading from infected PC (still allowed as legitimate use — only non-app executables blocked)
 
+### Fixed — BrowserDnsPolicyGuard Alert Loop
+
+- **Root cause identified:** Group Policy Client (`gpsvc`) deletes registry keys under `SOFTWARE\Policies\` that it didn't create. Sentinel wrote policies for Vivaldi, Opera, Chromium, Brave, etc. — GP wiped them every ~30-90s — monitor saw "missing" and re-reported every 15s.
+- **Fix:** Newly-created policy keys (for browsers without pre-existing GP policies) no longer trigger "changed" alerts. 5-minute cooldown on "Re-Applied" detection events. Sentinel still silently re-writes every 15s — enforcement persists even while GP fights it.
+
 ## [0.8.7] - 2026-06-19
 
 ### Added — Hosts File Guard (Embedded Baseline Enforcement & Directory Purge)
