@@ -83,6 +83,7 @@ namespace WindowsSentinel.Agent
                     services.AddHostedService<NeuroBehaviorVisualMonitor>();
                     services.AddHostedService<BrowserExtensionMonitor>();
                     services.AddHostedService<PhantomKeystrokeGuard>();
+                    services.AddHostedService<ClickjackingGuard>();
                     services.AddHostedService<WebcamHijackMonitor>();
                     services.AddHostedService<ConsultantSignalIngestor>();
                     services.AddHostedService<ShellWatchdog>();

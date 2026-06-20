@@ -2,6 +2,40 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [0.9.1] - 2026-06-20
+
+### Added — Clickjacking Guard (UI Manipulation & Credential Theft Protection)
+
+- **`ClickjackingGuard` monitor** (Agent-side) — Comprehensive protection against UI-based attacks:
+
+  **Mouse Input Injection Detection:**
+  - Low-level mouse hook (`WH_MOUSE_LL`) detects `LLMHF_INJECTED` flag on synthetic clicks
+  - Alerts on 5+ injected clicks within 10 seconds (burst pattern)
+  - Catches SendInput/mouse_event click automation
+
+  **Cursor Teleport + Click Redirection:**
+  - Detects large cursor jumps (>500px) immediately followed by synthetic click (<200ms)
+  - Classic clickjacking: move cursor to target button → synthetic click → return cursor
+  - Alerts after 2+ occurrences of the pattern
+
+  **Non-Foreground Overlay Enumeration:**
+  - Enumerates ALL visible top-level windows (not just foreground)
+  - Detects: Layered + Topmost + (Transparent OR NoActivate) pattern, size >400x400
+  - Checks alpha transparency — skips nearly-opaque windows
+  - Excludes known-good: DWM, Explorer, GeForce Overlay, GameBar, Discord
+  - Response: `KillProcessTree`
+
+  **Fake UAC / Credential Prompt Detection:**
+  - Scans all visible windows for titles containing "User Account Control", "Windows Security", "Credential", "Sign in"
+  - Validates the owning process — only system processes (consent.exe, CredentialUIBroker, LogonUI) may create these
+  - Non-system processes with UAC-like titles → `KillProcessTree`
+
+  **Clipboard Crypto Address Swap Detection:**
+  - Monitors clipboard every 5 seconds for BTC and ETH address patterns
+  - Detects when a crypto address is silently replaced with a different address of the same type
+  - Automatically restores the original address
+  - Catches clipper malware that swaps wallet addresses to redirect funds
+
 ## [0.9.0] - 2026-06-20
 
 ### Added — Persistent Connection Monitor (C2 Webhook/Pairing Detection)
