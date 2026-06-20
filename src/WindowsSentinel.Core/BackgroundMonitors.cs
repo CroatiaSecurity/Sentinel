@@ -3711,7 +3711,7 @@ namespace WindowsSentinel.Core
                 catch (OperationCanceledException) { break; }
                 catch (Exception ex) { _logger.LogDebug(ex, "[BrowserDnsPolicyGuard] Error"); }
 
-                await Task.Delay(60000, ct);
+                await Task.Delay(15000, ct);
             }
         }
 
