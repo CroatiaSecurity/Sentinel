@@ -4924,6 +4924,9 @@ namespace WindowsSentinel.Core
         {
             try
             {
+                // Mount EFI first so the baseline captures the post-mount BCD state
+                FindEfiMountPoint();
+
                 _baselineBcd = CaptureBcdEntries();
                 _baselineBootDrivers = CaptureBootDriverList();
                 _baselineCaptured = true;
@@ -5086,7 +5089,9 @@ namespace WindowsSentinel.Core
                 if (Directory.Exists(bootDir))
                 {
                     var known = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-                    { "bootmgfw.efi", "memtest.efi", "bootmgr.efi", "cdboot.efi" };
+                    { "bootmgfw.efi", "memtest.efi", "bootmgr.efi", "cdboot.efi",
+                      "SecureBootRecovery.efi", "bootx64.efi", "bootaa64.efi",
+                      "fwupx64.efi", "fwupaa64.efi", "mmx64.efi", "shimx64.efi" };
 
                     foreach (var file in Directory.GetFiles(bootDir, "*.efi"))
                     {
