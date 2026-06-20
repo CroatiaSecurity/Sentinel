@@ -92,6 +92,7 @@ The fusion layer is PASSIVE â€” it never blocks, kills, or modifies telemet
 | `ShellWatchdog` | **0.7.1** Monitors explorer.exe responsiveness via `SendMessageTimeout`. Auto-restarts shell on death. Detects cross-process hangs (AppHangXProcB1) and repeated crashes indicating active shell attack. Scans every 5s | No |
 | `CriticalServiceGuard` | **0.7.1** Monitors 15 critical Windows services for repeated crash patterns via SCM event log polling (Event 7034/7031). Detects exploitation indicators (STATUS_STACK_BUFFER_OVERRUN). Monitors BSOD-critical processes for debugger kill switches. Scans every 10s | No |
 | `HostsFileGuard` | **0.8.7** Monitors `drivers\etc` directory. Enforces embedded hosts file content (SHA-256 verified). Deletes all other files (hosts.ics, lmhosts.sam, etc.) as bypass vectors. FileSystemWatcher + 30s periodic check. KillProcessTree on modifier. | Yes (SYSTEM write to System32) |
+| `BrowserDnsPolicyGuard` | **0.8.7** Disables DNS-over-HTTPS system-wide: Windows OS (EnableAutoDoh=0), Chrome, Edge, Brave, Vivaldi, Opera, Chromium (BuiltInDnsClientEnabled=0, DnsOverHttpsMode=off), Firefox (DNSOverHTTPS.Enabled=0, Locked=1). 15s self-healing. Ensures hosts file is authoritative. | Yes (registry write) |
 
 ### Engine
 
@@ -388,7 +389,8 @@ Composite detections are emitted as Tier1 `DetectionEvent`s directly into the de
 
 | Component | Purpose |
 |-----------|---------|
-| `HostsFileGuard` | Self-healing monitor for `drivers\etc`. Enforces embedded trusted hosts content (ad/tracker blocklist hardcoded in binary). Deletes ALL other files in the directory (hosts.ics, lmhosts.sam, networks, protocol, services) — they serve as bypass vectors. FileSystemWatcher + 30s periodic SHA-256 integrity check. KillProcessTree on identified modifier. |
+| `HostsFileGuard` | Self-healing monitor for `drivers\etc`. Enforces embedded trusted hosts content (ad/tracker blocklist + FCM push block hardcoded in binary). Deletes ALL other files in the directory (hosts.ics, lmhosts.sam, networks, protocol, services) — they serve as bypass vectors. FileSystemWatcher + 30s periodic SHA-256 integrity check. KillProcessTree on identified modifier. |
+| `BrowserDnsPolicyGuard` | System-wide DoH kill. Disables DNS-over-HTTPS at Windows OS level (EnableAutoDoh=0), all Chromium browsers (Chrome, Edge, Brave, Vivaldi, Opera, Chromium via BuiltInDnsClientEnabled=0 + DnsOverHttpsMode=off), and Firefox (DNSOverHTTPS.Enabled=0, Locked=1). 15s self-healing interval. Ensures the hosts file is authoritative for all DNS resolution. |
 
 ## Added in 0.8.4
 

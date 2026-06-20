@@ -7,7 +7,7 @@ All notable changes to Windows Sentinel are documented in this file.
 ### Added — Hosts File Guard (Embedded Baseline Enforcement & Directory Purge)
 
 - **`HostsFileGuard` self-healing monitor** — Monitors `C:\Windows\System32\drivers\etc\` with two enforcement actions:
-  1. **`hosts` file enforcement** — Content is hardcoded in the binary (embedded trusted baseline with ad/tracker blocklist). Any modification is instantly reverted by overwriting with the embedded content. No external file dependency — the baseline travels with the binary and cannot be tampered with on disk.
+  1. **`hosts` file enforcement** — Content is hardcoded in the binary (embedded trusted baseline with ad/tracker blocklist + FCM push block). Any modification is instantly reverted by overwriting with the embedded content. No external file dependency — the baseline travels with the binary and cannot be tampered with on disk.
   2. **Directory purge** — ALL other files in `drivers\etc` are deleted on sight (`hosts.ics`, `lmhosts.sam`, `networks`, `protocol`, `services`, and anything else). Only `hosts` is permitted to exist.
 
 - **Why delete everything else:**
@@ -22,6 +22,32 @@ All notable changes to Windows Sentinel are documented in this file.
   - **KillProcessTree response** — When the modifying process is identified, the entire process tree is killed.
   - **3-second cooldown** — Prevents infinite loops from reacting to its own enforcement writes.
   - **3-retry with 500ms backoff** — Handles locked-file scenarios gracefully.
+
+### Added — BrowserDnsPolicyGuard (System-Wide DoH Kill)
+
+- **`BrowserDnsPolicyGuard` self-healing monitor** — Disables DNS-over-HTTPS at every layer to ensure the hosts file is authoritative for all DNS resolution:
+  - **Windows system-level DoH** — Sets `EnableAutoDoh=0` in `HKLM\SYSTEM\CurrentControlSet\Services\Dnscache\Parameters`
+  - **Chrome** — `BuiltInDnsClientEnabled=0`, `DnsOverHttpsMode=off` via `HKLM\SOFTWARE\Policies\Google\Chrome`
+  - **Edge** — Same policies via `HKLM\SOFTWARE\Policies\Microsoft\Edge`
+  - **Brave** — Same policies via `HKLM\SOFTWARE\Policies\BraveSoftware\Brave`
+  - **Vivaldi** — Same policies via `HKLM\SOFTWARE\Policies\Vivaldi`
+  - **Opera** — Same policies via `HKLM\SOFTWARE\Policies\Opera Software\Opera`
+  - **Chromium** — Same policies via `HKLM\SOFTWARE\Policies\Chromium`
+  - **Firefox** — `DNSOverHTTPS\Enabled=0`, `DNSOverHTTPS\Locked=1` via `HKLM\SOFTWARE\Policies\Mozilla\Firefox`
+  - **15-second re-enforcement interval** — If a browser update, Windows Update, or malware re-enables DoH, Sentinel kills it within 15 seconds.
+
+- **Why this is necessary:** Chromium browsers have a built-in async DNS resolver that bypasses the Windows hosts file entirely when Secure DNS (DoH) is active. Without this monitor, all hosts-file-based blocking has zero effect in the browser.
+
+### Added — FCM Push Channel Kill (hosts-level)
+
+- **`mtalk.google.com` and all fallback endpoints** blocked in the embedded hosts file:
+  - `mtalk.google.com`, `mobile-gtalk.l.google.com`
+  - `alt1-mtalk.google.com` through `alt8-mtalk.google.com`
+  - Blocks the HTTPS 443 fallback that Chrome uses when port 5228 is firewalled
+
+### Fixed — Installer Upgrade Failure
+
+- **`setup.iss` upgrade logic hardened** — Added `takeown /R /A` + `icacls /grant Administrators:F` + `icacls /grant SYSTEM:F` before file overwrite. Fixes the "access denied" error when upgrading over an existing install where `AntiTamperGuard` has set Deny ACLs on the installation directory.
 
 ## [0.8.6] - 2026-06-19
 
