@@ -159,6 +159,7 @@ namespace WindowsSentinel.Service
                     services.AddHostedService<CriticalServiceGuard>();
                     services.AddHostedService<NullSessionGuard>();
                     services.AddHostedService<HostsFileGuard>();
+                    services.AddHostedService<BrowserDnsPolicyGuard>();
                 });
     }
 }
