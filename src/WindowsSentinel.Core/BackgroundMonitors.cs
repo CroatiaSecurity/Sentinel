@@ -4684,6 +4684,7 @@ namespace WindowsSentinel.Core
             "ff02::3 ip6-allhosts\r\n" +
             "0.0.0.0 0.0.0.0\r\n" +
             "0.0.0.0 forum.hr\r\n" +
+            "0.0.0.0 www.forum.hr\r\n" +
             "0.0.0.0 adtago.s3.amazonaws.com\r\n" +
             "0.0.0.0 analyticsengine.s3.amazonaws.com\r\n" +
             "0.0.0.0 advice-ads.s3.amazonaws.com\r\n" +
