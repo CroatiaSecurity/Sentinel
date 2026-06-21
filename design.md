@@ -22,8 +22,6 @@ Monitors â†’ TelemetryFusionEngine â†’ DetectionEngine â†’ Respon
                EventGraph          BehavioralCorrelationEngine
            (queryable graph)              â†‘               â†“
                                    (composite detections via EmitAsync)
-                                                     DeceptionEngine (pre-kill)
-                                                          â†“
                                                      ChainTracer (kill + quarantine)
 ```
 
@@ -108,7 +106,6 @@ The fusion layer is PASSIVE â€” it never blocks, kills, or modifies telemet
 | `BehavioralCorrelationEngine` | Time-windowed (120s) multi-signal correlator. Fires composite `DetectionEvent`s via `IDetectionEngine.EmitAsync`. |
 | `BeaconingDetector` | Statistical C2 beacon detection. Tracks inter-connection intervals per `(ProcessId, RemoteAddress, Port)`. Fires when CV < 0.40 with 5+ observations. **v0.8.2:** Multi-factor Authenticode trust verification (WinVerifyTrust + path + diversity + baseline) demotes response for verified-legitimate software. Detection always fires and logs. |
 | `ScoringEngine` | Weighted multi-factor threat scoring with source weights, category base scores, corroboration bonuses. |
-| `DeceptionEngine` | **1.7.0** Pre-kill attacker punishment. Executes hostile tactics (memory flooding, DLL stomping, stack corruption, handle pollution, beacon flooding, protocol confusion, clipboard poisoning, sparse file bombs, symlink loops, polyglot files, corrupted archives, file locking, environment poisoning, honeypot deployment, network honeypot listeners) within 2s budget before ChainTracer kills. |
 
 ### Detection Rules
 
@@ -149,32 +146,22 @@ These never kill independently. Multiple Tier2 signals on the same PID within 12
 
 #### Composite Detections (BehavioralCorrelationEngine)
 
-Composite detections are emitted as Tier1 `DetectionEvent`s directly into the detection stream via `EmitAsync`, bypassing the rule pipeline.
+Composite detections are emitted as Tier1 `DetectionEvent`s directly into the detection stream via `EmitAsync`, bypassing the rule pipeline. Requires signals from different sources (distinct SignalTypes) within a 60-second window on the same PID.
 
 | Composite | Confidence | Trigger Combination |
 |-----------|-----------|---------------------|
-| Active Ransomware Chain | 0.99 | 2+ distinct ransomware signals (process + file) |
-| Fileless Attack Chain | 0.95 | AMSI/ETW evasion + encoded PS or C2 network |
-| Dropped Payload Phoning Home | 0.93 | Unsigned staged binary + C2 port |
-| Post-Exploitation Recon Sequence | 0.88 | 3+ distinct recon command types |
-| Injected C2 Beacon | 0.98 | Kernel injection (ThreatIntel) + C2 network |
-| Credential Dump + Exfiltration | 0.96 | LSASS dump + outbound C2 connection |
-| PPID Spoof + C2 Channel | 0.96 | Parent PID spoofing + C2 network (v1.2.0) |
-| Confirmed LSASS Dump | 0.97 | dbghelp.dll loaded + LSASS-targeting (v1.2.0) |
-| Privilege Escalation + Persistence | 0.94 | Token integrity change + persistence (v1.2.0) |
-| DGA + C2 Beaconing | 0.95 | High-entropy DNS + periodic beacon (v1.2.0) |
-| Credential Theft + Exfiltration | 0.97 | Credential canary tripped + network (v1.2.0) |
-| Advanced Attack Chain | 0.98 | 2 of 3: PPID spoof + escalation + injection (v1.2.0) |
-| Spoofed Process Phoning Home | 0.95 | PPID spoof + ANY network (v1.3.0) |
-| Dump Tool + Network Exfil | 0.94 | dbghelp.dll + ANY outbound (v1.3.0) |
-| Staged Payload + Non-Standard Port | 0.92 | Unsigned from temp + non-80/443 port (v1.3.0) |
-| Mass File Operation + DNS | 0.93 | 50+ file writes + DNS resolution (v1.3.0) |
-| Privilege Escalation + Network | 0.94 | Token escalation + ANY network (v1.3.0) |
-| Injection Tool + File Staging | 0.91 | Injection API cmdline + file writes (v1.3.0) |
-| DGA + File Operations | 0.94 | DGA DNS + ANY file access (v1.3.0) |
-| In-Memory Implant + Network | 0.96 | Memory anomaly + ANY network (v1.3.0) |
-| Camera/Mic Exfiltration: Capture + Network | 0.94 | Background webcam/mic access + ANY network (v1.6.0) |
-| Total AV Surveillance: Camera + Screen Capture | 0.95 | Webcam/mic capture + screen capture (v1.6.0) |
+| Active Ransomware Chain | 0.99 | 2+ distinct ransomware signals from different rules |
+| Injected C2 Beacon | 0.98 | Kernel-observed injection (ThreatIntel ETW) + C2 network |
+| Credential Dump + Exfiltration | 0.96 | LSASS/credential access + outbound network |
+| In-Memory Implant Active | 0.96 | Memory anomaly (injection/RWX) + network callback |
+| Fileless Attack Chain | 0.95 | AMSI/ETW/security evasion + shell or C2 |
+| DGA + C2 Beaconing | 0.94 | High-entropy/rapid DNS + periodic beacon |
+| Dropped Payload Active | 0.93 | Unsigned/staged binary + C2 communication |
+| Spoofed Process Phoning Home | 0.92 | PPID spoofing + network communication |
+| Evasion + Persistence Install | 0.91 | Security evasion + persistence mechanism |
+| Escalation + C2 Channel | 0.90 | Privilege escalation + outbound C2 |
+
+**Design:** Evaluated in confidence order (highest first). First match wins. All produce KillProcessTree. Redundant variants (e.g., "Staged Payload + Non-Standard Port", "Covert RAT", "Unsigned with Sustained C2") were consolidated into "Dropped Payload Active" since they fire on the same signal combination. Surveillance composites (Camera/Mic + Network) removed because underlying signal sources are shallow (registry polling only, no actual DXGI/Media Foundation detection).
 
 ### Logging
 
@@ -226,7 +213,6 @@ Composite detections are emitted as Tier1 `DetectionEvent`s directly into the de
 
 | Kind | When |
 |------|------|
-| `DeceptionPhase` | **1.7.0** Always before kill. 2s budget. Memory flooding, DLL stomping, beacon flooding, clipboard poisoning, file traps, environment poisoning, honeypot deployment. |
 | `LogOnly` | Always for Tier2; Tier1 when `--active-response` is not set; Tier1 non-President's-Law rules |
 | `KillProcess` | Tier1 President's Law rules only, with `--active-response`, confidence â‰¥ 0.85, via ChainTracer |
 | `SuspendProcess` | Reserved for future use |
@@ -273,9 +259,6 @@ Composite detections are emitted as Tier1 `DetectionEvent`s directly into the de
 
 | Component | Purpose |
 |-----------|---------|
-| `DeceptionEngine` | Orchestrates pre-kill attacker-hostile tactics within 2s time budget |
-| `MemoryFloodingTactic` | Injects 256MB random garbage via VirtualAllocEx into target process |
-| `ImplantDestabilizer` | DLL stomping (INT3 overwrite) + stack corruption + handle table pollution with decoy objects |
 | `BeaconFlooder` | Floods identified C2 server with 50+ fake beacon check-ins + 20 protocol confusion payloads |
 | `ClipboardPoisonTactic` | Replaces clipboard with fake AWS keys, SSH keys, crypto addresses |
 | `FileTrapTactic` | Deploys sparse file bombs (500GB), symlink loops, polyglot files (PDF/XLSX/DOCX), corrupted archives (tar.gz/7z), and file locks |
@@ -287,9 +270,6 @@ Composite detections are emitted as Tier1 `DetectionEvent`s directly into the de
 
 | Component | Purpose |
 |-----------|---------|
-| `Ransomware Fast-Path` | Instantly bypasses the deception engine execution window if "ransomware" is detected in rule or reasoning, terminating processes immediately to minimize encryption speed damage. |
-| `x64 Context Aligned Stack Corruption` | Suspends thread and queries thread context using a native 16-byte packed CONTEXT struct, safely targeting stack pointer (Rsp) on x64 processes. |
-| `Asynchronous Deception` | Refactors execution of off-host/network deception tactics (BeaconFlooder, NetworkHoneypotDeployer) into fire-and-forget background tasks. |
 
 ## Added in 2.8.1
 
@@ -307,7 +287,7 @@ Composite detections are emitted as Tier1 `DetectionEvent`s directly into the de
 | `ConfigurationValidation` | Startup validation framework for all configuration sections. |
 | `ConfigIntegrityMonitor` | Runtime detection of config/executable tampering (SHA-256 baseline, 5-min checks). |
 | `SentinelHealthCheck` | Structured health checks: process, memory, handles, log file, quarantine, thread pool. |
-| `SentinelMetrics` | Performance counters with histograms (P50/P90/P95/P99) for detection, response, deception. |
+| `SentinelMetrics` | Performance counters with histograms (P50/P90/P95/P99) for detection, response. |
 | `SecureHttpClientFactory` | TLS 1.2+ enforcement, domain allowlisting, certificate validation for threat intel APIs. |
 | `StructuredLoggingExtensions` | BeginScope helpers for consistent operation context in all log entries. |
 | `QuarantineFileAtomicAsync` | Atomic quarantine: encryptâ†’moveâ†’delete prevents race conditions. |

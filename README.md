@@ -62,6 +62,7 @@ Telemetry → Fusion → Rules → Scoring → Response → Chain Trace
 | 🛑 **Anti-Tamper** | Process suspend, binary deletion, service removal | 2s timing tick, binary integrity, SCM monitoring |
 | 🔒 **Null Session** | Blank-password network auth, SMB null-session | Registry policy enforcement + FCM push block |
 | 🥾 **Boot Persistence** | Bootkits, EFI rootkits, driver load hijack | BCD monitoring, EFI partition scan, boot driver baseline |
+| 🔗 **Multi-Signal Correlation** | Attack chains (inject+C2, cred+exfil, evasion+persist) | 10 composite detections from independent signal sources |
 
 ---
 

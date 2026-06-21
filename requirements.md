@@ -69,15 +69,20 @@ The system must detect the following indicators (log only):
 
 ### FR-4: Composite Detections
 
-The system must implement a behavioral correlation engine that fires composite detections when multiple signals combine within a 120-second window:
+The system must implement a behavioral correlation engine that fires composite detections when multiple signals combine within a 60-second window:
 
 | ID | Composite | Min Confidence |
 |----|-----------|---------------|
 | C-01 | Active Ransomware Chain | 0.99 |
-| C-02 | Fileless Attack Chain | 0.95 |
-| C-03 | Dropped Payload Phoning Home | 0.93 |
-| C-04 | Post-Exploitation Recon Sequence | 0.88 |
-| C-05 | Injected C2 Beacon | 0.98 |
+| C-02 | Injected C2 Beacon | 0.98 |
+| C-03 | Credential Dump + Exfiltration | 0.96 |
+| C-04 | In-Memory Implant Active | 0.96 |
+| C-05 | Fileless Attack Chain | 0.95 |
+| C-06 | DGA + C2 Beaconing | 0.94 |
+| C-07 | Dropped Payload Active | 0.93 |
+| C-08 | Spoofed Process Phoning Home | 0.92 |
+| C-09 | Evasion + Persistence Install | 0.91 |
+| C-10 | Escalation + C2 Channel | 0.90 |
 | C-06 | Credential Dump + Exfiltration | 0.96 |
 
 ### FR-5: Monitoring Sources
