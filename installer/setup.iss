@@ -15,6 +15,9 @@ OutputBaseFilename=WindowsSentinelSetup-0.9.2
 PrivilegesRequired=admin
 ; Allow upgrading over existing install
 UsePreviousAppDir=yes
+; Close applications that lock files during upgrade
+CloseApplications=force
+CloseApplicationsFilter=*.exe
 
 [Files]
 Source: "assets\Sentinel.ico"; DestDir: "{app}"; Flags: ignoreversion
@@ -60,15 +63,26 @@ Type: filesandordirs; Name: "{pf32}\WindowsSentinel"
 procedure StopExistingService();
 var
   ResultCode: Integer;
+  WaitCount: Integer;
 begin
   // Stop the service before upgrading
   Exec(ExpandConstant('{sys}\sc.exe'), 'stop "Windows Sentinel"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  // Wait for service to stop
-  Sleep(3000);
-  // Kill any remaining agent processes
+  // Wait for service to fully stop (up to 15 seconds)
+  WaitCount := 0;
+  while WaitCount < 15 do
+  begin
+    Sleep(1000);
+    WaitCount := WaitCount + 1;
+    // Check if process is gone
+    if not FileExists(ExpandConstant('{app}\WindowsSentinel.Service.exe')) then
+      Break;
+    Exec(ExpandConstant('{sys}\tasklist.exe'), '/FI "IMAGENAME eq WindowsSentinel.Service.exe" /NH', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  end;
+  // Force kill any remaining processes
   Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM WindowsSentinel.Agent.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM WindowsSentinel.Service.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Sleep(1000);
+  // Wait for handles to be released
+  Sleep(3000);
   // Take ownership of the directory (required if antitamper changed owner)
   Exec(ExpandConstant('{sys}\takeown.exe'),
     ExpandConstant('/F "{app}" /R /A /D Y'),
