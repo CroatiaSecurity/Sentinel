@@ -178,12 +178,7 @@ namespace WindowsSentinel.Core
                 }
             }
 
-            // Unhook
-            if (_mouseHookHandle != IntPtr.Zero)
-            {
-                UnhookWindowsHookEx(_mouseHookHandle);
-                _mouseHookHandle = IntPtr.Zero;
-            }
+            // Hook thread handles its own cleanup via WM_QUIT → UnhookWindowsHookEx
         }
 
         #region Mouse Injection Detection
@@ -198,7 +193,10 @@ namespace WindowsSentinel.Core
         private static extern IntPtr DispatchMessage(ref MSG lpMsg);
 
         [DllImport("user32.dll")]
-        private static extern void PostThreadMessage(int idThread, uint Msg, IntPtr wParam, IntPtr lParam);
+        private static extern bool PostThreadMessage(uint idThread, uint Msg, IntPtr wParam, IntPtr lParam);
+
+        [DllImport("kernel32.dll")]
+        private static extern uint GetCurrentThreadId();
 
         [StructLayout(LayoutKind.Sequential)]
         private struct MSG
@@ -212,13 +210,15 @@ namespace WindowsSentinel.Core
         }
 
         private const uint WM_QUIT = 0x0012;
-        private int _hookThreadId;
+        private uint _hookThreadNativeId;
 
         private void RunMouseHook(CancellationToken ct)
         {
             try
             {
-                _hookThreadId = Environment.CurrentManagedThreadId;
+                // Get the native Win32 thread ID (NOT managed thread ID)
+                _hookThreadNativeId = GetCurrentThreadId();
+
                 _mouseHookProc = MouseHookCallback;
                 using var curProcess = Process.GetCurrentProcess();
                 using var curModule = curProcess.MainModule!;
@@ -232,10 +232,10 @@ namespace WindowsSentinel.Core
 
                 _logger.LogInformation("[ClickjackingGuard] Mouse hook installed");
 
-                // Register cancellation to post WM_QUIT and break the message loop
+                // Register cancellation to post WM_QUIT to THIS thread's message queue
                 ct.Register(() =>
                 {
-                    try { PostThreadMessage(_hookThreadId, WM_QUIT, IntPtr.Zero, IntPtr.Zero); } catch { }
+                    try { PostThreadMessage(_hookThreadNativeId, WM_QUIT, IntPtr.Zero, IntPtr.Zero); } catch { }
                 });
 
                 // Proper Win32 message pump — required for low-level hooks to work without lag
@@ -244,6 +244,14 @@ namespace WindowsSentinel.Core
                 {
                     TranslateMessage(ref msg);
                     DispatchMessage(ref msg);
+                }
+
+                // Unhook on the same thread that installed the hook
+                if (_mouseHookHandle != IntPtr.Zero)
+                {
+                    UnhookWindowsHookEx(_mouseHookHandle);
+                    _mouseHookHandle = IntPtr.Zero;
+                    _logger.LogInformation("[ClickjackingGuard] Mouse hook removed");
                 }
             }
             catch (Exception ex)
