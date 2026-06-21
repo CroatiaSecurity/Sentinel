@@ -2,6 +2,28 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [0.9.3] - 2026-06-21
+
+### Security Audit — All Findings Fixed
+
+Full security audit performed. No backdoors or malicious code found. 10 issues identified and fixed:
+
+**HIGH:**
+- **Installer reg import removed** — Commented out `reg.exe import` of developer-local `.reg` file (supply chain risk)
+
+**MEDIUM (6 fixes):**
+- **BeaconingDetector port 80/443** — Now monitors HTTPS beaconing (CV < 0.20 threshold for these ports). Previously completely blind to C2 over standard ports.
+- **Rate limiter increased** — 100/sec → 1000/sec (5000 burst). Prevents attacker from flooding low-priority events to suppress forensic logging of real kills.
+- **PID reuse protection** — `SafeProcessExemptionRegistry` now stores `(PID, StartTime)` tuples. Validates process identity on every check. Stale entries auto-removed on PID recycling.
+- **Agent protection toggle requires confirmation** — MessageBox Yes/No dialog before disabling active response. Prevents drive-by desktop session attacks from silently disabling protection.
+- **ReverseShellRule: -enc alone demoted to Tier2** — Bare encoded PowerShell no longer kills. Requires evasion indicators (`-nop`, `-w hidden`, network APIs) to escalate to Tier1+Kill. Reduces false positives on legitimate automation.
+- **TargetIP validation** — Firewall rules now reject unparseable, loopback, 0.0.0.0, and broadcast IPs before creation.
+
+**LOW (3 fixes):**
+- **Quarantine: XOR → DPAPI** — Quarantined files now encrypted with machine-scoped DPAPI (ProtectedData.Protect). No longer trivially recoverable with XOR.
+- **async void → async Task** — `RegistryMonitor.EvaluateAutorunEntry/EvaluateNewService` changed to `async Task` to prevent unhandled exception crashes.
+- **Log directory ACLs** — Explicitly locked to SYSTEM + Administrators after creation (no more inherited permissions from ProgramData).
+
 ## [0.9.2] - 2026-06-21
 
 ### Fixed — Mouse Cursor Lag After Install

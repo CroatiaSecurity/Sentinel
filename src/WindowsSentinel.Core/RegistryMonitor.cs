@@ -160,7 +160,7 @@ namespace WindowsSentinel.Core
                     if (!baseline.ContainsKey(name))
                     {
                         // New entry since baseline
-                        EvaluateAutorunEntry(name, value ?? "", isHklm, subPath);
+                        _ = EvaluateAutorunEntry(name, value ?? "", isHklm, subPath);
                         baseline[name] = value;
                     }
                 }
@@ -178,7 +178,7 @@ namespace WindowsSentinel.Core
                     if (!_servicesBaseline.ContainsKey(serviceName))
                     {
                         // New service since baseline
-                        EvaluateNewService(serviceName, imagePath ?? "");
+                        _ = EvaluateNewService(serviceName, imagePath ?? "");
                         _servicesBaseline[serviceName] = imagePath;
                     }
                 }
@@ -333,7 +333,7 @@ namespace WindowsSentinel.Core
                     var valueName = kvp.Key;
                     var valueData = kvp.Value ?? string.Empty;
 
-                    EvaluateAutorunEntry(valueName, valueData, isHklm, @"Software\Microsoft\Windows\CurrentVersion\Run");
+                    _ = EvaluateAutorunEntry(valueName, valueData, isHklm, @"Software\Microsoft\Windows\CurrentVersion\Run");
                 }
 
                 // Update baseline
@@ -356,7 +356,7 @@ namespace WindowsSentinel.Core
                     var serviceName = kvp.Key;
                     var imagePath = kvp.Value ?? string.Empty;
 
-                    EvaluateNewService(serviceName, imagePath);
+                    _ = EvaluateNewService(serviceName, imagePath);
                 }
 
                 _servicesBaseline = current;
@@ -553,7 +553,7 @@ namespace WindowsSentinel.Core
             }
         }
 
-        private async void EvaluateAutorunEntry(string valueName, string valueData, bool isHklm, string keyPath)
+        private async Task EvaluateAutorunEntry(string valueName, string valueData, bool isHklm, string keyPath)
         {
             var lowerData = valueData.ToLowerInvariant();
             var lowerName = valueName.ToLowerInvariant();
@@ -603,7 +603,7 @@ namespace WindowsSentinel.Core
             }
         }
 
-        private async void EvaluateNewService(string serviceName, string imagePath)
+        private async Task EvaluateNewService(string serviceName, string imagePath)
         {
             var lowerPath = imagePath.ToLowerInvariant();
             var confidence = 0.0;

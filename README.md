@@ -2,7 +2,7 @@
 
 **Userland IDS/EDR for Windows — Behavioral Threat Detection & Automated Response**
 
-> Version: 0.9.2 | Author: [Gorstak](https://gorstak.eu) | License: MIT
+> Version: 0.9.3 | Author: [Gorstak](https://gorstak.eu) | License: MIT
 
 [![Release](https://img.shields.io/github/v/release/CroatiaSecurity/Sentinel?style=flat-square)](https://github.com/CroatiaSecurity/Sentinel/releases/latest)
 [![License](https://img.shields.io/github/license/CroatiaSecurity/Sentinel?style=flat-square)](LICENSE)
@@ -23,7 +23,7 @@ No signatures. No blocklists. No name-based detection. Pure behavioral analysis.
 
 ```powershell
 # Run as Administrator
-.\WindowsSentinelSetup-0.9.2.exe
+.\WindowsSentinelSetup-0.9.3.exe
 ```
 
 Installs a Windows Service (SYSTEM) + user Agent (tray icon). Active response is enabled by default.

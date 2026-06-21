@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Net;
 using System.Threading.Tasks;
 
 namespace WindowsSentinel.Core
@@ -310,7 +311,17 @@ namespace WindowsSentinel.Core
                 var targetIp = detection.Metadata.GetValueOrDefault("TargetIP", "");
                 if (!string.IsNullOrEmpty(targetIp))
                 {
-                    IsolateNetworkTarget(targetIp, detection.RuleName);
+                    // Validate IP before creating firewall rules
+                    if (!System.Net.IPAddress.TryParse(targetIp, out var parsedIp) ||
+                        System.Net.IPAddress.IsLoopback(parsedIp) ||
+                        targetIp == "0.0.0.0" || targetIp == "255.255.255.255")
+                    {
+                        // Skip invalid/loopback/broadcast IPs
+                    }
+                    else
+                    {
+                        IsolateNetworkTarget(targetIp, detection.RuleName);
+                    }
                 }
 
                 // Also flush DNS cache to clear poisoned entries

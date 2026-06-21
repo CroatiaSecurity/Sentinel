@@ -164,6 +164,13 @@ namespace WindowsSentinel.Agent
 
         private void OnToggleProtection(object? sender, EventArgs e)
         {
+            var result = MessageBox.Show(
+                "Are you sure you want to " + (_config.ActiveResponse ? "disable" : "enable") + " active response?",
+                "Windows Sentinel",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning);
+            if (result != DialogResult.Yes) return;
+
             _config.ActiveResponse = !_config.ActiveResponse;
             var status = _config.ActiveResponse ? "Active" : "Disabled";
             _notifyIcon!.Text = $"Windows Sentinel v{_version} — Protection {status}";

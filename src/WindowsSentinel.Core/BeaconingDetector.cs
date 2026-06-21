@@ -98,7 +98,6 @@ namespace WindowsSentinel.Core
         public void RecordConnection(string remoteAddress, int remotePort, int processId, string processName, string? imagePath, string state)
         {
             if (state != "Established") return;
-            if (remotePort is 80 or 443) return;
 
             if (_baseline != null && _baseline.IsKnownNetworkDestination(processName, remoteAddress, remotePort))
             {
@@ -155,6 +154,10 @@ namespace WindowsSentinel.Core
                 if (cv > MaxBeaconCv) continue;
                 if (mean < MinBeaconIntervalSec) continue;
                 if (mean > MaxBeaconIntervalSec) continue;
+
+                // Stricter threshold for port 80/443: require CV < 0.20 to reduce false positives
+                // from legitimate HTTP/HTTPS polling (e.g., keep-alive, long-polling, websockets)
+                if (history.RemotePort is 80 or 443 && cv >= 0.20) continue;
 
                 history.HasFired = true;
 
