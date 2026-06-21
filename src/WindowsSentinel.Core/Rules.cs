@@ -96,6 +96,13 @@ namespace WindowsSentinel.Core
     {
         public string Name => "ReverseShellRule";
 
+        private static readonly string[] EscalationIndicators = new[]
+        {
+            "-nop", "-w hidden", "-windowstyle hidden", "-sta", "-noni",
+            "net.webclient", "downloadstring", "invoke-expression", "iex",
+            "net.sockets", "tcpclient", "system.net"
+        };
+
         public DetectionEvent? Evaluate(FusedTelemetryContext context)
         {
             if (context.TriggeringEvent is ProcessTelemetry pt)
@@ -105,18 +112,42 @@ namespace WindowsSentinel.Core
                     (cmd.Contains("-enc", StringComparison.OrdinalIgnoreCase) || 
                      cmd.Contains("-encodedcommand", StringComparison.OrdinalIgnoreCase)))
                 {
-                    return new DetectionEvent
+                    // Check for escalation indicators that suggest malicious use
+                    bool hasEscalationIndicator = EscalationIndicators.Any(
+                        indicator => cmd.Contains(indicator, StringComparison.OrdinalIgnoreCase));
+
+                    if (hasEscalationIndicator)
                     {
-                        RuleName = Name,
-                        ProcessName = pt.ProcessName,
-                        ProcessId = pt.ProcessId,
-                        SignalType = SignalType.ReverseShell,
-                        Confidence = 0.85,
-                        Tier = DetectionTier.Tier1Behavioral,
-                        AuthorizedResponse = ResponseAction.KillProcessTree,
-                        Evidence = $"Encoded PowerShell execution command: {cmd}",
-                        Reasoning = "Process launched an obfuscated PowerShell session, commonly used to execute downloader cradles or C2 shell callbacks."
-                    };
+                        // Combined with evasion flags or network indicators → Tier1 + Kill
+                        return new DetectionEvent
+                        {
+                            RuleName = Name,
+                            ProcessName = pt.ProcessName,
+                            ProcessId = pt.ProcessId,
+                            SignalType = SignalType.ReverseShell,
+                            Confidence = 0.85,
+                            Tier = DetectionTier.Tier1Behavioral,
+                            AuthorizedResponse = ResponseAction.KillProcessTree,
+                            Evidence = $"Encoded PowerShell with evasion/network indicators: {cmd}",
+                            Reasoning = "Process launched an obfuscated PowerShell session combined with evasion flags or network indicators, commonly used to execute downloader cradles or C2 shell callbacks."
+                        };
+                    }
+                    else
+                    {
+                        // Encoded command alone → Tier2 (log only, no kill)
+                        return new DetectionEvent
+                        {
+                            RuleName = Name,
+                            ProcessName = pt.ProcessName,
+                            ProcessId = pt.ProcessId,
+                            SignalType = SignalType.ReverseShell,
+                            Confidence = 0.50,
+                            Tier = DetectionTier.Tier2Indicator,
+                            AuthorizedResponse = ResponseAction.LogOnly,
+                            Evidence = $"Encoded PowerShell execution (no evasion indicators): {cmd}",
+                            Reasoning = "Process launched PowerShell with an encoded command. Without additional evasion or network indicators this may be legitimate automation. Logged for correlation."
+                        };
+                    }
                 }
             }
             return null;

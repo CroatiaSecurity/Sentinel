@@ -203,9 +203,9 @@ namespace WindowsSentinel.Tests
                 commandLine: "powershell.exe -enc JABjAGwAaQBlAG4AdAA=");
             var result = rule.Evaluate(ctx);
             Assert.NotNull(result);
-            Assert.Equal(DetectionTier.Tier1Behavioral, result!.Tier);
-            Assert.Equal(SignalType.ReverseShell, result.SignalType);
-            Assert.True(result.KillAuthorized);
+            // Bare -enc without evasion indicators is now Tier2 (log-only)
+            Assert.Equal(DetectionTier.Tier2Indicator, result!.Tier);
+            Assert.False(result.KillAuthorized);
         }
 
         [Fact]

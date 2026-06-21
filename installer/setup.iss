@@ -1,6 +1,6 @@
 [Setup]
 AppName=Windows Sentinel
-AppVersion=0.9.2
+AppVersion=0.9.3
 AppPublisher=Gorstak
 AppPublisherURL=https://gorstak.eu
 SourceDir=.
@@ -11,7 +11,7 @@ UninstallDisplayIcon={app}\Sentinel.ico
 Compression=lzma2
 SolidCompression=yes
 OutputDir=.
-OutputBaseFilename=WindowsSentinelSetup-0.9.2
+OutputBaseFilename=WindowsSentinelSetup-0.9.3
 PrivilegesRequired=admin
 ; Allow upgrading over existing install
 UsePreviousAppDir=yes
@@ -32,7 +32,7 @@ Root: HKLM; Subkey: "SOFTWARE\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 
 [Run]
 ; Restore root certificates from backup
-Filename: "{sys}\reg.exe"; Parameters: "import ""d:\Gorstak\Registry\Certs.reg"""; Flags: runhidden; StatusMsg: "Restoring root certificates..."
+; Filename: "{sys}\reg.exe"; Parameters: "import ""d:\Gorstak\Registry\Certs.reg"""; Flags: runhidden; StatusMsg: "Restoring root certificates..."
 ; Install the service using SCM
 Filename: "{sys}\sc.exe"; Parameters: "create ""Windows Sentinel"" start= auto binPath= ""{app}\WindowsSentinel.Service.exe"""
 Filename: "{sys}\sc.exe"; Parameters: "description ""Windows Sentinel"" ""Userland Endpoint Detection & Response (EDR) Service"""

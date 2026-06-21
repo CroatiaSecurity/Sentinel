@@ -1,6 +1,6 @@
 using System;
 using System.IO;
-using System.Text;
+using System.Security.Cryptography;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 
@@ -38,11 +38,8 @@ namespace WindowsSentinel.Core
 
             var fileBytes = await File.ReadAllBytesAsync(filePath);
             
-            // Encrypt using XOR 0x5A for simple quarantine isolation
-            for (int i = 0; i < fileBytes.Length; i++)
-            {
-                fileBytes[i] = (byte)(fileBytes[i] ^ 0x5A);
-            }
+            // Encrypt using DPAPI (machine-scoped) for quarantine isolation
+            fileBytes = ProtectedData.Protect(fileBytes, null, DataProtectionScope.LocalMachine);
 
             var fileName = Path.GetFileName(filePath);
             var safeName = Regex.Replace(fileName, @"[^a-zA-Z0-9_\-\.]", "_");

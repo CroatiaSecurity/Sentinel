@@ -10,7 +10,7 @@ namespace WindowsSentinel.Core
     {
         private readonly string _logFilePath;
         private readonly SemaphoreSlim _semaphore = new(1, 1);
-        private readonly BurstRateLimiter _rateLimiter = new(100, 200);
+        private readonly BurstRateLimiter _rateLimiter = new(1000, 5000);
         private FileStream? _fileStream;
         private StreamWriter? _writer;
         private bool _isDegraded;
@@ -39,6 +39,16 @@ namespace WindowsSentinel.Core
                 try
                 {
                     Directory.CreateDirectory(directory);
+
+                    // Restrict log directory ACLs to SYSTEM and Administrators only
+                    var dirInfo = new DirectoryInfo(directory);
+                    var security = dirInfo.GetAccessControl();
+                    security.SetAccessRuleProtection(true, false);
+                    var systemSid = new System.Security.Principal.SecurityIdentifier(System.Security.Principal.WellKnownSidType.LocalSystemSid, null);
+                    security.AddAccessRule(new System.Security.AccessControl.FileSystemAccessRule(systemSid, System.Security.AccessControl.FileSystemRights.FullControl, System.Security.AccessControl.InheritanceFlags.ContainerInherit | System.Security.AccessControl.InheritanceFlags.ObjectInherit, System.Security.AccessControl.PropagationFlags.None, System.Security.AccessControl.AccessControlType.Allow));
+                    var adminSid = new System.Security.Principal.SecurityIdentifier(System.Security.Principal.WellKnownSidType.BuiltinAdministratorsSid, null);
+                    security.AddAccessRule(new System.Security.AccessControl.FileSystemAccessRule(adminSid, System.Security.AccessControl.FileSystemRights.FullControl, System.Security.AccessControl.InheritanceFlags.ContainerInherit | System.Security.AccessControl.InheritanceFlags.ObjectInherit, System.Security.AccessControl.PropagationFlags.None, System.Security.AccessControl.AccessControlType.Allow));
+                    dirInfo.SetAccessControl(security);
                 }
                 catch
                 {
