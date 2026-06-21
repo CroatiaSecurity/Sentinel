@@ -2,6 +2,31 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [0.9.4] - 2026-06-21
+
+### Added — Composite Detections Restored (10 correlations, up from 3)
+
+Re-implemented behavioral correlation composites that were removed during the AV-clean refactor. These use only existing signal sources (ETW, memory analyzer, beaconing detector, rule pipeline) — no AV-triggering APIs.
+
+| Composite | Confidence | Trigger |
+|-----------|-----------|---------|
+| Active Ransomware Chain | 0.99 | 2+ distinct ransomware signals from different rules |
+| Injected C2 Beacon | 0.98 | Kernel-observed injection + C2 network |
+| Credential Dump + Exfiltration | 0.96 | LSASS/credential access + outbound network |
+| In-Memory Implant Active | 0.96 | Memory anomaly (injection/RWX) + network callback |
+| Fileless Attack Chain | 0.95 | AMSI/ETW/security evasion + shell or C2 |
+| DGA + C2 Beaconing | 0.94 | High-entropy/rapid DNS + periodic beacon |
+| Dropped Payload Active | 0.93 | Unsigned/staged binary + C2 communication |
+| Spoofed Process Phoning Home | 0.92 | PPID spoofing + network communication |
+| Evasion + Persistence Install | 0.91 | Security evasion + persistence mechanism |
+| Escalation + C2 Channel | 0.90 | Privilege escalation + outbound C2 |
+
+**Design principles:**
+- Require signals from different sources (distinct SignalTypes) — can't be faked by triggering one rule repeatedly
+- Evaluated in confidence order (highest first, return on match)
+- All composites are Tier1+KillProcessTree — they represent corroborated multi-signal attack chains
+- Hackers can read the code: composites rely on the *combination* of signals being hard to produce legitimately, not on the logic being secret
+
 ## [0.9.3] - 2026-06-21
 
 ### Security Audit — All Findings Fixed
