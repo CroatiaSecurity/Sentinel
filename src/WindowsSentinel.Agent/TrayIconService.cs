@@ -18,6 +18,7 @@ namespace WindowsSentinel.Agent
         private Thread? _uiThread;
         private readonly CancellationTokenSource _cts = new();
         private readonly string _version;
+        private (string RuleName, string ProcessName, double Confidence, string Evidence)? _pendingDetection;
 
         public TrayIconService(SentinelConfig config)
         {
@@ -266,52 +267,51 @@ namespace WindowsSentinel.Agent
                                             tierVal = tierProp.GetInt32();
                                         }
 
-                                        // Deduplication check
-                                        var cacheKey = $"{ruleName}:{processName}";
-                                        if (shownCache.TryGetValue(cacheKey, out var lastShown))
+                                        // Store detection temporarily — only toast if followed by a KILL response
+                                        if (tierVal == 0)
                                         {
-                                            if (DateTime.UtcNow - lastShown < TimeSpan.FromSeconds(30))
+                                            _pendingDetection = (ruleName, processName, confidence, evidence);
+                                        }
+                                    }
+                                    catch { }
+                                }
+                                else if (line.Contains("\"type\":\"response\"", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    try
+                                    {
+                                        using var doc = JsonDocument.Parse(line);
+                                        var data = doc.RootElement.GetProperty("data");
+                                        var actionTaken = data.GetProperty("ActionTaken").GetString() ?? "";
+
+                                        // Only show toast when an actual KILL/QUARANTINE/NETWORK_ISOLATE happened
+                                        if (_pendingDetection.HasValue &&
+                                            (actionTaken == "KILL" || actionTaken == "QUARANTINE_AND_KILL" ||
+                                             actionTaken == "NETWORK_ISOLATE" || actionTaken == "REMOVE_CERT_AND_KILL_ADDER"))
+                                        {
+                                            var (ruleName, processName, confidence, evidence) = _pendingDetection.Value;
+
+                                            // Deduplication check
+                                            var cacheKey = $"{ruleName}:{processName}";
+                                            if (shownCache.TryGetValue(cacheKey, out var lastShown))
                                             {
-                                                continue; // Skip duplicate notification
+                                                if (DateTime.UtcNow - lastShown < TimeSpan.FromSeconds(30))
+                                                {
+                                                    _pendingDetection = null;
+                                                    continue;
+                                                }
                                             }
-                                        }
-                                        shownCache[cacheKey] = DateTime.UtcNow;
+                                            shownCache[cacheKey] = DateTime.UtcNow;
 
-                                        bool killAuthorized = false;
-                                        if (data.TryGetProperty("KillAuthorized", out var killProp))
-                                            killAuthorized = killProp.GetBoolean();
-
-                                        string title;
-                                        string statusText;
-                                        if (killAuthorized && _config.ActiveResponse)
-                                        {
-                                            title = $"Threat Terminated: {ruleName}";
-                                            statusText = "Terminated (Active Response)";
-                                        }
-                                        else if (tierVal == 0) // Tier1Behavioral but not kill-authorized
-                                        {
-                                            title = $"Threat Detected: {ruleName}";
-                                            statusText = _config.ActiveResponse ? "Blocked (No Kill)" : "Log Only (Active Response Off)";
-                                        }
-                                        else // Tier2Indicator
-                                        {
-                                            title = $"Suspicious Activity: {ruleName}";
-                                            statusText = "Logged (No Action)";
-                                        }
-
-                                        if (tierVal == 0 && killAuthorized && _config.ActiveResponse)
-                                        {
-                                            // Only show toasts for actual kills/blocks/quarantine
                                             _notifyIcon?.ShowBalloonTip(
                                                 5000,
-                                                title,
-                                                $"Process: {processName} ({statusText})\nConfidence: {confidence:P0}\n{evidence}",
+                                                $"Threat Terminated: {ruleName}",
+                                                $"Process: {processName} (Terminated)\nConfidence: {confidence:P0}\n{evidence}",
                                                 ToolTipIcon.Error
                                             );
                                         }
-                                        // All other detections: silent (logged only)
+                                        _pendingDetection = null;
                                     }
-                                    catch { }
+                                    catch { _pendingDetection = null; }
                                 }
                             }
                             lastOffset = fs.Position;

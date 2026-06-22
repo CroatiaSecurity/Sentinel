@@ -2,6 +2,28 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [0.9.8] - 2026-06-22
+
+### Fixed — False Positive Reduction (Toast, System Integrity, Module Growth, Attack Tool)
+
+**Toast notification bug (TrayIconService):**
+- Toasts no longer show "Threat Terminated" for detections that were demoted to LogOnly
+- Agent now reads the **response** event (`ActionTaken: KILL`) instead of the detection's `KillAuthorized` field
+- Only shows toast when an actual KILL/QUARANTINE/NETWORK_ISOLATE response occurred
+
+**System Integrity false positives (FileActivityMonitor):**
+- Excluded Sentinel, Kiro, Chrome, Delivery Optimization, AppXSVC, and WinStore from "Unauthorized Write to System Directory"
+- These processes trigger FileSystemWatcher `Changed` events when Sentinel writes ADS verdict tags to System32 DLLs — the watcher misattributes the change to whatever process last loaded the DLL
+
+**Module Count Growth false positives (MemoryBehaviorAnalyzer):**
+- Added `svchost.exe`, `Taskmgr.exe`, `mmc.exe`, `explorer.exe`, `SearchHost.exe`, `RuntimeBroker.exe`, `dllhost.exe` to the excluded process list
+- These system processes dynamically load service DLLs and modules on demand — module count growth is normal behavior for them
+
+**Attack Tool rule demoted (NetworkMonitor):**
+- "Attack Tool: Connection from Suspicious Path" demoted from Tier1/KillProcessTree to Tier2/LogOnly
+- Was killing legitimate portable tools (aria2c, RogueKiller) that connect to the internet from Downloads folder
+- Real threats from Downloads are caught by FileVerdictScanner (hash reputation), BeaconingDetector (C2 patterns), and BehavioralCorrelationEngine (multi-signal composites)
+
 ## [0.9.7] - 2026-06-22
 
 ### Added — Isolation Response Engine (ISO / Docker / VM Containment)
