@@ -2,6 +2,35 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [0.9.7] - 2026-06-22
+
+### Added — Isolation Response Engine (ISO / Docker / VM Containment)
+
+New `IsolationResponseEngine` handles threats originating from isolated environments where Sentinel cannot inspect or modify files directly:
+
+**Mounted ISO Response:**
+- Kill all processes running from the ISO drive path
+- Dismount the ISO via `Dismount-DiskImage`
+- Delete the source `.iso` file from disk (writable location)
+- Prevents re-execution after dismount
+
+**Docker Container Response:**
+- Inspect container to identify image before stopping
+- `docker stop` → `docker rm --force` → `docker rmi --force`
+- Removes both container and source image to prevent re-launch
+- Direct `docker.exe` invocation (no cmd.exe shell-out per constraints)
+
+**Virtual Machine Response (Hyper-V / VirtualBox / VMware):**
+- Hyper-V: graceful `Stop-VM -TurnOff -Force` via WMI, fallback to process kill
+- VirtualBox/VMware: kill VM host process (`VBoxHeadless.exe`, `vmware-vmx.exe`)
+- VM disk files preserved (too destructive to auto-delete)
+- Triggered when beaconing/C2 detection correlates to a VM host process
+
+**Design:**
+- Only fires on Tier1 kill-authorized detections (President's Law)
+- Follows the pattern: terminate runtime → remove source → log
+- Registered as singleton in both Service and Agent
+
 ## [0.9.6] - 2026-06-22
 
 ### Fixed — AV Heuristic False Positives (0/68 target)

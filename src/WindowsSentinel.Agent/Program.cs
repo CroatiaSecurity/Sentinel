@@ -87,6 +87,7 @@ namespace WindowsSentinel.Agent
                     services.AddHostedService<WebcamHijackMonitor>();
                     services.AddHostedService<ConsultantSignalIngestor>();
                     services.AddHostedService<ShellWatchdog>();
+                    services.AddSingleton<IsolationResponseEngine>();
                 });
     }
 }

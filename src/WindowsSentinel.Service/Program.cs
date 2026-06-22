@@ -165,6 +165,7 @@ namespace WindowsSentinel.Service
                     services.AddHostedService<BootIntegrityGuard>();
                     services.AddSingleton<PersistentConnectionMonitor>();
                     services.AddHostedService<PersistentConnectionMonitor>(sp => sp.GetRequiredService<PersistentConnectionMonitor>());
+                    services.AddSingleton<IsolationResponseEngine>();
                 });
     }
 }
