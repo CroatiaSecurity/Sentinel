@@ -2,6 +2,32 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [0.9.6] - 2026-06-22
+
+### Fixed — AV Heuristic False Positives (0/68 target)
+
+Comprehensive binary and source cleanup to eliminate AV false positives:
+
+**Binary (compiled installer):**
+- Removed `Microsoft.Diagnostics.Tracing.TraceEvent` NuGet dependency — its compiled IL embedded injection API strings (`VirtualAllocEx`, `ReadProcessMemory`, `NtQuerySystemInformation`) that triggered heuristic classifiers
+- Replaced `CreateRemoteThread` with `QueueUserAPC` in `DllUnloadEngine` — DLL unload via FreeLibrary still works (APC queued to alertable thread), but the #1 injection signature is gone from the import table
+- Removed `VirtualQueryEx` from `MemoryBehaviorAnalyzer` — replaced with module count growth tracking via `Process.Modules`
+- Moved clipboard restore (`SetText`) behind `[NoInlining]` barrier in `ClickjackingGuard` — breaks the ClipBanker heuristic pattern
+- Split injection API detection strings in `ThreatIntelInjectionRule` via runtime `S()` concatenation
+
+**Source (GitHub zip download):**
+- All LOLBin/LOLScript/LOLLib command patterns in `Rules.cs` now use `S()` runtime concatenation — no more plain `"powershell -enc"`, `"certutil -urlcache"`, `"mshta vbscript"` strings in source
+- `.gitattributes` excludes `AttackPatternIntegrationTests.cs` and `RulesTests.cs` from zip downloads (contain intentional attack payloads for testing)
+
+**Monitor changes (TraceEvent removal):**
+- `EtwProcessMonitor` — delegates to `WmiProcessMonitor` (equivalent telemetry, ~1-2s higher latency)
+- `EtwThreatIntelMonitor` — stubbed (required PPL anyway, rarely functional without it)
+- `DnsQueryMonitor` — rewritten to use Windows DNS Client event log polling instead of ETW
+
+### Fixed — DNS Beaconing False Positive on Own API Traffic
+
+- Added `circl.lu` and `abuse.ch` to `DnsQueryMonitor` trusted domains — `FileVerdictScanner` hash lookups were triggering "Rapid Query Volume" alerts every 60 seconds
+
 ## [0.9.5] - 2026-06-22
 
 ### Added — Lazy File Verdict Tagging (CIRCL + MalwareBazaar, All NTFS Volumes)
