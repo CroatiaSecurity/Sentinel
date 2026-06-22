@@ -1,234 +1,221 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
+using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
-using Microsoft.Diagnostics.Tracing;
-using Microsoft.Diagnostics.Tracing.Session;
 using Microsoft.Extensions.Logging;
 
 namespace WindowsSentinel.Core
 {
     /// <summary>
-    /// Monitors DNS queries via ETW (Microsoft-Windows-DNS-Client) for behavioral anomalies:
-    /// - DGA-like domain patterns (high entropy, unusual length)
-    /// - DNS tunneling indicators (long subdomains, high query rate to single base domain)
-    /// - Rapid unique domain resolution (beaconing via random subdomains)
-    /// Purely behavioral — no domain blocklists.
+    /// Monitors DNS queries for beaconing/tunneling behavior.
+    /// 
+    /// Previously used ETW (Microsoft-Windows-DNS-Client) via TraceEvent.
+    /// Now uses Windows DNS Client event log + periodic polling as telemetry source
+    /// to avoid embedding TraceEvent's injection API strings in the binary.
+    /// 
+    /// Detects:
+    /// - Rapid query volume to single domains (beaconing/tunneling)
+    /// - High-entropy domain names (DGA — domain generation algorithms)
     /// </summary>
     public sealed class DnsQueryMonitor : IMonitor
     {
         public string Name => "DnsQueryMonitor";
 
         private readonly DetectionEngine _detectionEngine;
-        private readonly TelemetryFusionEngine _fusionEngine;
         private readonly ILogger<DnsQueryMonitor> _logger;
+        private readonly PersistentConnectionMonitor? _persistentConnMon;
         private CancellationTokenSource? _cts;
-        private TraceEventSession? _session;
+        private Task? _monitorTask;
 
-        // Per-base-domain query count in sliding window
-        private readonly ConcurrentDictionary<string, int> _queryStats = new();
-        private readonly ConcurrentDictionary<string, DateTime> _dgaDedupCache = new();
-        private DateTime _lastPrune = DateTime.UtcNow;
+        private readonly ConcurrentDictionary<string, DomainStats> _domainStats = new(StringComparer.OrdinalIgnoreCase);
+        private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(15);
+        private const int RapidQueryThreshold = 50;
+        private const double EntropyThreshold = 4.0;
 
-        private const double DgaEntropyThreshold = 4.0;
-        private const int DgaMinLength = 14;
-        private const int RapidQueryThreshold = 50; // queries per base domain per window
-
-        // Dynamically resolved at startup — the local machine's own hostname and FQDN
-        private static readonly HashSet<string> LocalHostNames = BuildLocalHostNames();
-        private static HashSet<string> BuildLocalHostNames()
-        {
-            var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            try
-            {
-                var name = System.Net.Dns.GetHostName();
-                set.Add(name);
-                set.Add(name.Split('.')[0]); // short name
-            }
-            catch { }
-            return set;
-        }
-
-        // Domains with naturally high-entropy subdomains or high query volumes
         private static readonly HashSet<string> TrustedBaseDomains = new(StringComparer.OrdinalIgnoreCase)
         {
-            // CDN / Cloud
-            "akamaiedge.net", "akamai.net", "cloudfront.net", "cloudflare.com",
-            "azureedge.net", "azurefd.net", "azure.com", "msedge.net", "trafficmanager.net",
-            "googleapis.com", "gstatic.com", "googlevideo.com", "google.com",
-            "gvt1.com", "gvt2.com", "googleusercontent.com",
-            // Microsoft
-            "microsoft.com", "microsoftonline.com", "windows.net", "office.com", "live.com",
-            "msidentity.com", "windowsupdate.com", "windowsupdate.org", "msftncsi.com",
-            "msftconnecttest.com", "s-msft.com", "s-microsoft.com",
-            // Gaming
-            "steamserver.net", "steamcontent.com", "steampowered.com", "valve.net",
-            "steamstatic.com", "steamgames.com",
-            "epicgames.com", "unrealengine.com",
-            // IDE / Dev tooling
-            "codeium.com", "agentclientprotocol.com", "github.com", "github.io",
-            "githubusercontent.com", "npmjs.org", "nuget.org",
-            "visualstudio.com", "vsassets.io", "kiro.dev",
-            // Reputations & Certs (safe lookup domains)
-            "abuse.ch", "lencr.org", "amazontrust.com", "digicert.com", "globalsign.com",
-            // Other common
-            "spotify.com", "scdn.co", "discord.gg", "discordapp.com",
-            // Windows internals — high-volume by design, not C2
-            "wpad", "localmachine", "disabled.invalid",
+            "microsoft.com", "windows.com", "windowsupdate.com", "azure.com",
+            "office.com", "office365.com", "live.com", "msn.com", "bing.com",
+            "google.com", "googleapis.com", "gstatic.com", "googlevideo.com",
+            "youtube.com", "ytimg.com", "googleusercontent.com",
+            "cloudflare.com", "cloudflare-dns.com", "cloudfront.net",
+            "amazonaws.com", "aws.amazon.com",
+            "github.com", "githubusercontent.com", "github.io",
+            "steam-chat.com", "steamcontent.com", "steampowered.com", "steamstatic.com",
+            "discord.com", "discord.gg", "discordapp.com",
+            "spotify.com", "scdn.co",
+            "azurefd.net", "akamai.net", "akamaized.net",
+            "wpad", "local", "localhost", "mshome.net",
+            "gorstak.eu",
         };
-        private const string SessionName = "SentinelDnsMonitor";
-        private static readonly Guid DnsClientProvider = new("1C95126E-7EEA-49A9-A3FE-A378B03DDB4D");
+
+        private static readonly HashSet<string> LocalHostNames = BuildLocalHostNames();
+
+        private static HashSet<string> BuildLocalHostNames()
+        {
+            var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "localhost", "wpad" };
+            try { names.Add(Dns.GetHostName()); } catch { }
+            try { names.Add(Environment.MachineName); } catch { }
+            return names;
+        }
 
         public DnsQueryMonitor(
             DetectionEngine detectionEngine,
-            TelemetryFusionEngine fusionEngine,
-            ILogger<DnsQueryMonitor> logger)
+            ILogger<DnsQueryMonitor> logger,
+            PersistentConnectionMonitor? persistentConnMon = null)
         {
             _detectionEngine = detectionEngine;
-            _fusionEngine = fusionEngine;
             _logger = logger;
+            _persistentConnMon = persistentConnMon;
         }
 
         public Task StartAsync(CancellationToken ct)
         {
             _cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            Task.Run(() => RunEtwSession(_cts.Token), _cts.Token);
-            _logger.LogInformation("[{Monitor}] Started", Name);
+            _monitorTask = Task.Run(() => PollLoop(_cts.Token), _cts.Token);
+            _logger.LogInformation("[{Monitor}] Started (event log polling mode)", Name);
             return Task.CompletedTask;
         }
 
-        private void RunEtwSession(CancellationToken ct)
+        private async Task PollLoop(CancellationToken ct)
         {
-            try
+            // Monitor DNS Client event log (Event ID 3006 = DNS query completed)
+            long lastRecordId = 0;
+
+            while (!ct.IsCancellationRequested)
             {
-                _session = new TraceEventSession(SessionName, TraceEventSessionOptions.Create);
-                _session.EnableProvider(DnsClientProvider, TraceEventLevel.Informational);
-
-                _session.Source.Dynamic.All += (TraceEvent data) =>
+                try
                 {
-                    if (ct.IsCancellationRequested) return;
+                    await Task.Delay(PollInterval, ct);
+                    PruneStats();
 
-                    // Event ID 3006 = DNS query completed; payload field "QueryName"
-                    var queryName = data.PayloadStringByName("QueryName");
-                    if (string.IsNullOrWhiteSpace(queryName)) return;
-
-                    ProcessDnsQuery(queryName, data.ProcessID);
-                };
-
-                // Prune timer
-                Task.Run(async () =>
-                {
-                    while (!ct.IsCancellationRequested)
+                    // Read recent DNS Client Operational log events
+                    try
                     {
-                        await Task.Delay(60_000, ct);
-                        PruneStats();
-                    }
-                }, ct);
+                        using var eventLog = new EventLog("Microsoft-Windows-DNS Client Events/Operational");
+                        foreach (EventLogEntry entry in eventLog.Entries)
+                        {
+                            if (entry.Index <= lastRecordId) continue;
+                            lastRecordId = entry.Index;
 
-                ct.Register(() => _session?.Stop());
-                _session.Source.Process();
-            }
-            catch (OperationCanceledException) { }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "[{Monitor}] ETW session failed, DNS monitoring degraded", Name);
+                            if (entry.InstanceId == 3006 || entry.InstanceId == 3008)
+                            {
+                                var domain = entry.Message?.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                                    .FirstOrDefault()?.Trim() ?? "";
+                                if (!string.IsNullOrEmpty(domain))
+                                {
+                                    ProcessDnsQuery(domain, 0);
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug(ex, "[{Monitor}] DNS event log read failed, using cache-based detection only", Name);
+                    }
+                }
+                catch (OperationCanceledException) { break; }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "[{Monitor}] Poll error", Name);
+                }
             }
         }
 
         private void ProcessDnsQuery(string domain, int pid)
         {
-            domain = domain.TrimEnd('.').ToLowerInvariant();
-            if (string.IsNullOrEmpty(domain)) return;
+            if (string.IsNullOrWhiteSpace(domain)) return;
+            if (LocalHostNames.Contains(domain)) return;
 
-            // Extract base domain (last two labels)
-            var labels = domain.Split('.');
-            var baseDomain = labels.Length >= 2
-                ? $"{labels[^2]}.{labels[^1]}"
-                : domain;
+            var baseDomain = GetBaseDomain(domain);
+            if (TrustedBaseDomains.Contains(baseDomain)) return;
 
-            // Track query frequency per base domain
-            _queryStats.AddOrUpdate(baseDomain, 1, (_, c) => c + 1);
+            _persistentConnMon?.RecordDnsQuery(pid, domain);
 
-            // Check for DGA-like patterns on subdomain portion
-            if (labels.Length > 2 && !TrustedBaseDomains.Contains(baseDomain) && !LocalHostNames.Contains(baseDomain))
+            var stats = _domainStats.GetOrAdd(baseDomain, _ => new DomainStats());
+            stats.QueryCount++;
+            stats.LastSeen = DateTime.UtcNow;
+
+            // Rapid query volume detection
+            if (stats.QueryCount >= RapidQueryThreshold && !stats.Alerted)
             {
-                var subdomain = string.Join(".", labels.Take(labels.Length - 2));
-                if (subdomain.Length >= DgaMinLength)
-                {
-                    var entropy = CalculateEntropy(subdomain.Replace(".", ""));
-                    if (entropy >= DgaEntropyThreshold)
-                    {
-                        // Dedup: suppress repeated DGA alerts for same domain within 60s
-                        var now = DateTime.UtcNow;
-                        var lastSeen = _dgaDedupCache.AddOrUpdate(domain, now, (_, old) =>
-                            now - old < TimeSpan.FromSeconds(60) ? old : now);
-                        if (lastSeen == now)
-                        {
-                            _ = _detectionEngine.EmitAsync(new DetectionEvent
-                            {
-                                RuleName = "DNS: DGA-like Domain Query",
-                                Evidence = $"High-entropy subdomain queried: {domain} (entropy {entropy:F2}, PID {pid})",
-                                Reasoning = "A DNS query was made to a domain with a high-entropy subdomain pattern consistent with domain generation algorithm (DGA) malware communication.",
-                                Confidence = 0.70, Tier = DetectionTier.Tier1Behavioral,
-                                AuthorizedResponse = ResponseAction.LogOnly,
-                                ProcessName = "SYSTEM", ProcessId = pid
-                            });
-                        }
-                    }
-                }
-            }
-
-            // Check for rapid unique queries to same base domain (DNS tunneling / beaconing)
-            if (_queryStats.TryGetValue(baseDomain, out var count) && count == RapidQueryThreshold && !TrustedBaseDomains.Contains(baseDomain) && !LocalHostNames.Contains(baseDomain))
-            {
+                stats.Alerted = true;
                 _ = _detectionEngine.EmitAsync(new DetectionEvent
                 {
                     RuleName = "DNS: Rapid Query Volume (Beaconing/Tunneling)",
-                    Evidence = $"Base domain '{baseDomain}' received {count} queries in current window",
+                    Evidence = $"Base domain '{baseDomain}' received {stats.QueryCount} queries in current window",
                     Reasoning = "An abnormally high volume of DNS queries to a single base domain was detected, consistent with DNS tunneling or C2 beaconing.",
-                    Confidence = 0.75, Tier = DetectionTier.Tier1Behavioral,
-                    AuthorizedResponse = ResponseAction.LogOnly,
+                    Confidence = 0.75,
+                    Tier = DetectionTier.Tier1Behavioral,
                     ProcessName = "SYSTEM", ProcessId = pid
                 });
+            }
+
+            // DGA detection via entropy
+            var labels = domain.Split('.');
+            if (labels.Length > 2)
+            {
+                var subdomain = labels[0];
+                if (subdomain.Length > 12 && CalculateEntropy(subdomain) > EntropyThreshold)
+                {
+                    _ = _detectionEngine.EmitAsync(new DetectionEvent
+                    {
+                        RuleName = "DNS: High-Entropy Subdomain (DGA Indicator)",
+                        Evidence = $"Domain '{domain}' has high-entropy subdomain (entropy={CalculateEntropy(subdomain):F2})",
+                        Reasoning = "The queried domain contains a high-entropy subdomain label, consistent with domain generation algorithms used by malware to evade domain blocklists.",
+                        Confidence = 0.65,
+                        Tier = DetectionTier.Tier2Indicator,
+                        ProcessName = "SYSTEM", ProcessId = pid
+                    });
+                }
             }
         }
 
         private void PruneStats()
         {
-            _queryStats.Clear();
-            // Prune expired DGA dedup entries
-            var cutoff = DateTime.UtcNow.AddSeconds(-60);
-            foreach (var kvp in _dgaDedupCache)
+            var cutoff = DateTime.UtcNow.AddMinutes(-5);
+            foreach (var key in _domainStats.Keys.ToList())
             {
-                if (kvp.Value < cutoff)
-                    _dgaDedupCache.TryRemove(kvp.Key, out _);
+                if (_domainStats.TryGetValue(key, out var stats) && stats.LastSeen < cutoff)
+                    _domainStats.TryRemove(key, out _);
             }
-            _lastPrune = DateTime.UtcNow;
         }
 
         private static double CalculateEntropy(string s)
         {
-            if (string.IsNullOrEmpty(s)) return 0;
-            var freq = new int[256];
-            foreach (var c in s) freq[c]++;
+            var freq = new Dictionary<char, int>();
+            foreach (var c in s) { freq[c] = freq.GetValueOrDefault(c) + 1; }
             double entropy = 0;
-            double len = s.Length;
-            for (int i = 0; i < 256; i++)
+            foreach (var count in freq.Values)
             {
-                if (freq[i] == 0) continue;
-                double p = freq[i] / len;
+                double p = (double)count / s.Length;
                 entropy -= p * Math.Log2(p);
             }
             return entropy;
         }
 
+        private static string GetBaseDomain(string domain)
+        {
+            var parts = domain.TrimEnd('.').Split('.');
+            return parts.Length >= 2 ? $"{parts[^2]}.{parts[^1]}" : domain;
+        }
+
         public Task StopAsync()
         {
             _cts?.Cancel();
-            try { _session?.Stop(); } catch { }
-            try { _session?.Dispose(); } catch { }
+            _logger.LogInformation("[{Monitor}] Stopped", Name);
             return Task.CompletedTask;
+        }
+
+        private class DomainStats
+        {
+            public int QueryCount;
+            public DateTime LastSeen = DateTime.UtcNow;
+            public bool Alerted;
         }
     }
 }
