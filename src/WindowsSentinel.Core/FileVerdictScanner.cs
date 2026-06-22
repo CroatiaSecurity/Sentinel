@@ -17,12 +17,21 @@ namespace WindowsSentinel.Core
         private readonly ILogger<FileVerdictScanner> _logger;
         private readonly List<FileSystemWatcher> _watchers = new();
 
-        // Directories to exclude from real-time scanning (temp downloads, NTLite work dirs, etc.)
+        // All scannable extensions — matches Antivirus.ps1 coverage
+        private static readonly HashSet<string> ScanExtensions = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ".exe", ".dll", ".sys", ".scr", ".bat", ".cmd", ".ps1", ".vbs", ".js", ".hta", ".msi"
+        };
+
+        // Directories to exclude from scanning (temp, build artifacts, browser updates)
         private static readonly HashSet<string> ExcludedPaths = new(StringComparer.OrdinalIgnoreCase)
         {
             "temp", "tmp", "downloads", "uupdump", "ntlite", "mount", "extracted",
             "cache", "localcache", "opera autoupdate", "google\\update", "edge\\update"
         };
+
+        // Throttle: max concurrent API lookups to avoid hammering CIRCL/MalwareBazaar
+        private readonly SemaphoreSlim _apiThrottle = new(4, 4);
 
         public FileVerdictScanner(
             HashReputationService reputationService,
@@ -36,21 +45,23 @@ namespace WindowsSentinel.Core
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            _logger.LogInformation("[FileVerdictScanner] Starting consensus pre-scan and file watchers...");
+            _logger.LogInformation("[FileVerdictScanner] Starting lazy verdict scan and file watchers...");
 
-            // Start drive watchers
+            // Start drive watchers for all scannable file types — PRIORITY: new files scanned immediately
             var drives = DriveInfo.GetDrives().Where(d => d.DriveType == DriveType.Fixed && d.IsReady);
             foreach (var drive in drives)
             {
                 try
                 {
+                    // FileSystemWatcher doesn't support multiple filters natively,
+                    // so we watch all files and filter in the event handler
                     var watcher = new FileSystemWatcher(drive.RootDirectory.FullName)
                     {
                         IncludeSubdirectories = true,
-                        Filter = "*.exe",
+                        Filter = "*.*",
                         NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite
                     };
-                    watcher.Created += OnFileChanged;
+                    watcher.Created += OnFileCreated;
                     watcher.Renamed += OnFileRenamed;
                     watcher.EnableRaisingEvents = true;
                     _watchers.Add(watcher);
@@ -61,52 +72,55 @@ namespace WindowsSentinel.Core
                 }
             }
 
-            // Start pre-scanning existing executables in background
+            // Lazy background walk — scans every file on every NTFS volume, skipping those already marked
             _ = Task.Run(async () => await WalkDrivesAsync(stoppingToken), stoppingToken);
         }
 
-        private void OnFileChanged(object sender, FileSystemEventArgs e)
+        private static bool IsScannable(string filePath)
         {
-            _ = Task.Run(async () => await ScanFileWithBackoffAsync(e.FullPath));
+            var ext = Path.GetExtension(filePath);
+            return !string.IsNullOrEmpty(ext) && ScanExtensions.Contains(ext);
+        }
+
+        private void OnFileCreated(object sender, FileSystemEventArgs e)
+        {
+            if (IsScannable(e.FullPath))
+                _ = Task.Run(async () => await ScanNewFileAsync(e.FullPath));
         }
 
         private void OnFileRenamed(object sender, RenamedEventArgs e)
         {
-            _ = Task.Run(async () => await ScanFileWithBackoffAsync(e.FullPath));
+            if (IsScannable(e.FullPath))
+                _ = Task.Run(async () => await ScanNewFileAsync(e.FullPath));
         }
 
-        private async Task ScanFileWithBackoffAsync(string filePath)
+        /// <summary>
+        /// Fast-path for new/renamed files. Minimal delay, no lazy throttle.
+        /// Goal: tag known-malicious files BEFORE they can execute for the first time.
+        /// </summary>
+        private async Task ScanNewFileAsync(string filePath)
         {
-            if (string.IsNullOrEmpty(filePath) || !filePath.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) return;
+            if (string.IsNullOrEmpty(filePath) || !IsScannable(filePath)) return;
 
-            // Skip excluded paths (temp dirs, download dirs, NTLite work dirs, etc.)
             var pathLower = filePath.ToLowerInvariant();
-            if (ExcludedPaths.Any(excluded => pathLower.Contains(excluded)))
-            {
-                _logger.LogDebug("Skipping scan for file in excluded path: {FilePath}", filePath);
-                return;
-            }
+            if (ExcludedPaths.Any(excluded => pathLower.Contains(excluded))) return;
 
-            // Wait for file to stabilize - don't scan files that are actively being written
-            // This prevents "file in use" errors during downloads/UUP extraction/NTLite operations
-            await Task.Delay(2000);
+            // Brief stabilization wait — just enough for the write to finish
+            await Task.Delay(500);
 
-            int retries = 5;
+            int retries = 3;
             while (retries > 0)
             {
                 try
                 {
                     if (!File.Exists(filePath)) return;
 
-                    // Check if file has been stable (not modified) for at least 1 second
-                    // If it's still being written to, skip this scan attempt
                     var lastWrite = File.GetLastWriteTimeUtc(filePath);
-                    if (DateTime.UtcNow - lastWrite < TimeSpan.FromSeconds(1))
+                    if (DateTime.UtcNow - lastWrite < TimeSpan.FromMilliseconds(300))
                     {
                         throw new IOException("File is still being modified");
                     }
 
-                    // Try to open file with read sharing to ensure it is not locked for writing
                     using (var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
                     {
                         await ScanFileInternalAsync(filePath);
@@ -116,7 +130,55 @@ namespace WindowsSentinel.Core
                 catch (IOException)
                 {
                     retries--;
-                    // Longer backoff: 2 seconds between retries (total max wait: ~12 seconds)
+                    await Task.Delay(800);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Fast scan failed for new file: {FilePath}", filePath);
+                    return;
+                }
+            }
+
+            // If fast path failed, fall back to lazy scan with longer backoff
+            await ScanFileWithBackoffAsync(filePath);
+        }
+
+        private async Task ScanFileWithBackoffAsync(string filePath)
+        {
+            if (string.IsNullOrEmpty(filePath) || !IsScannable(filePath)) return;
+
+            // Skip excluded paths
+            var pathLower = filePath.ToLowerInvariant();
+            if (ExcludedPaths.Any(excluded => pathLower.Contains(excluded)))
+            {
+                return;
+            }
+
+            // Wait for file to stabilize
+            await Task.Delay(2000);
+
+            int retries = 5;
+            while (retries > 0)
+            {
+                try
+                {
+                    if (!File.Exists(filePath)) return;
+
+                    var lastWrite = File.GetLastWriteTimeUtc(filePath);
+                    if (DateTime.UtcNow - lastWrite < TimeSpan.FromSeconds(1))
+                    {
+                        throw new IOException("File is still being modified");
+                    }
+
+                    using (var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                    {
+                        await ScanFileInternalAsync(filePath);
+                        return;
+                    }
+                }
+                catch (IOException)
+                {
+                    retries--;
                     await Task.Delay(2000);
                 }
                 catch (Exception ex)
@@ -126,7 +188,6 @@ namespace WindowsSentinel.Core
                 }
             }
 
-            // If all retries failed, log it but don't interfere with the file operation
             _logger.LogDebug("File scan abandoned after retries (file likely in use): {FilePath}", filePath);
         }
 
@@ -142,11 +203,30 @@ namespace WindowsSentinel.Core
                     hash = Convert.ToHexString(hashBytes).ToLowerInvariant();
                 }
 
+                // Lazy: skip if already marked (ADS verdict exists and hash matches)
                 var existingVerdict = _verdictAds.GetVerdict(filePath, hash);
                 if (existingVerdict != HashVerdict.Unknown) return;
 
-                var verdict = await _reputationService.GetVerdictAsync(hash);
+                // Throttle API calls to avoid rate-limiting
+                await _apiThrottle.WaitAsync();
+                HashVerdict verdict;
+                try
+                {
+                    verdict = await _reputationService.GetVerdictAsync(hash);
+                }
+                finally
+                {
+                    _apiThrottle.Release();
+                }
+
                 _verdictAds.SetVerdict(filePath, hash, verdict);
+
+                // If known-malicious, deny execute permission immediately so it can't run
+                if (verdict == HashVerdict.Unsafe)
+                {
+                    DenyExecution(filePath);
+                    _logger.LogWarning("[FileVerdictScanner] Blocked known-malicious file: {FilePath} (SHA256: {Hash})", filePath, hash);
+                }
             }
             catch (Exception ex)
             {
@@ -154,12 +234,39 @@ namespace WindowsSentinel.Core
             }
         }
 
+        /// <summary>
+        /// Adds a Deny Execute ACL for Everyone on a malicious file, preventing execution.
+        /// </summary>
+        private void DenyExecution(string filePath)
+        {
+            try
+            {
+                var fileInfo = new FileInfo(filePath);
+                var acl = fileInfo.GetAccessControl();
+                var rule = new System.Security.AccessControl.FileSystemAccessRule(
+                    new System.Security.Principal.SecurityIdentifier(
+                        System.Security.Principal.WellKnownSidType.WorldSid, null),
+                    System.Security.AccessControl.FileSystemRights.ExecuteFile,
+                    System.Security.AccessControl.AccessControlType.Deny);
+                acl.AddAccessRule(rule);
+                fileInfo.SetAccessControl(acl);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to deny execution on file: {FilePath}", filePath);
+            }
+        }
+
         private async Task WalkDrivesAsync(CancellationToken ct)
         {
+            // Wait a bit after startup to let higher-priority monitors initialize
+            await Task.Delay(TimeSpan.FromSeconds(30), ct);
+
             var drives = DriveInfo.GetDrives().Where(d => d.DriveType == DriveType.Fixed && d.IsReady);
             foreach (var drive in drives)
             {
                 if (ct.IsCancellationRequested) break;
+                _logger.LogInformation("[FileVerdictScanner] Starting lazy walk of {Drive}", drive.Name);
                 try
                 {
                     await TraverseDirectoryAsync(drive.RootDirectory.FullName, ct);
@@ -169,6 +276,7 @@ namespace WindowsSentinel.Core
                     _logger.LogDebug(ex, "Error initiating drive walk for {Drive}", drive.Name);
                 }
             }
+            _logger.LogInformation("[FileVerdictScanner] Lazy walk complete on all volumes.");
         }
 
         private async Task TraverseDirectoryAsync(string rootDir, CancellationToken ct)
@@ -181,15 +289,21 @@ namespace WindowsSentinel.Core
                 if (ct.IsCancellationRequested) break;
                 var currentDir = queue.Dequeue();
 
+                // Skip excluded directories
+                var dirLower = currentDir.ToLowerInvariant();
+                if (ExcludedPaths.Any(excluded => dirLower.Contains(excluded))) continue;
+
                 try
                 {
-                    foreach (var file in Directory.EnumerateFiles(currentDir, "*.exe"))
+                    foreach (var file in Directory.EnumerateFiles(currentDir))
                     {
                         if (ct.IsCancellationRequested) break;
+                        if (!IsScannable(file)) continue;
+
                         await ScanFileWithBackoffAsync(file);
 
-                        // Throttle execution slightly to prevent CPU starvation
-                        await Task.Delay(5, ct);
+                        // Lazy throttle: yield between files to keep system responsive
+                        await Task.Delay(50, ct);
                     }
 
                     foreach (var subDir in Directory.EnumerateDirectories(currentDir))
@@ -212,9 +326,10 @@ namespace WindowsSentinel.Core
 
         public override void Dispose()
         {
+            _apiThrottle.Dispose();
             foreach (var watcher in _watchers)
             {
-                watcher.Created -= OnFileChanged;
+                watcher.Created -= OnFileCreated;
                 watcher.Renamed -= OnFileRenamed;
                 watcher.Dispose();
             }
