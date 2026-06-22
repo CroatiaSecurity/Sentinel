@@ -51,6 +51,8 @@ namespace WindowsSentinel.Core
             "azurefd.net", "akamai.net", "akamaized.net",
             "wpad", "local", "localhost", "mshome.net",
             "gorstak.eu",
+            "circl.lu", "hashlookup.circl.lu", // CIRCL hash reputation API used by FileVerdictScanner
+            "abuse.ch", "mb-api.abuse.ch", // MalwareBazaar API used by HashReputationService
         };
 
         private static readonly HashSet<string> LocalHostNames = BuildLocalHostNames();
