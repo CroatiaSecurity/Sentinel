@@ -128,7 +128,7 @@ namespace WindowsSentinel.Core
 
                 if (sideloadedFiles.Count == 0) return result;
 
-                // Step 1: Attempt in-memory DLL unload via QueueUserAPC + FreeLibrary
+                // Step 1: Attempt in-memory DLL unload via FreeLibrary
                 // This removes the malicious code from the process's address space
                 // without killing the host process (if possible)
                 bool allUnloaded = true;
@@ -138,7 +138,7 @@ namespace WindowsSentinel.Core
                     {
                         if (sideloadedFiles.Contains(mod.FileName))
                         {
-                            bool unloaded = TryUnloadDllViaApc(proc, mod.BaseAddress);
+                            bool unloaded = TryUnloadDll(processId, mod.BaseAddress);
                             if (!unloaded) allUnloaded = false;
                         }
                     }
@@ -247,10 +247,7 @@ namespace WindowsSentinel.Core
 
                 if (suspiciousDlls.Count == 0) return result;
 
-                // Unload injected DLLs using QueueUserAPC + FreeLibrary.
-                // QueueUserAPC is the legitimate Windows mechanism for scheduling work on a thread
-                // and does NOT trigger AV heuristics (unlike CreateRemoteThread which is flagged
-                // as the DLL injection pattern by every AV engine).
+                // Step 1: Attempt in-memory unload via FreeLibrary
                 bool allUnloaded = true;
                 foreach (ProcessModule mod in proc.Modules)
                 {
@@ -258,24 +255,21 @@ namespace WindowsSentinel.Core
                     {
                         if (suspiciousDlls.Contains(mod.FileName))
                         {
-                            bool unloaded = TryUnloadDllViaApc(proc, mod.BaseAddress);
+                            bool unloaded = TryUnloadDll(targetPid, mod.BaseAddress);
                             if (!unloaded) allUnloaded = false;
                         }
                     }
                     catch { allUnloaded = false; }
                 }
 
-                // If APC unload failed, kill the process as fallback
+                // Step 2: If unload failed, kill the process
                 if (!allUnloaded)
                 {
                     try { proc.Kill(entireProcessTree: true); }
                     catch { }
                 }
 
-                // Small delay to let the process release file handles
-                await Task.Delay(300);
-
-                // Quarantine each suspicious DLL from disk
+                // Step 3: Quarantine each suspicious DLL from disk
                 foreach (var dllPath in suspiciousDlls)
                 {
                     await RemediateDroppedDll(dllPath, result.ProcessName, targetPid);
@@ -289,55 +283,28 @@ namespace WindowsSentinel.Core
         }
 
         /// <summary>
-        /// Unloads a DLL from a target process using QueueUserAPC + FreeLibrary.
-        /// Unlike CreateRemoteThread (which is the textbook DLL injection pattern and
-        /// triggers every AV heuristic), QueueUserAPC is a legitimate thread scheduling
-        /// mechanism that doesn't appear in injection signature databases.
-        /// 
-        /// The APC is queued to an alertable thread in the target process.
-        /// When the thread enters an alertable wait (SleepEx, WaitForSingleObjectEx, etc.),
-        /// it executes FreeLibrary(moduleBase) and the DLL is unloaded.
+        /// Unloads a DLL from a target process using CreateRemoteThread + FreeLibrary.
+        /// This is the same technique as DLL injection but in reverse — removes instead of adds.
         /// </summary>
-        private static bool TryUnloadDllViaApc(Process targetProcess, IntPtr moduleBaseAddress)
+        private static bool TryUnloadDll(int processId, IntPtr moduleBaseAddress)
         {
             IntPtr hProcess = IntPtr.Zero;
             try
             {
-                hProcess = OpenProcess(PROCESS_ALL_ACCESS, false, targetProcess.Id);
+                hProcess = OpenProcess(0x1F0FFF, false, processId); // PROCESS_ALL_ACCESS
                 if (hProcess == IntPtr.Zero) return false;
 
-                // Resolve FreeLibrary address (same across all processes due to ASLR base sharing for system DLLs)
-                var kernel32 = GetModuleHandle("kernel32.dll");
+                var kernel32 = GetModuleHandleA("kernel32.dll");
                 if (kernel32 == IntPtr.Zero) return false;
                 var freeLibAddr = GetProcAddress(kernel32, "FreeLibrary");
                 if (freeLibAddr == IntPtr.Zero) return false;
 
-                // Queue APC to all threads — at least one should be alertable
-                bool queued = false;
-                foreach (ProcessThread thread in targetProcess.Threads)
-                {
-                    IntPtr hThread = IntPtr.Zero;
-                    try
-                    {
-                        hThread = OpenThread(THREAD_SET_CONTEXT, false, (uint)thread.Id);
-                        if (hThread == IntPtr.Zero) continue;
+                var thread = CreateRemoteThread(hProcess, IntPtr.Zero, 0, freeLibAddr,
+                    moduleBaseAddress, 0, out _);
+                if (thread == IntPtr.Zero) return false;
 
-                        uint result = QueueUserAPC(freeLibAddr, hThread, moduleBaseAddress);
-                        if (result != 0) queued = true;
-                    }
-                    catch { }
-                    finally
-                    {
-                        if (hThread != IntPtr.Zero) CloseHandle(hThread);
-                    }
-
-                    if (queued) break; // One successful queue is enough
-                }
-
-                if (!queued) return false;
-
-                // Give the target thread time to enter alertable state and execute the APC
-                Thread.Sleep(2000);
+                WaitForSingleObject(thread, 5000);
+                CloseHandle(thread);
                 return true;
             }
             catch { return false; }
@@ -347,23 +314,21 @@ namespace WindowsSentinel.Core
             }
         }
 
-        private const uint PROCESS_ALL_ACCESS = 0x1F0FFF;
-        private const uint THREAD_SET_CONTEXT = 0x0010;
-
         [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
         private static extern IntPtr OpenProcess(uint dwDesiredAccess, bool bInheritHandle, int dwProcessId);
 
-        [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
-        private static extern IntPtr OpenThread(uint dwDesiredAccess, bool bInheritHandle, uint dwThreadId);
+        [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true, CharSet = System.Runtime.InteropServices.CharSet.Ansi)]
+        private static extern IntPtr GetModuleHandleA(string lpModuleName);
 
-        [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
-        private static extern uint QueueUserAPC(IntPtr pfnAPC, IntPtr hThread, IntPtr dwData);
-
-        [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Auto, SetLastError = true)]
-        private static extern IntPtr GetModuleHandle(string lpModuleName);
-
-        [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Ansi, SetLastError = true)]
+        [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true, CharSet = System.Runtime.InteropServices.CharSet.Ansi)]
         private static extern IntPtr GetProcAddress(IntPtr hModule, string lpProcName);
+
+        [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+        private static extern IntPtr CreateRemoteThread(IntPtr hProcess, IntPtr lpThreadAttributes,
+            uint dwStackSize, IntPtr lpStartAddress, IntPtr lpParameter, uint dwCreationFlags, out uint lpThreadId);
+
+        [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+        private static extern uint WaitForSingleObject(IntPtr hHandle, uint dwMilliseconds);
 
         [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
         private static extern bool CloseHandle(IntPtr hObject);
