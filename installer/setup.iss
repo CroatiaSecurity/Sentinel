@@ -1,6 +1,6 @@
 [Setup]
 AppName=Windows Sentinel
-AppVersion=0.9.7
+AppVersion=0.9.8
 AppPublisher=Gorstak
 AppPublisherURL=https://gorstak.eu
 SourceDir=.
@@ -11,7 +11,7 @@ UninstallDisplayIcon={app}\Sentinel.ico
 Compression=lzma2
 SolidCompression=yes
 OutputDir=.
-OutputBaseFilename=WindowsSentinelSetup-0.9.7
+OutputBaseFilename=WindowsSentinelSetup-0.9.8
 PrivilegesRequired=admin
 ; Allow upgrading over existing install
 UsePreviousAppDir=yes
@@ -61,7 +61,7 @@ procedure StopExistingService();
 var
   ResultCode: Integer;
 begin
-  // Stop the service before upgrading � handles antitamper ACL-locked files
+  // Stop the service before upgrading — handles antitamper ACL-locked files
   Exec(ExpandConstant('{sys}\sc.exe'), 'stop "Windows Sentinel"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   // Wait for service to stop
   Sleep(2000);
@@ -73,6 +73,23 @@ begin
   Exec(ExpandConstant('{sys}\icacls.exe'),
     ExpandConstant('"{app}" /reset /T /C /Q'),
     '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  // Also reset ACLs on legacy Program Files (x86) path if it exists
+  if DirExists(ExpandConstant('{commonpf32}\WindowsSentinel')) then
+  begin
+    Exec(ExpandConstant('{sys}\icacls.exe'),
+      ExpandConstant('"{commonpf32}\WindowsSentinel" /reset /T /C /Q'),
+      '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  end;
+  // Take ownership first if icacls reset fails (SYSTEM-owned files)
+  Exec(ExpandConstant('{sys}\takeown.exe'),
+    ExpandConstant('/F "{app}" /R /A /D Y'),
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{sys}\icacls.exe'),
+    ExpandConstant('"{app}" /grant Administrators:F /T /C /Q'),
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{sys}\icacls.exe'),
+    ExpandConstant('"{app}" /grant SYSTEM:F /T /C /Q'),
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
@@ -81,7 +98,8 @@ begin
   // If upgrading (service exists, run key exists, or folder exists), stop existing service and reset ACLs
   if RegValueExists(HKLM, 'SOFTWARE\Microsoft\Windows\CurrentVersion\Run', 'WindowsSentinelAgent') or
      RegKeyExists(HKLM, 'SYSTEM\CurrentControlSet\Services\Windows Sentinel') or
-     DirExists(ExpandConstant('{app}')) then
+     DirExists(ExpandConstant('{app}')) or
+     DirExists(ExpandConstant('{commonpf32}\WindowsSentinel')) then
   begin
     StopExistingService();
   end;

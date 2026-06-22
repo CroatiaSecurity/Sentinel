@@ -44,6 +44,9 @@ namespace WindowsSentinel.Core
             "steamwebhelper.exe", "cefsharp.browsersubprocess.exe",
             // Games with JIT/scripting engines
             "fm.exe", "Football Manager 2024.exe", "Football Manager 2025.exe",
+            // System processes that dynamically load service DLLs / modules on demand
+            "svchost.exe", "Taskmgr.exe", "mmc.exe", "explorer.exe",
+            "SearchHost.exe", "RuntimeBroker.exe", "dllhost.exe",
         };
 
         // Module count growth threshold: injection adds 1-2 DLLs at a time

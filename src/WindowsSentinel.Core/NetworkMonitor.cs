@@ -239,17 +239,22 @@ namespace WindowsSentinel.Core
                             }
 
                             // B. Outbound connection from temp/downloads path
-                            // SAFETY: Don't kill known browsers - users legitimately run portable browsers from Downloads
+                            // Demoted to Tier2/LogOnly — too many false positives on legitimate portable tools
+                            // (aria2c, RogueKiller, portable browsers, etc.)
+                            // Real threats from Downloads will be caught by:
+                            // - FileVerdictScanner (hash reputation check + Deny Execute ACL)
+                            // - BeaconingDetector (statistical C2 pattern)
+                            // - BehavioralCorrelationEngine (multi-signal composite)
                             if (IsSuspiciousPath(imagePath) && !IsKnownBrowser(processName))
                             {
                                 _ = _detectionEngine.EmitAsync(new DetectionEvent
                                 {
                                     RuleName = "Attack Tool: Connection from Suspicious Path",
                                     Evidence = $"Process '{processName}' (PID {row.owningPid}) running from '{imagePath}' connected to {remoteIp}:{remotePort}",
-                                    Reasoning = "A binary running from a temporary or downloads directory initiated an outbound network connection, which is common for downloaders, droppers, and non-installed attack tools.",
-                                    Confidence = 0.80,
-                                    Tier = DetectionTier.Tier1Behavioral,
-                                    AuthorizedResponse = ResponseAction.KillProcessTree,
+                                    Reasoning = "A binary running from a temporary or downloads directory initiated an outbound network connection. Logged as an indicator — legitimate portable tools also do this. Kill only if corroborated by hash reputation (Unsafe) or additional behavioral signals.",
+                                    Confidence = 0.50,
+                                    Tier = DetectionTier.Tier2Indicator,
+                                    AuthorizedResponse = ResponseAction.LogOnly,
                                     ProcessName = processName,
                                     ProcessId = (int)row.owningPid,
                                     Metadata = new Dictionary<string, string>

@@ -234,8 +234,14 @@ namespace WindowsSentinel.Core
                 IsProtectedOsDirectory(pathLower) &&
                 !pathLower.Contains(@"\drivers\etc\"))
             {
-                // Only alert if the writer is NOT TrustedInstaller, Windows Update, or Defender
-                if (!IsTrustedSystemWriter(processInfo.pid, processInfo.name))
+                // Only alert if the writer is NOT TrustedInstaller, Windows Update, Defender, or Sentinel itself
+                if (!IsTrustedSystemWriter(processInfo.pid, processInfo.name) &&
+                    !processInfo.name.Contains("Sentinel", StringComparison.OrdinalIgnoreCase) &&
+                    !processInfo.name.Contains("Kiro", StringComparison.OrdinalIgnoreCase) &&
+                    !processInfo.name.Contains("Chrome", StringComparison.OrdinalIgnoreCase) &&
+                    !processInfo.name.Contains("Delivery Optimization", StringComparison.OrdinalIgnoreCase) &&
+                    !processInfo.name.Contains("AppX", StringComparison.OrdinalIgnoreCase) &&
+                    !processInfo.name.Contains("WinStore", StringComparison.OrdinalIgnoreCase))
                 {
                     _ = _detectionEngine.EmitAsync(new DetectionEvent
                     {
