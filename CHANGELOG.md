@@ -2,6 +2,38 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [0.9.5] - 2026-06-22
+
+### Added — Lazy File Verdict Tagging (CIRCL + MalwareBazaar, All NTFS Volumes)
+
+Full-volume file reputation system that lazily tags every scannable file on every NTFS volume as trusted or malicious using NTFS Alternate Data Streams.
+
+**Hash Reputation — CIRCL Goodware Fast-Path:**
+- Added CIRCL Hashlookup (`hashlookup.circl.lu`) as a first-pass "known-good" check in `HashReputationService`
+- Files with trust score > 60 are immediately marked `Safe` without hitting MalwareBazaar
+- Reduces API load and latency for the vast majority of legitimate binaries
+- Falls through to MalwareBazaar if CIRCL returns 404 (unknown file)
+
+**File Verdict Scanner — Expanded Coverage:**
+- Extended from `.exe` only to all executable types: `.exe`, `.dll`, `.sys`, `.scr`, `.bat`, `.cmd`, `.ps1`, `.vbs`, `.js`, `.hta`, `.msi`
+- Background lazy walk of all fixed drives with 50ms inter-file throttle — system stays responsive
+- Walk starts 30s after boot to avoid competing with higher-priority monitors
+- `SemaphoreSlim(4)` throttles concurrent API lookups to avoid rate-limiting
+- Excluded paths respected (temp, downloads, NTLite work dirs, browser update dirs)
+
+**New Files — Scanned Immediately (Pre-Execution Block):**
+- Real-time FileSystemWatcher triggers on Created/Renamed events
+- New files scanned with only 500ms stabilization delay (vs 50ms lazy walk delay for existing files)
+- 3 retries × 800ms backoff — falls back to lazy path if file is locked
+- **If hash is known-malicious: Deny Execute ACL set immediately** — malware can't execute even once
+- ACL rule: `Everyone` → `Deny ExecuteFile` — unforgeable without admin access to remove
+
+**Design:**
+- Lazy for existing files (gradual background tagging over hours/days)
+- Aggressive for new files (tagged and blocked within ~2 seconds of creation)
+- Files already tagged (valid ADS verdict + matching hash) are skipped entirely
+- Over time, every scannable file on every volume carries an HMAC-signed trust verdict
+
 ## [0.9.4] - 2026-06-21
 
 ### Added — Composite Detections Restored (10 correlations, up from 3)

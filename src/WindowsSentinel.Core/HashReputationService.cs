@@ -75,11 +75,40 @@ namespace WindowsSentinel.Core
                 return HashVerdict.Unsafe;
             }
 
+            // Tier 1: CIRCL Hashlookup — fast-path for known-good files
             try
             {
-                // Query MalwareBazaar API for known-malicious hash match
+                using var circlClient = new System.Net.Http.HttpClient();
+                circlClient.Timeout = TimeSpan.FromSeconds(4);
+                circlClient.DefaultRequestHeaders.Accept.Add(
+                    new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
+
+                var circlResponse = await circlClient.GetAsync(
+                    $"https://hashlookup.circl.lu/lookup/sha256/{sha256}", cancellationToken);
+
+                if (circlResponse.IsSuccessStatusCode)
+                {
+                    var circlJson = await circlResponse.Content.ReadAsStringAsync(cancellationToken);
+                    // Parse "hashlookup:trust" field — values above 60 indicate known-good software
+                    var trustMatch = System.Text.RegularExpressions.Regex.Match(
+                        circlJson, @"""hashlookup:trust""\s*:\s*(\d+)");
+                    if (trustMatch.Success && int.TryParse(trustMatch.Groups[1].Value, out int trustScore) && trustScore > 60)
+                    {
+                        return HashVerdict.Safe;
+                    }
+                }
+                // 404 = not in CIRCL database, fall through to MalwareBazaar
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "CIRCL hashlookup failed for hash {Hash}, falling through to MalwareBazaar", sha256);
+            }
+
+            // Tier 2: MalwareBazaar — known-malicious check
+            try
+            {
                 using var client = new System.Net.Http.HttpClient();
-                client.Timeout = TimeSpan.FromSeconds(3); // Keep it fast, 3s budget
+                client.Timeout = TimeSpan.FromSeconds(3);
 
                 if (!string.IsNullOrWhiteSpace(_config.MalwareBazaarApiKey))
                 {
@@ -98,7 +127,6 @@ namespace WindowsSentinel.Core
                 if (response.IsSuccessStatusCode)
                 {
                     var responseString = await response.Content.ReadAsStringAsync(cancellationToken);
-                    // Basic JSON parsing to locate query_status without complex external dependency
                     if (responseString.Contains("\"query_status\": \"ok\"") || responseString.Contains("\"query_status\":\"ok\""))
                     {
                         return HashVerdict.Unsafe;
@@ -111,7 +139,6 @@ namespace WindowsSentinel.Core
             }
             catch (Exception ex)
             {
-                // Degrade gracefully on network / timeout errors, but log at debug level per constraints
                 _logger.LogDebug(ex, "Failed to fetch reputation from MalwareBazaar API for hash {Hash}", sha256);
             }
 
