@@ -23,9 +23,19 @@ namespace WindowsSentinel.Core
                 _quarantineDir = Path.Combine(programData, "WindowsSentinel", "Quarantine");
             }
 
-            if (!Directory.Exists(_quarantineDir))
+            // Only create the directory if we have access (Service runs as SYSTEM, Agent as user).
+            // The Agent doesn't write to quarantine — the Service handles all quarantine operations.
+            try
             {
-                Directory.CreateDirectory(_quarantineDir);
+                if (!Directory.Exists(_quarantineDir))
+                {
+                    Directory.CreateDirectory(_quarantineDir);
+                }
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // Running as user-session Agent — quarantine dir is owned by SYSTEM.
+                // This is expected; the Agent only reads quarantine metadata for display.
             }
         }
 

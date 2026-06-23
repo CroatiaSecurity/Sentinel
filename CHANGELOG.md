@@ -2,6 +2,22 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [0.9.9] - 2026-06-23
+
+### Fixed — Agent Crash on Non-Debloated Windows (QuarantineManager ACL)
+
+**Root cause:** The Agent (running as the logged-in user) crashed immediately on startup with `System.UnauthorizedAccessException: Access to the path 'C:\ProgramData\WindowsSentinel\Quarantine' is denied`.
+
+**Chain of events:**
+1. The Service (SYSTEM) creates `C:\ProgramData\WindowsSentinel\` and locks it with ACLs restricted to SYSTEM + Administrators only (via `JsonlEventLogger` directory hardening)
+2. The Agent launches as the logged-in user via HKLM Run key (`runasoriginaluser`)
+3. `QuarantineManager` constructor unconditionally called `Directory.CreateDirectory()` — threw `UnauthorizedAccessException` for non-elevated users
+4. Unhandled exception propagated through DI container → hosting startup failure → process termination
+
+**Why it worked on debloated Windows:** UAC disabled or different default ACLs on `C:\ProgramData\` allowed user-context directory creation.
+
+**Fix:** `QuarantineManager` constructor now catches `UnauthorizedAccessException` gracefully. The Agent doesn't perform quarantine operations (only the SYSTEM Service does) — it only reads quarantine metadata for tray icon display.
+
 ## [0.9.8] - 2026-06-22
 
 ### Fixed — False Positive Reduction (Toast, System Integrity, Module Growth, Attack Tool)
