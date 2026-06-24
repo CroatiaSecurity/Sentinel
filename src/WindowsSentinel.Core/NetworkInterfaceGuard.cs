@@ -370,23 +370,10 @@ namespace WindowsSentinel.Core
 
         private void EnforceSecureDoh()
         {
-            try
-            {
-                using var key = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Services\Dnscache\Parameters", writable: true);
-                if (key != null)
-                {
-                    var val = key.GetValue("EnableAutoDoh");
-                    if (val == null || (int)val != 2)
-                    {
-                        key.SetValue("EnableAutoDoh", 2, RegistryValueKind.DWord);
-                        _logger.LogInformation("[NetworkInterfaceGuard] Enforced global DNS-over-HTTPS (DoH) requirement (EnableAutoDoh = 2)");
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogDebug(ex, "[NetworkInterfaceGuard] Failed to enforce global DoH");
-            }
+            // REMOVED: This conflicts with BrowserDnsPolicyGuard which disables DoH to enforce
+            // hosts-file-based blocking. BrowserDnsPolicyGuard is the authoritative policy —
+            // the hosts file is the DNS override mechanism for this system.
+            // NetworkInterfaceGuard should NOT re-enable DoH.
         }
 
         private static string GetDeviceProperty(IntPtr deviceInfoSet, ref SP_DEVINFO_DATA deviceInfoData, int property)

@@ -4275,7 +4275,7 @@ namespace WindowsSentinel.Core
                 if (current != null && (int)current != 0)
                 {
                     key.SetValue(EnableAutoDohValue, 0, RegistryValueKind.DWord);
-                    _logger.LogWarning("[BrowserDnsPolicyGuard] Disabled system-level DoH (EnableAutoDoh=0)");
+                    _logger.LogDebug("[BrowserDnsPolicyGuard] Disabled system-level DoH (EnableAutoDoh=0)");
                     return true;
                 }
             }
@@ -4882,6 +4882,9 @@ namespace WindowsSentinel.Core
             "Npfs", "Msfs", "tdx", "TDI", "netbt", "afunix",
             "IKEEXT", "PolicyAgent", "BFE", "wfplwfs", "Dhcp",
             "Dnscache", "nsi", "Tcpip", "NDIS", "afd", "spaceport",
+            // Microsoft system drivers commonly present on non-debloated Windows
+            "UCPD", "MsSecFlt", "SgrmBroker", "bindflt", "wcifs",
+            "storqosflt", "wcnfs", "CldFlt", "FileCrypt",
         };
 
         private static readonly string[] SuspiciousDriverPaths = new[]
@@ -5056,6 +5059,12 @@ namespace WindowsSentinel.Core
                             { "SuspiciousPath", suspicious.ToString() }
                         }
                     });
+                }
+
+                // Update baseline with current state so we only alert once per new driver
+                if (newDrivers.Count > 0)
+                {
+                    _baselineBootDrivers = current;
                 }
             }
             catch (Exception ex) { _logger.LogDebug(ex, "[BootIntegrityGuard] Driver check error"); }

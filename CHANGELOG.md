@@ -2,6 +2,24 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [1.0.0] - 2026-06-24
+
+### Fixed — Monitor Conflict & Log Spam (DoH Policy Fight, Boot Driver False Positive)
+
+**BrowserDnsPolicyGuard vs NetworkInterfaceGuard conflict:**
+- `NetworkInterfaceGuard` set `EnableAutoDoh = 2` (enable DoH) every 15 seconds
+- `BrowserDnsPolicyGuard` set `EnableAutoDoh = 0` (disable DoH) every 15 seconds
+- Both monitors fought each other in a perpetual loop, spamming Warning events to the Application Event Log every 15 seconds (~5,760 events/day)
+- **Fix:** Removed `EnforceSecureDoh()` from `NetworkInterfaceGuard` — `BrowserDnsPolicyGuard` is the authoritative DNS policy (hosts-file-based blocking requires DoH disabled)
+- **Fix:** Demoted `BrowserDnsPolicyGuard` re-enforcement log from `LogWarning` to `LogDebug` — routine policy re-application is not a warning-level event
+
+**BootIntegrityGuard UCPD.sys false positive loop:**
+- Microsoft's `UCPD.sys` (Unchained Copy Protection Driver, part of Windows Defender) fired "New Boot Driver Registered" every 60 seconds indefinitely
+- **Root cause 1:** `UCPD` was not in the `TrustedBootDrivers` allowlist — it's a legitimate Microsoft system driver present on non-debloated Windows
+- **Root cause 2:** After alerting on a new driver, the baseline was never updated — the same driver re-triggered every scan cycle forever
+- **Fix:** Added `UCPD`, `MsSecFlt`, `SgrmBroker`, `bindflt`, `wcifs`, `wcnfs`, `CldFlt`, `storqosflt`, `FileCrypt` to `TrustedBootDrivers`
+- **Fix:** After emitting alerts for new drivers, the baseline is updated with the current driver list — each new driver only fires once
+
 ## [0.9.9] - 2026-06-23
 
 ### Fixed — Agent Crash on Non-Debloated Windows (QuarantineManager ACL)
