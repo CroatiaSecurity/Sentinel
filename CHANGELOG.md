@@ -2,6 +2,77 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [1.0.1] - 2026-06-26
+
+### Added — Blind Spot Elimination (8 new monitors)
+
+Comprehensive coverage for all previously unmonitored attack surfaces.
+
+**VolumeMountMonitor — RAM Disk, PMEM, Encrypted Container Detection:**
+- Detects new volume mounts at runtime via WMI `Win32_Volume` polling (5s interval)
+- Classifies mounted volumes: RAM disk, PMEM/DAX, VeraCrypt/encrypted container, VHD/VHDX
+- Recognizes 15+ RAM disk drivers (ImDisk, OSFMount, SoftPerfect, Arsenal, DataRAM, etc.)
+- Recognizes PMEM/DAX drivers (nvdimm, winpmem, stornvme_pmem, etc.)
+- Recognizes encrypted container drivers (VeraCrypt, TrueCrypt, BestCrypt, DiskCryptor, etc.)
+- **Dynamic FileActivityMonitor extension** — when a new volume is detected, `AddWatchPath()` is called to extend file monitoring coverage to the new drive letter in real-time
+- Eliminates the blind spot where attackers stage payloads on volatile/unmapped volumes
+
+**WslMonitor — Windows Subsystem for Linux Activity:**
+- Monitors WSL process spawns (wsl.exe, wslhost.exe, bash.exe)
+- Detects suspicious command execution inside WSL (reverse shells, attack tools, /mnt/c/ access)
+- Alerts on new WSL distribution installs/imports at runtime (custom attacker distros)
+- Detects Windows processes running from `\\wsl$\` filesystem (staged payload execution)
+- Scans every 10s; idle when WSL is not installed (re-checks every 5min)
+
+**RawDiskAccessMonitor — Direct Physical Disk I/O:**
+- Detects processes opening raw device paths (`\\.\PhysicalDrive0`, `\Device\Harddisk`, etc.)
+- Uses `NtQuerySystemInformation` + `DuplicateHandle` to enumerate kernel object handles per-process
+- Bypasses detected: bootkit installation, forensic evidence wiping, below-filesystem exfiltration
+- Allowlists legitimate disk tools (diskpart, defrag, chkdsk, backup software, VM hypervisors)
+- Integrates with `SignerTrustService` — signed tools get Tier2; unsigned get Tier1+KillProcessTree
+- Scans every 20s
+
+**NetworkShareMonitor — SMB/Lateral Movement Detection:**
+- Monitors new network drive mappings at runtime (WMI `Win32_NetworkConnection`)
+- Detects admin share access (C$, ADMIN$, IPC$) — high-confidence lateral movement indicator
+- Monitors inbound SMB sessions via `NetSessionEnum` (remote authentication to this machine)
+- Monitors open files on local shares via `NetFileEnum` (what remote users are accessing)
+- Scans every 15s; NetworkIsolate response for admin share activity
+
+**EphemeralProcessMonitor — WMI Latency Gap Coverage:**
+- Catches processes that execute and exit within WMI's 1-2s reporting latency
+- **Prefetch monitoring** — Windows creates .pf files for every execution regardless of duration; FileSystemWatcher + 5s periodic scan detects new entries
+- **Security Event Log 4688 polling** — catches process creation audit events for exited processes
+- Detects self-deleting dropper pattern (prefetch entry exists but binary is gone from disk)
+- Feeds ephemeral process telemetry into TelemetryFusionEngine for correlation
+- Submits discovered executables to HashReputationService for verdict
+
+**PrintSpoolerMonitor — Print Spool Exfiltration:**
+- Monitors `spool\PRINTERS` directory for burst activity (20+ files in 60s = suspicious)
+- Detects suspicious files in spool directory (executables, DLLs = PrintNightmare indicator)
+- Monitors XPS document creation (print-to-file staging for exfiltration)
+- FileSystemWatcher on spool directory + 15s periodic scan
+
+**SandboxEscapeMonitor — Container/VM Isolation:**
+- Monitors Docker containers for dangerous configurations (--privileged, --network=host, --pid=host)
+- Detects Windows Sandbox .wsb configs mapping sensitive host paths with write access
+- Detects container escape: processes spawned by container runtime executing from host filesystem
+- Monitors for privilege escalation from sandboxed context to host
+- Scans every 15s
+
+**AppDnsExfilMonitor — Application-Level DNS Bypass:**
+- Detects non-browser processes connecting to known DoH resolver IPs (Cloudflare, Google, Quad9, NextDNS, AdGuard, OpenDNS) on port 443
+- These connections bypass Windows DNS Client, making DnsQueryMonitor and hosts file blocking completely ineffective
+- Distinguishes browsers (handled by BrowserDnsPolicyGuard) from standalone malware with embedded DoH
+- Alerts after 3+ repeated connections to confirm persistent DoH usage (not transient TLS)
+- KillProcessTree response for confirmed non-browser DoH bypass
+
+### Changed — FileActivityMonitor Dynamic Path Extension
+
+- Added `AddWatchPath(string path)` public method for runtime expansion of monitored directories
+- Used by VolumeMountMonitor to automatically extend file monitoring to newly mounted volumes
+- Prevents duplicate watcher creation via existing-path check
+
 ## [1.0.0] - 2026-06-24
 
 ### Fixed — Monitor Conflict & Log Spam (DoH Policy Fight, Boot Driver False Positive)

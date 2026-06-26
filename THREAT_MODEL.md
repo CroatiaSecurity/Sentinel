@@ -1,6 +1,6 @@
-# Windows Sentinel — Threat Model
+﻿# Windows Sentinel — Threat Model
 
-**Version: 0.8.6**
+**Version: 1.0.1**
 
 This document assumes the attacker has read the source code.
 
@@ -162,6 +162,29 @@ These are fundamental limitations, not bugs:
 8. **Direct syscalls from custom code** â€” Bypasses ntdll hooks (but SyscallStubMonitor detects unhooking attempts)
 9. **Upstream BGP hijacking** â€” Detectable via public IP shift but not preventable
 10. **Physical-layer Wi-Fi attacks** â€” Cannot see deauth frames directly (detects the symptom: rapid disconnects)
+
+11. **GPU memory-resident malware** u{2014} Code staged entirely in GPU VRAM/compute shaders has no CPU-side memory to scan
+
+---
+
+## Blind Spots Closed in v1.0.1
+
+Previously exploitable attack surfaces that are now monitored:
+
+| Blind Spot | Closed By | Detection Method |
+|------------|-----------|-----------------|
+| RAM disk staging (ImDisk, OSFMount, etc.) | `VolumeMountMonitor` | WMI volume polling + dynamic FileActivityMonitor extension |
+| Persistent memory (PMEM/DAX) | `VolumeMountMonitor` | PMEM driver detection + volume classification |
+| Encrypted containers (VeraCrypt) | `VolumeMountMonitor` | Driver/device path matching + auto-watch |
+| Volume mount/dismount events | `VolumeMountMonitor` | Baseline comparison every 5s |
+| WSL execution evasion | `WslMonitor` | Process tracking + command analysis + distro installs |
+| WMI process telemetry latency (1-2s) | `EphemeralProcessMonitor` | Prefetch monitoring + Security Event 4688 |
+| Raw disk I/O bypass | `RawDiskAccessMonitor` | NtQuerySystemInformation handle scan |
+| Network shares / SMB lateral movement | `NetworkShareMonitor` | NetFileEnum + NetSessionEnum + drive mapping |
+| Container/sandbox escape | `SandboxEscapeMonitor` | Docker inspect + .wsb analysis + ancestry check |
+| Application-level DoH bypass | `AppDnsExfilMonitor` | TCP connection scan for DoH resolver IPs |
+| Print spooler exfiltration | `PrintSpoolerMonitor` | Spool directory watch + burst detection |
+| FileSystemWatcher path limitation | `VolumeMountMonitor` | Dynamic `AddWatchPath()` on new volumes |
 
 ## What Sentinel CAN Detect Even Against Skilled Attackers
 

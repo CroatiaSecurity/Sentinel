@@ -1,6 +1,6 @@
 # Windows Sentinel — Design Document
 
-**Version: 0.8.8**
+**Version: 1.0.1**
 
 ---
 
@@ -92,6 +92,14 @@ The fusion layer is PASSIVE â€” it never blocks, kills, or modifies telemet
 | `HostsFileGuard` | **0.8.7** Monitors `drivers\etc` directory. Enforces embedded hosts file content (SHA-256 verified). Deletes all other files (hosts.ics, lmhosts.sam, etc.) as bypass vectors. FileSystemWatcher + 30s periodic check. KillProcessTree on modifier. | Yes (SYSTEM write to System32) |
 | `BrowserDnsPolicyGuard` | **0.8.7** Disables DNS-over-HTTPS system-wide: Windows OS (EnableAutoDoh=0), Chrome, Edge, Brave, Vivaldi, Opera, Chromium (BuiltInDnsClientEnabled=0, DnsOverHttpsMode=off), Firefox (DNSOverHTTPS.Enabled=0, Locked=1). 15s self-healing. Ensures hosts file is authoritative. | Yes (registry write) |
 | `MtpTransferGuard` | **0.8.8** Blocks non-media file transfers to MTP devices (phones/tablets). Allows only images, video, audio, and mobile app packages (APK/IPA). Kills transferring process on violation. Detects WPD API usage via loaded module scanning + WPDNSE staging directory monitoring. 5s scan interval. | No |
+| `VolumeMountMonitor` | **1.0.1** Detects new volume mounts at runtime: RAM disks (ImDisk, OSFMount, SoftPerfect, Arsenal), PMEM/DAX, VeraCrypt/encrypted containers, VHD/VHDX. Classifies volume type and dynamically extends FileActivityMonitor to cover new drives. WMI Win32_Volume polling every 5s. | No |
+| `WslMonitor` | **1.0.1** Monitors WSL process spawns, suspicious command execution inside WSL, new distro installs, and processes running from \\wsl$ filesystem. Tracks wsl.exe/wslhost.exe/bash.exe activity. Scans every 10s. | No |
+| `RawDiskAccessMonitor` | **1.0.1** Detects processes opening raw disk device paths (\\.\PhysicalDrive, \Device\Harddisk) via NtQuerySystemInformation handle enumeration. Bypasses filesystem-level monitoring. Allows known disk management/backup tools. Scans every 20s. | Yes (PROCESS_DUP_HANDLE) |
+| `NetworkShareMonitor` | **1.0.1** Monitors SMB/network share activity: new drive mappings, admin share access (C$, ADMIN$, IPC$), inbound SMB sessions. Uses NetFileEnum/NetSessionEnum. Detects lateral movement patterns. Scans every 15s. | No |
+| `EphemeralProcessMonitor` | **1.0.1** Catches short-lived processes that exit before WMI reports them via Prefetch file monitoring (FileSystemWatcher + periodic scan) and Security Event ID 4688 polling. Detects self-deleting droppers. Scans every 5s. | Yes (Prefetch access) |
+| `PrintSpoolerMonitor` | **1.0.1** Monitors print spooler for data exfiltration: bulk spool file creation, suspicious files in spool directory, XPS output creation. FileSystemWatcher on spool\PRINTERS + periodic scan every 15s. | No |
+| `SandboxEscapeMonitor` | **1.0.1** Monitors Windows Sandbox, Docker containers, and Hyper-V for escape indicators: privileged containers, host namespace access, sensitive path mappings in .wsb files, processes spawned by container runtime from host paths. Scans every 15s. | No |
+| `AppDnsExfilMonitor` | **1.0.1** Detects application-level DNS-over-HTTPS bypass where non-browser processes communicate directly with known DoH resolvers (Cloudflare, Google, Quad9, etc.) on port 443, evading Windows DNS Client event log and hosts file. Scans every 10s. | No |
 
 ### Engine
 

@@ -166,6 +166,16 @@ namespace WindowsSentinel.Service
                     services.AddSingleton<PersistentConnectionMonitor>();
                     services.AddHostedService<PersistentConnectionMonitor>(sp => sp.GetRequiredService<PersistentConnectionMonitor>());
                     services.AddSingleton<IsolationResponseEngine>();
+
+                    // v1.0.1: Blind spot monitors
+                    services.AddHostedService<VolumeMountMonitor>();
+                    services.AddHostedService<WslMonitor>();
+                    services.AddHostedService<RawDiskAccessMonitor>();
+                    services.AddHostedService<NetworkShareMonitor>();
+                    services.AddHostedService<EphemeralProcessMonitor>();
+                    services.AddHostedService<PrintSpoolerMonitor>();
+                    services.AddHostedService<SandboxEscapeMonitor>();
+                    services.AddHostedService<AppDnsExfilMonitor>();
                 });
     }
 }

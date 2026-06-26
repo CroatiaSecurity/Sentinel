@@ -200,6 +200,26 @@ namespace WindowsSentinel.Core
             }
         }
 
+        /// <summary>
+        /// Dynamically adds a new path to the file activity monitoring scope.
+        /// Used by VolumeMountMonitor to extend coverage to newly mounted volumes.
+        /// v1.0.1: New method.
+        /// </summary>
+        public void AddWatchPath(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path)) return;
+
+            // Check if already watched
+            lock (_watchers)
+            {
+                if (_watchers.Any(w => w.Path.Equals(path, StringComparison.OrdinalIgnoreCase)))
+                    return;
+            }
+
+            StartWatchersForPath(path);
+            _logger.LogInformation("[FileActivityMonitor] Dynamically added watch path: {Path}", path);
+        }
+
         private FileSystemWatcher CreateWatcher(string path, bool includeSubdirectories)
         {
             var watcher = new FileSystemWatcher(path)
