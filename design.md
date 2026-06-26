@@ -1,6 +1,6 @@
 # Windows Sentinel — Design Document
 
-**Version: 1.0.1**
+**Version: 1.0.2**
 
 ---
 
@@ -100,6 +100,7 @@ The fusion layer is PASSIVE â€” it never blocks, kills, or modifies telemet
 | `PrintSpoolerMonitor` | **1.0.1** Monitors print spooler for data exfiltration: bulk spool file creation, suspicious files in spool directory, XPS output creation. FileSystemWatcher on spool\PRINTERS + periodic scan every 15s. | No |
 | `SandboxEscapeMonitor` | **1.0.1** Monitors Windows Sandbox, Docker containers, and Hyper-V for escape indicators: privileged containers, host namespace access, sensitive path mappings in .wsb files, processes spawned by container runtime from host paths. Scans every 15s. | No |
 | `AppDnsExfilMonitor` | **1.0.1** Detects application-level DNS-over-HTTPS bypass where non-browser processes communicate directly with known DoH resolvers (Cloudflare, Google, Quad9, etc.) on port 443, evading Windows DNS Client event log and hosts file. Scans every 10s. | No |
+| `CastDeviceGuard` | **1.0.2** Baselines Cast protocol devices (port 8008/8009) on LAN at startup. Detects Chrome/browser connections to non-baselined Cast devices. Validates Google OUI MAC prefix to distinguish real Chromecasts from rogue relay devices. Kills connections to non-Google-OUI post-boot devices. Correlates with PhantomDeviceMonitor. Scans every 10s. | No |
 
 ### Engine
 

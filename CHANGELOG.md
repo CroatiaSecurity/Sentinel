@@ -2,6 +2,31 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [1.0.2] - 2026-06-26
+
+### Added — CastDeviceGuard (Rogue Chromecast / LAN Relay Detection)
+
+**Problem:** Chrome maintains persistent Cast protocol connections (port 8009) to LAN devices. GhostProcessMonitor only catches processes with empty/unresolvable names — Chrome is a valid signed process, so it passes all checks. An attacker who places a rogue device on the LAN spoofing a Chromecast gets a persistent C2 relay channel through Chrome itself.
+
+**Solution:** `CastDeviceGuard` — baseline-based Cast device authentication:
+
+- **At startup:** Probes all ARP-visible LAN devices on ports 8008/8009, records responding devices as legitimate Cast devices (user's real Chromecast/Nest/Google Home)
+- **At runtime:** Scans every 10s for browser connections to Cast ports on NON-baselined devices
+- **Google OUI verification:** Real Chromecasts always have Google-manufactured MAC addresses (B0-B3-69, F4-F5-D8, 54-60-09, A4-77-33, 30-FD-38, 48-D6-D5, etc.). Non-Google MAC + Cast port = rogue device
+- **Decision matrix:**
+  - Blocked phantom device + any process → **KillProcessTree** (0.95 confidence)
+  - Non-Google-OUI + browser + not baselined → **KillProcessTree** (0.82-0.90 confidence)
+  - Google-OUI + browser + not baselined → **LogOnly** (0.55 confidence, new legit device plugged in after boot)
+  - Non-browser process on Cast port → **KillProcessTree** (0.85 confidence)
+
+**Impact on real Chromecast users:** Zero. Devices present at boot are baselined and never touched. New Chromecasts plugged in after boot get a low-confidence log entry (Google OUI + new = probably legitimate). Only non-Google-MAC devices on Cast ports trigger kills.
+
+**Attack chain closed:**
+1. Attacker places rogue device on LAN at 192.168.1.100 spoofing Cast protocol
+2. Chrome auto-discovers it via mDNS and connects on port 8009
+3. CastDeviceGuard sees: non-baselined device + non-Google MAC + Chrome connection → kill
+4. PhantomDeviceMonitor correlation: if device was already flagged as phantom → confirmed kill at 0.95
+
 ## [1.0.1] - 2026-06-26
 
 ### Added — Blind Spot Elimination (8 new monitors)

@@ -1,6 +1,6 @@
 ﻿# Windows Sentinel — Threat Model
 
-**Version: 1.0.1**
+**Version: 1.0.2**
 
 This document assumes the attacker has read the source code.
 
@@ -185,6 +185,7 @@ Previously exploitable attack surfaces that are now monitored:
 | Application-level DoH bypass | `AppDnsExfilMonitor` | TCP connection scan for DoH resolver IPs |
 | Print spooler exfiltration | `PrintSpoolerMonitor` | Spool directory watch + burst detection |
 | FileSystemWatcher path limitation | `VolumeMountMonitor` | Dynamic `AddWatchPath()` on new volumes |
+| Rogue Cast device / LAN relay | `CastDeviceGuard` | Baseline Cast devices at boot, Google OUI validation, kill non-baselined non-Google connections |
 
 ## What Sentinel CAN Detect Even Against Skilled Attackers
 
