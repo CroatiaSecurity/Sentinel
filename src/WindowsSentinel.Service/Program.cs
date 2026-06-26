@@ -176,6 +176,9 @@ namespace WindowsSentinel.Service
                     services.AddHostedService<PrintSpoolerMonitor>();
                     services.AddHostedService<SandboxEscapeMonitor>();
                     services.AddHostedService<AppDnsExfilMonitor>();
+
+                    // v1.0.2: Cast device guard
+                    services.AddHostedService<CastDeviceGuard>();
                 });
     }
 }
