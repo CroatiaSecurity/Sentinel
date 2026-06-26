@@ -1,0 +1,553 @@
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.Net;
+using System.Threading.Tasks;
+
+namespace WindowsSentinel.Core
+{
+    public class AdvancedResponseEngine
+    {
+        private readonly SentinelConfig _config;
+        private readonly SentinelMetrics _metrics;
+        private readonly JsonlEventLogger _eventLogger;
+        private readonly QuarantineManager _quarantineManager;
+        private readonly AllowlistService? _allowlist;
+        private IncidentResponseService? _incidentResponse;
+        private DllUnloadEngine? _dllUnloadEngine;
+        private ChainTracer? _chainTracer;
+
+        public AdvancedResponseEngine(
+            SentinelConfig config,
+            SentinelMetrics metrics,
+            JsonlEventLogger eventLogger,
+            QuarantineManager quarantineManager,
+            AllowlistService? allowlist = null)
+        {
+            _config = config;
+            _metrics = metrics;
+            _eventLogger = eventLogger;
+            _quarantineManager = quarantineManager;
+            _allowlist = allowlist;
+        }
+
+        public void SetDllUnloadEngine(DllUnloadEngine engine) => _dllUnloadEngine = engine;
+
+        public void SetChainTracer(ChainTracer tracer) => _chainTracer = tracer;
+
+        public void SetIncidentResponseService(IncidentResponseService irs) => _incidentResponse = irs;
+
+        private bool IsPresidentsLawRule(DetectionEvent detection)
+        {
+            var rule = detection.RuleName ?? string.Empty;
+            var lower = rule.ToLowerInvariant();
+            return lower.Contains("lsass") ||
+                   lower.Contains("amsi") ||
+                   lower.Contains("etw") ||
+                   lower.Contains("ransomware") ||
+                   lower.Contains("shadow copy") ||
+                   lower.Contains("self-protection") ||
+                   lower.Contains("selfprotection") ||
+                   lower.Contains("honeypot") ||
+                   lower.Contains("chain-nuke") ||
+                   lower.Contains("composite") ||
+                   lower.Contains("verdictgate") ||
+                   lower.Contains("verdict gate") ||
+                   lower.Contains("webcamhijack") ||
+                   lower.Contains("webcam hijack") ||
+                   lower.Contains("audiohijack") ||
+                   lower.Contains("audio hijack") ||
+                   lower.Contains("antitamper") ||
+                   lower.Contains("anti-tamper") ||
+                   lower.Contains("tampering") ||
+                   lower.Contains("privilege") ||
+                   lower.Contains("attack") ||
+                   lower.Contains("badusb") ||
+                   lower.Contains("arp") ||
+                   lower.Contains("canary") ||
+                   lower.Contains("dns") ||
+                   lower.Contains("tls") ||
+                   lower.Contains("neuro") ||
+                   lower.Contains("hollowing") ||
+                   lower.Contains("reverseshell") ||
+                   lower.Contains("reverse shell") ||
+                   lower.Contains("threatintel") ||
+                   lower.Contains("registry");
+            // NOTE: "beaconing" removed from President's Law (v0.8.2).
+            // The BeaconingDetector now handles response demotion internally using
+            // multi-factor trust (Authenticode + path + diversity + baseline).
+            // Detections always fire and log, but verified-legitimate apps get demoted
+            // response actions directly from the detector.
+        }
+
+        public async Task HandleAsync(DetectionEvent detection)
+        {
+            var stopwatch = Stopwatch.StartNew();
+
+            bool shouldKill = false;
+            bool shouldIsolateNetwork = false;
+            bool shouldQuarantineAndKill = false;
+            bool shouldRemoveCertAndKillAdder = false;
+            bool shouldRemoveCert = false;
+            bool shouldRemoveRegistryEntry = false;
+            string reason = "LogOnly";
+
+            var isPresidentsLaw = IsPresidentsLawRule(detection);
+            var effectiveTier = detection.Tier;
+            var effectiveResponse = detection.AuthorizedResponse;
+            var effectiveKillAuthorized = detection.KillAuthorized;
+
+            string? imagePath = null;
+            try
+            {
+                if (detection.ProcessId > 0)
+                {
+                    using var proc = Process.GetProcessById(detection.ProcessId);
+                    imagePath = proc.MainModule?.FileName;
+                }
+            }
+            catch { }
+
+            if (_allowlist != null && _allowlist.ShouldSuppress(detection.ProcessName, imagePath, detection.RuleName))
+            {
+                effectiveTier = DetectionTier.Tier2Indicator;
+                effectiveResponse = ResponseAction.LogOnly;
+                effectiveKillAuthorized = false;
+                reason = "LogOnly (Suppressed by allowlist)";
+            }
+            else if (effectiveTier == DetectionTier.Tier1Behavioral && !isPresidentsLaw)
+            {
+                effectiveTier = DetectionTier.Tier2Indicator;
+                effectiveResponse = ResponseAction.LogOnly;
+                effectiveKillAuthorized = false;
+                reason = "LogOnly (Demoted non-President's-law rule)";
+            }
+
+            if (effectiveResponse == ResponseAction.QuarantineAndKill && effectiveTier == DetectionTier.Tier1Behavioral)
+            {
+                if (_config.ActiveResponse)
+                {
+                    shouldQuarantineAndKill = true;
+                    reason = $"QuarantineAndKill (AuthorizedResponse={effectiveResponse})";
+                }
+                else
+                {
+                    reason = "LogOnly (ActiveResponse disabled)";
+                }
+            }
+            else if (effectiveResponse == ResponseAction.RemoveCertAndKillAdder && effectiveTier == DetectionTier.Tier1Behavioral)
+            {
+                if (_config.ActiveResponse)
+                {
+                    shouldRemoveCertAndKillAdder = true;
+                    reason = $"RemoveCertAndKillAdder (AuthorizedResponse={effectiveResponse})";
+                }
+                else
+                {
+                    reason = "LogOnly (ActiveResponse disabled)";
+                }
+            }
+            else if (effectiveResponse == ResponseAction.RemoveRegistryEntry && effectiveTier == DetectionTier.Tier1Behavioral)
+            {
+                if (_config.ActiveResponse)
+                {
+                    shouldRemoveRegistryEntry = true;
+                    reason = $"RemoveRegistryEntry (AuthorizedResponse={effectiveResponse})";
+                }
+                else
+                {
+                    reason = "LogOnly (ActiveResponse disabled)";
+                }
+            }
+            else if (effectiveResponse == ResponseAction.RemoveCert && effectiveTier == DetectionTier.Tier1Behavioral)
+            {
+                if (_config.ActiveResponse)
+                {
+                    shouldRemoveCert = true;
+                    reason = $"RemoveCert (AuthorizedResponse={effectiveResponse}, no process terminated)";
+                }
+                else
+                {
+                    reason = "LogOnly (ActiveResponse disabled)";
+                }
+            }
+            else if (effectiveResponse == ResponseAction.NetworkIsolate && effectiveTier == DetectionTier.Tier1Behavioral)
+            {
+                if (_config.ActiveResponse)
+                {
+                    shouldIsolateNetwork = true;
+                    reason = $"NetworkIsolate (AuthorizedResponse={effectiveResponse})";
+                }
+                else
+                {
+                    reason = "LogOnly (ActiveResponse disabled)";
+                }
+            }
+            else if (effectiveKillAuthorized && effectiveTier == DetectionTier.Tier1Behavioral)
+            {
+                if (_config.ActiveResponse)
+                {
+                    shouldKill = true;
+                    reason = $"Killed (AuthorizedResponse={effectiveResponse})";
+                }
+                else
+                {
+                    reason = "LogOnly (ActiveResponse disabled)";
+                }
+            }
+            else if (effectiveTier == DetectionTier.Tier1Behavioral)
+            {
+                reason = "LogOnly (Tier1 without kill authorization)";
+            }
+            else
+            {
+                if (reason == "LogOnly")
+                {
+                    reason = "LogOnly (Tier2 Indicator)";
+                }
+            }
+
+            if (shouldRemoveCertAndKillAdder)
+            {
+                var certThumb = detection.Metadata.GetValueOrDefault("CertThumbprint", "Unknown");
+                var adderPidStr = detection.Metadata.GetValueOrDefault("AdderProcessId", "0");
+
+                if (!string.IsNullOrEmpty(certThumb) && certThumb != "Unknown")
+                {
+                    RemoveCertificateFromStore(certThumb);
+                }
+
+                if (int.TryParse(adderPidStr, out int adderPid) && adderPid > 4)
+                {
+                    HardeningModule.SafeKillProcessTree(adderPid);
+                }
+
+                stopwatch.Stop();
+                _metrics.RecordResponse(stopwatch.ElapsedMilliseconds);
+
+                var responseLog = new ResponseEvent
+                {
+                    ProcessId = detection.ProcessId,
+                    ProcessName = detection.ProcessName,
+                    ActionTaken = "REMOVE_CERT_AND_KILL_ADDER",
+                    Reason = $"Triggered by rule: {detection.RuleName}. {reason}. CertThumbprint={certThumb}. AdderPID={adderPidStr}",
+                    ExecutionTimeMs = stopwatch.ElapsedMilliseconds
+                };
+                await _eventLogger.LogEventAsync("response", responseLog);
+            }
+            else if (shouldRemoveCert)
+            {
+                var certThumb = detection.Metadata.GetValueOrDefault("CertThumbprint", "Unknown");
+
+                if (!string.IsNullOrEmpty(certThumb) && certThumb != "Unknown")
+                {
+                    RemoveCertificateFromStore(certThumb);
+                }
+
+                stopwatch.Stop();
+                _metrics.RecordResponse(stopwatch.ElapsedMilliseconds);
+
+                var responseLog = new ResponseEvent
+                {
+                    ProcessId = detection.ProcessId,
+                    ProcessName = detection.ProcessName,
+                    ActionTaken = "REMOVE_CERT",
+                    Reason = $"Triggered by rule: {detection.RuleName}. {reason}. CertThumbprint={certThumb}",
+                    ExecutionTimeMs = stopwatch.ElapsedMilliseconds
+                };
+                await _eventLogger.LogEventAsync("response", responseLog);
+            }
+            else if (shouldQuarantineAndKill)
+            {
+                // DLL sideloading/injection: quarantine the malicious DLL, kill the host process
+                var targetPidStr = detection.Metadata.GetValueOrDefault("TargetProcessId", "0");
+                int.TryParse(targetPidStr, out int targetPid);
+                
+                string quarantinedInfo = "None";
+                if (targetPid > 0 && _dllUnloadEngine != null)
+                {
+                    var remediateResult = await _dllUnloadEngine.UnloadInjectedDllAsync(targetPid);
+                    if (remediateResult.Success && remediateResult.UnloadedDlls.Count > 0)
+                    {
+                        quarantinedInfo = string.Join(", ", remediateResult.UnloadedDlls);
+                    }
+                }
+
+                // Also quarantine the injector binary itself
+                try
+                {
+                    using var proc = Process.GetProcessById(detection.ProcessId);
+                    var quarantinePath = proc.MainModule?.FileName;
+                    if (!string.IsNullOrEmpty(quarantinePath) && File.Exists(quarantinePath))
+                    {
+                        await _quarantineManager.QuarantineFileAtomicAsync(quarantinePath);
+                    }
+                }
+                catch { }
+
+                // Terminate injecting process tree
+                if (detection.ProcessId > 4)
+                {
+                    HardeningModule.SafeKillProcessTree(detection.ProcessId);
+                }
+
+                stopwatch.Stop();
+                _metrics.RecordResponse(stopwatch.ElapsedMilliseconds);
+
+                var responseLog = new ResponseEvent
+                {
+                    ProcessId = detection.ProcessId,
+                    ProcessName = detection.ProcessName,
+                    ActionTaken = "QUARANTINE_AND_KILL",
+                    Reason = $"Triggered by rule: {detection.RuleName}. {reason}. Quarantined={quarantinedInfo}. TargetPID={targetPid}",
+                    ExecutionTimeMs = stopwatch.ElapsedMilliseconds
+                };
+                await _eventLogger.LogEventAsync("response", responseLog);
+            }
+            else if (shouldIsolateNetwork)
+            {
+                // Network-level threat: block suspicious IPs extracted from evidence metadata
+                var targetIp = detection.Metadata.GetValueOrDefault("TargetIP", "");
+                if (!string.IsNullOrEmpty(targetIp))
+                {
+                    // Validate IP before creating firewall rules
+                    if (!System.Net.IPAddress.TryParse(targetIp, out var parsedIp) ||
+                        System.Net.IPAddress.IsLoopback(parsedIp) ||
+                        targetIp == "0.0.0.0" || targetIp == "255.255.255.255")
+                    {
+                        // Skip invalid/loopback/broadcast IPs
+                    }
+                    else
+                    {
+                        IsolateNetworkTarget(targetIp, detection.RuleName);
+                    }
+                }
+
+                // Also flush DNS cache to clear poisoned entries
+                FlushDnsCache();
+
+                stopwatch.Stop();
+                _metrics.RecordResponse(stopwatch.ElapsedMilliseconds);
+
+                var responseLog = new ResponseEvent
+                {
+                    ProcessId = detection.ProcessId,
+                    ProcessName = detection.ProcessName,
+                    ActionTaken = "NETWORK_ISOLATE",
+                    Reason = $"Triggered by rule: {detection.RuleName}. {reason}. Target={targetIp}",
+                    ExecutionTimeMs = stopwatch.ElapsedMilliseconds
+                };
+                await _eventLogger.LogEventAsync("response", responseLog);
+            }
+            else if (shouldRemoveRegistryEntry)
+            {
+                var hive = detection.Metadata.GetValueOrDefault("Hive", "HKLM");
+                var keyPath = detection.Metadata.GetValueOrDefault("KeyPath", "");
+                var valueName = detection.Metadata.GetValueOrDefault("ValueName", "");
+                var subKey = detection.Metadata.GetValueOrDefault("SubKey", "");
+                var removed = false;
+                var removalLog = "";
+
+                try
+                {
+                    if (!string.IsNullOrEmpty(valueName) && !string.IsNullOrEmpty(keyPath))
+                    {
+                        // Remove a specific value from a key
+                        var regHive = hive switch
+                        {
+                            "HKCU" => Microsoft.Win32.Registry.CurrentUser,
+                            "HKCR" => Microsoft.Win32.Registry.ClassesRoot,
+                            _ => Microsoft.Win32.Registry.LocalMachine
+                        };
+                        using var key = regHive.OpenSubKey(keyPath, writable: true);
+                        if (key != null)
+                        {
+                            key.DeleteValue(valueName, throwOnMissingValue: false);
+                            removed = true;
+                            removalLog = $"Removed value '{valueName}' from {hive}\\{keyPath}";
+                        }
+                    }
+                    else if (!string.IsNullOrEmpty(subKey) && keyPath.Contains("Services"))
+                    {
+                        // Remove a service subkey
+                        using var servicesKey = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(keyPath, writable: true);
+                        if (servicesKey != null)
+                        {
+                            servicesKey.DeleteSubKeyTree(subKey, throwOnMissingSubKey: false);
+                            removed = true;
+                            removalLog = $"Removed service subkey '{subKey}' from {hive}\\{keyPath}";
+                        }
+                    }
+                    else if (!string.IsNullOrEmpty(keyPath) && keyPath.Contains("CLSID"))
+                    {
+                        // Remove a CLSID subkey tree
+                        using var clsidKey = Microsoft.Win32.Registry.ClassesRoot.OpenSubKey(keyPath, writable: true);
+                        if (clsidKey != null)
+                        {
+                            var parent = Microsoft.Win32.Registry.ClassesRoot.OpenSubKey("CLSID", writable: true);
+                            if (parent != null)
+                            {
+                                var clsid = detection.Metadata.GetValueOrDefault("CLSID", "");
+                                if (!string.IsNullOrEmpty(clsid))
+                                {
+                                    parent.DeleteSubKeyTree(clsid, throwOnMissingSubKey: false);
+                                    removed = true;
+                                    removalLog = $"Removed CLSID '{clsid}' from HKCR\\CLSID";
+                                }
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    removalLog = $"Failed to remove registry entry: {ex.Message}";
+                }
+
+                stopwatch.Stop();
+                _metrics.RecordResponse(stopwatch.ElapsedMilliseconds);
+
+                var responseLog = new ResponseEvent
+                {
+                    ProcessId = detection.ProcessId,
+                    ProcessName = detection.ProcessName,
+                    ActionTaken = removed ? "REMOVE_REGISTRY_ENTRY" : "REMOVE_REGISTRY_ENTRY_FAILED",
+                    Reason = $"Triggered by rule: {detection.RuleName}. {reason}. {removalLog}",
+                    ExecutionTimeMs = stopwatch.ElapsedMilliseconds
+                };
+                await _eventLogger.LogEventAsync("response", responseLog);
+            }
+            else if (shouldKill && detection.ProcessId > 4)
+            {
+                // Collect forensic evidence before killing
+                try { if (_incidentResponse != null) _ = _incidentResponse.CollectEvidenceAsync(detection); } catch { }
+
+                if (_chainTracer != null)
+                {
+                    await _chainTracer.TraceAndRespondAsync(detection);
+                }
+                else
+                {
+                    HardeningModule.SafeKillProcessTree(detection.ProcessId);
+                }
+
+                stopwatch.Stop();
+                _metrics.RecordResponse(stopwatch.ElapsedMilliseconds);
+
+                var responseLog = new ResponseEvent
+                {
+                    ProcessId = detection.ProcessId,
+                    ProcessName = detection.ProcessName,
+                    ActionTaken = "KILL",
+                    Reason = $"Triggered by rule: {detection.RuleName}. {reason}",
+                    ExecutionTimeMs = stopwatch.ElapsedMilliseconds
+                };
+                await _eventLogger.LogEventAsync("response", responseLog);
+            }
+            else
+            {
+                stopwatch.Stop();
+                _metrics.RecordResponse(stopwatch.ElapsedMilliseconds);
+                var responseLog = new ResponseEvent
+                {
+                    ProcessId = detection.ProcessId,
+                    ProcessName = detection.ProcessName,
+                    ActionTaken = "LOG",
+                    Reason = reason,
+                    ExecutionTimeMs = stopwatch.ElapsedMilliseconds
+                };
+                await _eventLogger.LogEventAsync("response", responseLog);
+            }
+        }
+
+        private void RemoveCertificateFromStore(string thumbprint)
+        {
+            try
+            {
+                using var store = new System.Security.Cryptography.X509Certificates.X509Store(
+                    System.Security.Cryptography.X509Certificates.StoreName.Root,
+                    System.Security.Cryptography.X509Certificates.StoreLocation.LocalMachine);
+                store.Open(System.Security.Cryptography.X509Certificates.OpenFlags.ReadWrite);
+
+                var certs = store.Certificates.Find(
+                    System.Security.Cryptography.X509Certificates.X509FindType.FindByThumbprint,
+                    thumbprint,
+                    validOnly: false);
+
+                foreach (var cert in certs)
+                {
+                    store.Remove(cert);
+                }
+            }
+            catch (Exception ex)
+            {
+                _eventLogger.LogEventAsync("debug", new { Message = $"Failed to remove cert {thumbprint}: {ex.Message}" }).GetAwaiter().GetResult();
+            }
+        }
+
+        private void IsolateNetworkTarget(string ip, string ruleName)
+        {
+            var safeName = ip.Replace('.', '_').Replace(':', '_');
+            var fwRule = $"Sentinel-Isolate-{safeName}";
+
+            try
+            {
+                // Use Windows Firewall COM API (INetFwPolicy2) instead of shelling out to netsh.
+                // This avoids Process.Start patterns that AV engines flag as malware behavior.
+                var fwPolicyType = Type.GetTypeFromProgID("HNetCfg.FwPolicy2");
+                if (fwPolicyType == null) return;
+                dynamic? fwPolicy = Activator.CreateInstance(fwPolicyType);
+                if (fwPolicy == null) return;
+
+                var ruleType = Type.GetTypeFromProgID("HNetCfg.FWRule");
+                if (ruleType == null) return;
+
+                // Outbound block
+                dynamic? outRule = Activator.CreateInstance(ruleType);
+                if (outRule != null)
+                {
+                    outRule.Name = $"{fwRule}-OUT";
+                    outRule.Description = $"Sentinel: Block outbound to {ip} ({ruleName})";
+                    outRule.Direction = 2; // NET_FW_RULE_DIR_OUT
+                    outRule.Action = 0;    // NET_FW_ACTION_BLOCK
+                    outRule.RemoteAddresses = ip;
+                    outRule.Enabled = true;
+                    outRule.Profiles = 0x7FFFFFFF; // All profiles
+                    fwPolicy.Rules.Add(outRule);
+                }
+
+                // Inbound block
+                dynamic? inRule = Activator.CreateInstance(ruleType);
+                if (inRule != null)
+                {
+                    inRule.Name = $"{fwRule}-IN";
+                    inRule.Description = $"Sentinel: Block inbound from {ip} ({ruleName})";
+                    inRule.Direction = 1; // NET_FW_RULE_DIR_IN
+                    inRule.Action = 0;    // NET_FW_ACTION_BLOCK
+                    inRule.RemoteAddresses = ip;
+                    inRule.Enabled = true;
+                    inRule.Profiles = 0x7FFFFFFF;
+                    fwPolicy.Rules.Add(inRule);
+                }
+            }
+            catch (Exception ex)
+            {
+                // Fallback: if COM fails (e.g., service not running), log and continue
+                _eventLogger.LogEventAsync("debug", new { Message = $"Firewall COM failed for {ip}: {ex.Message}" }).GetAwaiter().GetResult();
+            }
+        }
+
+        private static void FlushDnsCache()
+        {
+            try
+            {
+                // DnsFlushResolverCache is a documented public API — not a shell-out
+                DnsFlushResolverCache();
+            }
+            catch { }
+        }
+
+        [System.Runtime.InteropServices.DllImport("dnsapi.dll", EntryPoint = "DnsFlushResolverCache")]
+        private static extern uint DnsFlushResolverCache();
+    }
+}
