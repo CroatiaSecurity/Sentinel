@@ -1,4 +1,4 @@
-﻿# Windows Sentinel — Threat Model
+# Windows Sentinel — Threat Model
 
 **Version: 1.0.3**
 
@@ -173,7 +173,7 @@ Previously exploitable attack surfaces that are now monitored:
 
 | Blind Spot | Closed By | Detection Method |
 |------------|-----------|-----------------|
-| RAM disk staging (ImDisk, OSFMount, etc.) | `VolumeMountMonitor` | WMI volume polling + dynamic FileActivityMonitor extension |
+| RAM disk staging (ImDisk, OSFMount, etc.) | `VolumeMountMonitor` | DriveInfo/QueryDosDevice polling + dynamic FileActivityMonitor extension |
 | Persistent memory (PMEM/DAX) | `VolumeMountMonitor` | PMEM driver detection + volume classification |
 | Encrypted containers (VeraCrypt) | `VolumeMountMonitor` | Driver/device path matching + auto-watch |
 | Volume mount/dismount events | `VolumeMountMonitor` | Baseline comparison every 5s |
@@ -185,7 +185,7 @@ Previously exploitable attack surfaces that are now monitored:
 | Application-level DoH bypass | `AppDnsExfilMonitor` | TCP connection scan for DoH resolver IPs |
 | Print spooler exfiltration | `PrintSpoolerMonitor` | Spool directory watch + burst detection |
 | FileSystemWatcher path limitation | `VolumeMountMonitor` | Dynamic `AddWatchPath()` on new volumes |
-| Rogue Cast device / LAN relay | `CastDeviceGuard` | Baseline Cast devices at boot, Google OUI validation, kill non-baselined non-Google connections |
+| Rogue Cast device / LAN relay | `CastDeviceGuard` | Kill all Cast connections to port 8008/8009 on LAN unless target IP is in TrustedCastDevices allowlist |
 
 ## What Sentinel CAN Detect Even Against Skilled Attackers
 

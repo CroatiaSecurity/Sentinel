@@ -4,6 +4,25 @@ All notable changes to Windows Sentinel are documented in this file.
 
 ## [1.0.5] - 2026-06-27
 
+### Fixed — Codebase Cleanup, Performance & Architectural Bug Fixes
+
+**Problem:** Multiple logical bugs, performance bottlenecks, and architectural conflicts were identified:
+1. **Fighting Services Loop**: `BootIntegrityGuard` was mounting the system's EFI System Partition (ESP) to `S:` using `mountvol.exe S: /S` to perform boot integrity analysis, but never unmounted it. Within 5 seconds, `VolumeMountMonitor` would see the mounted ESP and unmount it via `mountvol S: /D`, creating an endless mount-dismount cycle.
+2. **TLS Baseline False Positives**: `TlsCertificateMonitor` added raw thumbprints to baseline on startup but queried formatted keys (`"store:thumbprint"`) at runtime. It also missed pre-existing `TrustedPublisher` certificates, triggering false-positive removals on service start.
+3. **C2 Beaconing Categorization Bug**: `ScoringEngine` misclassified `"C2 Beaconing Behavior"` rules as `ReverseShell` because the `"c2"` substring check matched first, preventing correct allowlist suppression.
+4. **Heavy Polling Loops**: `CriticalServiceGuard` queried event logs over the last 30 minutes every 10 seconds. `DeviceInstallMonitor` polled all keys in SCM registry database every 30 seconds.
+5. **Security & Memory Growth**: `DllEntropyAnalyzer` used a static path cache that could be bypassed by overwriting scanned files, while growing indefinitely in memory.
+
+**Fix:**
+- **EFI Auto-Unmount** — `BootIntegrityGuard` now tracks its temporary mounts and unmounts the EFI partition using `mountvol S: /D` in a `finally` block immediately after checks finish.
+- **Unified TLS Baseline Keys** — Standardized keys to `"{storeLabel}:{thumbprint}"` on startup and expanded baseline coverage to audit both Root and TrustedPublisher stores.
+- **Categorization Ordering** — Placed the `"beacon"` check at the top of `CategorizeDetection` so beaconing rules are correctly categorized as `C2Beaconing` (which is not a President's Law rule).
+- **SCM Query Optimization** — `CriticalServiceGuard` now queries event logs dynamically using `TimeCreated[@SystemTime >= '{lastQueryTime}']`, reducing query overhead to a few seconds.
+- **Deduplicated DLL Scanning** — `DiskWideDllScanner` now uses a sliding 10-minute cache and 125-second creation age window to prevent duplicate alerts.
+- **Secure Entropy Analyzer Cache** — `DllEntropyAnalyzer` maps paths to `LastWriteTimeUtc` and prunes non-existent files.
+- **Unified President's Law Checks** — Delegated `AllowlistService.IsPresidentsLawRule()` to `ScoringEngine.IsPresidentsLawRule()`. Deleted unused duplicate validation functions from `SecurityValidation.cs`.
+- **Baseline Persist Ordering** — Network destinations are ordered by popularity before baseline pruning.
+
 ### Fixed — VolumeMountMonitor: SUBST Drive Auto-Dismount Now Fires Unconditionally
 
 **Problem:** An attacker's fallback SUBST drive (S:) was being created minutes after Sentinel start but was NOT being auto-dismounted. The v1.0.1 auto-dismount logic required correlation with a `PhantomDeviceMonitor` block within a 2-minute window. If no phantom device happened to be blocked — or if the SUBST creation happened outside the 2-minute window — the attacker's staging drive was left untouched and only logged as a Tier2 indicator.
