@@ -1,6 +1,6 @@
 [Setup]
 AppName=Windows Sentinel
-AppVersion=1.0.4
+AppVersion=1.0.5
 AppPublisher=Gorstak
 AppPublisherURL=https://gorstak.eu
 SourceDir=.
@@ -11,7 +11,7 @@ UninstallDisplayIcon={app}\Sentinel.ico
 Compression=lzma2
 SolidCompression=yes
 OutputDir=.
-OutputBaseFilename=WindowsSentinelSetup-1.0.4
+OutputBaseFilename=WindowsSentinelSetup-1.0.5
 PrivilegesRequired=admin
 ; Allow upgrading over existing install
 UsePreviousAppDir=yes
@@ -52,7 +52,7 @@ Filename: "{sys}\sc.exe"; Parameters: "delete ""Windows Sentinel"""; Flags: runh
 ; Remove application directory (but NOT ProgramData logs)
 Type: filesandordirs; Name: "{app}"
 ; Remove Program Files (x86) leftovers if previous install was there
-Type: filesandordirs; Name: "{pf32}\WindowsSentinel"
+Type: filesandordirs; Name: "{commonpf32}\WindowsSentinel"
 
 [Code]
 // Pascal Script for upgrade/uninstall logic
@@ -121,7 +121,7 @@ begin
     Exec(ExpandConstant('{sys}\sc.exe'), 'delete "Windows Sentinel"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
     // Remove Program Files (x86) folder if exists (legacy installs)
-    DelTree(ExpandConstant('{pf32}\WindowsSentinel'), True, True, True);
+    DelTree(ExpandConstant('{commonpf32}\WindowsSentinel'), True, True, True);
 
     // NOTE: ProgramData\WindowsSentinel logs are intentionally PRESERVED
   end;

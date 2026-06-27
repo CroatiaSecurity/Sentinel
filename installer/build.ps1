@@ -23,10 +23,10 @@ Write-Host "Stamped $($CsprojFiles.Count) .csproj files with version $Version" -
 
 # 0.2 Stamp Inno Setup script
 $SetupScript = Join-Path $PSScriptRoot "setup.iss"
-$issContent = Get-Content $SetupScript -Raw
+$issContent = [System.IO.File]::ReadAllText($SetupScript)
 $issContent = $issContent -replace 'AppVersion=.*', "AppVersion=$Version"
 $issContent = $issContent -replace 'OutputBaseFilename=WindowsSentinelSetup-.*', "OutputBaseFilename=WindowsSentinelSetup-$Version"
-Set-Content $SetupScript -Value $issContent -NoNewline
+[System.IO.File]::WriteAllText($SetupScript, $issContent)
 
 # 1. Clean previous build artifacts and publish folder
 $PublishDir = Join-Path $PSScriptRoot "..\publish"
