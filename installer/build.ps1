@@ -32,9 +32,9 @@ $issContent = $issContent -replace 'OutputBaseFilename=WindowsSentinelSetup-.*',
 $PublishDir = Join-Path $PSScriptRoot "..\publish"
 $SrcDir = Join-Path $PSScriptRoot "..\src"
 Write-Host "Cleaning bin/obj and publish outputs..." -ForegroundColor Yellow
-Get-ChildItem -Path $SrcDir -Include bin,obj -Directory -Recurse | Remove-Item -Recurse -Force
+Get-ChildItem -Path $SrcDir -Include bin,obj -Directory -Recurse | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 if (Test-Path $PublishDir) {
-    Remove-Item -Path $PublishDir -Recurse -Force
+    Remove-Item -Path $PublishDir -Recurse -Force -ErrorAction SilentlyContinue
 }
 
 # 2. Build and Publish Service (win-x64 self-contained single-file)
