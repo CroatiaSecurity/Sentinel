@@ -2,6 +2,28 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [1.0.4] - 2026-06-27
+
+### Fixed — CastDeviceGuard Rewritten: Allowlist-Only (No Baseline, No OUI Trust)
+
+**Problem:** v1.0.2 and v1.0.3 used baseline-at-boot + Google OUI validation. Both defeated:
+- Persistent rogue device present at every boot → gets baselined every time
+- Spoofed Google MAC (B0-B3-69) → passes OUI check
+- PhantomDeviceMonitor correlation depends on device appearing *after* boot
+
+**Fix:** Ripped out all heuristic logic. New approach is zero-trust:
+- **No baseline.** Startup state is irrelevant.
+- **No OUI check.** MAC addresses are trivially spoofed.
+- **No PhantomDeviceMonitor correlation.** Doesn't matter when the device appeared.
+- **Explicit allowlist only.** If the IP isn't in `TrustedCastDevices`, connection is killed.
+- **Self-healing firewall rules.** Blocks the rogue IP via netsh — survives Chrome reconnection.
+- **5-second scan interval.** Connection killed within 5s of establishment.
+
+**Config:** `appsettings.json` → `"Sentinel": { "TrustedCastDevices": ["192.168.1.50"] }`
+Default is empty array = all Cast connections killed.
+
+**Impact on Chromecast users:** Add your device IP to the allowlist. One-time config.
+
 ## [1.0.3] - 2026-06-27
 
 ### Fixed — CastDeviceGuard: Spoofed Google OUI Evasion
