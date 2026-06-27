@@ -630,6 +630,7 @@ namespace WindowsSentinel.Core
     {
         private readonly DetectionEngine _detectionEngine;
         private readonly ILogger<DiskWideDllScanner> _logger;
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTime> _alertedDlls = new(StringComparer.OrdinalIgnoreCase);
 
         public DiskWideDllScanner(DetectionEngine de, ILogger<DiskWideDllScanner> l) { _detectionEngine = de; _logger = l; }
 
@@ -642,7 +643,13 @@ namespace WindowsSentinel.Core
                 try
                 {
                     await Task.Delay(120000, ct);
-                    // Scan user temp directories for suspicious DLLs
+
+                    var pruneCutoff = DateTime.UtcNow.AddMinutes(-10);
+                    foreach (var kvp in _alertedDlls.Where(x => x.Value < pruneCutoff).ToList())
+                    {
+                        _alertedDlls.TryRemove(kvp.Key, out _);
+                    }
+
                     var tempDir = Path.GetTempPath();
                     if (Directory.Exists(tempDir))
                     {
@@ -651,8 +658,12 @@ namespace WindowsSentinel.Core
                             try
                             {
                                 var fi = new FileInfo(dll);
-                                if (fi.Length > 0 && fi.CreationTimeUtc > DateTime.UtcNow.AddMinutes(-3))
+                                if (fi.Length > 0 && 
+                                    fi.CreationTimeUtc > DateTime.UtcNow.AddSeconds(-125) &&
+                                    !_alertedDlls.ContainsKey(dll))
                                 {
+                                    _alertedDlls.TryAdd(dll, DateTime.UtcNow);
+
                                     await _detectionEngine.EmitAsync(new DetectionEvent
                                     {
                                         RuleName = "DLL Sideloading: DLL in Temp Directory",
@@ -680,7 +691,7 @@ namespace WindowsSentinel.Core
     {
         private readonly DetectionEngine _detectionEngine;
         private readonly ILogger<DllEntropyAnalyzer> _logger;
-        private readonly HashSet<string> _scanned = new(StringComparer.OrdinalIgnoreCase);
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTime> _scanned = new(StringComparer.OrdinalIgnoreCase);
 
         public DllEntropyAnalyzer(DetectionEngine de, ILogger<DllEntropyAnalyzer> l) { _detectionEngine = de; _logger = l; }
 
@@ -693,6 +704,15 @@ namespace WindowsSentinel.Core
                 try
                 {
                     await Task.Delay(180000, ct);
+
+                    foreach (var path in _scanned.Keys.ToList())
+                    {
+                        if (!File.Exists(path))
+                        {
+                            _scanned.TryRemove(path, out _);
+                        }
+                    }
+
                     var tempDir = Path.GetTempPath();
                     var downloadsDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
                     foreach (var dir in new[] { tempDir, downloadsDir })
@@ -700,12 +720,18 @@ namespace WindowsSentinel.Core
                         if (!Directory.Exists(dir)) continue;
                         foreach (var file in Directory.EnumerateFiles(dir, "*.dll", SearchOption.TopDirectoryOnly))
                         {
-                            if (_scanned.Contains(file)) continue;
-                            _scanned.Add(file);
                             try
                             {
+                                var fi = new FileInfo(file);
+                                var currentWriteTime = fi.LastWriteTimeUtc;
+
+                                if (_scanned.TryGetValue(file, out var prevWriteTime) && prevWriteTime == currentWriteTime)
+                                    continue;
+
+                                _scanned[file] = currentWriteTime;
+
                                 var entropy = CalculateEntropy(file);
-                                if (entropy > 7.2) // High entropy = likely packed/encrypted
+                                if (entropy > 7.2)
                                 {
                                     await _detectionEngine.EmitAsync(new DetectionEvent
                                     {
@@ -738,7 +764,7 @@ namespace WindowsSentinel.Core
                 {
                     for (int i = 0; i < read; i++) freq[buf[i]]++;
                     total += read;
-                    if (total > 1_000_000) break; // Sample first 1MB
+                    if (total > 1_000_000) break; 
                 }
             }
             if (total == 0) return 0;
@@ -1629,46 +1655,66 @@ namespace WindowsSentinel.Core
         /// </summary>
         private async Task AuditAndBaselineStoreAsync(CancellationToken ct)
         {
-            using var store = new System.Security.Cryptography.X509Certificates.X509Store(
-                System.Security.Cryptography.X509Certificates.StoreName.Root,
-                System.Security.Cryptography.X509Certificates.StoreLocation.LocalMachine);
-            store.Open(System.Security.Cryptography.X509Certificates.OpenFlags.ReadOnly);
+            var storesToAudit = new (System.Security.Cryptography.X509Certificates.StoreName Name, string Label)[]
+            {
+                (System.Security.Cryptography.X509Certificates.StoreName.Root, "Root"),
+                (System.Security.Cryptography.X509Certificates.StoreName.TrustedPublisher, "TrustedPublisher")
+            };
 
-            foreach (var cert in store.Certificates)
+            foreach (var (storeName, storeLabel) in storesToAudit)
             {
                 if (ct.IsCancellationRequested) break;
-                _baselineThumbprints.Add(cert.Thumbprint);
 
-                var analysis = AnalyzeCert(cert);
-
-                // Known public root CAs: fully trusted, no alert
-                if (analysis.IsPublicRootCa) continue;
-
-                // Known enterprise/dev tool CAs: log as Tier2 for visibility but no action
-                if (analysis.IsEnterpriseCa || analysis.IsDevTool)
+                try
                 {
-                    await EmitCertDetectionAsync(cert, analysis, null, isStartupScan: true);
-                    continue;
-                }
+                    using var store = new System.Security.Cryptography.X509Certificates.X509Store(
+                        storeName,
+                        System.Security.Cryptography.X509Certificates.StoreLocation.LocalMachine);
+                    store.Open(System.Security.Cryptography.X509Certificates.OpenFlags.ReadOnly);
 
-                // Unknown cert with suspicious signals: flag it even though it was pre-existing
-                // This catches the "install cert before Sentinel starts" attack
-                if (analysis.Confidence >= 0.70)
-                {
-                    _logger.LogWarning("[TlsCertificateMonitor] Startup: suspicious pre-existing cert: {Subject} (confidence {Conf:F2})",
-                        cert.Subject, analysis.Confidence);
-
-                    // Very high confidence at startup (>=0.90): actively remove
-                    // These are almost certainly attacker MitM certs planted before Sentinel started
-                    ResponseAction? startupResponse = null;
-                    if (analysis.Confidence >= 0.90 && _config.ActiveResponse)
+                    foreach (var cert in store.Certificates)
                     {
-                        startupResponse = ResponseAction.RemoveCert;
-                        _logger.LogWarning("[TlsCertificateMonitor] REMOVING malicious pre-existing cert: {Subject}", cert.Subject);
-                    }
+                        if (ct.IsCancellationRequested) break;
 
-                    await EmitCertDetectionAsync(cert, analysis, null, isStartupScan: false, startupResponse);
-                    // Note: isStartupScan=false here so the response engine actually processes the removal
+                        var key = $"{storeLabel}:{cert.Thumbprint}";
+                        _baselineThumbprints.Add(key);
+
+                        var analysis = AnalyzeCert(cert);
+
+                        // Known public root CAs: fully trusted, no alert
+                        if (analysis.IsPublicRootCa) continue;
+
+                        // Known enterprise/dev tool CAs: log as Tier2 for visibility but no action
+                        if (analysis.IsEnterpriseCa || analysis.IsDevTool)
+                        {
+                            await EmitCertDetectionAsync(cert, analysis, null, isStartupScan: true);
+                            continue;
+                        }
+
+                        // Unknown cert with suspicious signals: flag it even though it was pre-existing
+                        // This catches the "install cert before Sentinel starts" attack
+                        if (analysis.Confidence >= 0.70)
+                        {
+                            _logger.LogWarning("[TlsCertificateMonitor] Startup: suspicious pre-existing cert in {Store}: {Subject} (confidence {Conf:F2})",
+                                storeLabel, cert.Subject, analysis.Confidence);
+
+                            // Very high confidence at startup (>=0.90): actively remove
+                            // These are almost certainly attacker MitM certs planted before Sentinel started
+                            ResponseAction? startupResponse = null;
+                            if (analysis.Confidence >= 0.90 && _config.ActiveResponse)
+                            {
+                                startupResponse = ResponseAction.RemoveCert;
+                                _logger.LogWarning("[TlsCertificateMonitor] REMOVING malicious pre-existing cert: {Subject}", cert.Subject);
+                            }
+
+                            await EmitCertDetectionAsync(cert, analysis, null, isStartupScan: false, startupResponse);
+                            // Note: isStartupScan=false here so the response engine actually processes the removal
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "[TlsCertificateMonitor] Audit of {Store} failed", storeLabel);
                 }
             }
         }
@@ -4939,10 +4985,12 @@ namespace WindowsSentinel.Core
 
         private Task CaptureBaselineAsync()
         {
+            bool mountedByUs = false;
             try
             {
                 // Mount EFI first so the baseline captures the post-mount BCD state
-                FindEfiMountPoint();
+                var result = FindEfiMountPoint();
+                mountedByUs = result.MountedByUs;
 
                 _baselineBcd = CaptureBcdEntries();
                 _baselineBootDrivers = CaptureBootDriverList();
@@ -4951,6 +4999,13 @@ namespace WindowsSentinel.Core
                     _baselineBcd.Count, _baselineBootDrivers.Count);
             }
             catch (Exception ex) { _logger.LogDebug(ex, "[BootIntegrityGuard] Baseline capture failed"); }
+            finally
+            {
+                if (mountedByUs)
+                {
+                    UnmountEfiVolume();
+                }
+            }
             return Task.CompletedTask;
         }
 
@@ -5086,9 +5141,13 @@ namespace WindowsSentinel.Core
 
         private async Task CheckEfiPartitionAsync()
         {
+            string? efiDir = null;
+            bool mountedByUs = false;
             try
             {
-                var efiDir = FindEfiMountPoint();
+                var result = FindEfiMountPoint();
+                efiDir = result.Path;
+                mountedByUs = result.MountedByUs;
                 if (string.IsNullOrEmpty(efiDir)) return;
 
                 // Check for bootmgfw.efi.bak — classic bootkit signature
@@ -5162,6 +5221,13 @@ namespace WindowsSentinel.Core
                 }
             }
             catch (Exception ex) { _logger.LogDebug(ex, "[BootIntegrityGuard] EFI check error"); }
+            finally
+            {
+                if (mountedByUs)
+                {
+                    UnmountEfiVolume();
+                }
+            }
         }
 
         private static Dictionary<string, string> CaptureBcdEntries()
@@ -5229,15 +5295,19 @@ namespace WindowsSentinel.Core
             catch { return null; }
         }
 
-        private static string? FindEfiMountPoint()
+        private static (string? Path, bool MountedByUs) FindEfiMountPoint()
         {
             try
             {
                 // Check if EFI partition is already mounted
                 var paths = new[] { @"S:\", @"T:\", @"Z:\", @"Y:\", @"X:\", @"W:\" };
                 foreach (var p in paths)
+                {
                     if (Directory.Exists(Path.Combine(p, "EFI")))
-                        return p;
+                    {
+                        return (p, false);
+                    }
+                }
 
                 // Try mounting via mountvol S: /S
                 var psi = new ProcessStartInfo("mountvol.exe", @"S: /S")
@@ -5245,10 +5315,25 @@ namespace WindowsSentinel.Core
                 using var proc = Process.Start(psi);
                 proc?.WaitForExit(5000);
 
-                if (Directory.Exists(@"S:\EFI")) return @"S:\";
+                if (Directory.Exists(@"S:\EFI"))
+                {
+                    return (@"S:\", true);
+                }
             }
             catch { }
-            return null;
+            return (null, false);
+        }
+
+        private static void UnmountEfiVolume()
+        {
+            try
+            {
+                var psi = new ProcessStartInfo("mountvol.exe", @"S: /D")
+                { CreateNoWindow = true, UseShellExecute = false };
+                using var proc = Process.Start(psi);
+                proc?.WaitForExit(5000);
+            }
+            catch { }
         }
     }
 }

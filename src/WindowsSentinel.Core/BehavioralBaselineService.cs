@@ -151,7 +151,11 @@ namespace WindowsSentinel.Core
                     Processes = _knownProcesses.Values.ToList(),
                     Paths = _knownExecutablePaths.Values.ToList(),
                     ParentChild = _knownParentChild.Values.ToList(),
-                    NetworkDestinations = _knownNetworkDestinations.Values.Take(1000).ToList(),
+                    NetworkDestinations = _knownNetworkDestinations.Values
+                        .OrderByDescending(n => n.ConnectionCount)
+                        .ThenByDescending(n => n.LastSeen)
+                        .Take(1000)
+                        .ToList(),
                     ExportedAt = DateTimeOffset.UtcNow
                 };
                 _cacheStore.Save("baseline", "data", JsonSerializer.Serialize(data));

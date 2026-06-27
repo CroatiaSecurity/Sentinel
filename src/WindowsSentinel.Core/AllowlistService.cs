@@ -123,45 +123,7 @@ namespace WindowsSentinel.Core
 
         private static bool IsPresidentsLawRule(string? ruleName)
         {
-            if (string.IsNullOrEmpty(ruleName)) return false;
-            var lower = ruleName.ToLowerInvariant();
-            return lower.Contains("lsass") ||
-                   lower.Contains("amsi") ||
-                   lower.Contains("etw") ||
-                   lower.Contains("ransomware") ||
-                   lower.Contains("shadow copy") ||
-                   lower.Contains("self-protection") ||
-                   lower.Contains("selfprotection") ||
-                   lower.Contains("honeypot") ||
-                   lower.Contains("chain-nuke") ||
-                   lower.Contains("composite") ||
-                   lower.Contains("verdictgate") ||
-                   lower.Contains("verdict gate") ||
-                   lower.Contains("webcamhijack") ||
-                   lower.Contains("webcam hijack") ||
-                   lower.Contains("audiohijack") ||
-                   lower.Contains("audio hijack") ||
-                   lower.Contains("antitamper") ||
-                   lower.Contains("anti-tamper") ||
-                   lower.Contains("tampering") ||
-                   lower.Contains("privilege") ||
-                   lower.Contains("attack") ||
-                   lower.Contains("badusb") ||
-                   lower.Contains("arp") ||
-                   lower.Contains("canary") ||
-                   lower.Contains("dns") ||
-                   lower.Contains("tls") ||
-                   lower.Contains("neuro") ||
-                   lower.Contains("hollowing") ||
-                   lower.Contains("reverseshell") ||
-                   lower.Contains("reverse shell") ||
-                   lower.Contains("threatintel");
-            // NOTE: "beaconing" removed from President's Law (v0.8.2).
-            // Beaconing detections now use multi-factor cryptographic trust verification
-            // (Authenticode + path + diversity + baseline) in the BeaconingDetector itself.
-            // The detection ALWAYS fires and is logged, but the response is demoted for
-            // verified-legitimate software. This can't be exploited because demotion requires
-            // a valid Authenticode signature (needs the publisher's private key).
+            return ScoringEngine.IsPresidentsLawRule(ruleName);
         }
 
         private void LoadUserAllowlist()

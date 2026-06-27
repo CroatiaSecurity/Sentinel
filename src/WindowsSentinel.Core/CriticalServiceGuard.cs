@@ -48,6 +48,8 @@ namespace WindowsSentinel.Core
         // Already-alerted services (cooldown to avoid flood)
         private readonly ConcurrentDictionary<string, DateTimeOffset> _alertedServices = new();
 
+        private DateTime _lastEventQueryTime;
+
         private static readonly TimeSpan ScanInterval = TimeSpan.FromSeconds(10);
         private static readonly TimeSpan CrashWindow = TimeSpan.FromMinutes(30);
         private static readonly TimeSpan AlertCooldown = TimeSpan.FromMinutes(10);
@@ -118,6 +120,8 @@ namespace WindowsSentinel.Core
             _logger.LogInformation("[CriticalServiceGuard] Started — monitoring {Count} critical services",
                 MonitoredServices.Count);
 
+            _lastEventQueryTime = DateTime.UtcNow.Subtract(CrashWindow);
+
             while (!ct.IsCancellationRequested)
             {
                 try
@@ -136,12 +140,11 @@ namespace WindowsSentinel.Core
         {
             try
             {
-                // Query Service Control Manager for recent crash events
-                // Event ID 7034 = service terminated unexpectedly
-                // Event ID 7031 = service terminated unexpectedly, taking recovery action
-                var query = new EventLogQuery("System", PathType.LogName,
-                    "*[System[Provider[@Name='Service Control Manager'] and (EventID=7034 or EventID=7031) " +
-                    $"and TimeCreated[timediff(@SystemTime) <= {(long)CrashWindow.TotalMilliseconds}]]]");
+                var queryTime = DateTime.UtcNow;
+                var queryXml = "*[System[Provider[@Name='Service Control Manager'] and (EventID=7034 or EventID=7031) " +
+                               $"and TimeCreated[@SystemTime >= '{_lastEventQueryTime.ToString("yyyy-MM-ddTHH:mm:ss.fffZ")}']]]";
+
+                var query = new EventLogQuery("System", PathType.LogName, queryXml);
 
                 using var reader = new EventLogReader(query);
 
@@ -181,6 +184,8 @@ namespace WindowsSentinel.Core
                         }
                     }
                 }
+
+                _lastEventQueryTime = queryTime.AddSeconds(-2);
             }
             catch (UnauthorizedAccessException)
             {

@@ -46,22 +46,7 @@ namespace WindowsSentinel.Core
             return IPAddress.TryParse(ip, out _);
         }
 
-        public static bool ValidatePid(int pid)
-        {
-            return pid >= 0 && pid <= 4194304; // Max PID limit in Windows/Linux
-        }
 
-        public static bool ValidatePort(int port)
-        {
-            return port >= 0 && port <= 65535;
-        }
-
-        public static bool ValidateTimestamp(DateTime timestamp)
-        {
-            // Within reasonable limits (not years in the past or future)
-            var diff = (DateTime.UtcNow - timestamp.ToUniversalTime()).Duration();
-            return diff.TotalDays < 365;
-        }
 
         private static readonly HashSet<string> WindowsReservedNames = new(StringComparer.OrdinalIgnoreCase)
         {

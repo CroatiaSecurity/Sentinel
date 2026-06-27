@@ -70,8 +70,7 @@ namespace WindowsSentinel.Core
 
         private static bool IsAttackOnUserRule(DetectionEvent detection)
         {
-            var category = CategorizeDetection(detection);
-            return category == DetectionCategory.AttackOnUser;
+            return CategorizeDetection(detection.RuleName) == DetectionCategory.AttackOnUser;
         }
 
         /// <summary>
@@ -83,9 +82,9 @@ namespace WindowsSentinel.Core
         /// This prevents false-positive kills on legitimate software (Steam, torrent clients, etc.)
         /// while remaining unexploitable since demotion requires a valid code signature.
         /// </summary>
-        private static bool IsPresidentsLawRule(DetectionEvent detection)
+        public static bool IsPresidentsLawRule(string? ruleName)
         {
-            var category = CategorizeDetection(detection);
+            var category = CategorizeDetection(ruleName);
             return category is DetectionCategory.CredentialDump
                 or DetectionCategory.SecurityEvasion
                 or DetectionCategory.Ransomware
@@ -96,6 +95,11 @@ namespace WindowsSentinel.Core
                 or DetectionCategory.PrivilegeEscalation
                 or DetectionCategory.DnsAnomaly
                 or DetectionCategory.NetworkAnomaly;
+        }
+
+        private static bool IsPresidentsLawRule(DetectionEvent detection)
+        {
+            return IsPresidentsLawRule(detection.RuleName);
         }
 
         /// <summary>
@@ -226,15 +230,16 @@ namespace WindowsSentinel.Core
             return null;
         }
 
-        private static DetectionCategory CategorizeDetection(DetectionEvent detection)
+        public static DetectionCategory CategorizeDetection(string? ruleName)
         {
-            var r = detection.RuleName.ToLowerInvariant();
+            if (string.IsNullOrEmpty(ruleName)) return DetectionCategory.Unknown;
+            var r = ruleName.ToLowerInvariant();
+            if (r.Contains("beacon")) return DetectionCategory.C2Beaconing;
             if (r.Contains("lsass") || r.Contains("credential") || r.Contains("credtool") || r.Contains("canary")) return DetectionCategory.CredentialDump;
             if (r.Contains("reverse shell") || r.Contains("reverseshell") || r.Contains("c2") || r.Contains("callback")) return DetectionCategory.ReverseShell;
             if (r.Contains("injection") || r.Contains("hollowing") || r.Contains("threatintel")) return DetectionCategory.ProcessInjection;
             if (r.Contains("ransomware") || r.Contains("shadow copy")) return DetectionCategory.Ransomware;
             if (r.Contains("evasion") || r.Contains("tampering") || r.Contains("amsi") || r.Contains("etw")) return DetectionCategory.SecurityEvasion;
-            if (r.Contains("beacon")) return DetectionCategory.C2Beaconing;
             if (r.Contains("persistence") || r.Contains("scheduled task")) return DetectionCategory.Persistence;
             if (r.Contains("privilege") || r.Contains("uac bypass")) return DetectionCategory.PrivilegeEscalation;
             if (r.Contains("unsigned")) return DetectionCategory.UnsignedBinary;
@@ -249,6 +254,11 @@ namespace WindowsSentinel.Core
             if (r.Contains("arp") || r.Contains("route") || r.Contains("tls") || r.Contains("badusb") || r.Contains("network")) return DetectionCategory.NetworkAnomaly;
             if (r.Contains("exfil")) return DetectionCategory.DataExfiltration;
             return DetectionCategory.Unknown;
+        }
+
+        private static DetectionCategory CategorizeDetection(DetectionEvent detection)
+        {
+            return CategorizeDetection(detection.RuleName);
         }
 
         private static Verdict DetermineVerdict(double score) => score switch
