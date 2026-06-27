@@ -19,7 +19,8 @@ namespace WindowsSentinel.Core
         Quarantine,
         QuarantineAndKill,
         RemoveCertAndKillAdder,
-        RemoveRegistryEntry
+        RemoveRegistryEntry,
+        DismountVolume
     }
 
     public enum SignalType

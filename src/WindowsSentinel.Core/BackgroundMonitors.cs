@@ -3205,6 +3205,18 @@ namespace WindowsSentinel.Core
         public bool IsBlockedDevice(string ip) => _blockedIps.ContainsKey(ip);
 
         /// <summary>
+        /// Returns true if any phantom device was blocked within the specified time window.
+        /// Used by VolumeMountMonitor to correlate new volume mounts with recent phantom device
+        /// blocks — the attacker's fallback pattern creates a staging drive after their C2 relay
+        /// gets cut off.
+        /// </summary>
+        public bool HasRecentBlock(TimeSpan window)
+        {
+            var threshold = DateTime.UtcNow - window;
+            return _blockedIps.Values.Any(blockTime => blockTime > threshold);
+        }
+
+        /// <summary>
         /// Returns true if the given IP belongs to a device that was detected after startup
         /// (regardless of whether it was blocked). Used for correlation.
         /// </summary>

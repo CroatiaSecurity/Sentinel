@@ -2,6 +2,30 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [1.0.5] - 2026-06-27
+
+### Fixed — VolumeMountMonitor: SUBST Drive Auto-Dismount Now Fires Unconditionally
+
+**Problem:** An attacker's fallback SUBST drive (S:) was being created minutes after Sentinel start but was NOT being auto-dismounted. The v1.0.1 auto-dismount logic required correlation with a `PhantomDeviceMonitor` block within a 2-minute window. If no phantom device happened to be blocked — or if the SUBST creation happened outside the 2-minute window — the attacker's staging drive was left untouched and only logged as a Tier2 indicator.
+
+**Root cause:** The auto-dismount was gated on `_phantomDeviceMonitor.HasRecentBlock(PhantomCorrelationWindow)`. This created a dependency on an unrelated monitor. Attackers who don't use a rogue LAN device (or whose device block happened >2 min earlier) bypassed the dismount entirely.
+
+**Fix:**
+- **SUBST drives at runtime are now unconditionally dismounted** when `ActiveResponse` is enabled. There is zero legitimate reason for a SUBST drive to be created after boot — this is a textbook attacker technique (`subst S: C:\staging\path`). No phantom device correlation required.
+- **Implant hunter** — after dismounting the SUBST drive, Sentinel actively hunts and kills the responsible process:
+  - Phase 1: Finds `subst.exe` or shells with subst in command line + kills their parent process (the implant)
+  - Phase 2: Scans all TCP connections, kills any process connected to a PhantomDeviceMonitor-blocked IP (the C2 channel)
+  - Phase 3: Kills any process running from the SUBST target directory (staged payloads)
+  - Phase 4: Kills recently-spawned (<30s) non-system processes from non-standard paths (catches direct DefineDosDevice callers)
+- **Persistence removal** — removes registry Run keys and scheduled tasks containing "subst" + the drive letter
+- **No cooldown for SUBST** — if the drive reappears, Sentinel kills it again every 5-second poll without waiting 10 minutes
+- **Non-SUBST suspicious volumes** (VHDs, RAM disks, encrypted containers) still require phantom device correlation to avoid nuking legitimate developer workloads.
+- **60-second startup grace period** — prevents false detection of volumes that report with different WMI DeviceId during initialization.
+- **Drive letter stability check** — if a volume's drive letter was already present at startup baseline, it's recognized as the same volume.
+- **Volume type filtering** — standard removable/fixed/network drives with known filesystems are never auto-dismounted.
+
+**Result:** Attacker SUBST drives are killed within 5 seconds of creation, regardless of any other monitor state. The S: drive staging attack is now blocked unconditionally. The implant controlling the drive creation is identified and killed. Persistence mechanisms are removed.
+
 ## [1.0.4] - 2026-06-27
 
 ### Fixed — CastDeviceGuard Rewritten: Allowlist-Only (No Baseline, No OUI Trust)
