@@ -2,6 +2,18 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [1.0.6] - 2026-06-27
+
+### Fixed — FileActivityMonitor: PID 0 / Closed-Handle EDR Bypass Blocked
+
+**Problem:** When a process wrote to a protected OS directory (like `System32` or `SysWOW64`) and closed the file handle extremely quickly, the Restart Manager API query in `GetProcessUsingFile` returned `PID 0` (`unknown`). Because PID 0 was hardcoded as a trusted system writer (under the assumption it was system-idle or kernel writing), the EDR completely bypassed verification and allowed the write. This allowed malware to drop malicious DLLs/backdoors into System32 without triggering alerts or kills.
+
+**Fix:**
+- Injected `SignerTrustService` into `FileActivityMonitor`.
+- Modified `IsTrustedSystemWriter` to accept the target file path.
+- If the writing process is unresolved (PID 0), the monitor now verifies the dropped file's Authenticode signature using both catalog checking (`WinVerifyTrust` validation against protected OS folders) and embedded certificate trust (for Microsoft, Windows, and `.NET` signed binaries).
+- Writes by unidentified processes that drop unsigned or third-party binaries to `System32` now trigger a Tier 1 behavioral alert and process/implant containment.
+
 ## [1.0.5] - 2026-06-27
 
 ### Fixed — Codebase Cleanup, Performance & Architectural Bug Fixes

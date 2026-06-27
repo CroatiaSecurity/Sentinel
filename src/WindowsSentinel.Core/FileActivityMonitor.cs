@@ -14,6 +14,7 @@ namespace WindowsSentinel.Core
         private readonly RansomwareIoMonitor? _ransomwareIoMonitor;
         private readonly SentinelConfig _config;
         private readonly ILogger<FileActivityMonitor> _logger;
+        private readonly SignerTrustService _signerTrust;
         private readonly List<FileSystemWatcher> _watchers = new();
 
         [StructLayout(LayoutKind.Sequential)]
@@ -67,6 +68,7 @@ namespace WindowsSentinel.Core
             DetectionEngine detectionEngine,
             SentinelConfig config,
             ILogger<FileActivityMonitor> logger,
+            SignerTrustService signerTrust,
             RansomwareIoMonitor? ransomwareIoMonitor = null)
         {
             _fusionEngine = fusionEngine;
@@ -74,6 +76,7 @@ namespace WindowsSentinel.Core
             _ransomwareIoMonitor = ransomwareIoMonitor;
             _config = config;
             _logger = logger;
+            _signerTrust = signerTrust;
 
             Start();
         }
@@ -255,7 +258,7 @@ namespace WindowsSentinel.Core
                 !pathLower.Contains(@"\drivers\etc\"))
             {
                 // Only alert if the writer is NOT TrustedInstaller, Windows Update, Defender, or Sentinel itself
-                if (!IsTrustedSystemWriter(processInfo.pid, processInfo.name) &&
+                if (!IsTrustedSystemWriter(processInfo.pid, processInfo.name, e.FullPath) &&
                     !processInfo.name.Contains("Sentinel", StringComparison.OrdinalIgnoreCase) &&
                     !processInfo.name.Contains("Kiro", StringComparison.OrdinalIgnoreCase) &&
                     !processInfo.name.Contains("Chrome", StringComparison.OrdinalIgnoreCase) &&
@@ -395,7 +398,7 @@ namespace WindowsSentinel.Core
                    pathLower.Contains(@"\windows\syswow64\");
         }
 
-        private static bool IsTrustedSystemWriter(int pid, string processName)
+        internal bool IsTrustedSystemWriter(int pid, string processName, string filePath)
         {
             // TrustedInstaller (Windows Modules Installer), Windows Update, Defender, DISM
             var trustedNames = new[] { "trustedinstaller", "tiworker", "msiexec",
@@ -413,8 +416,38 @@ namespace WindowsSentinel.Core
             var lowerName = processName.ToLowerInvariant();
             if (trustedNames.Any(t => lowerName.Contains(t))) return true;
 
-            // PID 4 = SYSTEM kernel, PID 0 = Idle (driver loads, legitimate)
-            if (pid == 4 || pid == 0) return true;
+            // PID 4 = SYSTEM kernel
+            if (pid == 4) return true;
+
+            // If PID is 0 (unresolved process because the handle was closed quickly),
+            // only trust it if the file itself is signed by Microsoft.
+            if (pid == 0)
+            {
+                try
+                {
+                    if (File.Exists(filePath))
+                    {
+                        // Catalog-signed system files in System32 won't return signer CN via GetSignerName,
+                        // but WinVerifyTrust confirms they chain to a trusted Microsoft root.
+                        if (IsProtectedOsDirectory(filePath.ToLowerInvariant()) &&
+                            SecurityValidation.VerifyAuthenticodeSignature(filePath))
+                        {
+                            return true;
+                        }
+
+                        var signer = _signerTrust.GetSignerName(filePath);
+                        if (signer != null && 
+                            (signer.Contains("Microsoft", StringComparison.OrdinalIgnoreCase) ||
+                             signer.Contains("Windows", StringComparison.OrdinalIgnoreCase) ||
+                             signer.Equals(".NET", StringComparison.OrdinalIgnoreCase)))
+                        {
+                            return true;
+                        }
+                    }
+                }
+                catch { }
+                return false;
+            }
 
             // Own PID = Sentinel itself writing (e.g., quarantine lock files)
             if (pid == Environment.ProcessId) return true;

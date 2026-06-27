@@ -1,6 +1,6 @@
 [Setup]
 AppName=Windows Sentinel
-AppVersion=1.0.5
+AppVersion=1.0.6
 AppPublisher=Gorstak
 AppPublisherURL=https://gorstak.eu
 SourceDir=.
@@ -11,7 +11,7 @@ UninstallDisplayIcon={app}\Sentinel.ico
 Compression=lzma2
 SolidCompression=yes
 OutputDir=.
-OutputBaseFilename=WindowsSentinelSetup-1.0.5
+OutputBaseFilename=WindowsSentinelSetup-1.0.6
 PrivilegesRequired=admin
 ; Allow upgrading over existing install — but always use new path (migrate from x86)
 UsePreviousAppDir=no
