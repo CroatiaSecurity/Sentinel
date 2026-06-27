@@ -8,10 +8,20 @@ All notable changes to Windows Sentinel are documented in this file.
 
 **Problem:** An attacker's fallback SUBST drive (S:) was being created minutes after Sentinel start but was NOT being auto-dismounted. The v1.0.1 auto-dismount logic required correlation with a `PhantomDeviceMonitor` block within a 2-minute window. If no phantom device happened to be blocked — or if the SUBST creation happened outside the 2-minute window — the attacker's staging drive was left untouched and only logged as a Tier2 indicator.
 
-**Root cause:** The auto-dismount was gated on `_phantomDeviceMonitor.HasRecentBlock(PhantomCorrelationWindow)`. This created a dependency on an unrelated monitor. Attackers who don't use a rogue LAN device (or whose device block happened >2 min earlier) bypassed the dismount entirely.
+**Root cause:** Multiple issues compounded:
+1. The auto-dismount was gated on `_phantomDeviceMonitor.HasRecentBlock(PhantomCorrelationWindow)`. This created a dependency on an unrelated monitor. Attackers who don't use a rogue LAN device (or whose device block happened >2 min earlier) bypassed the dismount entirely.
+2. `GetMountedVolumes()` used `Win32_Volume` WMI class exclusively. SUBST drives are DOS device aliases (`DefineDosDevice`) — they are NOT real volumes and do NOT appear in `Win32_Volume`. The scan loop never saw the S: drive at all.
+3. Even after fixing local enumeration, if the SUBST drive existed at boot (attacker persistence via Run key or scheduled task), it was baselined and never flagged. The 60-second grace period also protected SUBST drives created immediately after startup.
+4. **The fundamental issue:** SUBST drives are **per-session DOS device mappings**. The service runs in Session 0 (`UseWindowsService()`), while the attacker creates the SUBST in the user's interactive session (Session 1+). Both `DriveInfo.GetDrives()` and `QueryDosDevice()` from Session 0 cannot see per-session SUBST drives in other sessions. `DefineDosDevice` removal also doesn't work cross-session.
 
 **Fix:**
-- **SUBST drives at runtime are now unconditionally dismounted** when `ActiveResponse` is enabled. There is zero legitimate reason for a SUBST drive to be created after boot — this is a textbook attacker technique (`subst S: C:\staging\path`). No phantom device correlation required.
+- **Cross-session SUBST detection** — `GetMountedVolumes()` now uses `WTSGetActiveConsoleSessionId` + `CreateProcessAsUser` to run `subst.exe` in the active user session and parse its output. This sees SUBST drives regardless of which session created them.
+- **Registry-based detection** — additionally scans all user profile `Run` keys for `subst` commands, catching persistent SUBST drives even when the user session hasn't started yet.
+- **Cross-session SUBST removal** — `RemoveSubstDrive` now falls back to executing `subst /D` in the user's session via `CreateProcessAsUser` when local `DefineDosDevice` fails (which it always will for user-session drives).
+- **Synthetic DeviceId fast-path** — drives discovered via user-session enumeration get `SUBST:X:` DeviceId and are immediately classified as SUBST without needing `QueryDosDevice` (which wouldn't work cross-session anyway).
+- **SUBST drives are NEVER baselined** — at startup, any detected SUBST drive is immediately dismounted. Attacker persistence that creates the drive before Sentinel starts no longer evades detection.
+- **SUBST drives bypass the grace period** — the 60-second startup grace window no longer protects SUBST drives. They are killed regardless of timing.
+- **SUBST drives at runtime are unconditionally dismounted** when `ActiveResponse` is enabled. No phantom device correlation required.
 - **Implant hunter** — after dismounting the SUBST drive, Sentinel actively hunts and kills the responsible process:
   - Phase 1: Finds `subst.exe` or shells with subst in command line + kills their parent process (the implant)
   - Phase 2: Scans all TCP connections, kills any process connected to a PhantomDeviceMonitor-blocked IP (the C2 channel)

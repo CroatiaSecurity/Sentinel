@@ -213,7 +213,6 @@ namespace WindowsSentinel.Agent
             catch { }
 
             var rateLimiter = new RateLimiter(3, TimeSpan.FromSeconds(5));
-            bool isSilenced = false;
             var shownCache = new System.Collections.Generic.Dictionary<string, DateTime>();
 
             while (!cancellationToken.IsCancellationRequested)

@@ -192,7 +192,9 @@ namespace WindowsSentinel.Core
         {
             try
             {
+#pragma warning disable SYSLIB0057 // CreateFromSignedFile is obsolete but has no X509CertificateLoader equivalent for Authenticode
                 using var cert = X509Certificate2.CreateFromSignedFile(filePath);
+#pragma warning restore SYSLIB0057
                 // Parse CN from Subject
                 var subject = cert.Subject;
                 // Subject looks like: CN="Microsoft Corporation", O="Microsoft Corporation", ...

@@ -13,8 +13,8 @@ SolidCompression=yes
 OutputDir=.
 OutputBaseFilename=WindowsSentinelSetup-1.0.5
 PrivilegesRequired=admin
-; Allow upgrading over existing install
-UsePreviousAppDir=yes
+; Allow upgrading over existing install — but always use new path (migrate from x86)
+UsePreviousAppDir=no
 
 [Files]
 Source: "assets\Sentinel.ico"; DestDir: "{app}"; Flags: ignoreversion
@@ -93,6 +93,9 @@ begin
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  ResultCode: Integer;
+  OldUninstaller: String;
 begin
   Result := '';
   // If upgrading (service exists, run key exists, or folder exists), stop existing service and reset ACLs
@@ -102,6 +105,41 @@ begin
      DirExists(ExpandConstant('{commonpf32}\WindowsSentinel')) then
   begin
     StopExistingService();
+  end;
+
+  // Run the old uninstaller silently to clean up the previous installation
+  // (handles migration from Program Files (x86) to Program Files)
+  if RegQueryStringValue(HKLM, 'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Windows Sentinel_is1',
+     'UninstallString', OldUninstaller) then
+  begin
+    // Strip quotes from the uninstall path
+    StringChangeEx(OldUninstaller, '"', '', True);
+    if FileExists(OldUninstaller) then
+    begin
+      // Reset ACLs on the old uninstaller directory so it can actually execute
+      Exec(ExpandConstant('{sys}\takeown.exe'),
+        '/F "' + ExtractFileDir(OldUninstaller) + '" /R /A /D Y',
+        '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+      Exec(ExpandConstant('{sys}\icacls.exe'),
+        '"' + ExtractFileDir(OldUninstaller) + '" /grant Administrators:F /T /C /Q',
+        '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+      // Run uninstaller silently
+      Exec(OldUninstaller, '/VERYSILENT /NORESTART /SUPPRESSMSGBOXES', '',
+        SW_HIDE, ewWaitUntilTerminated, ResultCode);
+      Sleep(2000);
+    end;
+  end;
+
+  // Final cleanup: forcefully remove the old x86 directory if it still exists
+  if DirExists(ExpandConstant('{commonpf32}\WindowsSentinel')) then
+  begin
+    Exec(ExpandConstant('{sys}\takeown.exe'),
+      ExpandConstant('/F "{commonpf32}\WindowsSentinel" /R /A /D Y'),
+      '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec(ExpandConstant('{sys}\icacls.exe'),
+      ExpandConstant('"{commonpf32}\WindowsSentinel" /grant Administrators:F /T /C /Q'),
+      '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    DelTree(ExpandConstant('{commonpf32}\WindowsSentinel'), True, True, True);
   end;
 end;
 

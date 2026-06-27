@@ -1868,8 +1868,10 @@ namespace WindowsSentinel.Core
         {
             try
             {
+#pragma warning disable SYSLIB0057 // CreateFromSignedFile is obsolete but has no X509CertificateLoader equivalent for Authenticode
                 var cert = new System.Security.Cryptography.X509Certificates.X509Certificate2(
                     System.Security.Cryptography.X509Certificates.X509Certificate.CreateFromSignedFile(filePath));
+#pragma warning restore SYSLIB0057
                 return cert;
             }
             catch { return null; }
