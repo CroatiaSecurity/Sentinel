@@ -1394,7 +1394,7 @@ namespace WindowsSentinel.Core
                     return null;
                 }
 
-                // Set up process to capture stdout
+                // Set up process to capture stdout via temp file, using cmd.exe but fully hidden
                 var tempFile = Path.Combine(Path.GetTempPath(), $"sentinel_subst_{sessionId}_{Guid.NewGuid():N}.tmp");
                 var cmdLine = string.IsNullOrEmpty(arguments)
                     ? $"cmd.exe /c \"{exePath}\" > \"{tempFile}\" 2>&1"
@@ -1402,10 +1402,12 @@ namespace WindowsSentinel.Core
 
                 var si = new STARTUPINFO { cb = Marshal.SizeOf<STARTUPINFO>() };
                 si.lpDesktop = @"winsta0\default";
+                si.dwFlags = 0x00000001; // STARTF_USESHOWWINDOW
+                si.wShowWindow = 0;      // SW_HIDE
 
                 if (CreateProcessAsUser(duplicateToken, null, cmdLine,
                     IntPtr.Zero, IntPtr.Zero, false,
-                    0x00000010 /* CREATE_NEW_CONSOLE */ | 0x08000000 /* CREATE_NO_WINDOW */,
+                    0x08000000 /* CREATE_NO_WINDOW */,
                     IntPtr.Zero, null, ref si, out var pi))
                 {
                     WaitForSingleObject(pi.hProcess, 5000);
