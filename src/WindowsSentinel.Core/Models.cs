@@ -44,6 +44,12 @@ namespace WindowsSentinel.Core
         public bool ActiveResponse { get; set; } = true;
         public string? LogPath { get; set; }
         public string? WatchPath { get; set; }
+        /// <summary>
+        /// Explicit allowlist of Cast device IPs on the LAN.
+        /// Empty = no Cast devices trusted = all Cast connections killed.
+        /// Add your Chromecast/Nest IP here if you have one.
+        /// </summary>
+        public string[] TrustedCastDevices { get; set; } = Array.Empty<string>();
     }
 
     public class ThreatReportingConfig
