@@ -2,6 +2,22 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [1.0.3] - 2026-06-27
+
+### Fixed — CastDeviceGuard: Spoofed Google OUI Evasion
+
+**Problem:** Attacker at 192.168.1.100 spoofed a Google MAC prefix (B0-B3-69) to defeat CastDeviceGuard's OUI validation. The monitor saw "Google OUI + Cast port" and classified it as "probably a legitimate Chromecast" — logging instead of killing.
+
+**Root cause:** The decision logic treated Google OUI as a strong trust signal regardless of other context. But PhantomDeviceMonitor had *already* independently flagged 192.168.1.100 as a phantom device (appeared after boot, not in ARP baseline). That correlation was ignored.
+
+**Fix:** When PhantomDeviceMonitor flags a device as phantom AND the device is not baselined AND it has a Google OUI — that's a **spoofed MAC**. Real Chromecasts are always-on devices present at boot. A phantom device with Google OUI appearing at runtime = deliberate evasion of OUI validation.
+
+**New logic:**
+- Google OUI + phantom device → **KillProcessTree** (0.92 confidence) — spoofed MAC confirmed
+- Google OUI + NOT phantom + not baselined → **LogOnly** (0.55) — probably a new legit Chromecast plugged in
+
+**Result:** The Chrome connection to 192.168.1.100:8009 will now be killed on next scan cycle.
+
 ## [1.0.2] - 2026-06-26
 
 ### Added — CastDeviceGuard (Rogue Chromecast / LAN Relay Detection)

@@ -251,27 +251,46 @@ namespace WindowsSentinel.Core
                 }
                 else if (isGoogleMac && isBrowser)
                 {
-                    // Google OUI but wasn't present at boot — could be a new Chromecast plugged in,
-                    // or a sophisticated attacker spoofing a Google MAC. Log but don't kill.
-                    confidence = 0.55;
-                    response = ResponseAction.LogOnly;
-                    reasoning = "Browser connected to a new Cast device with Google OUI that was NOT " +
-                                "present at boot. This is likely a legitimately new Chromecast/Nest " +
-                                "device plugged in after startup. Logging for correlation. If this " +
-                                "device was not intentionally added by the user, investigate. " +
-                                "The device will be baselined on next service restart.";
-
-                    // Add to post-boot tracking
-                    if (!_postBootCastDevices.ContainsKey(conn.RemoteAddress))
+                    // Google OUI but wasn't present at boot.
+                    // CRITICAL: If PhantomDeviceMonitor already flagged this as a phantom device,
+                    // the Google MAC is SPOOFED. Real Chromecasts don't appear and disappear —
+                    // they're plugged in at boot. A phantom + Google OUI = attacker chose a Google
+                    // MAC prefix specifically to defeat OUI validation.
+                    if (isPhantom)
                     {
-                        _postBootCastDevices[conn.RemoteAddress] = new CastDevice
+                        confidence = 0.92;
+                        response = ResponseAction.KillProcessTree;
+                        reasoning = "Browser connected to a device on Cast port with a Google OUI MAC, " +
+                                    "BUT PhantomDeviceMonitor has independently flagged this device as a " +
+                                    "phantom (it appeared after boot and was not in the ARP table at startup). " +
+                                    "Real Chromecasts are always-on devices present at boot. A phantom device " +
+                                    "with a spoofed Google MAC appearing at runtime is a deliberate evasion " +
+                                    "of OUI-based validation — confirmed rogue C2 relay.";
+                    }
+                    else
+                    {
+                        // Not phantom, Google OUI, not baselined — could be a new legit Chromecast
+                        // plugged in after boot. Log only.
+                        confidence = 0.55;
+                        response = ResponseAction.LogOnly;
+                        reasoning = "Browser connected to a new Cast device with Google OUI that was NOT " +
+                                    "present at boot. This is likely a legitimately new Chromecast/Nest " +
+                                    "device plugged in after startup. Logging for correlation. If this " +
+                                    "device was not intentionally added by the user, investigate. " +
+                                    "The device will be baselined on next service restart.";
+
+                        // Add to post-boot tracking
+                        if (!_postBootCastDevices.ContainsKey(conn.RemoteAddress))
                         {
-                            Ip = conn.RemoteAddress,
-                            Mac = remoteMac ?? "unknown",
-                            IsGoogleOui = true,
-                            DiscoveredAt = DateTimeOffset.UtcNow,
-                            IsBaseline = false
-                        };
+                            _postBootCastDevices[conn.RemoteAddress] = new CastDevice
+                            {
+                                Ip = conn.RemoteAddress,
+                                Mac = remoteMac ?? "unknown",
+                                IsGoogleOui = true,
+                                DiscoveredAt = DateTimeOffset.UtcNow,
+                                IsBaseline = false
+                            };
+                        }
                     }
                 }
                 else if (!isBrowser)
