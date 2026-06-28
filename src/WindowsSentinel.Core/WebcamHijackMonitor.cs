@@ -39,9 +39,9 @@ namespace WindowsSentinel.Core
                             RuleName = "Webcam Hijack: New Video Capture Device Detected",
                             Evidence = $"Video capture devices increased from {_baselineDeviceCount} to {current}",
                             Reasoning = "A new video capture device was registered under the standard webcam device class at runtime, indicating potential hardware emulation or video stream hijacking.",
-                            Confidence = 0.80,
-                            Tier = DetectionTier.Tier1Behavioral,
-                            AuthorizedResponse = ResponseAction.KillProcessTree,
+                            Confidence = 0.60,
+                            Tier = DetectionTier.Tier2Indicator,
+                            AuthorizedResponse = ResponseAction.LogOnly,
                             ProcessName = "SYSTEM",
                             ProcessId = 0
                         });

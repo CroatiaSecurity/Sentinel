@@ -129,15 +129,7 @@ namespace WindowsSentinel.Core
 
         private static string? GetProcessImagePath(int pid)
         {
-            try
-            {
-                using var p = Process.GetProcessById(pid);
-                return p.MainModule?.FileName;
-            }
-            catch
-            {
-                return null;
-            }
+            return SecurityValidation.GetProcessImagePath(pid);
         }
 
         private void ScanConnections(object? state)

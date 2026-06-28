@@ -298,8 +298,7 @@ namespace WindowsSentinel.Core
                     // Process whose parent is a container runtime but runs from host paths
                     if (!ContainerProcesses.Contains(parentName)) continue;
 
-                    string? imagePath = null;
-                    try { imagePath = proc.MainModule?.FileName; } catch { continue; }
+                    string? imagePath = SecurityValidation.GetProcessImagePath(proc.Id);
                     if (string.IsNullOrEmpty(imagePath)) continue;
 
                     // If it's running from a host path (not container layer), that's suspicious

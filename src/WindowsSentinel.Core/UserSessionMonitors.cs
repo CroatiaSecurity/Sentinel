@@ -880,8 +880,7 @@ namespace WindowsSentinel.Core
                         try
                         {
                             var name = proc.ProcessName.ToLowerInvariant();
-                            string? imagePath = null;
-                            try { imagePath = proc.MainModule?.FileName; } catch { }
+                            string? imagePath = SecurityValidation.GetProcessImagePath(proc.Id);
 
                             if ((name.Contains("sendinput") || name.Contains("autoit") ||
                                  name.Contains("nircmd") || name.Contains("inputsimulator")) &&

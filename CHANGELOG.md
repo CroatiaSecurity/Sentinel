@@ -2,6 +2,23 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [1.0.9] - 2026-06-28
+
+### Fixed — Codebase Audit, Usability & EDR Hardening
+
+**Problem:** 
+1. Direct memory-reading calls like `proc.MainModule?.FileName` in background monitors trigger Denuvo anti-cheat detection and crash running games.
+2. In `DataExfiltrationMonitor.cs`, the threshold was set to a tiny 100KB with the `NetworkIsolate` response action, causing network isolation on benign 150KB uploads.
+3. `WebcamHijackMonitor` and `CredentialCanaryMonitor` hardcoded PID 0 (SYSTEM) with `ResponseAction.KillProcessTree`, which is invalid and dangerous.
+4. `SyscallStubMonitor` monitored `ntdll.dll` on disk to detect memory-level hooking/unhooking, which is a logic flaw.
+
+**Fix:**
+- Replaced all direct `proc.MainModule?.FileName` calls in active monitors with the safe `SecurityValidation.GetProcessImagePath` helper to eliminate memory handle-opening triggers.
+- Injected `SignerTrustService` into `MemoryBehaviorAnalyzer.cs` and bypassed module scanning for trusted signed processes entirely. Added strict path validation (rejecting Temp/Downloads) to prevent attackers from bypassing exclusions via directory rename.
+- Increased exfiltration minimum threshold to 20MB and demoted network isolation to LogOnly.
+- Demoted PID 0 responses in `WebcamHijackMonitor` and `CredentialCanaryMonitor` to LogOnly.
+- Renamed the on-disk ntdll hash check alert to correctly describe it as a disk integrity rule rather than a memory unhooking detection.
+
 ## [1.0.8] - 2026-06-28
 
 ### Fixed — Resolved Steam DirectX Setup (dxsetup.exe) Blocks & EDR Hardening

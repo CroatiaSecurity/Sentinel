@@ -24,6 +24,7 @@ namespace WindowsSentinel.Core
     {
         private readonly TelemetryFusionEngine _fusionEngine;
         private readonly DetectionEngine _detectionEngine;
+        private readonly SignerTrustService _signerTrust;
         private readonly ILogger<MemoryBehaviorAnalyzer> _logger;
         private readonly System.Threading.Timer _timer;
 
@@ -55,10 +56,12 @@ namespace WindowsSentinel.Core
         public MemoryBehaviorAnalyzer(
             TelemetryFusionEngine fusionEngine,
             DetectionEngine detectionEngine,
+            SignerTrustService signerTrust,
             ILogger<MemoryBehaviorAnalyzer> logger)
         {
             _fusionEngine = fusionEngine;
             _detectionEngine = detectionEngine;
+            _signerTrust = signerTrust;
             _logger = logger;
             _timer = new System.Threading.Timer(ScanMemory, null, ScanInterval, ScanInterval);
         }
@@ -79,13 +82,25 @@ namespace WindowsSentinel.Core
                         if (path != null)
                         {
                             var lowerPath = path.ToLowerInvariant();
-                            if (lowerPath.Contains(@"\steamapps\common\") ||
-                                lowerPath.Contains(@"\steam\") ||
-                                lowerPath.Contains(@"\gog games\") ||
-                                lowerPath.Contains(@"\epic games\"))
+                            // Reject Temp/Downloads directories to prevent directory rename bypasses
+                            bool isSuspiciousDir = lowerPath.Contains(@"\temp\") || 
+                                                    lowerPath.Contains(@"\downloads\") || 
+                                                    lowerPath.Contains(@"\appdata\local\temp\");
+
+                            if (!isSuspiciousDir && 
+                                (lowerPath.Contains(@"\steamapps\common\") ||
+                                 lowerPath.Contains(@"\steam\") ||
+                                 lowerPath.Contains(@"\gog games\") ||
+                                 lowerPath.Contains(@"\epic games\")))
                             {
                                 continue;
                             }
+                        }
+
+                        // Bypass memory scanner entirely for trusted processes signed by reputable publishers
+                        if (_signerTrust.IsTrustedProcess(proc.Id))
+                        {
+                            continue;
                         }
 
                         if (JitProcesses.Contains(name + ".exe"))

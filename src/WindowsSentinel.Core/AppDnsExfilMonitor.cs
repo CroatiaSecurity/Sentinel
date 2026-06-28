@@ -148,12 +148,7 @@ namespace WindowsSentinel.Core
                 _alertedPids[conn.OwnerPid] = DateTimeOffset.UtcNow;
 
                 string imagePath = "";
-                try
-                {
-                    using var proc = Process.GetProcessById(conn.OwnerPid);
-                    imagePath = proc.MainModule?.FileName ?? "";
-                }
-                catch { }
+                imagePath = SecurityValidation.GetProcessImagePath(conn.OwnerPid) ?? "";
 
                 await _detectionEngine.EmitAsync(new DetectionEvent
                 {

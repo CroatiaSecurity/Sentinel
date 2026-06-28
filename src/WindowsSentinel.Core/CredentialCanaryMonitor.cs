@@ -114,8 +114,8 @@ namespace WindowsSentinel.Core
                         RuleName = "Credential Theft: Canary Credential Deleted",
                         Evidence = $"Honeypot credential '{CanaryTarget}' was removed from Windows Credential Manager",
                         Reasoning = "A canary credential planted by Sentinel was deleted, indicating active credential harvesting. Legitimate tools do not interact with this credential.",
-                        Confidence = 0.95, Tier = DetectionTier.Tier1Behavioral,
-                        AuthorizedResponse = ResponseAction.KillProcessTree,
+                        Confidence = 0.85, Tier = DetectionTier.Tier2Indicator,
+                        AuthorizedResponse = ResponseAction.LogOnly,
                         ProcessName = "SYSTEM", ProcessId = 0
                     });
                     _canaryPlanted = false;

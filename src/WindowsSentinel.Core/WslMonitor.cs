@@ -139,7 +139,7 @@ namespace WindowsSentinel.Core
                     {
                         try
                         {
-                            var path = proc.MainModule?.FileName ?? "";
+                            var path = SecurityValidation.GetProcessImagePath(proc.Id) ?? "";
                             if (!path.Contains("Windows", StringComparison.OrdinalIgnoreCase) &&
                                 !path.Contains("wsl", StringComparison.OrdinalIgnoreCase))
                                 continue;
@@ -265,7 +265,7 @@ namespace WindowsSentinel.Core
                         // Check if the process image is loaded from \\wsl$ path
                         try
                         {
-                            var mainModule = proc.MainModule?.FileName;
+                            var mainModule = SecurityValidation.GetProcessImagePath(proc.Id);
                             if (mainModule != null &&
                                 (mainModule.StartsWith(@"\\wsl", StringComparison.OrdinalIgnoreCase) ||
                                  mainModule.StartsWith(@"\\wsl.localhost", StringComparison.OrdinalIgnoreCase)))

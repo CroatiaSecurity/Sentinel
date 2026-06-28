@@ -1531,7 +1531,9 @@ namespace WindowsSentinel.Core
     }
 
     // ──────────────────────────────────────────────
-    // Syscall Stub Monitor — detects ntdll syscall hook/unhook
+    // Syscall Stub Monitor — monitors on-disk ntdll.dll file integrity.
+    // Note: Actual memory-level hooking/unhooking is detected by MemoryBehaviorAnalyzer
+    // and DllUnloadEngine. This monitor ensures the physical ntdll.dll binary on disk is not altered.
     // ──────────────────────────────────────────────
     public sealed class SyscallStubMonitor : BackgroundService
     {

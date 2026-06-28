@@ -24,7 +24,7 @@ namespace WindowsSentinel.Core
 
         private static readonly TimeSpan Interval = TimeSpan.FromSeconds(15);
         private const long SpikeMultiplier = 10;
-        private const long MinBaselineBytes = 100_000; // 100KB baseline minimum
+        private const long MinBaselineBytes = 20_000_000; // 20MB baseline minimum (prevents tiny 100KB false-positive alerts)
         private const int WarmupSamples = 10;
 
         public DataExfiltrationMonitor(DetectionEngine de, ILogger<DataExfiltrationMonitor> l)
@@ -67,10 +67,10 @@ namespace WindowsSentinel.Core
                         await _detectionEngine.EmitAsync(new DetectionEvent
                         {
                             RuleName = "Data Exfiltration: Outbound Volume Spike",
-                            Evidence = $"Outbound data spike: {delta / 1024}KB in {Interval.TotalSeconds}s (baseline: {_baselineRate / 1024}KB)",
+                            Evidence = $"Outbound data spike: {delta / (1024 * 1024)}MB in {Interval.TotalSeconds}s (baseline: {_baselineRate / (1024 * 1024)}MB)",
                             Reasoning = "A sudden spike in outbound network transfer volume was detected, significantly exceeding the established baseline. This pattern is consistent with data exfiltration.",
-                            Confidence = 0.75, Tier = DetectionTier.Tier1Behavioral,
-                            AuthorizedResponse = ResponseAction.NetworkIsolate,
+                            Confidence = 0.60, Tier = DetectionTier.Tier2Indicator,
+                            AuthorizedResponse = ResponseAction.LogOnly,
                             ProcessName = "SYSTEM", ProcessId = 0
                         });
                     }
