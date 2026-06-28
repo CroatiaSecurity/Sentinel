@@ -223,6 +223,10 @@ namespace WindowsSentinel.Core
             "eventvwr.exe", "slui.exe", "cmstp.exe",
             // Token manipulation
             "tokenvator", "incognito", "getsystem",
+            // Privilege escalation exploits (GodPotato, JuicyPotato, PrintSpoofer, etc.)
+            "potato", "printspoof",
+            // Defense evasion: Clearing Windows Application, System, or Security event logs
+            "wevtutil cl ", "wevtutil.exe cl ", "wevtutil clear-log",
             // Named pipe impersonation
             "\\pipe\\", "ImpersonateNamedPipeClient",
             // DLL hijack indicators
@@ -367,6 +371,16 @@ namespace WindowsSentinel.Core
             (S("ieadvpack.dll",",registerocx"), "LOLLib:ieadvpack"),
             (S("shdocvw.dll",",openurl"), "LOLLib:shdocvw"),
             (S("shell32.dll",",shellexec_rundll"), "LOLLib:shell32"),
+            // === Chinese APT / Earth Lamia / StrikeShark Toolsets ===
+            ("fscan", "APTTool:fscan"),
+            ("kscan", "APTTool:kscan"),
+            ("stowaway", "APTTool:stowaway"),
+            ("rakshasa", "APTTool:rakshasa"),
+            ("supershell", "APTTool:supershell"),
+            ("pillager", "APTTool:pillager"),
+            ("searchall", "APTTool:searchall"),
+            ("ntdsutil", "APTTool:ntdsutil"),
+            ("ntds.dit", "APTTool:ntds.dit"),
 
             // === Exfiltration endpoints ===
             ("pastebin.com/raw", "Exfil:Pastebin"),

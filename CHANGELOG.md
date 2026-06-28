@@ -2,6 +2,15 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [1.1.0] - 2026-06-28
+
+### Added — Earth Lamia & StrikeShark APT Protection Rules
+
+- Added privilege escalation signatures to block `potato` (GodPotato, JuicyPotato, SweetPotato) and `PrintSpoof` (PrintSpoofer) tools.
+- Added defense evasion signatures to block `wevtutil` Application/System/Security log clearing attempts.
+- Added offensive tools and proxy signatures for Chinese APT toolsets: Fscan (`fscan`), Kscan (`kscan`), Stowaway (`stowaway`), Rakshasa (`rakshasa`), Supershell (`supershell`), Pillager (`pillager`), Searchall (`searchall`), and Active Directory credential extraction (`ntdsutil`, `ntds.dit`).
+- Added robust unit test coverage in `RulesTests.cs` for all new threat rules.
+
 ## [1.0.9] - 2026-06-28
 
 ### Fixed — Codebase Audit, Usability & EDR Hardening
