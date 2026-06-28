@@ -327,6 +327,12 @@ namespace WindowsSentinel.Core
 
                 if (!dismounted)
                 {
+                    // Try dismounting as an ISO (virtual CD-ROM)
+                    dismounted = await DismountIso(driveLetter);
+                }
+
+                if (!dismounted)
+                {
                     // Method 3: Remove volume mount point (works for any mounted volume)
                     dismounted = RemoveVolumeMountPoint(driveLetter);
                 }
@@ -1134,7 +1140,8 @@ namespace WindowsSentinel.Core
                 classification.Contains("RamDisk", StringComparison.OrdinalIgnoreCase) ||
                 classification.Contains("Encrypted", StringComparison.OrdinalIgnoreCase) ||
                 classification.Contains("VHD", StringComparison.OrdinalIgnoreCase) ||
-                classification.Contains("PMEM", StringComparison.OrdinalIgnoreCase))
+                classification.Contains("PMEM", StringComparison.OrdinalIgnoreCase) ||
+                classification.Contains("ISO", StringComparison.OrdinalIgnoreCase))
             {
                 return false; // These are suspicious — allow fallback dismount
             }
@@ -1534,6 +1541,15 @@ namespace WindowsSentinel.Core
 
             try
             {
+                // Check if it's a CDRom (virtual ISO mount)
+                try
+                {
+                    var driveInfo = new DriveInfo(vol.DriveLetter.TrimEnd('\\'));
+                    if (driveInfo.DriveType == DriveType.CDRom)
+                        return "ISO";
+                }
+                catch {}
+
                 // Check if it's a SUBST drive
                 var buffer = new char[260];
                 uint result = QueryDosDevice(vol.DriveLetter.TrimEnd('\\'), buffer, (uint)buffer.Length);
@@ -1643,6 +1659,31 @@ namespace WindowsSentinel.Core
             catch (Exception ex)
             {
                 _logger.LogDebug(ex, "[VolumeMountMonitor] VHD dismount failed for {Letter}", driveLetter);
+                return false;
+            }
+        }
+
+        private async Task<bool> DismountIso(string driveLetter)
+        {
+            try
+            {
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "powershell.exe",
+                    Arguments = $"-NoProfile -Command \"Dismount-DiskImage -DevicePath '\\\\.\\{driveLetter}:' -ErrorAction SilentlyContinue\"",
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true
+                };
+                using var proc = Process.Start(psi);
+                if (proc == null) return false;
+                await proc.WaitForExitAsync();
+                return proc.ExitCode == 0;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "[VolumeMountMonitor] ISO dismount failed for {Letter}", driveLetter);
                 return false;
             }
         }
