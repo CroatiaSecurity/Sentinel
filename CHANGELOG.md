@@ -2,6 +2,16 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [1.0.8] - 2026-06-28
+
+### Fixed — Resolved Steam DirectX Setup (dxsetup.exe) Blocks & EDR Hardening
+
+**Problem:** The `FileActivityMonitor` blocks all writes to `System32`/`SysWOW64` unless the writing process name is hardcoded in a trusted list, or has PID 4/0. Legitimate installers like Steam's DirectX setup (`dxsetup.exe` or `dxupdate.exe`) and VC++ Redistributable installers running from non-standard paths (e.g. Steam libraries or temp folders) were blocked and killed. Furthermore, the monitor used `proc.MainModule` which could trigger anti-tamper blocks on running games.
+
+**Fix:**
+- Updated `IsTrustedSystemWriter` in `FileActivityMonitor` to resolve process image paths safely using `SecurityValidation.GetProcessImagePath` (no `PROCESS_VM_READ` handle opens).
+- Added Authenticode signature validation for the writing process itself using `SignerTrustService.IsTrustedFile`. If the installer is officially signed by Microsoft/Windows, it is permitted to perform system folder modifications.
+
 ## [1.0.7] - 2026-06-28
 
 ### Fixed — Resolved Football Manager 2017 & Denuvo Game Blocks

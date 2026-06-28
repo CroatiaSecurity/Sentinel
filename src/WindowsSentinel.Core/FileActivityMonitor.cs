@@ -452,29 +452,37 @@ namespace WindowsSentinel.Core
             // Own PID = Sentinel itself writing (e.g., quarantine lock files)
             if (pid == Environment.ProcessId) return true;
 
-            // Verify by path — only trust if running from System32/Windows or Defender folder
-            try
-            {
-                using var proc = System.Diagnostics.Process.GetProcessById(pid);
-                var imagePath = proc.MainModule?.FileName;
-                if (!string.IsNullOrEmpty(imagePath))
-                {
-                    return imagePath.StartsWith(@"C:\Windows\", StringComparison.OrdinalIgnoreCase) ||
-                           imagePath.Contains(@"\Windows Defender\", StringComparison.OrdinalIgnoreCase) ||
-                           imagePath.Contains(@"\Microsoft Security Client\", StringComparison.OrdinalIgnoreCase) ||
-                           imagePath.Contains(@"\WindowsSentinel\", StringComparison.OrdinalIgnoreCase);
-                }
-            }
-            catch (System.ComponentModel.Win32Exception)
-            {
-                // Access denied — likely a protected system process (csrss, smss, lsass)
-                // If we can't read it but it has a system-like name, trust it
-                return lowerName == "system" || pid <= 4;
-            }
-            catch { }
+             // Verify by path — only trust if running from System32/Windows or Defender folder, or if it is signed by Microsoft
+             try
+             {
+                 var imagePath = SecurityValidation.GetProcessImagePath(pid);
+                 if (!string.IsNullOrEmpty(imagePath))
+                 {
+                     if (imagePath.StartsWith(@"C:\Windows\", StringComparison.OrdinalIgnoreCase) ||
+                         imagePath.Contains(@"\Windows Defender\", StringComparison.OrdinalIgnoreCase) ||
+                         imagePath.Contains(@"\Microsoft Security Client\", StringComparison.OrdinalIgnoreCase) ||
+                         imagePath.Contains(@"\WindowsSentinel\", StringComparison.OrdinalIgnoreCase))
+                     {
+                         return true;
+                     }
 
-            return false;
-        }
+                     // Trust any Authenticode-signed Microsoft updater/setup tool running from non-standard paths (e.g. dxsetup.exe from Steam)
+                     if (_signerTrust.IsTrustedFile(imagePath))
+                     {
+                         return true;
+                     }
+                 }
+             }
+             catch (System.ComponentModel.Win32Exception)
+             {
+                 // Access denied — likely a protected system process (csrss, smss, lsass)
+                 // If we can't read it but it has a system-like name, trust it
+                 return lowerName == "system" || pid <= 4;
+             }
+             catch { }
+ 
+             return false;
+         }
 
         public void Dispose()
         {
