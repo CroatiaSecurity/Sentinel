@@ -253,5 +253,42 @@ namespace WindowsSentinel.Core
                     Marshal.FreeHGlobal(fileInfoPtr);
             }
         }
+
+        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        private static extern IntPtr OpenProcess(uint processAccess, bool bInheritHandle, int processId);
+
+        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        private static extern bool QueryFullProcessImageName(IntPtr hProcess, int dwFlags, System.Text.StringBuilder lpExeName, ref int lpdwSize);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool CloseHandle(IntPtr hObject);
+
+        private const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
+
+        /// <summary>
+        /// Retrieves the full image path of a process using query-limited-information access.
+        /// This is safe to call on Denuvo-protected games and protected system processes
+        /// without triggering anti-tamper or AV heuristic blocks.
+        /// </summary>
+        public static string? GetProcessImagePath(int pid)
+        {
+            IntPtr hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
+            if (hProcess == IntPtr.Zero) return null;
+            try
+            {
+                var builder = new System.Text.StringBuilder(1024);
+                int size = builder.Capacity;
+                if (QueryFullProcessImageName(hProcess, 0, builder, ref size))
+                {
+                    return builder.ToString();
+                }
+            }
+            catch { }
+            finally
+            {
+                CloseHandle(hProcess);
+            }
+            return null;
+        }
     }
 }

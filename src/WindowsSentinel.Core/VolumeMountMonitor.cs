@@ -717,9 +717,14 @@ namespace WindowsSentinel.Core
                         ManagementDateTimeConverter.ToDateTime(creationStr).ToUniversalTime() < cutoff)
                         continue; // Process started more than 30s ago — probably not the creator
 
-                    // Check if it's from a suspicious path (not Program Files, not System32)
+                    // Check if it's from a suspicious path (not Program Files, not System32, and not game directories)
                     var lowerPath = exePath.ToLowerInvariant();
-                    if (lowerPath.StartsWith(@"c:\windows\") || lowerPath.StartsWith(@"c:\program files"))
+                    if (lowerPath.StartsWith(@"c:\windows\") || 
+                        lowerPath.StartsWith(@"c:\program files") ||
+                        lowerPath.Contains(@"\steamapps\common\") ||
+                        lowerPath.Contains(@"\steam\") ||
+                        lowerPath.Contains(@"\gog games\") ||
+                        lowerPath.Contains(@"\epic games\"))
                         continue;
 
                     // This is a recently-spawned, non-system, non-standard-path process.

@@ -319,21 +319,9 @@ namespace WindowsSentinel.Core
             return 0;
         }
 
-        /// <summary>
-        /// Attempts to resolve the image path for a running process by PID.
-        /// Returns null if the process has exited or access is denied.
-        /// </summary>
         private static string? ResolveImagePath(int pid)
         {
-            try
-            {
-                using var proc = Process.GetProcessById(pid);
-                return proc.MainModule?.FileName;
-            }
-            catch
-            {
-                return null;
-            }
+            return SecurityValidation.GetProcessImagePath(pid);
         }
 
         /// <summary>

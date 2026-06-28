@@ -2,6 +2,17 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [1.0.7] - 2026-06-28
+
+### Fixed — Resolved Football Manager 2017 & Denuvo Game Blocks
+
+**Problem:** Multiple components (`MemoryBehaviorAnalyzer`, `ScreenCaptureMonitor`, and `MtpTransferGuard`) queried running processes using `proc.Modules` or `proc.MainModule`, opening process handles with memory-read permissions (`PROCESS_VM_READ`). Denuvo-protected games (like Football Manager 2017) immediately self-terminate upon seeing external handle opens with read access. In addition, the `VolumeMountMonitor` aggressive `SUBST` response killed recently started unsigned processes, targeting games on non-C drives.
+
+**Fix:**
+- Swapped unsafe `proc.Modules` and `proc.MainModule` references with a safe `SecurityValidation.GetProcessImagePath` helper using `PROCESS_QUERY_LIMITED_INFORMATION` via `QueryFullProcessImageName`.
+- Exempted Steam, GOG, and Epic game directories from memory scanning, screen capture, and MTP transfer checks.
+- Exempted game paths from the volume mount fallback killer in `VolumeMountMonitor`.
+
 ## [1.0.6] - 2026-06-27
 
 ### Fixed — FileActivityMonitor: PID 0 / Closed-Handle EDR Bypass Blocked

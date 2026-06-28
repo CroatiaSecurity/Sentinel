@@ -73,12 +73,24 @@ namespace WindowsSentinel.Core
                     {
                         if (proc.Id <= 4) continue;
                         var name = proc.ProcessName;
+                        var path = SecurityValidation.GetProcessImagePath(proc.Id);
+
+                        // Skip scanning games/Steam apps to prevent anti-tamper/anti-cheat false triggers
+                        if (path != null)
+                        {
+                            var lowerPath = path.ToLowerInvariant();
+                            if (lowerPath.Contains(@"\steamapps\common\") ||
+                                lowerPath.Contains(@"\steam\") ||
+                                lowerPath.Contains(@"\gog games\") ||
+                                lowerPath.Contains(@"\epic games\"))
+                            {
+                                continue;
+                            }
+                        }
 
                         if (JitProcesses.Contains(name + ".exe"))
                         {
-                            string? jitPath = null;
-                            try { jitPath = proc.MainModule?.FileName; } catch { }
-                            if (IsLegitimateJitPath(jitPath))
+                            if (IsLegitimateJitPath(path))
                                 continue;
                         }
                         if (_scannedPids.ContainsKey(proc.Id)) continue;
@@ -190,16 +202,21 @@ namespace WindowsSentinel.Core
         private static bool IsLegitimateJitPath(string? path)
         {
             if (string.IsNullOrEmpty(path)) return false;
-            return path.StartsWith(@"C:\Program Files", StringComparison.OrdinalIgnoreCase) ||
-                   path.Contains(@"\AppData\Local\Programs\", StringComparison.OrdinalIgnoreCase) ||
-                   path.Contains(@"\AppData\Local\Google\", StringComparison.OrdinalIgnoreCase) ||
-                   path.Contains(@"\AppData\Local\Microsoft\", StringComparison.OrdinalIgnoreCase) ||
-                   path.Contains(@"\AppData\Local\BraveSoftware\", StringComparison.OrdinalIgnoreCase) ||
-                   path.Contains(@"\AppData\Local\Vivaldi\", StringComparison.OrdinalIgnoreCase) ||
-                   path.Contains(@"\dotnet\", StringComparison.OrdinalIgnoreCase) ||
-                   path.Contains(@"\nodejs\", StringComparison.OrdinalIgnoreCase) ||
-                   path.Contains(@"\Python", StringComparison.OrdinalIgnoreCase) ||
-                   path.StartsWith(@"C:\Windows\", StringComparison.OrdinalIgnoreCase);
+            var lower = path.ToLowerInvariant();
+            return lower.StartsWith(@"c:\program files", StringComparison.OrdinalIgnoreCase) ||
+                   lower.Contains(@"\appdata\local\programs\", StringComparison.OrdinalIgnoreCase) ||
+                   lower.Contains(@"\appdata\local\google\", StringComparison.OrdinalIgnoreCase) ||
+                   lower.Contains(@"\appdata\local\microsoft\", StringComparison.OrdinalIgnoreCase) ||
+                   lower.Contains(@"\appdata\local\bravesoftware\", StringComparison.OrdinalIgnoreCase) ||
+                   lower.Contains(@"\appdata\local\vivaldi\", StringComparison.OrdinalIgnoreCase) ||
+                   lower.Contains(@"\dotnet\", StringComparison.OrdinalIgnoreCase) ||
+                   lower.Contains(@"\nodejs\", StringComparison.OrdinalIgnoreCase) ||
+                   lower.Contains(@"\python", StringComparison.OrdinalIgnoreCase) ||
+                   lower.StartsWith(@"c:\windows\", StringComparison.OrdinalIgnoreCase) ||
+                   lower.Contains(@"\steamapps\common\", StringComparison.OrdinalIgnoreCase) ||
+                   lower.Contains(@"\steam\", StringComparison.OrdinalIgnoreCase) ||
+                   lower.Contains(@"\gog games\", StringComparison.OrdinalIgnoreCase) ||
+                   lower.Contains(@"\epic games\", StringComparison.OrdinalIgnoreCase);
         }
     }
 }

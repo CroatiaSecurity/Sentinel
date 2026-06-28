@@ -94,8 +94,7 @@ namespace WindowsSentinel.Core
         {
             try
             {
-                using var proc = Process.GetProcessById(pid);
-                var path = proc.MainModule?.FileName;
+                var path = SecurityValidation.GetProcessImagePath(pid);
                 if (string.IsNullOrEmpty(path)) return false;
                 return IsTrustedFile(path);
             }

@@ -52,6 +52,20 @@ namespace WindowsSentinel.Core
                             if (proc.Id <= 4 || _alerted.Contains(proc.Id)) continue;
                             if (AllowedCapture.Contains(proc.ProcessName)) continue;
 
+                            // Skip scanning games/Steam apps to prevent anti-tamper/anti-cheat false triggers
+                            var path = SecurityValidation.GetProcessImagePath(proc.Id);
+                            if (path != null)
+                            {
+                                var lowerPath = path.ToLowerInvariant();
+                                if (lowerPath.Contains(@"\steamapps\common\") ||
+                                    lowerPath.Contains(@"\steam\") ||
+                                    lowerPath.Contains(@"\gog games\") ||
+                                    lowerPath.Contains(@"\epic games\"))
+                                {
+                                    continue;
+                                }
+                            }
+
                             // Check if process has loaded d3d11.dll + dxgi.dll (DXGI duplication)
                             bool hasDxgi = false, hasD3d = false;
                             try

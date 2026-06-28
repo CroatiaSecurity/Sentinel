@@ -242,15 +242,7 @@ namespace WindowsSentinel.Core
 
         private static string? ResolveImagePath(int pid)
         {
-            try
-            {
-                using var proc = System.Diagnostics.Process.GetProcessById(pid);
-                return proc.MainModule?.FileName;
-            }
-            catch
-            {
-                return null;
-            }
+            return SecurityValidation.GetProcessImagePath(pid);
         }
     }
 }

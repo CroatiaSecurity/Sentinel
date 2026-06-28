@@ -1131,7 +1131,7 @@ namespace WindowsSentinel.Core
 
                                     // Check if process is from temp/suspicious path
                                     string? imagePath = null;
-                                    try { imagePath = proc.MainModule?.FileName; } catch { }
+                                    try { imagePath = SecurityValidation.GetProcessImagePath(proc.Id); } catch { }
                                     if (!string.IsNullOrEmpty(imagePath) &&
                                         (imagePath.Contains(@"\Temp\", StringComparison.OrdinalIgnoreCase) ||
                                          imagePath.Contains(@"\Downloads\", StringComparison.OrdinalIgnoreCase)))
@@ -1342,7 +1342,7 @@ namespace WindowsSentinel.Core
                                                 name.Contains("bore") || name.Contains("cloudflared");
 
                                 string? imagePath = null;
-                                try { imagePath = proc.MainModule?.FileName; } catch { }
+                                try { imagePath = SecurityValidation.GetProcessImagePath(proc.Id); } catch { }
 
                                 // Tunneling from Temp/Downloads = very suspicious
                                 bool fromSuspiciousPath = imagePath != null &&
@@ -3881,6 +3881,20 @@ namespace WindowsSentinel.Core
         {
             try
             {
+                // Skip scanning games/Steam apps to prevent anti-tamper/anti-cheat false triggers
+                var path = SecurityValidation.GetProcessImagePath(proc.Id);
+                if (path != null)
+                {
+                    var lowerPath = path.ToLowerInvariant();
+                    if (lowerPath.Contains(@"\steamapps\common\") ||
+                        lowerPath.Contains(@"\steam\") ||
+                        lowerPath.Contains(@"\gog games\") ||
+                        lowerPath.Contains(@"\epic games\"))
+                    {
+                        return false;
+                    }
+                }
+
                 foreach (ProcessModule mod in proc.Modules)
                 {
                     var name = mod.ModuleName.ToLowerInvariant();
@@ -3915,7 +3929,7 @@ namespace WindowsSentinel.Core
 
                 // Also check the process's current directory and recently opened files
                 // by scanning file handles in temp/staging directories
-                var procPath = proc.MainModule?.FileName;
+                var procPath = SecurityValidation.GetProcessImagePath(proc.Id);
                 if (procPath != null)
                 {
                     // Explorer.exe doing drag-drop to MTP device — check clipboard/drag data
