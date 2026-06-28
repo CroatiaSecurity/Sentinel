@@ -240,13 +240,34 @@ namespace WindowsSentinel.Core
             watcher.EnableRaisingEvents = true;
             return watcher;
         }
-
         private void OnFileEvent(object sender, FileSystemEventArgs e)
         {
             var pathLower = e.FullPath.ToLowerInvariant();
             if (pathLower.Contains(@"\appdata\") || pathLower.Contains(@"\.git\") || pathLower.Contains(@"\.gemini\"))
             {
                 return;
+            }
+
+            // Optimize: if it is a write of a valid Microsoft-signed file to a protected OS directory,
+            // allow it immediately without doing a process lookup. This avoids sharing locks/violations
+            // (e.g. during DirectX or redistributable installations).
+            if ((e.ChangeType == WatcherChangeTypes.Created || e.ChangeType == WatcherChangeTypes.Changed) &&
+                IsProtectedOsDirectory(pathLower) &&
+                !pathLower.Contains(@"\drivers\etc\"))
+            {
+                try
+                {
+                    if (File.Exists(e.FullPath))
+                    {
+                        if (SecurityValidation.VerifyAuthenticodeSignature(e.FullPath) ||
+                            _signerTrust.IsTrustedFile(e.FullPath))
+                        {
+                            SubmitEvent(e.FullPath, e.ChangeType.ToString().ToUpperInvariant(), null, 0, "System (Trusted File)");
+                            return;
+                        }
+                    }
+                }
+                catch { }
             }
 
             var processInfo = GetProcessUsingFile(e.FullPath);
@@ -335,6 +356,28 @@ namespace WindowsSentinel.Core
             if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath))
             {
                 return (0, "unknown");
+            }
+
+            // Retry loop to handle temporary sharing violations (e.g. while process is writing the file)
+            int retries = 5;
+            while (retries > 0)
+            {
+                try
+                {
+                    using (var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+                    {
+                        break; // Successfully opened, not exclusively locked
+                    }
+                }
+                catch (IOException ex) when ((ex.HResult & 0xFFFF) == 32) // Sharing violation (locked)
+                {
+                    Thread.Sleep(30);
+                    retries--;
+                }
+                catch
+                {
+                    break;
+                }
             }
 
             string sessionKey = Guid.NewGuid().ToString();
