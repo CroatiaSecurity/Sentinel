@@ -34,21 +34,31 @@ namespace WindowsSentinel.Core
 
             // Ensure directory exists
             var directory = Path.GetDirectoryName(_logFilePath);
-            if (directory != null && !Directory.Exists(directory))
+            if (directory != null)
             {
                 try
                 {
-                    Directory.CreateDirectory(directory);
+                    if (!Directory.Exists(directory))
+                    {
+                        Directory.CreateDirectory(directory);
+                    }
 
-                    // Restrict log directory ACLs to SYSTEM and Administrators only
-                    var dirInfo = new DirectoryInfo(directory);
-                    var security = dirInfo.GetAccessControl();
-                    security.SetAccessRuleProtection(true, false);
-                    var systemSid = new System.Security.Principal.SecurityIdentifier(System.Security.Principal.WellKnownSidType.LocalSystemSid, null);
-                    security.AddAccessRule(new System.Security.AccessControl.FileSystemAccessRule(systemSid, System.Security.AccessControl.FileSystemRights.FullControl, System.Security.AccessControl.InheritanceFlags.ContainerInherit | System.Security.AccessControl.InheritanceFlags.ObjectInherit, System.Security.AccessControl.PropagationFlags.None, System.Security.AccessControl.AccessControlType.Allow));
-                    var adminSid = new System.Security.Principal.SecurityIdentifier(System.Security.Principal.WellKnownSidType.BuiltinAdministratorsSid, null);
-                    security.AddAccessRule(new System.Security.AccessControl.FileSystemAccessRule(adminSid, System.Security.AccessControl.FileSystemRights.FullControl, System.Security.AccessControl.InheritanceFlags.ContainerInherit | System.Security.AccessControl.InheritanceFlags.ObjectInherit, System.Security.AccessControl.PropagationFlags.None, System.Security.AccessControl.AccessControlType.Allow));
-                    dirInfo.SetAccessControl(security);
+                    // Only apply production ACLs if this is the default production path in CommonApplicationData
+                    var prodDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "WindowsSentinel");
+                    if (directory.StartsWith(prodDir, StringComparison.OrdinalIgnoreCase))
+                    {
+                        // Restrict log directory ACLs to SYSTEM and Administrators (Full) and Users (Read-Only)
+                        var dirInfo = new DirectoryInfo(directory);
+                        var security = dirInfo.GetAccessControl();
+                        security.SetAccessRuleProtection(true, false);
+                        var systemSid = new System.Security.Principal.SecurityIdentifier(System.Security.Principal.WellKnownSidType.LocalSystemSid, null);
+                        security.AddAccessRule(new System.Security.AccessControl.FileSystemAccessRule(systemSid, System.Security.AccessControl.FileSystemRights.FullControl, System.Security.AccessControl.InheritanceFlags.ContainerInherit | System.Security.AccessControl.InheritanceFlags.ObjectInherit, System.Security.AccessControl.PropagationFlags.None, System.Security.AccessControl.AccessControlType.Allow));
+                        var adminSid = new System.Security.Principal.SecurityIdentifier(System.Security.Principal.WellKnownSidType.BuiltinAdministratorsSid, null);
+                        security.AddAccessRule(new System.Security.AccessControl.FileSystemAccessRule(adminSid, System.Security.AccessControl.FileSystemRights.FullControl, System.Security.AccessControl.InheritanceFlags.ContainerInherit | System.Security.AccessControl.InheritanceFlags.ObjectInherit, System.Security.AccessControl.PropagationFlags.None, System.Security.AccessControl.AccessControlType.Allow));
+                        var usersSid = new System.Security.Principal.SecurityIdentifier(System.Security.Principal.WellKnownSidType.BuiltinUsersSid, null);
+                        security.AddAccessRule(new System.Security.AccessControl.FileSystemAccessRule(usersSid, System.Security.AccessControl.FileSystemRights.Read, System.Security.AccessControl.InheritanceFlags.ContainerInherit | System.Security.AccessControl.InheritanceFlags.ObjectInherit, System.Security.AccessControl.PropagationFlags.None, System.Security.AccessControl.AccessControlType.Allow));
+                        dirInfo.SetAccessControl(security);
+                    }
                 }
                 catch
                 {
