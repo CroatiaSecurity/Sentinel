@@ -2,6 +2,12 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [1.1.2] - 2026-06-29
+
+### Optimized — Remote DLL Unloading Response
+
+- Optimized remote DLL unloading mechanism in `DllUnloadEngine.cs`. Replaced the static, blocking 2000ms delay with a fast 10ms-interval polling loop (up to 200ms max) that dynamically exits when the DLL has finished unloading, providing up to a 100x speedup in responsive remediation.
+
 ## [1.1.1] - 2026-06-29
 
 ### Added — Defensive Hardening and Threat Mitigation
