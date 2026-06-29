@@ -9,6 +9,8 @@ All notable changes to Windows Sentinel are documented in this file.
 - Added privilege escalation signatures to block `potato` (GodPotato, JuicyPotato, SweetPotato) and `PrintSpoof` (PrintSpoofer) tools.
 - Added defense evasion signatures to block `wevtutil` Application/System/Security log clearing attempts.
 - Added offensive tools and proxy signatures for Chinese APT toolsets: Fscan (`fscan`), Kscan (`kscan`), Stowaway (`stowaway`), Rakshasa (`rakshasa`), Supershell (`supershell`), Pillager (`pillager`), Searchall (`searchall`), and Active Directory credential extraction (`ntdsutil`, `ntds.dit`).
+- Added dynamic `CDRom` device mapping and automated ISO/VHD dismounting in `VolumeMountMonitor` to defeat Mark-of-the-Web (MotW) bypasses like the RoguePlanet zero-day exploit.
+- Added behavioral NTFS junction and symlink creation checks in `AttackToolsRule` to prevent local privilege escalation exploits (such as BlueHammer) targeting sensitive system configuration database paths.
 - Added robust unit test coverage in `RulesTests.cs` for all new threat rules.
 
 ## [1.0.9] - 2026-06-28
