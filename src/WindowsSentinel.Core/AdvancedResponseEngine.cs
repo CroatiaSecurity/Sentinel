@@ -422,9 +422,22 @@ namespace WindowsSentinel.Core
                 // Collect forensic evidence before killing
                 try { if (_incidentResponse != null) _ = _incidentResponse.CollectEvidenceAsync(detection); } catch { }
 
+                var reasonText = $"Triggered by rule: {detection.RuleName}. {reason}";
                 if (_chainTracer != null)
                 {
-                    await _chainTracer.TraceAndRespondAsync(detection);
+                    var traceResult = await _chainTracer.TraceAndRespondAsync(detection);
+                    if (traceResult != null && traceResult.Success)
+                    {
+                        if (traceResult.AttackRoot != null)
+                        {
+                            reasonText += $". Root source of attack: {traceResult.AttackRoot.ProcessName} (PID {traceResult.AttackRoot.ProcessId}, Path: '{traceResult.AttackRoot.ImagePath ?? "unknown"}')";
+                        }
+                        if (traceResult.QuarantinedFiles.Count > 0)
+                        {
+                            var files = string.Join(", ", traceResult.QuarantinedFiles.Select(f => $"{f.ProcessName} ('{f.OriginalPath}')"));
+                            reasonText += $". Quarantined source files: {files}";
+                        }
+                    }
                 }
                 else
                 {
@@ -439,7 +452,7 @@ namespace WindowsSentinel.Core
                     ProcessId = detection.ProcessId,
                     ProcessName = detection.ProcessName,
                     ActionTaken = "KILL",
-                    Reason = $"Triggered by rule: {detection.RuleName}. {reason}",
+                    Reason = reasonText,
                     ExecutionTimeMs = stopwatch.ElapsedMilliseconds
                 };
                 await _eventLogger.LogEventAsync("response", responseLog);

@@ -8,7 +8,7 @@ namespace WindowsSentinel.Core
 {
     public class ProcessAncestryCache
     {
-        private volatile IReadOnlyDictionary<int, (int parentId, string name)> _cache = new Dictionary<int, (int, string)>();
+        private volatile IReadOnlyDictionary<int, (int parentId, string name, string imagePath)> _cache = new Dictionary<int, (int, string, string)>();
         private readonly System.Threading.Timer _refreshTimer;
 
         public ProcessAncestryCache()
@@ -24,7 +24,7 @@ namespace WindowsSentinel.Core
             {
                 var processes = Process.GetProcesses();
                 var currentCache = _cache;
-                var newCache = new Dictionary<int, (int parentId, string name)>();
+                var newCache = new Dictionary<int, (int parentId, string name, string imagePath)>();
 
                 foreach (var proc in processes)
                 {
@@ -38,11 +38,10 @@ namespace WindowsSentinel.Core
                     {
                         try
                         {
-                            using (proc)
-                            {
-                                var parentId = GetParentProcessId(proc);
-                                newCache[pid] = (parentId, proc.ProcessName);
-                            }
+                            var parentId = GetParentProcessId(proc);
+                            var imagePath = SecurityValidation.GetProcessImagePath(pid) ?? "";
+                            newCache[pid] = (parentId, proc.ProcessName, imagePath);
+                            proc.Dispose();
                         }
                         catch
                         {
@@ -61,8 +60,8 @@ namespace WindowsSentinel.Core
         public void RecordProcessStart(int pid, int parentPid, string processName, string imagePath)
         {
             // Inject ETW-sourced process data between periodic refreshes
-            var dict = new Dictionary<int, (int, string)>((Dictionary<int, (int, string)>)_cache);
-            dict[pid] = (parentPid, processName);
+            var dict = new Dictionary<int, (int, string, string)>((Dictionary<int, (int, string, string)>)_cache);
+            dict[pid] = (parentPid, processName, imagePath ?? "");
             _cache = dict;
         }
 
@@ -70,9 +69,22 @@ namespace WindowsSentinel.Core
         {
             if (_cache.TryGetValue(pid, out var info))
             {
-                return info;
+                return (info.parentId, info.name);
             }
             return (0, "unknown");
+        }
+
+        public (int parentId, string name, string imagePath) GetProcessInfo(int pid)
+        {
+            if (_cache.TryGetValue(pid, out var info))
+            {
+                return info;
+            }
+            
+            // Fallback to live query
+            string? livePath = null;
+            try { livePath = SecurityValidation.GetProcessImagePath(pid); } catch {}
+            return (0, "unknown", livePath ?? "");
         }
 
         [StructLayout(LayoutKind.Sequential)]

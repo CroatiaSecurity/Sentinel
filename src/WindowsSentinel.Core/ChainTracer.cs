@@ -180,14 +180,9 @@ namespace WindowsSentinel.Core
                 if (currentPid <= 4 || visited.Contains(currentPid)) break;
                 visited.Add(currentPid);
 
-                string? imagePath = null;
-                try
-                {
-                    using var proc = Process.GetProcessById(currentPid);
-                    try { imagePath = proc.MainModule?.FileName; } catch { }
-                    if (string.IsNullOrEmpty(currentName)) currentName = proc.ProcessName;
-                }
-                catch { }
+                var procInfo = _ancestryCache.GetProcessInfo(currentPid);
+                string? imagePath = !string.IsNullOrEmpty(procInfo.imagePath) ? procInfo.imagePath : null;
+                if (string.IsNullOrEmpty(currentName)) currentName = procInfo.name;
 
                 chain.Add(new ProcessNode
                 {
