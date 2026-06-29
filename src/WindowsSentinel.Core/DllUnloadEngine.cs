@@ -321,15 +321,38 @@ namespace WindowsSentinel.Core
 
                 if (!queued) return false;
 
-                // Give target thread time to enter alertable state
-                Thread.Sleep(2000);
-                return true;
+                // Poll every 10ms for up to 200ms to see if the module has been successfully unloaded.
+                // If the target thread is alertable, this will execute almost instantly.
+                for (int i = 0; i < 20; i++)
+                {
+                    Thread.Sleep(10);
+                    if (!IsModuleLoaded(processId, moduleBaseAddress))
+                    {
+                        return true; // Unloaded successfully!
+                    }
+                }
+
+                return false; // Timed out, did not unload
             }
             catch { return false; }
             finally
             {
                 if (hProcess != IntPtr.Zero) CloseHandle(hProcess);
             }
+        }
+
+        private static bool IsModuleLoaded(int processId, IntPtr baseAddress)
+        {
+            try
+            {
+                using var proc = System.Diagnostics.Process.GetProcessById(processId);
+                foreach (System.Diagnostics.ProcessModule mod in proc.Modules)
+                {
+                    if (mod.BaseAddress == baseAddress) return true;
+                }
+            }
+            catch { }
+            return false;
         }
 
         [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
