@@ -27,6 +27,21 @@ namespace WindowsSentinel.Core
             public uint dwOwningPid;
         }
 
+        [StructLayout(LayoutKind.Sequential)]
+        private struct MIB_TCP6ROW_OWNER_PID
+        {
+            [MarshalAs(UnmanagedType.ByValArray, SizeConst = 16)]
+            public byte[] ucLocalAddr;
+            public uint dwLocalScopeId;
+            public uint dwLocalPort;
+            [MarshalAs(UnmanagedType.ByValArray, SizeConst = 16)]
+            public byte[] ucRemoteAddr;
+            public uint dwRemoteScopeId;
+            public uint dwRemotePort;
+            public uint dwState;
+            public uint dwOwningPid;
+        }
+
         [DllImport("iphlpapi.dll", SetLastError = true)]
         private static extern uint GetExtendedTcpTable(
             IntPtr pTcpTable,
@@ -79,61 +94,99 @@ namespace WindowsSentinel.Core
         {
             try
             {
-                uint size = 0;
-                uint ret = GetExtendedTcpTable(IntPtr.Zero, ref size, true, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0);
-                if (ret != 122) // ERROR_INSUFFICIENT_BUFFER
+                // Helper to resolve process name and register the connection
+                void ProcessEstabConnection(int pid, string remoteIp)
                 {
-                    return;
+                    if (pid <= 0) return;
+
+                    string processName = "unknown";
+                    var ancestry = _ancestryCache.GetParent(pid);
+                    if (ancestry.name != "unknown")
+                    {
+                        processName = ancestry.name;
+                    }
+                    else
+                    {
+                        try
+                        {
+                            using var proc = System.Diagnostics.Process.GetProcessById(pid);
+                            processName = proc.ProcessName;
+                        }
+                        catch
+                        {
+                            // Ignore access denied / terminated
+                        }
+                    }
+
+                    RegisterConnection(pid, processName + ".exe", remoteIp);
                 }
 
-                IntPtr pTable = Marshal.AllocHGlobal((int)size);
-                try
+                // 1. Scan IPv4 connections
+                uint size4 = 0;
+                uint ret = GetExtendedTcpTable(IntPtr.Zero, ref size4, true, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0);
+                if (ret == 122) // ERROR_INSUFFICIENT_BUFFER
                 {
-                    ret = GetExtendedTcpTable(pTable, ref size, true, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0);
-                    if (ret == 0) // NO_ERROR
+                    IntPtr pTable = Marshal.AllocHGlobal((int)size4);
+                    try
                     {
-                        int numEntries = Marshal.ReadInt32(pTable);
-                        IntPtr rowPtr = pTable + Marshal.SizeOf<int>();
-                        int rowSize = Marshal.SizeOf<MIB_TCPROW_OWNER_PID>();
-
-                        for (int i = 0; i < numEntries; i++)
+                        ret = GetExtendedTcpTable(pTable, ref size4, true, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0);
+                        if (ret == 0) // NO_ERROR
                         {
-                            var row = Marshal.PtrToStructure<MIB_TCPROW_OWNER_PID>(rowPtr);
-                            rowPtr += rowSize;
+                            int numEntries = Marshal.ReadInt32(pTable);
+                            IntPtr rowPtr = pTable + Marshal.SizeOf<int>();
+                            int rowSize = Marshal.SizeOf<MIB_TCPROW_OWNER_PID>();
 
-                            if (row.dwState == MIB_TCP_STATE_ESTAB)
+                            for (int i = 0; i < numEntries; i++)
                             {
-                                int pid = (int)row.dwOwningPid;
-                                if (pid <= 0) continue;
+                                var row = Marshal.PtrToStructure<MIB_TCPROW_OWNER_PID>(rowPtr);
+                                rowPtr += rowSize;
 
-                                string processName = "unknown";
-                                var ancestry = _ancestryCache.GetParent(pid);
-                                if (ancestry.name != "unknown")
+                                if (row.dwState == MIB_TCP_STATE_ESTAB)
                                 {
-                                    processName = ancestry.name;
+                                    var remoteIp = new System.Net.IPAddress(row.dwRemoteAddr).ToString();
+                                    ProcessEstabConnection((int)row.dwOwningPid, remoteIp);
                                 }
-                                else
-                                {
-                                    try
-                                    {
-                                        using var proc = System.Diagnostics.Process.GetProcessById(pid);
-                                        processName = proc.ProcessName;
-                                    }
-                                    catch
-                                    {
-                                        // Ignore access denied / terminated
-                                    }
-                                }
-
-                                var remoteIp = new System.Net.IPAddress(row.dwRemoteAddr).ToString();
-                                RegisterConnection(pid, processName + ".exe", remoteIp);
                             }
                         }
                     }
+                    finally
+                    {
+                        Marshal.FreeHGlobal(pTable);
+                    }
                 }
-                finally
+
+                // 2. Scan IPv6 connections
+                uint size6 = 0;
+                ret = GetExtendedTcpTable(IntPtr.Zero, ref size6, true, 23 /* AF_INET6 */, TCP_TABLE_OWNER_PID_ALL, 0);
+                if (ret == 122) // ERROR_INSUFFICIENT_BUFFER
                 {
-                    Marshal.FreeHGlobal(pTable);
+                    IntPtr pTable = Marshal.AllocHGlobal((int)size6);
+                    try
+                    {
+                        ret = GetExtendedTcpTable(pTable, ref size6, true, 23, TCP_TABLE_OWNER_PID_ALL, 0);
+                        if (ret == 0) // NO_ERROR
+                        {
+                            int numEntries = Marshal.ReadInt32(pTable);
+                            IntPtr rowPtr = pTable + Marshal.SizeOf<int>();
+                            int rowSize = Marshal.SizeOf<MIB_TCP6ROW_OWNER_PID>();
+
+                            for (int i = 0; i < numEntries; i++)
+                            {
+                                var row = Marshal.PtrToStructure<MIB_TCP6ROW_OWNER_PID>(rowPtr);
+                                rowPtr += rowSize;
+
+                                if (row.dwState == MIB_TCP_STATE_ESTAB)
+                                {
+                                    var remoteIp = new System.Net.IPAddress(row.ucRemoteAddr).ToString();
+                                    ProcessEstabConnection((int)row.dwOwningPid, remoteIp);
+                                }
+                            }
+                        }
+                    }
+                    finally
+                    {
+                        Marshal.FreeHGlobal(pTable);
+                    }
                 }
             }
             catch
@@ -151,10 +204,34 @@ namespace WindowsSentinel.Core
 
             if (NetworkAllowlist.Contains(stem)) return;
 
-            // Determine /24 subnet
-            var parts = remoteAddress.Split('.');
-            if (parts.Length != 4) return; // IPv4 only for simple learning
-            var subnet = $"{parts[0]}.{parts[1]}.{parts[2]}.0";
+            // Determine /24 subnet (IPv4) or /32 prefix (IPv6)
+            string subnet;
+            if (remoteAddress.Contains(':'))
+            {
+                // IPv6 subnet determination (take first two segments for a /32 subnet equivalent)
+                var parts = remoteAddress.Split(':');
+                if (parts.Length >= 2)
+                {
+                    subnet = $"{parts[0]}:{parts[1]}::/32";
+                }
+                else
+                {
+                    subnet = remoteAddress;
+                }
+            }
+            else
+            {
+                // IPv4 subnet determination
+                var parts = remoteAddress.Split('.');
+                if (parts.Length == 4)
+                {
+                    subnet = $"{parts[0]}.{parts[1]}.{parts[2]}.0";
+                }
+                else
+                {
+                    return;
+                }
+            }
 
             if (_processSubnets.Count >= MaxProcesses && !_processSubnets.ContainsKey(processName))
             {

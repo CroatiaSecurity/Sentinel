@@ -187,48 +187,98 @@ namespace WindowsSentinel.Core
         private List<TcpConnectionInfo> GetEstablishedTcpConnections()
         {
             var results = new List<TcpConnectionInfo>();
-            int size = 0;
-            GetExtendedTcpTable(IntPtr.Zero, ref size, false, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0);
-            if (size == 0) return results;
-
-            IntPtr buffer = Marshal.AllocHGlobal(size);
-            try
+            
+            // 1. Scan IPv4
+            int size4 = 0;
+            GetExtendedTcpTable(IntPtr.Zero, ref size4, false, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0);
+            if (size4 > 0)
             {
-                if (GetExtendedTcpTable(buffer, ref size, false, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0) != 0)
-                    return results;
-
-                int numEntries = Marshal.ReadInt32(buffer);
-                int offset = 4;
-
-                for (int i = 0; i < numEntries; i++)
+                IntPtr buffer = Marshal.AllocHGlobal(size4);
+                try
                 {
-                    int state = Marshal.ReadInt32(buffer, offset);
-                    offset += 4;
-                    uint localAddr = (uint)Marshal.ReadInt32(buffer, offset);
-                    offset += 4;
-                    int localPort = IPAddress.NetworkToHostOrder(Marshal.ReadInt32(buffer, offset)) >> 16 & 0xFFFF;
-                    offset += 4;
-                    uint remoteAddr = (uint)Marshal.ReadInt32(buffer, offset);
-                    offset += 4;
-                    int remotePort = IPAddress.NetworkToHostOrder(Marshal.ReadInt32(buffer, offset)) >> 16 & 0xFFFF;
-                    offset += 4;
-                    int ownerPid = Marshal.ReadInt32(buffer, offset);
-                    offset += 4;
-
-                    // Only ESTABLISHED connections
-                    if (state != 5) continue;
-                    if (ownerPid == 0) continue;
-
-                    var remoteIp = new IPAddress(remoteAddr).ToString();
-                    results.Add(new TcpConnectionInfo
+                    if (GetExtendedTcpTable(buffer, ref size4, false, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0) == 0)
                     {
-                        RemoteAddress = remoteIp,
-                        RemotePort = remotePort,
-                        OwnerPid = ownerPid
-                    });
+                        int numEntries = Marshal.ReadInt32(buffer);
+                        int offset = 4;
+                        for (int i = 0; i < numEntries; i++)
+                        {
+                            int state = Marshal.ReadInt32(buffer, offset);
+                            offset += 4;
+                            uint localAddr = (uint)Marshal.ReadInt32(buffer, offset);
+                            offset += 4;
+                            int localPort = IPAddress.NetworkToHostOrder(Marshal.ReadInt32(buffer, offset)) >> 16 & 0xFFFF;
+                            offset += 4;
+                            uint remoteAddr = (uint)Marshal.ReadInt32(buffer, offset);
+                            offset += 4;
+                            int remotePort = IPAddress.NetworkToHostOrder(Marshal.ReadInt32(buffer, offset)) >> 16 & 0xFFFF;
+                            offset += 4;
+                            int ownerPid = Marshal.ReadInt32(buffer, offset);
+                            offset += 4;
+
+                            if (state != 5) continue; // Established only
+                            if (ownerPid == 0) continue;
+
+                            var remoteIp = new IPAddress(remoteAddr).ToString();
+                            results.Add(new TcpConnectionInfo
+                            {
+                                RemoteAddress = remoteIp,
+                                RemotePort = remotePort,
+                                OwnerPid = ownerPid
+                            });
+                        }
+                    }
                 }
+                finally { Marshal.FreeHGlobal(buffer); }
             }
-            finally { Marshal.FreeHGlobal(buffer); }
+
+            // 2. Scan IPv6
+            int size6 = 0;
+            GetExtendedTcpTable(IntPtr.Zero, ref size6, false, 23 /* AF_INET6 */, TCP_TABLE_OWNER_PID_ALL, 0);
+            if (size6 > 0)
+            {
+                IntPtr buffer = Marshal.AllocHGlobal(size6);
+                try
+                {
+                    if (GetExtendedTcpTable(buffer, ref size6, false, 23, TCP_TABLE_OWNER_PID_ALL, 0) == 0)
+                    {
+                        int numEntries = Marshal.ReadInt32(buffer);
+                        int offset = 4;
+                        for (int i = 0; i < numEntries; i++)
+                        {
+                            byte[] localAddrBytes = new byte[16];
+                            Marshal.Copy(IntPtr.Add(buffer, offset), localAddrBytes, 0, 16);
+                            offset += 16;
+                            uint localScopeId = (uint)Marshal.ReadInt32(buffer, offset);
+                            offset += 4;
+                            int localPort = IPAddress.NetworkToHostOrder(Marshal.ReadInt32(buffer, offset)) >> 16 & 0xFFFF;
+                            offset += 4;
+                            byte[] remoteAddrBytes = new byte[16];
+                            Marshal.Copy(IntPtr.Add(buffer, offset), remoteAddrBytes, 0, 16);
+                            offset += 16;
+                            uint remoteScopeId = (uint)Marshal.ReadInt32(buffer, offset);
+                            offset += 4;
+                            int remotePort = IPAddress.NetworkToHostOrder(Marshal.ReadInt32(buffer, offset)) >> 16 & 0xFFFF;
+                            offset += 4;
+                            int state = Marshal.ReadInt32(buffer, offset);
+                            offset += 4;
+                            int ownerPid = Marshal.ReadInt32(buffer, offset);
+                            offset += 4;
+
+                            if (state != 5) continue; // Established only
+                            if (ownerPid == 0) continue;
+
+                            var remoteIp = new IPAddress(remoteAddrBytes).ToString();
+                            results.Add(new TcpConnectionInfo
+                            {
+                                RemoteAddress = remoteIp,
+                                RemotePort = remotePort,
+                                OwnerPid = ownerPid
+                            });
+                        }
+                    }
+                }
+                finally { Marshal.FreeHGlobal(buffer); }
+            }
 
             return results;
         }

@@ -2,6 +2,16 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [1.1.1] - 2026-06-29
+
+### Added — Defensive Hardening and Threat Mitigation
+
+- Added full dual-stack IPv4 and IPv6 socket connection polling in `NetworkMonitor.cs`, `AppDnsExfilMonitor.cs`, and `AppNetworkPolicyMonitor.cs` to prevent C2 network bypasses.
+- Added plane 14 invisible Unicode tag steganography (`U+E0001` - `U+E007F`) detection and stripping in `ClipboardSanitizer.cs`.
+- Added a local process sandbox isolation engine (`PseudoSandbox.cs`) utilizing Windows Job Objects to constrain suspicious processes (64MB memory caps, IDLE CPU, Active Process limits, and UI object blocking).
+- Added DI registrations for the new defensive containment engines inside both the Windows Service and Agent launchers.
+- Added a unit test suite to verify steganographic tag stripping behavior.
+
 ## [1.1.0] - 2026-06-28
 
 ### Added — Earth Lamia & StrikeShark APT Protection Rules

@@ -71,8 +71,25 @@ namespace WindowsSentinel.Core
             if (string.IsNullOrEmpty(text)) return text;
 
             var sb = new System.Text.StringBuilder(text.Length);
-            foreach (char c in text)
+            for (int i = 0; i < text.Length; i++)
             {
+                char c = text[i];
+
+                // Check for surrogate pairs first
+                if (i < text.Length - 1 && char.IsHighSurrogate(c) && char.IsLowSurrogate(text[i + 1]))
+                {
+                    char low = text[i + 1];
+                    // Check if this surrogate pair represents a character in the plane 14 tag block (U+E0000 - U+E007F)
+                    // High surrogate: \uD83F
+                    // Low surrogate: \uDC00 to \uDC7F
+                    if (c == '\uD83F' && low >= '\uDC00' && low <= '\uDC7F')
+                    {
+                        modified = true;
+                        i++; // skip low surrogate
+                        continue;
+                    }
+                }
+
                 // Strip Zero-width characters (U+200B/C/D, FEFF, 2060)
                 if (c == '\u200B' || c == '\u200C' || c == '\u200D' || c == '\uFEFF' || c == '\u2060')
                 {

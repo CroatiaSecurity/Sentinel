@@ -79,6 +79,16 @@ namespace WindowsSentinel.Tests
             Assert.Equal("clean", result);
         }
 
+        [Fact]
+        public void InvisibleUnicodeTags_Plane14_Stripped()
+        {
+            // \uD83F\uDC01 represents U+E0001 (Plane 14 Tag character)
+            var input = "hello\uD83F\uDC01world";
+            var result = ClipboardSanitizer.SanitizeText(input, out var modified);
+            Assert.True(modified);
+            Assert.Equal("helloworld", result);
+        }
+
         // ═══════════════════════════════════════════════════════════════════
         // HOMOGLYPH REPLACEMENT (3 tests)
         // ═══════════════════════════════════════════════════════════════════

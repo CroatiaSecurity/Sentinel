@@ -68,6 +68,21 @@ namespace WindowsSentinel.Core
             public uint owningPid;
         }
 
+        [StructLayout(LayoutKind.Sequential)]
+        private struct MIB_TCP6ROW_OWNER_PID
+        {
+            [MarshalAs(UnmanagedType.ByValArray, SizeConst = 16)]
+            public byte[] localAddr;
+            public uint localScopeId;
+            public uint localPort;
+            [MarshalAs(UnmanagedType.ByValArray, SizeConst = 16)]
+            public byte[] remoteAddr;
+            public uint remoteScopeId;
+            public uint remotePort;
+            public uint state;
+            public uint owningPid;
+        }
+
         private enum TCP_TABLE_CLASS
         {
             TCP_TABLE_BASIC_LISTENER,
@@ -136,164 +151,190 @@ namespace WindowsSentinel.Core
         {
             try
             {
-                int size = 0;
-                uint ret = GetExtendedTcpTable(IntPtr.Zero, ref size, true, 2, TCP_TABLE_CLASS.TCP_TABLE_OWNER_PID_ALL, 0);
-                if (ret != 122) // ERROR_INSUFFICIENT_BUFFER
+                int myPid = Environment.ProcessId;
+                var currentCounts = new Dictionary<string, int>();
+
+                void ProcessConnection(string localIp, string remoteIp, int localPort, int remotePort, int owningPid)
                 {
-                    _logger.LogWarning("[NetworkMonitor] GetExtendedTcpTable failed to get size: {Ret}", ret);
-                    return;
+                    if (owningPid <= 4 || owningPid == myPid) return;
+
+                    var key = $"{remoteIp}:{remotePort}";
+                    currentCounts[key] = currentCounts.GetValueOrDefault(key) + 1;
+
+                    if (IsOutbound(remoteIp))
+                    {
+                        var processName = "unknown";
+                        var (parentPid, name) = _ancestryCache.GetParent(owningPid);
+                        if (name != "unknown")
+                        {
+                            processName = name;
+                        }
+                        else
+                        {
+                            try
+                            {
+                                using var p = Process.GetProcessById(owningPid);
+                                processName = p.ProcessName;
+                            }
+                            catch
+                            {
+                                // Ignore
+                            }
+                        }
+
+                        var imagePath = GetProcessImagePath(owningPid);
+
+                        // 1. Record connection in statistical beaconing detector
+                        _beaconingDetector.RecordConnection(remoteIp, remotePort, owningPid, processName, imagePath, "Established");
+
+                        // 1.5. Record connection in behavioral baseline
+                        _behavioralBaseline?.RecordNetworkConnection(processName, remoteIp, remotePort);
+
+                        // 2. Behavioral checks
+                        // A. Shell process outbound to non-standard port
+                        if (ShellProcesses.Contains(processName) && !StandardPorts.Contains(remotePort))
+                        {
+                            _ = _detectionEngine.EmitAsync(new DetectionEvent
+                            {
+                                RuleName = "Reverse Shell: Suspicious Outbound Connection",
+                                Evidence = $"Shell process '{processName}' (PID {owningPid}) connected to non-standard remote port {remotePort} ({remoteIp}:{remotePort})",
+                                Reasoning = "A shell process initiated an outbound network connection to a non-standard port, indicating a potential active reverse shell or remote access tool session.",
+                                Confidence = 0.85,
+                                Tier = DetectionTier.Tier1Behavioral,
+                                AuthorizedResponse = ResponseAction.KillProcessTree,
+                                ProcessName = processName,
+                                ProcessId = owningPid,
+                                Metadata = new Dictionary<string, string>
+                                {
+                                    { "RemoteAddress", remoteIp },
+                                    { "RemotePort", remotePort.ToString() },
+                                    { "LocalAddress", localIp },
+                                    { "LocalPort", localPort.ToString() }
+                                }
+                            });
+                        }
+
+                        // B. Outbound connection from temp/downloads path
+                        if (IsSuspiciousPath(imagePath) && !IsKnownBrowser(processName))
+                        {
+                            _ = _detectionEngine.EmitAsync(new DetectionEvent
+                            {
+                                RuleName = "Attack Tool: Connection from Suspicious Path",
+                                Evidence = $"Process '{processName}' (PID {owningPid}) running from '{imagePath}' connected to {remoteIp}:{remotePort}",
+                                Reasoning = "A binary running from a temporary or downloads directory initiated an outbound network connection. Logged as an indicator — legitimate portable tools also do this. Kill only if corroborated by hash reputation (Unsafe) or additional behavioral signals.",
+                                Confidence = 0.50,
+                                Tier = DetectionTier.Tier2Indicator,
+                                AuthorizedResponse = ResponseAction.LogOnly,
+                                ProcessName = processName,
+                                ProcessId = owningPid,
+                                Metadata = new Dictionary<string, string>
+                                {
+                                    { "ImagePath", imagePath ?? "" },
+                                    { "RemoteAddress", remoteIp },
+                                    { "RemotePort", remotePort.ToString() },
+                                    { "LocalAddress", localIp },
+                                    { "LocalPort", localPort.ToString() }
+                                }
+                            });
+                        }
+
+                        // 3. Submit network telemetry context to telemetry pipeline
+                        var telemetry = new NetworkTelemetry
+                        {
+                            Type = "NetworkConnection",
+                            ProcessId = owningPid,
+                            ProcessName = processName,
+                            LocalAddress = localIp,
+                            LocalPort = localPort,
+                            RemoteAddress = remoteIp,
+                            RemotePort = remotePort,
+                            Protocol = "TCP",
+                            State = "ESTABLISHED",
+                            Timestamp = DateTime.UtcNow
+                        };
+                        var context = _fusionEngine.FeedEvent(telemetry);
+                        _detectionEngine.SubmitTelemetry(context);
+                    }
                 }
 
-                IntPtr buffer = Marshal.AllocHGlobal(size);
-                try
+                // --- Part A: Scan IPv4 Connections ---
+                int ipv4Size = 0;
+                uint ret = GetExtendedTcpTable(IntPtr.Zero, ref ipv4Size, true, 2, TCP_TABLE_CLASS.TCP_TABLE_OWNER_PID_ALL, 0);
+                if (ret == 122) // ERROR_INSUFFICIENT_BUFFER
                 {
-                    ret = GetExtendedTcpTable(buffer, ref size, true, 2, TCP_TABLE_CLASS.TCP_TABLE_OWNER_PID_ALL, 0);
-                    if (ret != 0)
+                    IntPtr ipv4Buffer = Marshal.AllocHGlobal(ipv4Size);
+                    try
                     {
-                        _logger.LogWarning("[NetworkMonitor] GetExtendedTcpTable failed: {Ret}", ret);
-                        return;
-                    }
-
-                    int numEntries = Marshal.ReadInt32(buffer);
-                    int structSize = Marshal.SizeOf<MIB_TCPROW_OWNER_PID>();
-                    int myPid = Environment.ProcessId;
-
-                    var currentCounts = new Dictionary<string, int>();
-
-                    for (int i = 0; i < numEntries; i++)
-                    {
-                        IntPtr rowPtr = IntPtr.Add(buffer, 4 + i * structSize);
-                        var row = Marshal.PtrToStructure<MIB_TCPROW_OWNER_PID>(rowPtr);
-
-                        // State == 5 (Established)
-                        if (row.state != 5) continue;
-                        if (row.owningPid <= 4 || row.owningPid == myPid) continue;
-
-                        var localIp = new IPAddress(BitConverter.GetBytes(row.localAddr)).ToString();
-                        var remoteIp = new IPAddress(BitConverter.GetBytes(row.remoteAddr)).ToString();
-                        var localPort = GetPort(row.localPort);
-                        var remotePort = GetPort(row.remotePort);
-
-                        var key = $"{remoteIp}:{remotePort}";
-                        currentCounts[key] = currentCounts.GetValueOrDefault(key) + 1;
-
-                        if (IsOutbound(remoteIp))
+                        ret = GetExtendedTcpTable(ipv4Buffer, ref ipv4Size, true, 2, TCP_TABLE_CLASS.TCP_TABLE_OWNER_PID_ALL, 0);
+                        if (ret == 0)
                         {
-                            var processName = "unknown";
-                            var (parentPid, name) = _ancestryCache.GetParent((int)row.owningPid);
-                            if (name != "unknown")
+                            int numEntries = Marshal.ReadInt32(ipv4Buffer);
+                            int structSize = Marshal.SizeOf<MIB_TCPROW_OWNER_PID>();
+                            for (int i = 0; i < numEntries; i++)
                             {
-                                processName = name;
-                            }
-                            else
-                            {
-                                try
-                                {
-                                    using var p = Process.GetProcessById((int)row.owningPid);
-                                    processName = p.ProcessName;
-                                }
-                                catch
-                                {
-                                    // Ignore
-                                }
-                            }
+                                IntPtr rowPtr = IntPtr.Add(ipv4Buffer, 4 + i * structSize);
+                                var row = Marshal.PtrToStructure<MIB_TCPROW_OWNER_PID>(rowPtr);
+                                if (row.state != 5) continue; // Established
 
-                             var imagePath = GetProcessImagePath((int)row.owningPid);
+                                var localIp = new IPAddress(BitConverter.GetBytes(row.localAddr)).ToString();
+                                var remoteIp = new IPAddress(BitConverter.GetBytes(row.remoteAddr)).ToString();
+                                var localPort = GetPort(row.localPort);
+                                var remotePort = GetPort(row.remotePort);
 
-                             // 1. Record connection in statistical beaconing detector
-                             _beaconingDetector.RecordConnection(remoteIp, remotePort, (int)row.owningPid, processName, imagePath, "Established");
- 
-                             // 1.5. Record connection in behavioral baseline
-                             _behavioralBaseline?.RecordNetworkConnection(processName, remoteIp, remotePort);
- 
-                             // 2. Behavioral checks
-                            // A. Shell process outbound to non-standard port
-                            if (ShellProcesses.Contains(processName) && !StandardPorts.Contains(remotePort))
-                            {
-                                _ = _detectionEngine.EmitAsync(new DetectionEvent
-                                {
-                                    RuleName = "Reverse Shell: Suspicious Outbound Connection",
-                                    Evidence = $"Shell process '{processName}' (PID {row.owningPid}) connected to non-standard remote port {remotePort} ({remoteIp}:{remotePort})",
-                                    Reasoning = "A shell process initiated an outbound network connection to a non-standard port, indicating a potential active reverse shell or remote access tool session.",
-                                    Confidence = 0.85,
-                                    Tier = DetectionTier.Tier1Behavioral,
-                                    AuthorizedResponse = ResponseAction.KillProcessTree,
-                                    ProcessName = processName,
-                                    ProcessId = (int)row.owningPid,
-                                    Metadata = new Dictionary<string, string>
-                                    {
-                                        { "RemoteAddress", remoteIp },
-                                        { "RemotePort", remotePort.ToString() },
-                                        { "LocalAddress", localIp },
-                                        { "LocalPort", localPort.ToString() }
-                                    }
-                                });
+                                ProcessConnection(localIp, remoteIp, localPort, remotePort, (int)row.owningPid);
                             }
-
-                            // B. Outbound connection from temp/downloads path
-                            // Demoted to Tier2/LogOnly — too many false positives on legitimate portable tools
-                            // (aria2c, RogueKiller, portable browsers, etc.)
-                            // Real threats from Downloads will be caught by:
-                            // - FileVerdictScanner (hash reputation check + Deny Execute ACL)
-                            // - BeaconingDetector (statistical C2 pattern)
-                            // - BehavioralCorrelationEngine (multi-signal composite)
-                            if (IsSuspiciousPath(imagePath) && !IsKnownBrowser(processName))
-                            {
-                                _ = _detectionEngine.EmitAsync(new DetectionEvent
-                                {
-                                    RuleName = "Attack Tool: Connection from Suspicious Path",
-                                    Evidence = $"Process '{processName}' (PID {row.owningPid}) running from '{imagePath}' connected to {remoteIp}:{remotePort}",
-                                    Reasoning = "A binary running from a temporary or downloads directory initiated an outbound network connection. Logged as an indicator — legitimate portable tools also do this. Kill only if corroborated by hash reputation (Unsafe) or additional behavioral signals.",
-                                    Confidence = 0.50,
-                                    Tier = DetectionTier.Tier2Indicator,
-                                    AuthorizedResponse = ResponseAction.LogOnly,
-                                    ProcessName = processName,
-                                    ProcessId = (int)row.owningPid,
-                                    Metadata = new Dictionary<string, string>
-                                    {
-                                        { "ImagePath", imagePath ?? "" },
-                                        { "RemoteAddress", remoteIp },
-                                        { "RemotePort", remotePort.ToString() },
-                                        { "LocalAddress", localIp },
-                                        { "LocalPort", localPort.ToString() }
-                                    }
-                                });
-                            }
-
-                            // 3. Submit network telemetry context to telemetry pipeline
-                            var telemetry = new NetworkTelemetry
-                            {
-                                Type = "NetworkConnection",
-                                ProcessId = (int)row.owningPid,
-                                ProcessName = processName,
-                                LocalAddress = localIp,
-                                LocalPort = localPort,
-                                RemoteAddress = remoteIp,
-                                RemotePort = remotePort,
-                                Protocol = "TCP",
-                                State = "ESTABLISHED",
-                                Timestamp = DateTime.UtcNow
-                            };
-                            var context = _fusionEngine.FeedEvent(telemetry);
-                            _detectionEngine.SubmitTelemetry(context);
                         }
                     }
-
-                    foreach (var (key, count) in currentCounts)
+                    finally
                     {
-                        _connectionCounts[key] = count;
-                    }
-
-                    // Prune stale entries
-                    var staleKeys = _connectionCounts.Keys.Except(currentCounts.Keys).ToList();
-                    foreach (var k in staleKeys)
-                    {
-                        _connectionCounts.TryRemove(k, out _);
+                        Marshal.FreeHGlobal(ipv4Buffer);
                     }
                 }
-                finally
+
+                // --- Part B: Scan IPv6 Connections ---
+                int ipv6Size = 0;
+                ret = GetExtendedTcpTable(IntPtr.Zero, ref ipv6Size, true, 23, TCP_TABLE_CLASS.TCP_TABLE_OWNER_PID_ALL, 0);
+                if (ret == 122) // ERROR_INSUFFICIENT_BUFFER
                 {
-                    Marshal.FreeHGlobal(buffer);
+                    IntPtr ipv6Buffer = Marshal.AllocHGlobal(ipv6Size);
+                    try
+                    {
+                        ret = GetExtendedTcpTable(ipv6Buffer, ref ipv6Size, true, 23, TCP_TABLE_CLASS.TCP_TABLE_OWNER_PID_ALL, 0);
+                        if (ret == 0)
+                        {
+                            int numEntries = Marshal.ReadInt32(ipv6Buffer);
+                            int structSize = Marshal.SizeOf<MIB_TCP6ROW_OWNER_PID>();
+                            for (int i = 0; i < numEntries; i++)
+                            {
+                                IntPtr rowPtr = IntPtr.Add(ipv6Buffer, 4 + i * structSize);
+                                var row = Marshal.PtrToStructure<MIB_TCP6ROW_OWNER_PID>(rowPtr);
+                                if (row.state != 5) continue; // Established
+
+                                var localIp = new IPAddress(row.localAddr).ToString();
+                                var remoteIp = new IPAddress(row.remoteAddr).ToString();
+                                var localPort = GetPort(row.localPort);
+                                var remotePort = GetPort(row.remotePort);
+
+                                ProcessConnection(localIp, remoteIp, localPort, remotePort, (int)row.owningPid);
+                            }
+                        }
+                    }
+                    finally
+                    {
+                        Marshal.FreeHGlobal(ipv6Buffer);
+                    }
+                }
+
+                // Update counts and prune stale entries
+                foreach (var (key, count) in currentCounts)
+                {
+                    _connectionCounts[key] = count;
+                }
+
+                var staleKeys = _connectionCounts.Keys.Except(currentCounts.Keys).ToList();
+                foreach (var k in staleKeys)
+                {
+                    _connectionCounts.TryRemove(k, out _);
                 }
             }
             catch (Exception ex)

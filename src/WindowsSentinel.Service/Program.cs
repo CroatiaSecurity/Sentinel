@@ -179,6 +179,10 @@ namespace WindowsSentinel.Service
 
                     // v1.0.2: Cast device guard
                     services.AddHostedService<CastDeviceGuard>();
+
+                    // v1.1.0: Defensive isolation containment
+                    services.AddSingleton<PseudoSandbox>();
+                    services.AddHostedService<PseudoSandbox>(sp => sp.GetRequiredService<PseudoSandbox>());
                 });
     }
 }
