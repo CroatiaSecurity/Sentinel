@@ -105,5 +105,25 @@ namespace WindowsSentinel.Tests
             var result3 = rule.Evaluate(MakeContext(pt3));
             Assert.NotNull(result3);
         }
+
+        [Fact]
+        public void AttackToolsRule_DetectsJunctionLpeBlueHammer()
+        {
+            var rule = new AttackToolsRule();
+
+            // Test mklink targeting SAM database
+            var pt = new ProcessTelemetry
+            {
+                ProcessName = "cmd.exe",
+                ImagePath = @"C:\Windows\System32\cmd.exe",
+                CommandLine = @"cmd.exe /c mklink /j C:\Users\Admin\AppData\Local\Temp\samlink C:\Windows\System32\config",
+                ProcessId = 1240
+            };
+            var result = rule.Evaluate(MakeContext(pt));
+            Assert.NotNull(result);
+            Assert.Equal("AttackToolsRule", result.RuleName);
+            Assert.Equal(ResponseAction.KillProcessTree, result.AuthorizedResponse);
+            Assert.Contains("Junction LPE", result.Evidence);
+        }
     }
 }

@@ -396,6 +396,30 @@ namespace WindowsSentinel.Core
                 var cmd = pt.CommandLine;
                 var image = pt.ImagePath;
 
+                // Custom check for symlink/junction abuse targeting system folders (BlueHammer, etc.)
+                if ((cmd.Contains("mklink", StringComparison.OrdinalIgnoreCase) || 
+                     cmd.Contains("junction", StringComparison.OrdinalIgnoreCase)) &&
+                    (cmd.Contains(@"\system32\config", StringComparison.OrdinalIgnoreCase) ||
+                     cmd.Contains(@"\windows defender", StringComparison.OrdinalIgnoreCase) ||
+                     cmd.Contains(@"\config\system", StringComparison.OrdinalIgnoreCase) ||
+                     cmd.Contains(@"\config\sam", StringComparison.OrdinalIgnoreCase) ||
+                     cmd.Contains(@"\config\security", StringComparison.OrdinalIgnoreCase)))
+                {
+                    return new DetectionEvent
+                    {
+                        RuleName = Name,
+                        ProcessName = pt.ProcessName,
+                        ProcessId = pt.ProcessId,
+                        SignalType = SignalType.SuspiciousProcess,
+                        Confidence = 0.98,
+                        Tier = DetectionTier.Tier1Behavioral,
+                        AuthorizedResponse = ResponseAction.KillProcessTree,
+                        Evidence = $"Junction LPE attempt detected: '{cmd}'",
+                        Reasoning = "Process attempted to create an NTFS directory junction or symlink targeting sensitive Windows configuration or Defender update directories. " +
+                                    "This is a signature pattern of local privilege escalation exploits like BlueHammer."
+                    };
+                }
+
                 foreach (var (pattern, category) in ToolSignatures)
                 {
                     if (cmd.Contains(pattern, StringComparison.OrdinalIgnoreCase) ||
