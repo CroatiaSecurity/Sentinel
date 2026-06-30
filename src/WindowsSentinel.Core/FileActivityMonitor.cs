@@ -278,33 +278,42 @@ namespace WindowsSentinel.Core
                 IsProtectedOsDirectory(pathLower) &&
                 !pathLower.Contains(@"\drivers\etc\"))
             {
-                // Only alert if the writer is NOT TrustedInstaller, Windows Update, Defender, or Sentinel itself
-                if (!IsTrustedSystemWriter(processInfo.pid, processInfo.name, e.FullPath) &&
-                    !processInfo.name.Contains("Sentinel", StringComparison.OrdinalIgnoreCase) &&
-                    !processInfo.name.Contains("Kiro", StringComparison.OrdinalIgnoreCase) &&
-                    !processInfo.name.Contains("Chrome", StringComparison.OrdinalIgnoreCase) &&
-                    !processInfo.name.Contains("Delivery Optimization", StringComparison.OrdinalIgnoreCase) &&
-                    !processInfo.name.Contains("AppX", StringComparison.OrdinalIgnoreCase) &&
-                    !processInfo.name.Contains("WinStore", StringComparison.OrdinalIgnoreCase))
+                // Only inspect executable/binary extensions to avoid false positives on system logs/configs (.log, .txt, .tmp, etc.)
+                string ext = Path.GetExtension(pathLower);
+                bool isExecutableOrLibrary = ext == ".dll" || ext == ".exe" || ext == ".sys" || ext == ".ocx" || 
+                                             ext == ".scr" || ext == ".msi" || ext == ".drv" || ext == ".cpl" || ext == ".com";
+
+                if (isExecutableOrLibrary)
                 {
-                    _ = _detectionEngine.EmitAsync(new DetectionEvent
+                    // Only alert if the writer is NOT TrustedInstaller, Windows Update, Defender, or Sentinel itself
+                    if (!IsTrustedSystemWriter(processInfo.pid, processInfo.name, e.FullPath) &&
+                        !processInfo.name.Contains("Sentinel", StringComparison.OrdinalIgnoreCase) &&
+                        !processInfo.name.Contains("Kiro", StringComparison.OrdinalIgnoreCase) &&
+                        !processInfo.name.Contains("Chrome", StringComparison.OrdinalIgnoreCase) &&
+                        !processInfo.name.Contains("Delivery Optimization", StringComparison.OrdinalIgnoreCase) &&
+                        !processInfo.name.Contains("AppX", StringComparison.OrdinalIgnoreCase) &&
+                        !processInfo.name.Contains("WinStore", StringComparison.OrdinalIgnoreCase))
                     {
-                        RuleName = "System Integrity: Unauthorized Write to System Directory",
-                        Evidence = $"File '{e.FullPath}' was {e.ChangeType.ToString().ToLowerInvariant()}d by process '{processInfo.name}' (PID {processInfo.pid})",
-                        Reasoning = "A non-system process wrote to a protected OS directory (System32/SysWOW64). " +
-                                    "Only Windows Update (TrustedInstaller) and Defender should write here. " +
-                                    "Unauthorized writes indicate DLL planting, backdoor installation, or system binary replacement.",
-                        Confidence = 0.92,
-                        Tier = DetectionTier.Tier1Behavioral,
-                        AuthorizedResponse = ResponseAction.KillProcessTree,
-                        ProcessName = processInfo.name,
-                        ProcessId = processInfo.pid,
-                        Metadata = new Dictionary<string, string>
+                        var changeVerb = e.ChangeType == WatcherChangeTypes.Created ? "created" : "changed";
+                        _ = _detectionEngine.EmitAsync(new DetectionEvent
                         {
-                            ["FilePath"] = e.FullPath,
-                            ["Operation"] = e.ChangeType.ToString()
-                        }
-                    });
+                            RuleName = "System Integrity: Unauthorized Write to System Directory",
+                            Evidence = $"File '{e.FullPath}' was {changeVerb} by process '{processInfo.name}' (PID {processInfo.pid})",
+                            Reasoning = "A non-system process wrote to a protected OS directory (System32/SysWOW64). " +
+                                        "Only Windows Update (TrustedInstaller) and Defender should write here. " +
+                                        "Unauthorized writes indicate DLL planting, backdoor installation, or system binary replacement.",
+                            Confidence = 0.92,
+                            Tier = DetectionTier.Tier1Behavioral,
+                            AuthorizedResponse = ResponseAction.KillProcessTree,
+                            ProcessName = processInfo.name,
+                            ProcessId = processInfo.pid,
+                            Metadata = new Dictionary<string, string>
+                            {
+                                ["FilePath"] = e.FullPath,
+                                ["Operation"] = e.ChangeType.ToString()
+                            }
+                        });
+                    }
                 }
             }
 
@@ -466,29 +475,33 @@ namespace WindowsSentinel.Core
             // only trust it if the file itself is signed by Microsoft.
             if (pid == 0)
             {
-                try
+                for (int i = 0; i < 3; i++)
                 {
-                    if (File.Exists(filePath))
+                    try
                     {
-                        // Catalog-signed system files in System32 won't return signer CN via GetSignerName,
-                        // but WinVerifyTrust confirms they chain to a trusted Microsoft root.
-                        if (IsProtectedOsDirectory(filePath.ToLowerInvariant()) &&
-                            SecurityValidation.VerifyAuthenticodeSignature(filePath))
+                        if (File.Exists(filePath))
                         {
-                            return true;
-                        }
+                            // Catalog-signed system files in System32 won't return signer CN via GetSignerName,
+                            // but WinVerifyTrust confirms they chain to a trusted Microsoft root.
+                            if (IsProtectedOsDirectory(filePath.ToLowerInvariant()) &&
+                                SecurityValidation.VerifyAuthenticodeSignature(filePath))
+                            {
+                                return true;
+                            }
 
-                        var signer = _signerTrust.GetSignerName(filePath);
-                        if (signer != null && 
-                            (signer.Contains("Microsoft", StringComparison.OrdinalIgnoreCase) ||
-                             signer.Contains("Windows", StringComparison.OrdinalIgnoreCase) ||
-                             signer.Equals(".NET", StringComparison.OrdinalIgnoreCase)))
-                        {
-                            return true;
+                            var signer = _signerTrust.GetSignerName(filePath);
+                            if (signer != null && 
+                                (signer.Contains("Microsoft", StringComparison.OrdinalIgnoreCase) ||
+                                 signer.Contains("Windows", StringComparison.OrdinalIgnoreCase) ||
+                                 signer.Equals(".NET", StringComparison.OrdinalIgnoreCase)))
+                            {
+                                return true;
+                            }
                         }
                     }
+                    catch { }
+                    Thread.Sleep(50);
                 }
-                catch { }
                 return false;
             }
 

@@ -2,6 +2,14 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [1.1.6] - 2026-06-30
+
+### Fixed — System Integrity Write Log Noise Mitigation
+
+- Optimized the `System Integrity: Unauthorized Write to System Directory` rule in `FileActivityMonitor.cs` to only trigger alerts on executable/binary file extensions (`.dll`, `.exe`, `.sys`, etc.), completely eliminating false positives from benign system `.log`, `.txt`, `.tmp`, or `.xml` updates.
+- Added a 3-iteration signature check retry loop (with 50ms interval) for PID 0 (unknown) writes to gracefully handle transient sharing/write locks during Windows Updates or driver installations.
+- Corrected a spelling typo (`changedd` / `createdd` to `changed` / `created`) in file activity evidence logging.
+
 ## [1.1.5] - 2026-06-30
 
 ### Added — Behavioral Rules and Dynamic JSON Rules Engine
