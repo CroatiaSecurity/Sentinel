@@ -31,7 +31,7 @@ namespace WindowsSentinel.Core
         private readonly System.Threading.Timer _timer;
         private readonly ConcurrentDictionary<string, int> _connectionCounts = new();
 
-        private static readonly TimeSpan ScanInterval = TimeSpan.FromSeconds(15);
+        private static readonly TimeSpan ScanInterval = TimeSpan.FromMilliseconds(200);
 
         private static readonly HashSet<string> ShellProcesses = new(StringComparer.OrdinalIgnoreCase)
         {

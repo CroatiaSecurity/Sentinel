@@ -2,6 +2,15 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [1.1.3] - 2026-06-30
+
+### Added — Architectural Hardening against Advanced Evations
+
+- Hardened polling-based monitors (`NetworkMonitor.cs`, `AppNetworkPolicyMonitor.cs`, `AppDnsExfilMonitor.cs`) to run at ultra-fast 200ms/500ms intervals to eliminate Time-of-Check to Time-of-Use (TOCTOU) network connection gaps.
+- Implemented real-time Thread Win32 Start Address scanning in `EtwThreatIntelMonitor.cs` to detect code injection, thread hijacking, and direct syscall execution in unmapped memory.
+- Hardened the local `PseudoSandbox.cs` Job Object with `JOB_OBJECT_SECURITY_NO_ADMIN` and `JOB_OBJECT_SECURITY_FILTER_TOKENS` flags, stripping administrative group membership and dangerous privileges (like `SeLoadDriverPrivilege`) to prevent sandbox breakouts via BYOVD.
+- Enforced strict Authenticode code-signing verification in `AllowlistService.cs` via `SignerTrustService` to prevent attackers from masquerading as trusted development or browser processes.
+
 ## [1.1.2] - 2026-06-29
 
 ### Optimized — Remote DLL Unloading Response

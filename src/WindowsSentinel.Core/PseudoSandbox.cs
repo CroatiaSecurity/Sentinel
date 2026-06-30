@@ -121,6 +121,27 @@ namespace WindowsSentinel.Core
                     Marshal.FreeHGlobal(uiPtr);
                 }
 
+                // 3.5. Configure Security Restrictions: strip administrator privileges and filter token rights
+                var securityLimits = new JOBOBJECT_SECURITY_LIMIT_INFORMATION
+                {
+                    SecurityLimitFlags = JOB_OBJECT_SECURITY_NO_ADMIN | JOB_OBJECT_SECURITY_FILTER_TOKENS
+                };
+
+                int secSize = Marshal.SizeOf(securityLimits);
+                IntPtr secPtr = Marshal.AllocHGlobal(secSize);
+                try
+                {
+                    Marshal.StructureToPtr(securityLimits, secPtr, false);
+                    if (!SetInformationJobObject(hJob, JobObjectSecurityLimitInformation, secPtr, (uint)secSize))
+                    {
+                        _logger.LogWarning("[PseudoSandbox] SetInformationJobObject (Security) failed: {Error}", Marshal.GetLastWin32Error());
+                    }
+                }
+                finally
+                {
+                    Marshal.FreeHGlobal(secPtr);
+                }
+
                 // 4. Start process suspended to prevent escape before assignment
                 var si = new STARTUPINFO();
                 si.cb = Marshal.SizeOf(si);
@@ -458,5 +479,19 @@ namespace WindowsSentinel.Core
             public uint ActiveProcesses;
             public uint TotalTerminatedProcesses;
         }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct JOBOBJECT_SECURITY_LIMIT_INFORMATION
+        {
+            public uint SecurityLimitFlags;
+            public IntPtr JobToken;
+            public IntPtr SidsToDisable;
+            public IntPtr PrivilegesToDelete;
+            public IntPtr SidsToRestricted;
+        }
+
+        private const uint JobObjectSecurityLimitInformation = 5;
+        private const uint JOB_OBJECT_SECURITY_NO_ADMIN = 0x00000001;
+        private const uint JOB_OBJECT_SECURITY_FILTER_TOKENS = 0x00000008;
     }
 }

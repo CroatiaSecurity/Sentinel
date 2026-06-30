@@ -17,12 +17,14 @@ namespace WindowsSentinel.Core
     public sealed class AllowlistService
     {
         private readonly SecureCacheStore _cacheStore;
+        private readonly SignerTrustService _signerTrust;
         private readonly ILogger<AllowlistService> _logger;
         private readonly ConcurrentDictionary<string, AllowlistEntry> _userAllowlist;
 
-        public AllowlistService(SecureCacheStore cacheStore, ILogger<AllowlistService> logger)
+        public AllowlistService(SecureCacheStore cacheStore, ILogger<AllowlistService> logger, SignerTrustService? signerTrust = null)
         {
             _cacheStore = cacheStore;
+            _signerTrust = signerTrust ?? new SignerTrustService(new Microsoft.Extensions.Logging.Abstractions.NullLogger<SignerTrustService>());
             _logger = logger;
             _userAllowlist = new ConcurrentDictionary<string, AllowlistEntry>(StringComparer.OrdinalIgnoreCase);
             LoadUserAllowlist();
@@ -110,13 +112,35 @@ namespace WindowsSentinel.Core
 
         private bool IsUserAllowlisted(string processName, string? imagePath)
         {
-            if (_userAllowlist.ContainsKey(processName.ToLowerInvariant()))
-                return true;
+            if (string.IsNullOrEmpty(imagePath) || !System.IO.File.Exists(imagePath))
+            {
+                return _userAllowlist.ContainsKey(processName.ToLowerInvariant());
+            }
 
-            if (!string.IsNullOrEmpty(imagePath))
-                return _userAllowlist.Values.Any(e =>
-                    !string.IsNullOrEmpty(e.ImagePath) &&
-                    imagePath.Equals(e.ImagePath, StringComparison.OrdinalIgnoreCase));
+            // Exclude temp/downloads directories from any name-only baseline trust
+            var lowerPath = imagePath.ToLowerInvariant();
+            if (lowerPath.Contains(@"\temp\") || 
+                lowerPath.Contains(@"\downloads\") || 
+                lowerPath.Contains(@"\appdata\local\temp\"))
+            {
+                return false;
+            }
+
+            // Verify strict path match on allowlisted entries
+            bool matchesEntry = _userAllowlist.Values.Any(e =>
+                !string.IsNullOrEmpty(e.ImagePath) &&
+                imagePath.Equals(e.ImagePath, StringComparison.OrdinalIgnoreCase));
+
+            if (matchesEntry)
+            {
+                // Verify the binary is signed by a trusted publisher, or lives in a secure system path
+                if (imagePath.StartsWith(@"C:\Windows\", StringComparison.OrdinalIgnoreCase) ||
+                    imagePath.StartsWith(@"C:\Program Files", StringComparison.OrdinalIgnoreCase) ||
+                    _signerTrust.IsTrustedProcessByPath(imagePath))
+                {
+                    return true;
+                }
+            }
 
             return false;
         }

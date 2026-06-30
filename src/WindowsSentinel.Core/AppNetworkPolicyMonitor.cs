@@ -86,8 +86,8 @@ namespace WindowsSentinel.Core
         {
             _detectionEngine = detectionEngine;
             _ancestryCache = ancestryCache;
-            // Scan TCP connections every 30 seconds
-            _timer = new System.Threading.Timer(ScanNetworkConnections, null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
+            // Scan TCP connections every 500 milliseconds to prevent TOCTOU gaps
+            _timer = new System.Threading.Timer(ScanNetworkConnections, null, TimeSpan.FromMilliseconds(500), TimeSpan.FromMilliseconds(500));
         }
 
         private void ScanNetworkConnections(object? state)

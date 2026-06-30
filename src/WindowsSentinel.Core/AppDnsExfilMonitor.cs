@@ -38,7 +38,7 @@ namespace WindowsSentinel.Core
         private readonly ConcurrentDictionary<(int Pid, string Ip), DohConnectionState> _dohConnections = new();
         private readonly ConcurrentDictionary<int, DateTimeOffset> _alertedPids = new();
 
-        private static readonly TimeSpan ScanInterval = TimeSpan.FromSeconds(10);
+        private static readonly TimeSpan ScanInterval = TimeSpan.FromMilliseconds(500);
         private static readonly TimeSpan AlertCooldown = TimeSpan.FromMinutes(5);
 
         // Known public DoH resolver IPs
