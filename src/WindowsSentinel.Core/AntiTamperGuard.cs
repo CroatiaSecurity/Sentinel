@@ -156,6 +156,22 @@ namespace WindowsSentinel.Core
                 // Check if service exists via ServiceController
                 using var sc = new ServiceController(ServiceName);
                 _ = sc.Status; // Throws InvalidOperationException if service doesn't exist
+
+                // Enforce start type is Automatic so attackers cannot disable it
+                if (sc.StartType != ServiceStartMode.Automatic)
+                {
+                    try
+                    {
+                        var psi = new ProcessStartInfo("sc.exe", $"config {ServiceName} start=auto")
+                        { CreateNoWindow = true, UseShellExecute = false };
+                        Process.Start(psi)?.WaitForExit(5000);
+                        _logger.LogWarning("[AntiTamperGuard] Enforced service '{Service}' StartType back to Automatic.", ServiceName);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "[AntiTamperGuard] Failed to enforce service StartType");
+                    }
+                }
             }
             catch (InvalidOperationException)
             {

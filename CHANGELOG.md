@@ -2,6 +2,13 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [1.1.4] - 2026-06-30
+
+### Added — Advanced Self-Protection and PPID Evasion Mitigations
+
+- Added automated Service StartType enforcement in `AntiTamperGuard.cs` to automatically configure the startup type back to `Automatic` if disabled or modified by administrative attackers.
+- Added strict Authenticode-validated PPID scanning exclusions in `ParentPidSpoofDetector.cs` utilizing `SignerTrustService`, closing path-containment spoofing bypasses (such as executing malware from subfolders containing browser or developer keyword names).
+
 ## [1.1.3] - 2026-06-30
 
 ### Added — Architectural Hardening against Advanced Evations

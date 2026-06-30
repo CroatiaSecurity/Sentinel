@@ -17,6 +17,7 @@ namespace WindowsSentinel.Core
         private readonly DetectionEngine _detectionEngine;
         private readonly ProcessAncestryCache _ancestryCache;
         private readonly AllowlistService _allowlist;
+        private readonly SignerTrustService _signerTrust;
         private readonly ILogger<ParentPidSpoofDetector> _logger;
         private readonly System.Threading.Timer _timer;
         private readonly HashSet<int> _alertedPids = new();
@@ -42,11 +43,13 @@ namespace WindowsSentinel.Core
             DetectionEngine de,
             ProcessAncestryCache ac,
             AllowlistService allowlist,
-            ILogger<ParentPidSpoofDetector> l)
+            ILogger<ParentPidSpoofDetector> l,
+            SignerTrustService? signerTrust = null)
         {
             _detectionEngine = de;
             _ancestryCache = ac;
             _allowlist = allowlist;
+            _signerTrust = signerTrust ?? new SignerTrustService(new Microsoft.Extensions.Logging.Abstractions.NullLogger<SignerTrustService>());
             _logger = l;
             _timer = new System.Threading.Timer(Scan, null, TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(10));
         }
@@ -66,16 +69,21 @@ namespace WindowsSentinel.Core
                         string? imagePath = null;
                         try { imagePath = proc.MainModule?.FileName; } catch { }
 
-                        // Dev tools: only skip if name matches AND path is in a trusted location
-                        if (_allowlist.IsDevelopmentProcess(proc.ProcessName) && IsInTrustedDevPath(imagePath))
-                            continue;
-
-                        // Browsers: only skip if name matches AND path is a real browser install
+                        // Verify code signature for development tools and browser process exemptions
+                        bool isDev = _allowlist.IsDevelopmentProcess(proc.ProcessName);
                         var lowerName = proc.ProcessName.ToLowerInvariant();
-                        if (lowerName is "chrome" or "msedge" or "firefox" or "brave" or "opera" or "vivaldi")
+                        bool isBrowser = lowerName is "chrome" or "msedge" or "firefox" or "brave" or "opera" or "vivaldi";
+
+                        if (isDev || isBrowser)
                         {
-                            if (IsInBrowserPath(imagePath))
+                            // Enforce strict Authenticode signature and secure path verification
+                            if (!string.IsNullOrEmpty(imagePath) && 
+                                (imagePath.StartsWith(@"C:\Windows\", StringComparison.OrdinalIgnoreCase) ||
+                                 imagePath.StartsWith(@"C:\Program Files", StringComparison.OrdinalIgnoreCase) ||
+                                 _signerTrust.IsTrustedProcessByPath(imagePath)))
+                            {
                                 continue;
+                            }
                         }
 
                         var pbi = new PROCESS_BASIC_INFORMATION();
@@ -118,26 +126,5 @@ namespace WindowsSentinel.Core
         }
 
         public void Dispose() => _timer.Dispose();
-
-        private static bool IsInTrustedDevPath(string? path)
-        {
-            if (string.IsNullOrEmpty(path)) return false;
-            return path.StartsWith(@"C:\Program Files", StringComparison.OrdinalIgnoreCase) ||
-                   path.StartsWith(@"C:\Windows\", StringComparison.OrdinalIgnoreCase) ||
-                   path.Contains(@"\dotnet\", StringComparison.OrdinalIgnoreCase) ||
-                   path.Contains(@"\Git\", StringComparison.OrdinalIgnoreCase) ||
-                   path.Contains(@"\Microsoft Visual Studio\", StringComparison.OrdinalIgnoreCase);
-        }
-
-        private static bool IsInBrowserPath(string? path)
-        {
-            if (string.IsNullOrEmpty(path)) return false;
-            return path.Contains(@"\Google\Chrome\", StringComparison.OrdinalIgnoreCase) ||
-                   path.Contains(@"\Microsoft\Edge\", StringComparison.OrdinalIgnoreCase) ||
-                   path.Contains(@"\Mozilla Firefox\", StringComparison.OrdinalIgnoreCase) ||
-                   path.Contains(@"\BraveSoftware\", StringComparison.OrdinalIgnoreCase) ||
-                   path.Contains(@"\Opera", StringComparison.OrdinalIgnoreCase) ||
-                   path.Contains(@"\Vivaldi\", StringComparison.OrdinalIgnoreCase);
-        }
     }
 }
