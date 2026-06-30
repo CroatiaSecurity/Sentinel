@@ -652,4 +652,114 @@ namespace WindowsSentinel.Core
             return null;
         }
     }
+
+    public class ClickFixDetectionRule : IDetectionRule
+    {
+        public string Name => "ClickFixDetectionRule";
+
+        public DetectionEvent? Evaluate(FusedTelemetryContext context)
+        {
+            if (context.TriggeringEvent is ProcessTelemetry pt)
+            {
+                var cmd = pt.CommandLine.ToLowerInvariant();
+                var parent = pt.ParentProcessName?.ToLowerInvariant() ?? "";
+
+                // Check if powershell/cmd is launched from explorer (Run dialog Win+R) or from a browser
+                bool isExplorerOrBrowserParent = parent == "explorer" || parent == "explorer.exe" ||
+                                                 parent == "chrome" || parent == "chrome.exe" ||
+                                                 parent == "msedge" || parent == "msedge.exe" ||
+                                                 parent == "firefox" || parent == "firefox.exe" ||
+                                                 parent == "brave" || parent == "brave.exe";
+
+                if (isExplorerOrBrowserParent)
+                {
+                    bool isSuspiciousShell = pt.ProcessName.Contains("powershell", StringComparison.OrdinalIgnoreCase) || 
+                                             pt.ProcessName.Contains("cmd", StringComparison.OrdinalIgnoreCase) ||
+                                             pt.ProcessName.Contains("mshta", StringComparison.OrdinalIgnoreCase);
+
+                    if (isSuspiciousShell)
+                    {
+                        bool isClickFixPayload = cmd.Contains("frombase64string") || 
+                                                 cmd.Contains("downloadstring") || 
+                                                 cmd.Contains("iex ") || 
+                                                 cmd.Contains("invoke-expression") ||
+                                                 cmd.Contains("certutil -urlcache") ||
+                                                 cmd.Contains("http") && pt.ProcessName.Contains("mshta", StringComparison.OrdinalIgnoreCase);
+
+                        if (isClickFixPayload)
+                        {
+                            return new DetectionEvent
+                            {
+                                RuleName = Name,
+                                ProcessName = pt.ProcessName,
+                                ProcessId = pt.ProcessId,
+                                SignalType = SignalType.ReverseShell,
+                                Confidence = 0.95,
+                                Tier = DetectionTier.Tier1Behavioral,
+                                AuthorizedResponse = ResponseAction.KillProcessTree,
+                                Evidence = $"Click-Fix / Run-Dialog downloader execution detected: {pt.CommandLine}",
+                                Reasoning = "Process spawned directly from explorer or a browser executed commands associated with social engineering paste-and-run payloads (ClickFix)."
+                            };
+                        }
+                    }
+                }
+            }
+            return null;
+        }
+    }
+
+    public class DllSideloadingDetectionRule : IDetectionRule
+    {
+        public string Name => "DllSideloadingDetectionRule";
+
+        public DetectionEvent? Evaluate(FusedTelemetryContext context)
+        {
+            if (context.TriggeringEvent is ProcessTelemetry pt)
+            {
+                var path = pt.ImagePath.ToLowerInvariant();
+                
+                // Check if process runs out of user-writeable paths
+                bool isUserWriteablePath = path.Contains(@"\users\") || 
+                                           path.Contains(@"\appdata\") || 
+                                           path.Contains(@"\temp\");
+
+                if (isUserWriteablePath)
+                {
+                    // Check if it is a signed Microsoft utility (e.g. system tools or OneDrive)
+                    // that should normally reside in System32 or Program Files
+                    var procName = pt.ProcessName.Replace(".exe", "", StringComparison.OrdinalIgnoreCase);
+                    bool isSystemToolName = procName.Equals("onedrive", StringComparison.OrdinalIgnoreCase) ||
+                                            procName.Equals("msoju", StringComparison.OrdinalIgnoreCase) ||
+                                            procName.Equals("winword", StringComparison.OrdinalIgnoreCase) ||
+                                            procName.Equals("excel", StringComparison.OrdinalIgnoreCase) ||
+                                            procName.Equals("powershell", StringComparison.OrdinalIgnoreCase) ||
+                                            procName.Equals("cmd", StringComparison.OrdinalIgnoreCase);
+
+                    // Exclude developer build environments to avoid developer false positives
+                    if (path.Contains(@"\bin\debug") || path.Contains(@"\bin\release") || path.Contains(@".nuget"))
+                    {
+                        return null;
+                    }
+
+                    if (isSystemToolName)
+                    {
+                        return new DetectionEvent
+                        {
+                            RuleName = Name,
+                            ProcessName = pt.ProcessName,
+                            ProcessId = pt.ProcessId,
+                            SignalType = SignalType.SuspiciousProcess,
+                            Confidence = 0.85,
+                            Tier = DetectionTier.Tier1Behavioral,
+                            AuthorizedResponse = ResponseAction.KillProcessTree,
+                            Evidence = $"Signed Microsoft tool running out of user writeable path: {pt.ImagePath}",
+                            Reasoning = "A signed Microsoft utility was executed from an untrusted user-writeable directory. This is highly indicative of DLL Sideloading (T1574.002)."
+                        };
+                    }
+                }
+            }
+            return null;
+        }
+    }
 }
+

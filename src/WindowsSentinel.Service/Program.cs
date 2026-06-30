@@ -91,6 +91,9 @@ namespace WindowsSentinel.Service
                     services.AddTransient<IDetectionRule, UnsignedBinaryRule>();
                     services.AddTransient<IDetectionRule, CampaignDetectionRule>();
                     services.AddTransient<IDetectionRule, VerdictGateRule>();
+                    services.AddTransient<IDetectionRule, ClickFixDetectionRule>();
+                    services.AddTransient<IDetectionRule, DllSideloadingDetectionRule>();
+                    services.AddSingleton<IDetectionRule, DynamicRulesEvaluator>();
 
                     // Detection Engine
                     services.AddSingleton<DetectionEngine>();

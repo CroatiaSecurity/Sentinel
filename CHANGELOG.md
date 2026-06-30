@@ -2,6 +2,14 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [1.1.5] - 2026-06-30
+
+### Added — Behavioral Rules and Dynamic JSON Rules Engine
+
+- Added `ClickFixDetectionRule` in `Rules.cs` to intercept paste-and-run / CAPTCHA bypass exploits originating from explorer (Run dialog Win+R) or browser processes.
+- Added `DllSideloadingDetectionRule` in `Rules.cs` to block signed Microsoft utilities (such as `OneDrive.exe`, `msoju.exe`) executing from user-writeable paths (`AppData`, `Temp`, `Users\Public`).
+- Implemented `DynamicRulesEvaluator.cs`, a lightweight dynamic JSON rules engine that monitors a `/rules` subdirectory and evaluates incoming telemetry using reflection-based condition mapping without requiring re-compilation.
+
 ## [1.1.4] - 2026-06-30
 
 ### Added — Advanced Self-Protection and PPID Evasion Mitigations

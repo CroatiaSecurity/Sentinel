@@ -70,6 +70,9 @@ namespace WindowsSentinel.Agent
                     services.AddTransient<IDetectionRule, ReverseShellRule>();
                     services.AddTransient<IDetectionRule, UnsignedBinaryRule>();
                     services.AddTransient<IDetectionRule, VerdictGateRule>();
+                    services.AddTransient<IDetectionRule, ClickFixDetectionRule>();
+                    services.AddTransient<IDetectionRule, DllSideloadingDetectionRule>();
+                    services.AddSingleton<IDetectionRule, DynamicRulesEvaluator>();
 
                     // Tray Icon
                     services.AddHostedService<TrayIconService>();
