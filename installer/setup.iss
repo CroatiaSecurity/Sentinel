@@ -13,10 +13,8 @@ SolidCompression=yes
 OutputDir=.
 OutputBaseFilename=WindowsSentinelSetup-1.1.8
 PrivilegesRequired=admin
-; Allow upgrading over existing install — but always use new path (migrate from x86)
-UsePreviousAppDir=no
-; Do not use Restart Manager to close applications; handled in StopExistingService Pascal script
-CloseApplications=no
+; Allow upgrading over existing install
+UsePreviousAppDir=yes
 
 [Files]
 Source: "assets\Sentinel.ico"; DestDir: "{app}"; Flags: ignoreversion
@@ -47,14 +45,14 @@ Filename: "{app}\WindowsSentinel.Agent.exe"; Flags: nowait postinstall runasorig
 
 [UninstallRun]
 ; Stop and delete the service
-Filename: "{sys}\sc.exe"; Parameters: "stop ""Windows Sentinel"""; Flags: runhidden; RunOnceId: "StopService"
-Filename: "{sys}\sc.exe"; Parameters: "delete ""Windows Sentinel"""; Flags: runhidden; RunOnceId: "DeleteService"
+Filename: "{sys}\sc.exe"; Parameters: "stop ""Windows Sentinel"""; Flags: runhidden
+Filename: "{sys}\sc.exe"; Parameters: "delete ""Windows Sentinel"""; Flags: runhidden
 
 [UninstallDelete]
 ; Remove application directory (but NOT ProgramData logs)
 Type: filesandordirs; Name: "{app}"
 ; Remove Program Files (x86) leftovers if previous install was there
-Type: filesandordirs; Name: "{commonpf32}\WindowsSentinel"
+Type: filesandordirs; Name: "{pf32}\WindowsSentinel"
 
 [Code]
 // Pascal Script for upgrade/uninstall logic
@@ -62,25 +60,15 @@ Type: filesandordirs; Name: "{commonpf32}\WindowsSentinel"
 procedure StopExistingService();
 var
   ResultCode: Integer;
-  WaitCount: Integer;
 begin
   // Stop the service before upgrading — handles antitamper ACL-locked files
   Exec(ExpandConstant('{sys}\sc.exe'), 'stop "Windows Sentinel"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  // Wait for service to fully stop (up to 10 seconds)
-  WaitCount := 0;
-  while WaitCount < 10 do
-  begin
-    Sleep(1000);
-    WaitCount := WaitCount + 1;
-    // Check if service process is gone
-    if not Exec(ExpandConstant('{sys}\tasklist.exe'), '/FI "IMAGENAME eq WindowsSentinel.Service.exe" /NH', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
-      Break;
-  end;
-  // Force-kill any remaining processes
+  // Wait for service to stop
+  Sleep(2000);
+  // Kill any remaining agent processes
   Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM WindowsSentinel.Agent.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM WindowsSentinel.Service.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  // Wait for handles to be released
-  Sleep(2000);
+  Sleep(1000);
   // Reset directory ACLs so installer can overwrite files (antitamper hardens ACLs)
   Exec(ExpandConstant('{sys}\icacls.exe'),
     ExpandConstant('"{app}" /reset /T /C /Q'),
@@ -105,9 +93,6 @@ begin
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
-var
-  ResultCode: Integer;
-  OldUninstaller: String;
 begin
   Result := '';
   // If upgrading (service exists, run key exists, or folder exists), stop existing service and reset ACLs
@@ -117,41 +102,6 @@ begin
      DirExists(ExpandConstant('{commonpf32}\WindowsSentinel')) then
   begin
     StopExistingService();
-  end;
-
-  // Run the old uninstaller silently to clean up the previous installation
-  // (handles migration from Program Files (x86) to Program Files)
-  if RegQueryStringValue(HKLM, 'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Windows Sentinel_is1',
-     'UninstallString', OldUninstaller) then
-  begin
-    // Strip quotes from the uninstall path
-    StringChangeEx(OldUninstaller, '"', '', True);
-    if FileExists(OldUninstaller) then
-    begin
-      // Reset ACLs on the old uninstaller directory so it can actually execute
-      Exec(ExpandConstant('{sys}\takeown.exe'),
-        '/F "' + ExtractFileDir(OldUninstaller) + '" /R /A /D Y',
-        '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-      Exec(ExpandConstant('{sys}\icacls.exe'),
-        '"' + ExtractFileDir(OldUninstaller) + '" /grant Administrators:F /T /C /Q',
-        '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-      // Run uninstaller silently
-      Exec(OldUninstaller, '/VERYSILENT /NORESTART /SUPPRESSMSGBOXES', '',
-        SW_HIDE, ewWaitUntilTerminated, ResultCode);
-      Sleep(2000);
-    end;
-  end;
-
-  // Final cleanup: forcefully remove the old x86 directory if it still exists
-  if DirExists(ExpandConstant('{commonpf32}\WindowsSentinel')) then
-  begin
-    Exec(ExpandConstant('{sys}\takeown.exe'),
-      ExpandConstant('/F "{commonpf32}\WindowsSentinel" /R /A /D Y'),
-      '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-    Exec(ExpandConstant('{sys}\icacls.exe'),
-      ExpandConstant('"{commonpf32}\WindowsSentinel" /grant Administrators:F /T /C /Q'),
-      '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-    DelTree(ExpandConstant('{commonpf32}\WindowsSentinel'), True, True, True);
   end;
 end;
 
@@ -171,7 +121,7 @@ begin
     Exec(ExpandConstant('{sys}\sc.exe'), 'delete "Windows Sentinel"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
     // Remove Program Files (x86) folder if exists (legacy installs)
-    DelTree(ExpandConstant('{commonpf32}\WindowsSentinel'), True, True, True);
+    DelTree(ExpandConstant('{pf32}\WindowsSentinel'), True, True, True);
 
     // NOTE: ProgramData\WindowsSentinel logs are intentionally PRESERVED
   end;
