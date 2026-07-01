@@ -95,18 +95,25 @@ namespace WindowsSentinel.Core
                     await Task.Delay(PollInterval, ct);
                     PruneStats();
 
-                    // Read recent DNS Client Operational log events
+                    // Read recent DNS Client Operational log events (last 30 seconds only)
                     try
                     {
-                        using var eventLog = new EventLog("Microsoft-Windows-DNS Client Events/Operational");
-                        foreach (EventLogEntry entry in eventLog.Entries)
-                        {
-                            if (entry.Index <= lastRecordId) continue;
-                            lastRecordId = entry.Index;
+                        var query = new System.Diagnostics.Eventing.Reader.EventLogQuery(
+                            "Microsoft-Windows-DNS Client Events/Operational",
+                            System.Diagnostics.Eventing.Reader.PathType.LogName,
+                            "*[System[(EventID=3006 or EventID=3008) and TimeCreated[timediff(@SystemTime) <= 30000]]]");
 
-                            if (entry.InstanceId == 3006 || entry.InstanceId == 3008)
+                        using var reader = new System.Diagnostics.Eventing.Reader.EventLogReader(query);
+                        System.Diagnostics.Eventing.Reader.EventRecord? record;
+                        while ((record = reader.ReadEvent()) != null)
+                        {
+                            using (record)
                             {
-                                var domain = entry.Message?.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                                var recordId = record.RecordId ?? 0;
+                                if (recordId <= lastRecordId) continue;
+                                lastRecordId = recordId;
+
+                                var domain = record.FormatDescription()?.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
                                     .FirstOrDefault()?.Trim() ?? "";
                                 if (!string.IsNullOrEmpty(domain))
                                 {

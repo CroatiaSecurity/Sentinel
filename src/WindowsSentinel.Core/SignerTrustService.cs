@@ -117,7 +117,10 @@ namespace WindowsSentinel.Core
 
             // Verify signature and extract signer
             var (isSigned, signer) = VerifyAndExtractSigner(filePath);
-            _cache[filePath] = (isSigned, signer);
+            if (isSigned)
+            {
+                _cache[filePath] = (isSigned, signer);
+            }
 
             if (isSigned && UntrustedSigners.Contains(signer))
             {
@@ -139,7 +142,10 @@ namespace WindowsSentinel.Core
                 return cached.IsSigned ? cached.Signer : null;
 
             var (isSigned, signer) = VerifyAndExtractSigner(filePath);
-            _cache[filePath] = (isSigned, signer);
+            if (isSigned)
+            {
+                _cache[filePath] = (isSigned, signer);
+            }
             return isSigned ? signer : null;
         }
 

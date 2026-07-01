@@ -2,6 +2,28 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [1.1.8] - 2026-07-01
+
+### Fixed - Event Log Performance, Handle Leaks, and False Positives
+
+**Fixed DnsQueryMonitor Handle Leak and CPU Usage:**
+- Replaced the slow, resource-heavy iteration of all historical `eventLog.Entries` in `DnsQueryMonitor.cs` with `EventLogReader` using a scoped XPath query targeting only event IDs `3006`/`3008` in the last 30 seconds.
+- Ensured proper disposal of `EventRecord` instances to resolve handle exhaustion.
+
+**Fixed BootIntegrityGuard False Positives:**
+- Removed unnecessary EFI partition mounting from `CaptureBaselineAsync()` in `BackgroundMonitors.cs`. This aligns the baseline BCD configuration path (`\Device\HarddiskVolume1`) with subsequent checks, eliminating false "BCD Entry Modified" alerts every minute.
+
+**Fixed HostsFileGuard Destructive File Deletion:**
+- Modified `DeleteUnauthorizedFilesAsync()` to preserve standard Windows network configuration files (`services`, `protocol`, `networks`, and `lmhosts.sam`) in `C:\Windows\System32\drivers\etc`, avoiding breakage of network APIs.
+
+**Fixed SignerTrustService and FileActivityMonitor False Positives:**
+- Changed `SignerTrustService.cs` to only cache successful/positive signature verification results (`isSigned == true`). This allows transient signature verification failures (caused by temporary file locks during write operations) to be retried and successfully verified once writing finishes.
+- Updated `IsTrustedSystemWriter()` in `FileActivityMonitor.cs` to query `_signerTrust.IsTrustedFile()` directly when `pid == 0`, allowing driver updates from all globally trusted publishers (like NVIDIA Corporation, Intel, Google, AMD) rather than only hardcoded Microsoft ones.
+
+**Documentation updated to v1.1.8:**
+- Synced version across README.md, design.md, requirements.md, constraints.md, architecture-council.md.
+- Updated version in `version.txt` and installer `setup.iss`.
+
 ## [1.1.7] - 2026-07-01
 
 ### Fixed — Full Codebase Audit & Shell Protection

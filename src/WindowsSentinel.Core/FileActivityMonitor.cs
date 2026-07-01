@@ -472,7 +472,7 @@ namespace WindowsSentinel.Core
             if (pid == 4) return true;
 
             // If PID is 0 (unresolved process because the handle was closed quickly),
-            // only trust it if the file itself is signed by Microsoft.
+            // only trust it if the file itself is signed by a trusted publisher.
             if (pid == 0)
             {
                 for (int i = 0; i < 3; i++)
@@ -489,11 +489,7 @@ namespace WindowsSentinel.Core
                                 return true;
                             }
 
-                            var signer = _signerTrust.GetSignerName(filePath);
-                            if (signer != null && 
-                                (signer.Contains("Microsoft", StringComparison.OrdinalIgnoreCase) ||
-                                 signer.Contains("Windows", StringComparison.OrdinalIgnoreCase) ||
-                                 signer.Equals(".NET", StringComparison.OrdinalIgnoreCase)))
+                            if (_signerTrust.IsTrustedFile(filePath))
                             {
                                 return true;
                             }

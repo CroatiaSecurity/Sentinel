@@ -4602,11 +4602,16 @@ namespace WindowsSentinel.Core
         {
             try
             {
+                var allowedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    "hosts", "services", "protocol", "networks", "lmhosts.sam"
+                };
+
                 foreach (var file in Directory.GetFiles(DriversEtcPath))
                 {
                     var fileName = Path.GetFileName(file);
-                    if (string.Equals(fileName, "hosts", StringComparison.OrdinalIgnoreCase))
-                        continue; // This is the one we enforce, not delete
+                    if (allowedFiles.Contains(fileName))
+                        continue; // Keep standard system files
 
                     // Delete it
                     try
@@ -5004,13 +5009,8 @@ namespace WindowsSentinel.Core
 
         private Task CaptureBaselineAsync()
         {
-            bool mountedByUs = false;
             try
             {
-                // Mount EFI first so the baseline captures the post-mount BCD state
-                var result = FindEfiMountPoint();
-                mountedByUs = result.MountedByUs;
-
                 _baselineBcd = CaptureBcdEntries();
                 _baselineBootDrivers = CaptureBootDriverList();
                 _baselineCaptured = true;
@@ -5018,13 +5018,6 @@ namespace WindowsSentinel.Core
                     _baselineBcd.Count, _baselineBootDrivers.Count);
             }
             catch (Exception ex) { _logger.LogDebug(ex, "[BootIntegrityGuard] Baseline capture failed"); }
-            finally
-            {
-                if (mountedByUs)
-                {
-                    UnmountEfiVolume();
-                }
-            }
             return Task.CompletedTask;
         }
 
