@@ -15,6 +15,10 @@ OutputBaseFilename=WindowsSentinelSetup-1.1.7
 PrivilegesRequired=admin
 ; Allow upgrading over existing install — but always use new path (migrate from x86)
 UsePreviousAppDir=no
+; Auto-close running Sentinel processes using Windows Restart Manager
+CloseApplications=force
+CloseApplicationsFilter=*.exe
+RestartApplications=no
 
 [Files]
 Source: "assets\Sentinel.ico"; DestDir: "{app}"; Flags: ignoreversion
@@ -45,8 +49,8 @@ Filename: "{app}\WindowsSentinel.Agent.exe"; Flags: nowait postinstall runasorig
 
 [UninstallRun]
 ; Stop and delete the service
-Filename: "{sys}\sc.exe"; Parameters: "stop ""Windows Sentinel"""; Flags: runhidden
-Filename: "{sys}\sc.exe"; Parameters: "delete ""Windows Sentinel"""; Flags: runhidden
+Filename: "{sys}\sc.exe"; Parameters: "stop ""Windows Sentinel"""; Flags: runhidden; RunOnceId: "StopService"
+Filename: "{sys}\sc.exe"; Parameters: "delete ""Windows Sentinel"""; Flags: runhidden; RunOnceId: "DeleteService"
 
 [UninstallDelete]
 ; Remove application directory (but NOT ProgramData logs)
@@ -60,15 +64,25 @@ Type: filesandordirs; Name: "{commonpf32}\WindowsSentinel"
 procedure StopExistingService();
 var
   ResultCode: Integer;
+  WaitCount: Integer;
 begin
   // Stop the service before upgrading — handles antitamper ACL-locked files
   Exec(ExpandConstant('{sys}\sc.exe'), 'stop "Windows Sentinel"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  // Wait for service to stop
-  Sleep(2000);
-  // Kill any remaining agent processes
+  // Wait for service to fully stop (up to 10 seconds)
+  WaitCount := 0;
+  while WaitCount < 10 do
+  begin
+    Sleep(1000);
+    WaitCount := WaitCount + 1;
+    // Check if service process is gone
+    if not Exec(ExpandConstant('{sys}\tasklist.exe'), '/FI "IMAGENAME eq WindowsSentinel.Service.exe" /NH', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+      Break;
+  end;
+  // Force-kill any remaining processes
   Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM WindowsSentinel.Agent.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM WindowsSentinel.Service.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Sleep(1000);
+  // Wait for handles to be released
+  Sleep(2000);
   // Reset directory ACLs so installer can overwrite files (antitamper hardens ACLs)
   Exec(ExpandConstant('{sys}\icacls.exe'),
     ExpandConstant('"{app}" /reset /T /C /Q'),
