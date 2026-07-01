@@ -65,9 +65,8 @@ begin
   Exec(ExpandConstant('{sys}\sc.exe'), 'stop "Windows Sentinel"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   // Wait for service to stop
   Sleep(2000);
-  // Kill any remaining agent processes
-  Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM WindowsSentinel.Agent.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM WindowsSentinel.Service.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  // Kill any remaining agent and service processes using PowerShell
+  Exec('powershell.exe', '-Command "Stop-Process -Name WindowsSentinel.Agent -Force; Stop-Process -Name WindowsSentinel.Service -Force"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Sleep(1000);
   // Reset directory ACLs so installer can overwrite files (antitamper hardens ACLs)
   Exec(ExpandConstant('{sys}\icacls.exe'),
