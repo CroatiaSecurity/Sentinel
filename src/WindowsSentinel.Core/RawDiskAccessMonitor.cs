@@ -326,8 +326,43 @@ namespace WindowsSentinel.Core
 
         private static bool IsRawDiskPath(string path)
         {
-            return RawDiskPatterns.Any(p =>
-                path.Contains(p, StringComparison.OrdinalIgnoreCase));
+            if (string.IsNullOrEmpty(path)) return false;
+
+            // If it contains a subpath after the device prefix, it is a file/directory handle inside the volume, not raw disk access.
+            // Example of raw: \Device\HarddiskVolume3 or \Device\HarddiskVolume3\ or \\.\PhysicalDrive0
+            // Example of file: \Device\HarddiskVolume3\Windows\System32\winlogon.exe
+            
+            // 1. Check if it matches any pattern
+            bool matches = RawDiskPatterns.Any(p => path.Contains(p, StringComparison.OrdinalIgnoreCase));
+            if (!matches) return false;
+
+            // 2. If it is a file/folder inside a volume (has a subpath), ignore it.
+            // A subpath is indicated by a backslash after the volume name.
+            if (path.StartsWith(@"\Device\HarddiskVolume", StringComparison.OrdinalIgnoreCase))
+            {
+                var remaining = path[@"\Device\HarddiskVolume".Length..];
+                int firstBackslash = remaining.IndexOf('\\');
+                if (firstBackslash >= 0 && firstBackslash < remaining.Length - 1)
+                {
+                    return false;
+                }
+            }
+            else if (path.StartsWith(@"\Device\Harddisk", StringComparison.OrdinalIgnoreCase))
+            {
+                var remaining = path[@"\Device\Harddisk".Length..];
+                if (remaining.Contains("Volume", StringComparison.OrdinalIgnoreCase))
+                {
+                    int volIdx = remaining.IndexOf("Volume", StringComparison.OrdinalIgnoreCase);
+                    var volRemaining = remaining[(volIdx + "Volume".Length)..];
+                    int firstBackslash = volRemaining.IndexOf('\\');
+                    if (firstBackslash >= 0 && firstBackslash < volRemaining.Length - 1)
+                    {
+                        return false;
+                    }
+                }
+            }
+
+            return true;
         }
     }
 }

@@ -20,6 +20,9 @@ All notable changes to Windows Sentinel are documented in this file.
 - Changed `SignerTrustService.cs` to only cache successful/positive signature verification results (`isSigned == true`). This allows transient signature verification failures (caused by temporary file locks during write operations) to be retried and successfully verified once writing finishes.
 - Updated `IsTrustedSystemWriter()` in `FileActivityMonitor.cs` to query `_signerTrust.IsTrustedFile()` directly when `pid == 0`, allowing driver updates from all globally trusted publishers (like NVIDIA Corporation, Intel, Google, AMD) rather than only hardcoded Microsoft ones.
 
+**Fixed RawDiskAccessMonitor False Positives:**
+- Refactored `IsRawDiskPath()` in `RawDiskAccessMonitor.cs` to filter out standard file/directory handles that happen to use NT device paths (such as `\Device\HarddiskVolume3\Windows\System32\...`) using subpath exclusion, while retaining genuine alerts on direct raw volume/disk handles.
+
 **Documentation updated to v1.1.8:**
 - Synced version across README.md, design.md, requirements.md, constraints.md, architecture-council.md.
 - Updated version in `version.txt` and installer `setup.iss`.
