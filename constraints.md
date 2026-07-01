@@ -1,6 +1,6 @@
 # Windows Sentinel — Constraints
 
-**Version: 0.8.4**
+**Version: 1.1.7**
 
 ---
 
@@ -84,7 +84,7 @@
 ## Operational Constraints
 
 - Must run on Windows 10 / Windows Server 2019 or later
-- Must target `net8.0-windows`
+- Must target `net10.0-windows`
 - Must function as a standard user (reduced capability, no crash)
 - Must function as an elevated user (full capability)
 - Log files must not grow unbounded â€” rotation required (50 MB / 5 files)

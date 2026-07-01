@@ -82,7 +82,7 @@ namespace WindowsSentinel.Tests
         }
 
         [Fact]
-        public void PersistentConnectionMonitor_HasRecentDrop_ReturnsFalse_WhenNoDrop()
+        public async Task PersistentConnectionMonitor_HasRecentDrop_ReturnsFalse_WhenNoDrop()
         {
             var (engine, logger, tempDir) = CreateTestEngine();
             try
@@ -93,7 +93,7 @@ namespace WindowsSentinel.Tests
                 Assert.False(monitor.HasRecentDrop(12345));
 
                 engine.Stop();
-                logger.DisposeAsync().AsTask().Wait();
+                await logger.DisposeAsync();
             }
             finally
             {
@@ -102,7 +102,7 @@ namespace WindowsSentinel.Tests
         }
 
         [Fact]
-        public void PersistentConnectionMonitor_RecordDnsQuery_DoesNotThrow_WhenNoDrop()
+        public async Task PersistentConnectionMonitor_RecordDnsQuery_DoesNotThrow_WhenNoDrop()
         {
             var (engine, logger, tempDir) = CreateTestEngine();
             try
@@ -114,7 +114,7 @@ namespace WindowsSentinel.Tests
                 monitor.RecordDnsQuery(12345, "www.forum.hr");
 
                 engine.Stop();
-                logger.DisposeAsync().AsTask().Wait();
+                await logger.DisposeAsync();
             }
             finally
             {

@@ -38,47 +38,33 @@ namespace WindowsSentinel.Core
 
         public void SetIncidentResponseService(IncidentResponseService irs) => _incidentResponse = irs;
 
+        private static readonly HashSet<string> PresidentsLawKeywords = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "lsass", "amsi", "etw", "ransomware", "shadow copy",
+            "self-protection", "selfprotection", "honeypot", "chain-nuke",
+            "composite", "verdictgate", "verdict gate",
+            "webcamhijack", "webcam hijack", "audiohijack", "audio hijack",
+            "antitamper", "anti-tamper", "tampering",
+            "hollowing", "reverseshell", "reverse shell",
+            "threatintel", "badusb", "canary",
+            "tls:", "certificate"
+        };
+
         private bool IsPresidentsLawRule(DetectionEvent detection)
         {
             var rule = detection.RuleName ?? string.Empty;
             var lower = rule.ToLowerInvariant();
-            return lower.Contains("lsass") ||
-                   lower.Contains("amsi") ||
-                   lower.Contains("etw") ||
-                   lower.Contains("ransomware") ||
-                   lower.Contains("shadow copy") ||
-                   lower.Contains("self-protection") ||
-                   lower.Contains("selfprotection") ||
-                   lower.Contains("honeypot") ||
-                   lower.Contains("chain-nuke") ||
-                   lower.Contains("composite") ||
-                   lower.Contains("verdictgate") ||
-                   lower.Contains("verdict gate") ||
-                   lower.Contains("webcamhijack") ||
-                   lower.Contains("webcam hijack") ||
-                   lower.Contains("audiohijack") ||
-                   lower.Contains("audio hijack") ||
-                   lower.Contains("antitamper") ||
-                   lower.Contains("anti-tamper") ||
-                   lower.Contains("tampering") ||
-                   lower.Contains("privilege") ||
-                   lower.Contains("attack") ||
-                   lower.Contains("badusb") ||
-                   lower.Contains("arp") ||
-                   lower.Contains("canary") ||
-                   lower.Contains("dns") ||
-                   lower.Contains("tls") ||
-                   lower.Contains("neuro") ||
-                   lower.Contains("hollowing") ||
-                   lower.Contains("reverseshell") ||
-                   lower.Contains("reverse shell") ||
-                   lower.Contains("threatintel") ||
-                   lower.Contains("registry");
+
+            foreach (var keyword in PresidentsLawKeywords)
+            {
+                if (lower.Contains(keyword))
+                    return true;
+            }
+            return false;
             // NOTE: "beaconing" removed from President's Law (v0.8.2).
-            // The BeaconingDetector now handles response demotion internally using
-            // multi-factor trust (Authenticode + path + diversity + baseline).
-            // Detections always fire and log, but verified-legitimate apps get demoted
-            // response actions directly from the detector.
+            // NOTE: Broad terms like "dns", "registry", "attack", "privilege", "arp"
+            // removed in v1.1.6 to prevent over-killing of Tier2 advisory rules that
+            // happen to contain these words in their names.
         }
 
         public async Task HandleAsync(DetectionEvent detection)
@@ -103,8 +89,7 @@ namespace WindowsSentinel.Core
             {
                 if (detection.ProcessId > 0)
                 {
-                    using var proc = Process.GetProcessById(detection.ProcessId);
-                    imagePath = proc.MainModule?.FileName;
+                    imagePath = SecurityValidation.GetProcessImagePath(detection.ProcessId);
                 }
             }
             catch { }

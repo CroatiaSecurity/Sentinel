@@ -2,6 +2,30 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [1.1.7] - 2026-07-01
+
+### Fixed — Full Codebase Audit & Shell Protection
+
+**cmd.exe / PowerShell / pwsh no longer killed by Sentinel:**
+- Added `cmd`, `powershell`, and `pwsh` to `HardeningModule.SafeKillProcessTree` protected process list. Sentinel will never terminate user shell processes regardless of detection trigger.
+- Added `cmd`, `powershell`, and `pwsh` to `HostsFileGuard.GetModifyingProcess` exclusion list. Editing the hosts file from a shell no longer kills the shell (file still reverts to trusted baseline).
+
+**Fixed `proc.MainModule` in AdvancedResponseEngine:**
+- Replaced unsafe `proc.MainModule?.FileName` (triggers Denuvo anti-tamper, fails on sandboxed processes) with safe `SecurityValidation.GetProcessImagePath()` using `PROCESS_QUERY_LIMITED_INFORMATION`.
+
+**Tightened President's Law rule matching:**
+- Removed overly broad keywords (`"dns"`, `"registry"`, `"attack"`, `"privilege"`, `"arp"`, `"neuro"`, `"tls"`) that caused over-promotion of Tier2 advisory rules to kill-authorized status.
+- Replaced with precise keyword set using a `HashSet<string>` for clarity and performance.
+- Added `"tls:"` and `"certificate"` to correctly catch TLS certificate tampering rules without false matching.
+
+**Fixed xUnit1031 warnings:**
+- Converted `PersistentConnectionMonitorTests` blocking `.Wait()` calls to proper `async Task` with `await`.
+
+**Documentation updated to v1.1.7:**
+- Synced version across README.md, design.md, requirements.md, constraints.md, architecture-council.md.
+- Fixed stale `net8.0-windows` reference in constraints.md → `net10.0-windows`.
+- Fixed README Quick Start installer filename and appsettings example to match actual config.
+
 ## [1.1.6] - 2026-06-30
 
 ### Fixed — System Integrity Write Log Noise Mitigation

@@ -2,7 +2,7 @@
 
 **Userland IDS/EDR for Windows — Behavioral Threat Detection & Automated Response**
 
-> Version: 1.1.0 | Author: [Gorstak](https://gorstak.eu) | License: MIT
+> Version: 1.1.7 | Author: [Gorstak](https://gorstak.eu) | License: MIT
 
 [![Release](https://img.shields.io/github/v/release/CroatiaSecurity/Sentinel?style=flat-square)](https://github.com/CroatiaSecurity/Sentinel/releases/latest)
 [![License](https://img.shields.io/github/license/CroatiaSecurity/Sentinel?style=flat-square)](LICENSE)
@@ -23,7 +23,7 @@ No signatures. No blocklists. No name-based detection. Pure behavioral analysis.
 
 ```powershell
 # Run as Administrator
-.\WindowsSentinelSetup-0.9.6.exe
+.\WindowsSentinelSetup-1.1.7.exe
 ```
 
 Installs a Windows Service (SYSTEM) + user Agent (tray icon). Active response is enabled by default.
@@ -126,8 +126,12 @@ Both communicate through shared detection/response pipeline via the `DetectionEn
   },
   "ThreatReporting": {
     "Enabled": true,
-    "AbuseIPDbApiKey": "",
-    "MalwareBazaarApiKey": ""
+    "ProxyEndpoint": "https://sentinel-threat-proxy.znastidobrostoje-6ee.workers.dev",
+    "AbuseIpDbApiKey": null,
+    "UrlhausAuthToken": null,
+    "MalwareBazaarApiKey": null,
+    "ReportToMalwareBazaar": true,
+    "ReportToUrlhaus": true
   }
 }
 ```

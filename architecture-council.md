@@ -1,9 +1,9 @@
 # Sentinel â€” Council of Elders Architecture
 
 **Status:** Architecture spec. Extends, does not replace, `requirements.md`,
-`design.md`, `constraints.md` (all v0.8.4).
+`design.md`, `constraints.md` (all v1.1.7).
 
-**Last updated:** v0.8.4 (June 2026) — Implemented static Gateway ARP lock to prevent ARP spoofing, a new NetworkInterfaceGuard to detect/remove network bridges and re-enable disabled interfaces, active Wi-Fi reconnect / adapter toggling to mitigate deauth floods, and DNS registry integrity monitoring/restoration.
+**Last updated:** v1.1.7 (July 2026) — Full audit fixes: tightened President's Law rule matching, protected cmd.exe/shells from accidental kills, fixed proc.MainModule usage, updated all documentation versions.
 
 ---
 

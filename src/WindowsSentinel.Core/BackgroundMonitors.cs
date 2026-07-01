@@ -4703,7 +4703,7 @@ namespace WindowsSentinel.Core
                 {
                     try
                     {
-                        // Never target critical system processes — killing these causes BSOD
+                        // Never target critical system processes or user shells — killing these causes BSOD or breaks user workflow
                         var name = proc.ProcessName;
                         if (string.Equals(name, "csrss", StringComparison.OrdinalIgnoreCase) ||
                             string.Equals(name, "wininit", StringComparison.OrdinalIgnoreCase) ||
@@ -4716,7 +4716,10 @@ namespace WindowsSentinel.Core
                             string.Equals(name, "dwm", StringComparison.OrdinalIgnoreCase) ||
                             string.Equals(name, "System", StringComparison.OrdinalIgnoreCase) ||
                             string.Equals(name, "msiexec", StringComparison.OrdinalIgnoreCase) ||
-                            string.Equals(name, "TrustedInstaller", StringComparison.OrdinalIgnoreCase))
+                            string.Equals(name, "TrustedInstaller", StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(name, "cmd", StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(name, "powershell", StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(name, "pwsh", StringComparison.OrdinalIgnoreCase))
                         {
                             continue;
                         }
