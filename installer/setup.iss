@@ -15,10 +15,8 @@ OutputBaseFilename=WindowsSentinelSetup-1.1.8
 PrivilegesRequired=admin
 ; Allow upgrading over existing install — but always use new path (migrate from x86)
 UsePreviousAppDir=no
-; Auto-close running Sentinel processes using Windows Restart Manager
-CloseApplications=force
-CloseApplicationsFilter=*.exe
-RestartApplications=no
+; Do not use Restart Manager to close applications; handled in StopExistingService Pascal script
+CloseApplications=no
 
 [Files]
 Source: "assets\Sentinel.ico"; DestDir: "{app}"; Flags: ignoreversion
