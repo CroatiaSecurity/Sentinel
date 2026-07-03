@@ -65,7 +65,7 @@ var
   ResultCode: Integer;
 begin
   // Stop the service before upgrading — handles antitamper ACL-locked files
-  Exec(ExpandConstant('{sys}\sc.exe'), 'stop "Windows Sentinel"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{sysnative}\sc.exe'), 'stop "Windows Sentinel"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   // Wait for service to stop
   Sleep(2000);
   // Kill any remaining agent and service processes using PowerShell
@@ -75,45 +75,45 @@ begin
   // Take ownership of the directories recursively to ensure we can modify ACLs
   if DirExists(ExpandConstant('{app}')) then
   begin
-    Exec(ExpandConstant('{sys}\takeown.exe'), ExpandConstant('/F "{app}" /R /A /D Y'), '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec(ExpandConstant('{sysnative}\takeown.exe'), ExpandConstant('/F "{app}" /R /A /D Y'), '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   end;
   if DirExists(ExpandConstant('{commonpf32}\WindowsSentinel')) then
   begin
-    Exec(ExpandConstant('{sys}\takeown.exe'), ExpandConstant('/F "{commonpf32}\WindowsSentinel" /R /A /D Y'), '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec(ExpandConstant('{sysnative}\takeown.exe'), ExpandConstant('/F "{commonpf32}\WindowsSentinel" /R /A /D Y'), '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   end;
 
   // Grant Administrators and SYSTEM full permissions
   if DirExists(ExpandConstant('{app}')) then
   begin
-    Exec(ExpandConstant('{sys}\icacls.exe'), ExpandConstant('"{app}" /grant Administrators:F /T /C /Q'), '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-    Exec(ExpandConstant('{sys}\icacls.exe'), ExpandConstant('"{app}" /grant SYSTEM:F /T /C /Q'), '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec(ExpandConstant('{sysnative}\icacls.exe'), ExpandConstant('"{app}" /grant Administrators:F /T /C /Q'), '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec(ExpandConstant('{sysnative}\icacls.exe'), ExpandConstant('"{app}" /grant SYSTEM:F /T /C /Q'), '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   end;
   if DirExists(ExpandConstant('{commonpf32}\WindowsSentinel')) then
   begin
-    Exec(ExpandConstant('{sys}\icacls.exe'), ExpandConstant('"{commonpf32}\WindowsSentinel" /grant Administrators:F /T /C /Q'), '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-    Exec(ExpandConstant('{sys}\icacls.exe'), ExpandConstant('"{commonpf32}\WindowsSentinel" /grant SYSTEM:F /T /C /Q'), '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec(ExpandConstant('{sysnative}\icacls.exe'), ExpandConstant('"{commonpf32}\WindowsSentinel" /grant Administrators:F /T /C /Q'), '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec(ExpandConstant('{sysnative}\icacls.exe'), ExpandConstant('"{commonpf32}\WindowsSentinel" /grant SYSTEM:F /T /C /Q'), '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   end;
 
   // Explicitly remove any Deny rules for Users (which override Administrator allows)
   if DirExists(ExpandConstant('{app}')) then
   begin
-    Exec(ExpandConstant('{sys}\icacls.exe'), ExpandConstant('"{app}" /remove:d Users /T /C /Q'), '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-    Exec(ExpandConstant('{sys}\icacls.exe'), ExpandConstant('"{app}" /remove:d *S-1-5-32-545 /T /C /Q'), '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec(ExpandConstant('{sysnative}\icacls.exe'), ExpandConstant('"{app}" /remove:d Users /T /C /Q'), '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec(ExpandConstant('{sysnative}\icacls.exe'), ExpandConstant('"{app}" /remove:d *S-1-5-32-545 /T /C /Q'), '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   end;
   if DirExists(ExpandConstant('{commonpf32}\WindowsSentinel')) then
   begin
-    Exec(ExpandConstant('{sys}\icacls.exe'), ExpandConstant('"{commonpf32}\WindowsSentinel" /remove:d Users /T /C /Q'), '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-    Exec(ExpandConstant('{sys}\icacls.exe'), ExpandConstant('"{commonpf32}\WindowsSentinel" /remove:d *S-1-5-32-545 /T /C /Q'), '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec(ExpandConstant('{sysnative}\icacls.exe'), ExpandConstant('"{commonpf32}\WindowsSentinel" /remove:d Users /T /C /Q'), '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec(ExpandConstant('{sysnative}\icacls.exe'), ExpandConstant('"{commonpf32}\WindowsSentinel" /remove:d *S-1-5-32-545 /T /C /Q'), '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   end;
 
   // Reset to inherited defaults to clean up any remaining anti-tamper permission states
   if DirExists(ExpandConstant('{app}')) then
   begin
-    Exec(ExpandConstant('{sys}\icacls.exe'), ExpandConstant('"{app}" /reset /T /C /Q'), '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec(ExpandConstant('{sysnative}\icacls.exe'), ExpandConstant('"{app}" /reset /T /C /Q'), '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   end;
   if DirExists(ExpandConstant('{commonpf32}\WindowsSentinel')) then
   begin
-    Exec(ExpandConstant('{sys}\icacls.exe'), ExpandConstant('"{commonpf32}\WindowsSentinel" /reset /T /C /Q'), '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec(ExpandConstant('{sysnative}\icacls.exe'), ExpandConstant('"{commonpf32}\WindowsSentinel" /reset /T /C /Q'), '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   end;
 end;
 
