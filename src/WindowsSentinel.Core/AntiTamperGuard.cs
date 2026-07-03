@@ -25,11 +25,12 @@ namespace WindowsSentinel.Core
         private readonly DetectionEngine _detectionEngine;
         private readonly JsonlEventLogger _eventLogger;
         private readonly ILogger<AntiTamperGuard> _logger;
+        private readonly SentinelConfig _config;
 
         private const string ServiceName = "WindowsSentinel";
         private const int SuspendThresholdMs = 10_000; // 10s gap = suspended
-        private const int TimingTickMs = 2_000;        // 2s expected interval
-        private const int IntegrityTickMs = 10_000;    // 10s for binary/service checks
+        private readonly int _timingTickMs;
+        private readonly int _integrityTickMs;
 
         private DateTimeOffset _lastTick = DateTimeOffset.UtcNow;
         private readonly string? _ownExePath;
@@ -40,15 +41,20 @@ namespace WindowsSentinel.Core
         public AntiTamperGuard(
             DetectionEngine detectionEngine,
             JsonlEventLogger eventLogger,
+            SentinelConfig config,
             ILogger<AntiTamperGuard> logger)
         {
             _detectionEngine = detectionEngine;
             _eventLogger = eventLogger;
+            _config = config;
             _logger = logger;
             _ownExePath = Environment.ProcessPath;
             _lastGaspPath = Path.Combine(
                 Path.GetDirectoryName(_eventLogger.LogFilePath) ?? AppContext.BaseDirectory,
                 "last_gasp.jsonl");
+            
+            _timingTickMs = config.AntiTamperTimingTickMs > 0 ? config.AntiTamperTimingTickMs : 2000;
+            _integrityTickMs = config.AntiTamperIntegrityTickMs > 0 ? config.AntiTamperIntegrityTickMs : 10000;
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -64,7 +70,7 @@ namespace WindowsSentinel.Core
             {
                 try
                 {
-                    await Task.Delay(TimingTickMs, stoppingToken);
+                    await Task.Delay(_timingTickMs, stoppingToken);
                     tickCounter++;
 
                     // === Anti-Suspend Detection ===
@@ -79,10 +85,10 @@ namespace WindowsSentinel.Core
                         await _detectionEngine.EmitAsync(new DetectionEvent
                         {
                             RuleName = "Anti-Tamper: Process Suspended",
-                            Evidence = $"Execution gap of {gapSeconds:F1}s detected (expected ~{TimingTickMs / 1000.0:F1}s). " +
+                            Evidence = $"Execution gap of {gapSeconds:F1}s detected (expected ~{_timingTickMs / 1000.0:F1}s). " +
                                        $"Sentinel was likely suspended via NtSuspendProcess.",
                             Reasoning = "The Sentinel service experienced a timing gap far exceeding its " +
-                                        $"2-second tick interval ({gapSeconds:F1}s actual). This indicates the process was " +
+                                        $"expected tick interval ({gapSeconds:F1}s actual). This indicates the process was " +
                                         "suspended by an external actor using NtSuspendProcess/NtSuspendThread. " +
                                         "Attackers suspend EDR processes to operate undetected during the freeze window. " +
                                         "This is a high-confidence indicator of active compromise.",
@@ -94,13 +100,14 @@ namespace WindowsSentinel.Core
                             Metadata = new Dictionary<string, string>
                             {
                                 ["GapSeconds"] = gapSeconds.ToString("F1"),
-                                ["ExpectedTickMs"] = TimingTickMs.ToString()
+                                ["ExpectedTickMs"] = _timingTickMs.ToString()
                             }
                         });
                     }
 
-                    // === Binary & Service Checks (every 10s = every 5 ticks) ===
-                    if (tickCounter % 5 == 0)
+                    // === Binary & Service Checks (dynamic check based on integrity / timing ratio) ===
+                    int ticksPerCheck = Math.Max(1, _integrityTickMs / _timingTickMs);
+                    if (tickCounter % ticksPerCheck == 0)
                     {
                         await CheckBinaryIntegrity();
                         await CheckServiceRegistration();

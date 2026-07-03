@@ -208,5 +208,20 @@ namespace WindowsSentinel.Core
             }
             catch { }
         }
+
+        public override void Dispose()
+        {
+            if (_spoolWatcher != null)
+            {
+                try { _spoolWatcher.Created -= OnSpoolFileCreated; } catch { }
+                try { _spoolWatcher.Dispose(); } catch { }
+            }
+            if (_printToFileWatcher != null)
+            {
+                try { _printToFileWatcher.Created -= OnXpsFileCreated; } catch { }
+                try { _printToFileWatcher.Dispose(); } catch { }
+            }
+            base.Dispose();
+        }
     }
 }

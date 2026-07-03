@@ -2,6 +2,17 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [1.2.0] - 2026-07-03
+
+### Added
+- **Configurable Polling Intervals**: Exposed key polling intervals and timings (`DnsPollIntervalSeconds`, `RouteTableScanIntervalSeconds`, `RawDiskScanIntervalSeconds`, `AntiTamperTimingTickMs`, and `AntiTamperIntegrityTickMs`) under the `Sentinel` block in `appsettings.json` and bound them dynamically to `SentinelConfig` at runtime.
+
+### Fixed
+- **Supervised Background Task Lifetimes**: Wrapped the main telemetry queue processing loop in `DetectionEngine` in robust top-level `try-catch` blocks and assigned it to a tracked background `Task` property, ensuring unhandled exceptions are logged via `ILogger` rather than failing silently.
+- **Resource and Handle Leak Audits**:
+  - Updated `SentinelService.cs` shutdown sequence to recursively stop and call `Dispose()` on all constructor-injected singleton monitors (like `FileActivityMonitor`, `WmiProcessMonitor`, etc.) that implement `IDisposable`.
+  - Implemented `IDisposable` on `DnsQueryMonitor.cs`, `EtwThreatIntelMonitor.cs`, `PrintSpoolerMonitor.cs`, and `ProcessAncestryCache.cs` to cleanly cancel background loops, await task completion, and dispose of cancellation tokens and file system watchers.
+
 ## [1.1.9] - 2026-07-03
 
 ### Added

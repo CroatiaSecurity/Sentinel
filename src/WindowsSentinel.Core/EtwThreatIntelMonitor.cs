@@ -18,7 +18,7 @@ namespace WindowsSentinel.Core
     /// it indicates reflective DLL injection, hollowed execution, or direct syscall execution.
     /// Excludes JIT processes (JVM, .NET, Node.js) and trusted signed publishers.
     /// </summary>
-    public sealed class EtwThreatIntelMonitor : IMonitor
+    public sealed class EtwThreatIntelMonitor : IMonitor, IDisposable
     {
         public string Name => "EtwThreatIntelMonitor";
 
@@ -68,6 +68,11 @@ namespace WindowsSentinel.Core
             {
                 try { await _monitorTask; } catch { }
             }
+        }
+
+        public void Dispose()
+        {
+            _cts?.Dispose();
         }
 
         private async Task RunScanLoopAsync(CancellationToken ct)

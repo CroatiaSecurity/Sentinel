@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
 
 namespace WindowsSentinel.Core
 {
@@ -26,7 +27,9 @@ namespace WindowsSentinel.Core
         private readonly HashReputationService _reputationService;
         private readonly BehavioralCorrelationEngine _correlationEngine;
         private readonly ScoringEngine _scoringEngine;
+        private readonly ILogger<DetectionEngine> _logger;
         private readonly CancellationTokenSource _cts = new();
+        private readonly Task _processingTask;
 
         public DetectionEngine(
             IEnumerable<IDetectionRule> rules,
@@ -36,7 +39,8 @@ namespace WindowsSentinel.Core
             IoCScanner iocScanner,
             HashReputationService reputationService,
             BehavioralCorrelationEngine correlationEngine,
-            ScoringEngine scoringEngine)
+            ScoringEngine scoringEngine,
+            ILogger<DetectionEngine> logger)
         {
             _rules.AddRange(rules);
             _metrics = metrics;
@@ -46,12 +50,13 @@ namespace WindowsSentinel.Core
             _reputationService = reputationService;
             _correlationEngine = correlationEngine;
             _scoringEngine = scoringEngine;
+            _logger = logger;
 
             // Wire up the correlation engine callback
             _correlationEngine.Initialize(this.EmitAsync);
 
             // Start background processing
-            Task.Run(ProcessTelemetryQueueAsync);
+            _processingTask = Task.Run(ProcessTelemetryQueueAsync);
         }
 
         public void SubmitTelemetry(FusedTelemetryContext context)
@@ -78,76 +83,97 @@ namespace WindowsSentinel.Core
 
         private async Task ProcessTelemetryQueueAsync()
         {
-            var reader = _telemetryChannel.Reader;
-            while (await reader.WaitToReadAsync(_cts.Token))
+            try
             {
-                while (reader.TryRead(out var context))
+                var reader = _telemetryChannel.Reader;
+                while (await reader.WaitToReadAsync(_cts.Token))
                 {
-                    // If it is a process start, calculate process image hash and check reputations/IoCs asynchronously
-                    if (context.TriggeringEvent is ProcessTelemetry pt)
-                    {
-                        _ = Task.Run(async () =>
-                        {
-                            try
-                            {
-                                var imagePath = pt.ImagePath;
-                                if (!string.IsNullOrEmpty(imagePath) && System.IO.File.Exists(imagePath))
-                                {
-                                    string hash = string.Empty;
-                                    using (var sha = System.Security.Cryptography.SHA256.Create())
-                                    await using (var fs = System.IO.File.OpenRead(imagePath))
-                                    {
-                                        var hashBytes = await sha.ComputeHashAsync(fs, _cts.Token);
-                                        hash = Convert.ToHexString(hashBytes).ToLowerInvariant();
-                                    }
-
-                                    if (!string.IsNullOrEmpty(hash))
-                                    {
-                                        bool isIoC = _iocScanner.IsKnownBadHash(hash);
-                                        var apiVerdict = await _reputationService.GetVerdictAsync(hash, _cts.Token);
-
-                                        if (isIoC || apiVerdict == HashVerdict.Unsafe)
-                                        {
-                                            var reputationEvent = new DetectionEvent
-                                            {
-                                                RuleName = "IoC Scanner: Known Malicious File Hash",
-                                                Evidence = $"Process '{pt.ProcessName}' (PID {pt.ProcessId}) image file hash matches known malicious reputation signature: {hash}",
-                                                Reasoning = "The executed process's file hash matches a known malicious signature in the local threat intelligence IoC cache or the online reputation lookup service.",
-                                                Confidence = 0.95,
-                                                Tier = DetectionTier.Tier2Indicator,
-                                                ProcessName = pt.ProcessName,
-                                                ProcessId = pt.ProcessId,
-                                                Metadata = new Dictionary<string, string> { { "SHA256", hash } }
-                                            };
-                                            await ProcessDetectionAsync(reputationEvent);
-                                        }
-                                    }
-                                }
-                            }
-                            catch { }
-                        });
-                    }
-
-                    foreach (var rule in _rules)
+                    while (reader.TryRead(out var context))
                     {
                         try
                         {
-                            var startTime = DateTime.UtcNow;
-                            var detection = rule.Evaluate(context);
-
-                            if (detection != null)
+                            // If it is a process start, calculate process image hash and check reputations/IoCs asynchronously
+                            if (context.TriggeringEvent is ProcessTelemetry pt)
                             {
-                                var duration = (DateTime.UtcNow - startTime).TotalMilliseconds;
-                                _metrics.RecordDetection(duration);
-                                await ProcessDetectionAsync(detection);
+                                _ = Task.Run(async () =>
+                                {
+                                    try
+                                    {
+                                        var imagePath = pt.ImagePath;
+                                        if (!string.IsNullOrEmpty(imagePath) && System.IO.File.Exists(imagePath))
+                                        {
+                                            string hash = string.Empty;
+                                            using (var sha = System.Security.Cryptography.SHA256.Create())
+                                            await using (var fs = System.IO.File.OpenRead(imagePath))
+                                            {
+                                                var hashBytes = await sha.ComputeHashAsync(fs, _cts.Token);
+                                                hash = Convert.ToHexString(hashBytes).ToLowerInvariant();
+                                            }
+
+                                            if (!string.IsNullOrEmpty(hash))
+                                            {
+                                                bool isIoC = _iocScanner.IsKnownBadHash(hash);
+                                                var apiVerdict = await _reputationService.GetVerdictAsync(hash, _cts.Token);
+
+                                                if (isIoC || apiVerdict == HashVerdict.Unsafe)
+                                                {
+                                                    var reputationEvent = new DetectionEvent
+                                                    {
+                                                        RuleName = "IoC Scanner: Known Malicious File Hash",
+                                                        Evidence = $"Process '{pt.ProcessName}' (PID {pt.ProcessId}) image file hash matches known malicious reputation signature: {hash}",
+                                                        Reasoning = "The executed process's file hash matches a known malicious signature in the local threat intelligence IoC cache or the online reputation lookup service.",
+                                                        Confidence = 0.95,
+                                                        Tier = DetectionTier.Tier2Indicator,
+                                                        ProcessName = pt.ProcessName,
+                                                        ProcessId = pt.ProcessId,
+                                                        Metadata = new Dictionary<string, string> { { "SHA256", hash } }
+                                                    };
+                                                    await ProcessDetectionAsync(reputationEvent);
+                                                }
+                                            }
+                                        }
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        _logger.LogError(ex, "[DetectionEngine] Error checking process reputation for {ProcessName} (PID {ProcessId})", pt.ProcessName, pt.ProcessId);
+                                    }
+                                });
+                            }
+
+                            foreach (var rule in _rules)
+                            {
+                                try
+                                {
+                                    var startTime = DateTime.UtcNow;
+                                    var detection = rule.Evaluate(context);
+
+                                    if (detection != null)
+                                    {
+                                        var duration = (DateTime.UtcNow - startTime).TotalMilliseconds;
+                                        _metrics.RecordDetection(duration);
+                                        await ProcessDetectionAsync(detection);
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    _logger.LogError(ex, "[DetectionEngine] Error running rule {RuleName}", rule.Name);
+                                }
                             }
                         }
                         catch (Exception ex)
                         {
-                            System.Diagnostics.Debug.WriteLine($"Error running rule {rule.Name}: {ex.Message}");
+                            _logger.LogError(ex, "[DetectionEngine] Error processing telemetry context item");
                         }
                     }
                 }
+            }
+            catch (OperationCanceledException)
+            {
+                // Normal shutdown
+            }
+            catch (Exception ex)
+            {
+                _logger.LogCritical(ex, "[DetectionEngine] Critical error in telemetry queue processing loop");
             }
         }
 
@@ -201,6 +227,11 @@ namespace WindowsSentinel.Core
         public void Stop()
         {
             _cts.Cancel();
+            try
+            {
+                _processingTask?.Wait(2000);
+            }
+            catch { }
         }
     }
 }

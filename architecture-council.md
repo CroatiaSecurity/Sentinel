@@ -1,9 +1,9 @@
 # Sentinel â€” Council of Elders Architecture
 
 **Status:** Architecture spec. Extends, does not replace, `requirements.md`,
-`design.md`, `constraints.md` (all v1.1.9).
+`design.md`, `constraints.md` (all v1.2.0).
 
-**Last updated:** v1.1.9 (July 2026) — Scraped logs and Event Viewer: resolved handle leaks in DnsQueryMonitor, false positive BCD modifications in BootIntegrityGuard, etc/ directory file purging bugs in HostsFileGuard, and SignerTrust negative caching.
+**Last updated:** v1.2.0 (July 2026) — Comprehensive supervised task lifetimes and resource cleanup: resolved handle leaks and stopped tasks on service shutdown.
 
 ---
 

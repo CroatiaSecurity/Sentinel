@@ -6,7 +6,7 @@ using System.Threading;
 
 namespace WindowsSentinel.Core
 {
-    public class ProcessAncestryCache
+    public class ProcessAncestryCache : IDisposable
     {
         private volatile IReadOnlyDictionary<int, (int parentId, string name, string imagePath)> _cache = new Dictionary<int, (int, string, string)>();
         private readonly System.Threading.Timer _refreshTimer;
@@ -125,6 +125,11 @@ namespace WindowsSentinel.Core
         }
 
         public void Stop()
+        {
+            Dispose();
+        }
+
+        public void Dispose()
         {
             _refreshTimer.Dispose();
         }

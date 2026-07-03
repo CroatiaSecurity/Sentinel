@@ -21,18 +21,19 @@ namespace WindowsSentinel.Core
     /// - Rapid query volume to single domains (beaconing/tunneling)
     /// - High-entropy domain names (DGA — domain generation algorithms)
     /// </summary>
-    public sealed class DnsQueryMonitor : IMonitor
+    public sealed class DnsQueryMonitor : IMonitor, IDisposable
     {
         public string Name => "DnsQueryMonitor";
 
         private readonly DetectionEngine _detectionEngine;
+        private readonly SentinelConfig _config;
         private readonly ILogger<DnsQueryMonitor> _logger;
         private readonly PersistentConnectionMonitor? _persistentConnMon;
+        private readonly TimeSpan _pollInterval;
         private CancellationTokenSource? _cts;
         private Task? _monitorTask;
 
         private readonly ConcurrentDictionary<string, DomainStats> _domainStats = new(StringComparer.OrdinalIgnoreCase);
-        private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(15);
         private const int RapidQueryThreshold = 50;
         private const double EntropyThreshold = 4.0;
 
@@ -67,12 +68,15 @@ namespace WindowsSentinel.Core
 
         public DnsQueryMonitor(
             DetectionEngine detectionEngine,
+            SentinelConfig config,
             ILogger<DnsQueryMonitor> logger,
             PersistentConnectionMonitor? persistentConnMon = null)
         {
             _detectionEngine = detectionEngine;
+            _config = config;
             _logger = logger;
             _persistentConnMon = persistentConnMon;
+            _pollInterval = TimeSpan.FromSeconds(config.DnsPollIntervalSeconds > 0 ? config.DnsPollIntervalSeconds : 15);
         }
 
         public Task StartAsync(CancellationToken ct)
@@ -92,7 +96,7 @@ namespace WindowsSentinel.Core
             {
                 try
                 {
-                    await Task.Delay(PollInterval, ct);
+                    await Task.Delay(_pollInterval, ct);
                     PruneStats();
 
                     // Read recent DNS Client Operational log events (last 30 seconds only)
@@ -213,11 +217,26 @@ namespace WindowsSentinel.Core
             return parts.Length >= 2 ? $"{parts[^2]}.{parts[^1]}" : domain;
         }
 
-        public Task StopAsync()
+        public async Task StopAsync()
         {
             _cts?.Cancel();
+            if (_monitorTask != null)
+            {
+                try
+                {
+                    await _monitorTask;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "[{Monitor}] Error awaiting background task shutdown", Name);
+                }
+            }
             _logger.LogInformation("[{Monitor}] Stopped", Name);
-            return Task.CompletedTask;
+        }
+
+        public void Dispose()
+        {
+            _cts?.Dispose();
         }
 
         private class DomainStats

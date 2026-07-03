@@ -51,6 +51,13 @@ namespace WindowsSentinel.Core
         /// Add your Chromecast/Nest IP here if you have one.
         /// </summary>
         public string[] TrustedCastDevices { get; set; } = Array.Empty<string>();
+
+        // Dynamic polling intervals (configurable)
+        public int DnsPollIntervalSeconds { get; set; } = 15;
+        public int RouteTableScanIntervalSeconds { get; set; } = 15;
+        public int RawDiskScanIntervalSeconds { get; set; } = 20;
+        public int AntiTamperTimingTickMs { get; set; } = 2000;
+        public int AntiTamperIntegrityTickMs { get; set; } = 10000;
     }
 
     public class ThreatReportingConfig

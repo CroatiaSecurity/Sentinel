@@ -34,9 +34,10 @@ namespace WindowsSentinel.Core
         private readonly DetectionEngine _detectionEngine;
         private readonly SignerTrustService _signerTrust;
         private readonly ILogger<RawDiskAccessMonitor> _logger;
+        private readonly SentinelConfig _config;
+        private readonly TimeSpan _scanInterval;
 
         private readonly ConcurrentDictionary<(int Pid, string Device), DateTimeOffset> _alertedAccess = new();
-        private static readonly TimeSpan ScanInterval = TimeSpan.FromSeconds(20);
         private static readonly TimeSpan AlertCooldown = TimeSpan.FromMinutes(5);
 
         // Legitimate processes that access raw disk
@@ -92,11 +93,14 @@ namespace WindowsSentinel.Core
         public RawDiskAccessMonitor(
             DetectionEngine detectionEngine,
             SignerTrustService signerTrust,
+            SentinelConfig config,
             ILogger<RawDiskAccessMonitor> logger)
         {
             _detectionEngine = detectionEngine;
             _signerTrust = signerTrust;
+            _config = config;
             _logger = logger;
+            _scanInterval = TimeSpan.FromSeconds(config.RawDiskScanIntervalSeconds > 0 ? config.RawDiskScanIntervalSeconds : 20);
         }
 
         protected override async Task ExecuteAsync(CancellationToken ct)
@@ -107,7 +111,7 @@ namespace WindowsSentinel.Core
             {
                 try
                 {
-                    await Task.Delay(ScanInterval, ct);
+                    await Task.Delay(_scanInterval, ct);
                     await ScanForRawDiskHandles(ct);
                 }
                 catch (OperationCanceledException) { break; }

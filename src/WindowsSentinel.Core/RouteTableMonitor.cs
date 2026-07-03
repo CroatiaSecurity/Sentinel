@@ -34,14 +34,13 @@ namespace WindowsSentinel.Core
         private readonly SentinelConfig _config;
         private readonly ILogger<RouteTableMonitor> _logger;
         private readonly System.Threading.Timer _timer;
+        private readonly TimeSpan _scanInterval;
 
         // Baseline captured at startup
         private readonly ConcurrentDictionary<string, RouteEntry> _baselineRoutes = new();
         private string? _baselineGateway;
         private bool _startupCleanupDone;
         private bool _baselineCaptured;
-
-        private static readonly TimeSpan ScanInterval = TimeSpan.FromSeconds(15);
 
         // Registry path for persistent routes
         private const string PersistentRoutesKey = @"SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\PersistentRoutes";
@@ -129,9 +128,8 @@ namespace WindowsSentinel.Core
             _eventLogger = eventLogger;
             _config = config;
             _logger = logger;
-            // Don't baseline in constructor — network may not be up yet on cold boot.
-            // First timer tick will capture baseline instead.
-            _timer = new System.Threading.Timer(CheckRoutes, null, TimeSpan.FromSeconds(30), ScanInterval);
+            _scanInterval = TimeSpan.FromSeconds(config.RouteTableScanIntervalSeconds > 0 ? config.RouteTableScanIntervalSeconds : 15);
+            _timer = new System.Threading.Timer(CheckRoutes, null, TimeSpan.FromSeconds(30), _scanInterval);
         }
 
         private void SnapshotBaseline()

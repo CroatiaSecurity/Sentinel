@@ -147,11 +147,50 @@ namespace WindowsSentinel.Service
             {
                 _logger.LogInformation("Windows Sentinel Service stopping...");
 
-                // Stop IMonitors
+                // Stop and dispose IMonitors
                 foreach (var monitor in _monitors)
                 {
                     try { await monitor.StopAsync(); }
                     catch (Exception ex) { _logger.LogError(ex, "Error stopping monitor: {Monitor}", monitor.Name); }
+
+                    if (monitor is IDisposable disposable)
+                    {
+                        try { disposable.Dispose(); }
+                        catch (Exception ex) { _logger.LogError(ex, "Error disposing monitor: {Monitor}", monitor.Name); }
+                    }
+                }
+
+                // Dispose of other injected singletons to prevent handle/thread leaks
+                var disposables = new object[]
+                {
+                    _usbDeviceFingerprinter,
+                    _networkPolicyMonitor,
+                    _wmiProcessMonitor,
+                    _fileActivityMonitor,
+                    _networkMonitor,
+                    _lsassDumpCanaryMonitor,
+                    _routeTableMonitor,
+                    _memoryBehaviorAnalyzer,
+                    _tokenIntegrityMonitor,
+                    _credentialCanaryMonitor,
+                    _localServerMonitor,
+                    _parentPidSpoofDetector,
+                    _chainTracer
+                };
+
+                foreach (var item in disposables)
+                {
+                    if (item is IDisposable disposable)
+                    {
+                        try
+                        {
+                            disposable.Dispose();
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, "Error disposing singleton: {Type}", item.GetType().Name);
+                        }
+                    }
                 }
 
                 _ancestryCache.Stop();

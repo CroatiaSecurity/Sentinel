@@ -716,5 +716,15 @@ namespace WindowsSentinel.Core
                 _logger.LogDebug(ex, "[RegistryMonitor] CLSID scan error");
             }
         }
+
+        public override void Dispose()
+        {
+            try { _runHklmWatcher?.Stop(); _runHklmWatcher?.Dispose(); } catch { }
+            try { _runHkcuWatcher?.Stop(); _runHkcuWatcher?.Dispose(); } catch { }
+            try { _runOnceHklmWatcher?.Stop(); _runOnceHklmWatcher?.Dispose(); } catch { }
+            try { _servicesWatcher?.Stop(); _servicesWatcher?.Dispose(); } catch { }
+            try { _processWatcher?.Stop(); _processWatcher?.Dispose(); } catch { }
+            base.Dispose();
+        }
     }
 }
