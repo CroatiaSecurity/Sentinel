@@ -37,6 +37,7 @@ namespace WindowsSentinel.Core
         private readonly string _lastGaspPath;
         private bool _exitHandlerRegistered;
         private bool _serviceAlertSuppressed; // Only alert once about missing service registration
+        private bool _systemJustResumed;
 
         public AntiTamperGuard(
             DetectionEngine detectionEngine,
@@ -55,6 +56,38 @@ namespace WindowsSentinel.Core
             
             _timingTickMs = config.AntiTamperTimingTickMs > 0 ? config.AntiTamperTimingTickMs : 2000;
             _integrityTickMs = config.AntiTamperIntegrityTickMs > 0 ? config.AntiTamperIntegrityTickMs : 10000;
+        }
+
+        public override Task StartAsync(CancellationToken cancellationToken)
+        {
+            try
+            {
+                Microsoft.Win32.SystemEvents.PowerModeChanged += OnPowerModeChanged;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "[AntiTamperGuard] Failed to subscribe to PowerModeChanged events");
+            }
+            return base.StartAsync(cancellationToken);
+        }
+
+        public override void Dispose()
+        {
+            try
+            {
+                Microsoft.Win32.SystemEvents.PowerModeChanged -= OnPowerModeChanged;
+            }
+            catch { }
+            base.Dispose();
+        }
+
+        private void OnPowerModeChanged(object sender, Microsoft.Win32.PowerModeChangedEventArgs e)
+        {
+            if (e.Mode == Microsoft.Win32.PowerModes.Resume)
+            {
+                _logger.LogInformation("[AntiTamperGuard] System resume detected; suppressing anti-suspend alarm for next tick");
+                _systemJustResumed = true;
+            }
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -77,6 +110,12 @@ namespace WindowsSentinel.Core
                     var now = DateTimeOffset.UtcNow;
                     var elapsed = (now - _lastTick).TotalMilliseconds;
                     _lastTick = now;
+
+                    if (_systemJustResumed)
+                    {
+                        _systemJustResumed = false;
+                        elapsed = 0;
+                    }
 
                     // If elapsed time is significantly more than expected, we were suspended
                     if (elapsed > SuspendThresholdMs)
