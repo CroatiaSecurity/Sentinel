@@ -42,7 +42,8 @@ namespace WindowsSentinel.Tests.Monitors
                     iocScanner,
                     reputationService,
                     correlationEngine,
-                    scoringEngine
+                    scoringEngine,
+                    NullLogger<DetectionEngine>.Instance
                 );
 
                 var ingestor = new ConsultantSignalIngestor(engine, NullLogger<ConsultantSignalIngestor>.Instance, tempDir);

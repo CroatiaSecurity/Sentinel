@@ -90,7 +90,8 @@ namespace WindowsSentinel.Tests
                 var rules = new List<IDetectionRule>();
                 var engine = new DetectionEngine(
                     rules, metrics, logger, responseEngine,
-                    iocScanner, reputationService, correlationEngine, scoringEngine
+                    iocScanner, reputationService, correlationEngine, scoringEngine,
+                    NullLogger<DetectionEngine>.Instance
                 );
 
                 var guard = new HostsFileGuard(engine, NullLogger<HostsFileGuard>.Instance);

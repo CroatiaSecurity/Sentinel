@@ -41,7 +41,8 @@ namespace WindowsSentinel.Tests
                     iocScanner,
                     reputationService,
                     correlationEngine,
-                    scoringEngine
+                    scoringEngine,
+                    NullLogger<DetectionEngine>.Instance
                 );
 
                 var guard = new NetworkInterfaceGuard(engine, config, NullLogger<NetworkInterfaceGuard>.Instance);

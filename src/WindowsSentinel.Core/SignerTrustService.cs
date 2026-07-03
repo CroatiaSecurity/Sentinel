@@ -35,6 +35,7 @@ namespace WindowsSentinel.Core
             "Microsoft Windows",
             "Microsoft Windows Publisher",
             "Microsoft Code Signing PCA",
+            ".NET",
             // Google
             "Google LLC",
             "Google Inc",

@@ -31,7 +31,8 @@ namespace WindowsSentinel.Tests
             var rules = new List<IDetectionRule>();
             var engine = new DetectionEngine(
                 rules, metrics, logger, responseEngine,
-                iocScanner, reputationService, correlationEngine, scoringEngine
+                iocScanner, reputationService, correlationEngine, scoringEngine,
+                NullLogger<DetectionEngine>.Instance
             );
 
             return (engine, logger, tempDir);

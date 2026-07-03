@@ -40,7 +40,8 @@ namespace WindowsSentinel.Tests.Monitors
                     iocScanner,
                     reputationService,
                     correlationEngine,
-                    scoringEngine
+                    scoringEngine,
+                    NullLogger<DetectionEngine>.Instance
                 );
 
                 var guard = new PhantomKeystrokeGuard(engine, NullLogger<PhantomKeystrokeGuard>.Instance, config);
