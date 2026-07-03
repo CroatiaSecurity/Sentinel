@@ -2,6 +2,15 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [1.1.9] - 2026-07-03
+
+### Added
+- **QoS Registry Anti-Tamper Guard**: Implemented periodic checks on `HKLM\Software\Policies\Microsoft\Windows\QoS` in `AntiTamperGuard.cs` to prevent attackers from using Policy-based QoS rules to throttle or block Sentinel's network bandwidth. Unauthorized policies targeting Sentinel are automatically purged and reported.
+
+### Fixed
+- **Catalog Signature Verification Fallback**: Updated `SecurityValidation.VerifyAuthenticodeSignature` to support catalog-signed system files (like native DLLs in `System32` and `SysWOW64`) using a fast PowerShell fallback. This resolves high-frequency false positives and halts the 43MB log bloating.
+- **Removed Loose Process Exclusions**: Cleaned up the whitelist in `FileActivityMonitor.cs` by removing the insecure `Chrome` and `Kiro` process name exemptions to close potential EDR bypass loopholes.
+
 ## [1.1.8] - 2026-07-01
 
 ### Fixed - Event Log Performance, Handle Leaks, and False Positives

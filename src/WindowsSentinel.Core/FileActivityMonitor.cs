@@ -288,8 +288,6 @@ namespace WindowsSentinel.Core
                     // Only alert if the writer is NOT TrustedInstaller, Windows Update, Defender, or Sentinel itself
                     if (!IsTrustedSystemWriter(processInfo.pid, processInfo.name, e.FullPath) &&
                         !processInfo.name.Contains("Sentinel", StringComparison.OrdinalIgnoreCase) &&
-                        !processInfo.name.Contains("Kiro", StringComparison.OrdinalIgnoreCase) &&
-                        !processInfo.name.Contains("Chrome", StringComparison.OrdinalIgnoreCase) &&
                         !processInfo.name.Contains("Delivery Optimization", StringComparison.OrdinalIgnoreCase) &&
                         !processInfo.name.Contains("AppX", StringComparison.OrdinalIgnoreCase) &&
                         !processInfo.name.Contains("WinStore", StringComparison.OrdinalIgnoreCase))

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Net;
 using System.Runtime.CompilerServices;
@@ -236,11 +237,39 @@ namespace WindowsSentinel.Core
                 var actionId = WINTRUST_ACTION_GENERIC_VERIFY_V2;
                 int result = WinVerifyTrust(IntPtr.Zero, ref actionId, ref trustData);
 
-                // Close the state handle
-                trustData.dwStateAction = WTD_STATEACTION_CLOSE;
-                WinVerifyTrust(IntPtr.Zero, ref actionId, ref trustData);
+                if (result == 0) return true;
 
-                return result == 0;
+                // Fallback for catalog-signed Windows system files (e.g. in System32 / SysWOW64)
+                if (filePath.Contains(@"\System32\", StringComparison.OrdinalIgnoreCase) ||
+                    filePath.Contains(@"\SysWOW64\", StringComparison.OrdinalIgnoreCase))
+                {
+                    try
+                    {
+                        var escapedPath = filePath.Replace("'", "''");
+                        var psi = new ProcessStartInfo("powershell.exe", $"-Command \"(Get-AuthenticodeSignature '{escapedPath}').Status -eq 'Valid'\"")
+                        {
+                            CreateNoWindow = true,
+                            UseShellExecute = false,
+                            RedirectStandardOutput = true
+                        };
+                        using var proc = Process.Start(psi);
+                        if (proc != null)
+                        {
+                            string output = proc.StandardOutput.ReadToEnd().Trim();
+                            proc.WaitForExit(3000);
+                            if (output.Equals("True", StringComparison.OrdinalIgnoreCase))
+                            {
+                                return true;
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        logger?.LogDebug(ex, "[SecurityValidation] Catalog signature check failed for '{Path}'", filePath);
+                    }
+                }
+
+                return false;
             }
             catch (Exception ex)
             {

@@ -104,6 +104,7 @@ namespace WindowsSentinel.Core
                     {
                         await CheckBinaryIntegrity();
                         await CheckServiceRegistration();
+                        await CheckAndEnforceQosPolicies();
                     }
                 }
                 catch (OperationCanceledException) { break; }
@@ -243,6 +244,53 @@ namespace WindowsSentinel.Core
                 File.AppendAllText(_lastGaspPath, entry + Environment.NewLine);
             }
             catch { } // Best-effort — we're dying
+        }
+
+        /// <summary>
+        /// Scans Policies\Microsoft\Windows\QoS registry subkeys to detect and delete
+        /// any bandwidth throttling rules targeting Windows Sentinel binaries.
+        /// </summary>
+        private async Task CheckAndEnforceQosPolicies()
+        {
+            try
+            {
+                using var baseKey = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Policies\Microsoft\Windows\QoS", true);
+                if (baseKey == null) return;
+
+                foreach (var subkeyName in baseKey.GetSubKeyNames())
+                {
+                    using var subKey = baseKey.OpenSubKey(subkeyName);
+                    if (subKey == null) continue;
+
+                    var appName = subKey.GetValue("App Name") as string;
+                    if (!string.IsNullOrEmpty(appName) &&
+                        (appName.Contains("WindowsSentinel", StringComparison.OrdinalIgnoreCase) ||
+                         appName.Contains("Sentinel", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        // Found a policy targeting Sentinel! Delete it.
+                        baseKey.DeleteSubKeyTree(subkeyName);
+                        
+                        await _detectionEngine.EmitAsync(new DetectionEvent
+                        {
+                            RuleName = "Anti-Tamper: Network QoS Throttling Detected",
+                            Evidence = $"Rogue QoS policy '{subkeyName}' targeting '{appName}' was found in registry.",
+                            Reasoning = "An attacker attempted to throttle or block Sentinel's network traffic " +
+                                        "by writing a policy-based QoS rule to HKLM\\Software\\Policies\\Microsoft\\Windows\\QoS. " +
+                                        "This is a common EDR evasion technique to prevent alerts from reaching the cloud. " +
+                                        "Sentinel has removed the registry key to restore full network bandwidth.",
+                            Confidence = 0.99,
+                            Tier = DetectionTier.Tier1Behavioral,
+                            AuthorizedResponse = ResponseAction.LogOnly, // Healed in-line
+                            ProcessName = "SYSTEM",
+                            ProcessId = 0
+                        });
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "[AntiTamperGuard] Error checking QoS policies");
+            }
         }
     }
 }
