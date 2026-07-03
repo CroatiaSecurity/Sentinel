@@ -4835,7 +4835,6 @@ namespace WindowsSentinel.Core
             "0.0.0.0 sessions.bugsnag.com\r\n" +
             "0.0.0.0 browser.sentry-cdn.com\r\n" +
             "0.0.0.0 app.getsentry.com\r\n" +
-            "0.0.0.0 amazonaws.com\r\n" +
             "0.0.0.0 amazonaax.com\r\n" +
             "0.0.0.0 amazonclix.com\r\n" +
             "0.0.0.0 assoc-amazon.com\r\n" +
