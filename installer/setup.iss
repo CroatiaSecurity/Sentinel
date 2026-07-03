@@ -71,27 +71,50 @@ begin
   // Kill any remaining agent and service processes using PowerShell
   Exec(ExpandConstant('{win}\System32\WindowsPowerShell\v1.0\powershell.exe'), '-Command "Get-Process -Name WindowsSentinel.Agent, WindowsSentinel.Service -ErrorAction SilentlyContinue | Stop-Process -Force"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Sleep(1000);
-  // Reset directory ACLs so installer can overwrite files (antitamper hardens ACLs)
-  Exec(ExpandConstant('{sys}\icacls.exe'),
-    ExpandConstant('"{app}" /reset /T /C /Q'),
-    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  // Also reset ACLs on legacy Program Files (x86) path if it exists
+
+  // Take ownership of the directories recursively to ensure we can modify ACLs
+  if DirExists(ExpandConstant('{app}')) then
+  begin
+    Exec(ExpandConstant('{sys}\takeown.exe'), ExpandConstant('/F "{app}" /R /A /D Y'), '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  end;
   if DirExists(ExpandConstant('{commonpf32}\WindowsSentinel')) then
   begin
-    Exec(ExpandConstant('{sys}\icacls.exe'),
-      ExpandConstant('"{commonpf32}\WindowsSentinel" /reset /T /C /Q'),
-      '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec(ExpandConstant('{sys}\takeown.exe'), ExpandConstant('/F "{commonpf32}\WindowsSentinel" /R /A /D Y'), '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   end;
-  // Take ownership first if icacls reset fails (SYSTEM-owned files)
-  Exec(ExpandConstant('{sys}\takeown.exe'),
-    ExpandConstant('/F "{app}" /R /A /D Y'),
-    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Exec(ExpandConstant('{sys}\icacls.exe'),
-    ExpandConstant('"{app}" /grant Administrators:F /T /C /Q'),
-    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Exec(ExpandConstant('{sys}\icacls.exe'),
-    ExpandConstant('"{app}" /grant SYSTEM:F /T /C /Q'),
-    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+  // Grant Administrators and SYSTEM full permissions
+  if DirExists(ExpandConstant('{app}')) then
+  begin
+    Exec(ExpandConstant('{sys}\icacls.exe'), ExpandConstant('"{app}" /grant Administrators:F /T /C /Q'), '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec(ExpandConstant('{sys}\icacls.exe'), ExpandConstant('"{app}" /grant SYSTEM:F /T /C /Q'), '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  end;
+  if DirExists(ExpandConstant('{commonpf32}\WindowsSentinel')) then
+  begin
+    Exec(ExpandConstant('{sys}\icacls.exe'), ExpandConstant('"{commonpf32}\WindowsSentinel" /grant Administrators:F /T /C /Q'), '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec(ExpandConstant('{sys}\icacls.exe'), ExpandConstant('"{commonpf32}\WindowsSentinel" /grant SYSTEM:F /T /C /Q'), '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  end;
+
+  // Explicitly remove any Deny rules for Users (which override Administrator allows)
+  if DirExists(ExpandConstant('{app}')) then
+  begin
+    Exec(ExpandConstant('{sys}\icacls.exe'), ExpandConstant('"{app}" /remove:d Users /T /C /Q'), '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec(ExpandConstant('{sys}\icacls.exe'), ExpandConstant('"{app}" /remove:d *S-1-5-32-545 /T /C /Q'), '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  end;
+  if DirExists(ExpandConstant('{commonpf32}\WindowsSentinel')) then
+  begin
+    Exec(ExpandConstant('{sys}\icacls.exe'), ExpandConstant('"{commonpf32}\WindowsSentinel" /remove:d Users /T /C /Q'), '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec(ExpandConstant('{sys}\icacls.exe'), ExpandConstant('"{commonpf32}\WindowsSentinel" /remove:d *S-1-5-32-545 /T /C /Q'), '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  end;
+
+  // Reset to inherited defaults to clean up any remaining anti-tamper permission states
+  if DirExists(ExpandConstant('{app}')) then
+  begin
+    Exec(ExpandConstant('{sys}\icacls.exe'), ExpandConstant('"{app}" /reset /T /C /Q'), '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  end;
+  if DirExists(ExpandConstant('{commonpf32}\WindowsSentinel')) then
+  begin
+    Exec(ExpandConstant('{sys}\icacls.exe'), ExpandConstant('"{commonpf32}\WindowsSentinel" /reset /T /C /Q'), '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  end;
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
