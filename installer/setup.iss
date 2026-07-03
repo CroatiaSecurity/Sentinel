@@ -15,6 +15,9 @@ OutputBaseFilename=WindowsSentinelSetup-1.1.8
 PrivilegesRequired=admin
 ; Allow upgrading over existing install
 UsePreviousAppDir=yes
+CloseApplications=no
+RestartApplications=no
+
 
 [Files]
 Source: "assets\Sentinel.ico"; DestDir: "{app}"; Flags: ignoreversion
@@ -66,7 +69,7 @@ begin
   // Wait for service to stop
   Sleep(2000);
   // Kill any remaining agent and service processes using PowerShell
-  Exec('powershell.exe', '-Command "Stop-Process -Name WindowsSentinel.Agent -Force; Stop-Process -Name WindowsSentinel.Service -Force"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{win}\System32\WindowsPowerShell\v1.0\powershell.exe'), '-Command "Get-Process -Name WindowsSentinel.Agent, WindowsSentinel.Service -ErrorAction SilentlyContinue | Stop-Process -Force"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Sleep(1000);
   // Reset directory ACLs so installer can overwrite files (antitamper hardens ACLs)
   Exec(ExpandConstant('{sys}\icacls.exe'),
