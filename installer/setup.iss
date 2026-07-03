@@ -60,17 +60,39 @@ Type: filesandordirs; Name: "{pf32}\WindowsSentinel"
 [Code]
 // Pascal Script for upgrade/uninstall logic
 
+function IsFileLocked(const FileName: String): Boolean;
+var
+  TempName: String;
+begin
+  Result := False;
+  if FileExists(FileName) then
+  begin
+    TempName := FileName + '.locktest';
+    if RenameFile(FileName, TempName) then
+    begin
+      // Successfully renamed, meaning it is not locked. Rename it back immediately.
+      RenameFile(TempName, FileName);
+    end
+    else
+    begin
+      Result := True;
+    end;
+  end;
+end;
+
 procedure StopExistingService();
 var
   ResultCode: Integer;
+  ServiceExe: String;
+  AgentExe: String;
+  I: Integer;
 begin
   // Stop the service before upgrading — handles antitamper ACL-locked files
   Exec(ExpandConstant('{sysnative}\sc.exe'), 'stop "Windows Sentinel"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  // Wait for service to stop
-  Sleep(2000);
-  // Kill any remaining agent and service processes using PowerShell
-  Exec(ExpandConstant('{win}\System32\WindowsPowerShell\v1.0\powershell.exe'), '-Command "Get-Process -Name WindowsSentinel.Agent, WindowsSentinel.Service -ErrorAction SilentlyContinue | Stop-Process -Force"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Sleep(1000);
+  
+  // Kill remaining agent and service processes using 64-bit PowerShell Stop-Process (bypasses taskkill block)
+  Exec(ExpandConstant('{sysnative}\WindowsPowerShell\v1.0\powershell.exe'), '-Command "Stop-Process -Name WindowsSentinel.Service, WindowsSentinel.Agent -Force -ErrorAction SilentlyContinue"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Sleep(500);
 
   // Take ownership of the directories recursively to ensure we can modify ACLs
   if DirExists(ExpandConstant('{app}')) then
@@ -114,6 +136,27 @@ begin
   if DirExists(ExpandConstant('{commonpf32}\WindowsSentinel')) then
   begin
     Exec(ExpandConstant('{sysnative}\icacls.exe'), ExpandConstant('"{commonpf32}\WindowsSentinel" /reset /T /C /Q'), '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  end;
+
+  // Verify if the executables are locked. If so, wait for them to release.
+  ServiceExe := ExpandConstant('{app}\WindowsSentinel.Service.exe');
+  AgentExe := ExpandConstant('{app}\WindowsSentinel.Agent.exe');
+
+  for I := 1 to 10 do
+  begin
+    if not (IsFileLocked(ServiceExe) or IsFileLocked(AgentExe)) then
+      Break;
+    Sleep(500);
+  end;
+
+  // If still locked, attempt to rename them to bypass the lock (rename is allowed on active running files)
+  if IsFileLocked(ServiceExe) then
+  begin
+    RenameFile(ServiceExe, ServiceExe + '.old');
+  end;
+  if IsFileLocked(AgentExe) then
+  begin
+    RenameFile(AgentExe, AgentExe + '.old');
   end;
 end;
 
