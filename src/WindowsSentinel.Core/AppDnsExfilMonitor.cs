@@ -72,7 +72,14 @@ namespace WindowsSentinel.Core
         private static readonly HashSet<string> AllowedDohApps = new(StringComparer.OrdinalIgnoreCase)
         {
             "nextdns", "cloudflared", "dnscrypt-proxy", "stubby",
-            "adguardhome", "pihole-FTL", "unbound"
+            "adguardhome", "pihole-FTL", "unbound",
+            // CEF-based apps that embed Chromium's DNS resolver (talks to 8.8.8.8 via DoH)
+            "steamwebhelper", "steam", "steamservice",
+            "cefsharp.browsersubprocess", "cef",
+            // Other legitimate apps with embedded DoH
+            "discord", "spotify", "slack", "teams",
+            "epicgameslauncher", "eadesktop", "galaxyclient",
+            "battle.net", "origin"
         };
 
         [DllImport("iphlpapi.dll", SetLastError = true)]
