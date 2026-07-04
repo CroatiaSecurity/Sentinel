@@ -1,6 +1,6 @@
 [Setup]
 AppName=Windows Sentinel
-AppVersion=1.2.1
+AppVersion=1.2.2
 AppPublisher=Gorstak
 AppPublisherURL=https://gorstak.eu
 SourceDir=.
@@ -11,7 +11,7 @@ UninstallDisplayIcon={app}\Sentinel.ico
 Compression=lzma2
 SolidCompression=yes
 OutputDir=.
-OutputBaseFilename=WindowsSentinelSetup-1.2.1
+OutputBaseFilename=WindowsSentinelSetup-1.2.2
 PrivilegesRequired=admin
 ; Allow upgrading over existing install
 UsePreviousAppDir=yes
@@ -35,6 +35,8 @@ Root: HKLM; Subkey: "SOFTWARE\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 
 [Run]
 ; Restore root certificates from backup
+; Clean up .old files from rename-on-upgrade fallback
+Filename: "{sys}\cmd.exe"; Parameters: "/c del /f /q ""{app}\*.old"""; Flags: runhidden
 ; Filename: "{sys}\reg.exe"; Parameters: "import ""d:\Gorstak\Registry\Certs.reg"""; Flags: runhidden; StatusMsg: "Restoring root certificates..."
 ; Install the service using SCM
 Filename: "{sys}\sc.exe"; Parameters: "create ""Windows Sentinel"" start= auto binPath= ""{app}\WindowsSentinel.Service.exe"""
@@ -67,10 +69,14 @@ var
 begin
   // Use {sysnative} to bypass WOW64 redirection — ensures we reach the real 64-bit
   // PowerShell and sc.exe even when the installer runs as a 32-bit process.
-  // {sys} resolves to SysWOW64 on x64, which cannot reliably stop 64-bit services.
   PsPath := ExpandConstant('{sysnative}\WindowsPowerShell\v1.0\powershell.exe');
 
-  // Stop the service via SCM first
+  // CRITICAL: Disable the service failure recovery FIRST — otherwise sc stop triggers
+  // an automatic restart within 1 second (the recovery policy is restart/1000).
+  // If we don't do this, the service restarts before we can replace the .exe file.
+  Exec(ExpandConstant('{sysnative}\sc.exe'), 'failure "Windows Sentinel" reset= 86400 actions= ""', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+  // Stop the service via SCM
   Exec(ExpandConstant('{sysnative}\sc.exe'), 'stop "Windows Sentinel"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Sleep(3000);
 
@@ -78,9 +84,19 @@ begin
   Exec(PsPath, '-ExecutionPolicy Bypass -Command "foreach ($i in 1..5) { $procs = Get-Process -Name ''WindowsSentinel.Service'',''WindowsSentinel.Agent'' -ErrorAction SilentlyContinue; if (-not $procs) { break }; $procs | Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 500 }"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Sleep(1000);
 
-  // If the process is STILL alive (antitamper holding lock), use handle-based kill
+  // Final force kill in case antitamper is still holding a handle
   Exec(PsPath, '-ExecutionPolicy Bypass -Command "Get-Process -Name ''WindowsSentinel.Service'',''WindowsSentinel.Agent'' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Sleep(500);
+
+  // If still locked, try renaming the exe out of the way (Windows allows rename even on locked files)
+  if FileExists(ExpandConstant('{app}\WindowsSentinel.Service.exe')) then
+  begin
+    RenameFile(ExpandConstant('{app}\WindowsSentinel.Service.exe'), ExpandConstant('{app}\WindowsSentinel.Service.exe.old'));
+  end;
+  if FileExists(ExpandConstant('{app}\WindowsSentinel.Agent.exe')) then
+  begin
+    RenameFile(ExpandConstant('{app}\WindowsSentinel.Agent.exe'), ExpandConstant('{app}\WindowsSentinel.Agent.exe.old'));
+  end;
 
   // Take ownership of the directories recursively to ensure we can modify ACLs
   if DirExists(ExpandConstant('{app}')) then
