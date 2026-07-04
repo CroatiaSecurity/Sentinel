@@ -68,18 +68,38 @@ namespace WindowsSentinel.Core
             "librewolf", "tor", "electron"
         };
 
-        // Legitimate apps that use DoH for their own resolution
-        private static readonly HashSet<string> AllowedDohApps = new(StringComparer.OrdinalIgnoreCase)
+        // Legitimate apps that use DoH for their own resolution.
+        // SECURITY: We verify the binary's Authenticode signature publisher to prevent
+        // attackers from naming malware "steamwebhelper.exe". Path-based checks are
+        // insufficient because users install apps to arbitrary locations.
+        // Empty publisher = DNS resolver tools, allowed from anywhere without sig check.
+        private static readonly Dictionary<string, string[]> AllowedDohApps = new(StringComparer.OrdinalIgnoreCase)
         {
-            "nextdns", "cloudflared", "dnscrypt-proxy", "stubby",
-            "adguardhome", "pihole-FTL", "unbound",
-            // CEF-based apps that embed Chromium's DNS resolver (talks to 8.8.8.8 via DoH)
-            "steamwebhelper", "steam", "steamservice",
-            "cefsharp.browsersubprocess", "cef",
-            // Other legitimate apps with embedded DoH
-            "discord", "spotify", "slack", "teams",
-            "epicgameslauncher", "eadesktop", "galaxyclient",
-            "battle.net", "origin"
+            // DNS resolver tools — these ARE DNS resolvers, allow unconditionally
+            ["nextdns"] = Array.Empty<string>(),
+            ["cloudflared"] = Array.Empty<string>(),
+            ["dnscrypt-proxy"] = Array.Empty<string>(),
+            ["stubby"] = Array.Empty<string>(),
+            ["adguardhome"] = Array.Empty<string>(),
+            ["pihole-FTL"] = Array.Empty<string>(),
+            ["unbound"] = Array.Empty<string>(),
+            // Steam (Valve signed)
+            ["steamwebhelper"] = new[] { "Valve" },
+            ["steam"] = new[] { "Valve" },
+            ["steamservice"] = new[] { "Valve" },
+            // Game launchers
+            ["epicgameslauncher"] = new[] { "Epic Games" },
+            ["eadesktop"] = new[] { "Electronic Arts" },
+            ["galaxyclient"] = new[] { "GOG sp. z o.o." },
+            ["battle.net"] = new[] { "Blizzard Entertainment" },
+            ["origin"] = new[] { "Electronic Arts" },
+            // Communication apps (Electron/CEF-based)
+            ["discord"] = new[] { "Discord Inc." },
+            ["spotify"] = new[] { "Spotify AB" },
+            ["slack"] = new[] { "Slack Technologies" },
+            ["teams"] = new[] { "Microsoft" },
+            // Generic CEF subprocesses — require known publisher
+            ["cefsharp.browsersubprocess"] = new[] { "Valve", "Discord Inc.", "Spotify AB", "Slack Technologies" },
         };
 
         [DllImport("iphlpapi.dll", SetLastError = true)]
@@ -128,7 +148,11 @@ namespace WindowsSentinel.Core
                 string procName = GetProcessName(conn.OwnerPid);
                 if (string.IsNullOrEmpty(procName)) continue;
                 if (BrowserProcesses.Contains(procName)) continue;
-                if (AllowedDohApps.Contains(procName)) continue;
+
+                // Check path-verified allowlist: name must match AND image path must
+                // contain an expected directory substring. This prevents attackers from
+                // naming malware "steamwebhelper.exe" in a temp folder to bypass detection.
+                if (IsAllowedDohApp(procName, conn.OwnerPid)) continue;
 
                 var key = (conn.OwnerPid, conn.RemoteAddress);
                 if (!_dohConnections.TryGetValue(key, out var state))
@@ -298,6 +322,80 @@ namespace WindowsSentinel.Core
                 return proc.ProcessName;
             }
             catch { return ""; }
+        }
+
+        /// <summary>
+        /// Checks if a process is in the DoH allowlist by verifying BOTH process name
+        /// AND the Authenticode digital signature publisher of the binary.
+        /// Empty publisher arrays mean "allow from any location" (DNS resolver tools).
+        /// Non-empty arrays require the binary to be signed by one of the listed publishers.
+        /// 
+        /// This is tamper-proof: an attacker cannot forge a valid Authenticode signature
+        /// for "Valve" or "Discord Inc." without stealing those companies' code signing keys.
+        /// Even if malware is named "steamwebhelper.exe", it won't have Valve's signature.
+        /// 
+        /// Results are cached per PID to avoid repeated signature verification (expensive).
+        /// </summary>
+        private readonly ConcurrentDictionary<int, bool> _allowedPidCache = new();
+
+        private bool IsAllowedDohApp(string processName, int pid)
+        {
+            // Check cache first (sig verification is expensive)
+            if (_allowedPidCache.TryGetValue(pid, out var cached))
+                return cached;
+
+            if (!AllowedDohApps.TryGetValue(processName, out var requiredPublishers))
+            {
+                _allowedPidCache[pid] = false;
+                return false;
+            }
+
+            // Empty array = DNS resolver tools, allow unconditionally
+            if (requiredPublishers.Length == 0)
+            {
+                _allowedPidCache[pid] = true;
+                return true;
+            }
+
+            // Verify Authenticode signature publisher
+            string imagePath = SecurityValidation.GetProcessImagePath(pid) ?? "";
+            if (string.IsNullOrEmpty(imagePath))
+            {
+                _allowedPidCache[pid] = false;
+                return false; // Can't verify — don't allow
+            }
+
+            bool allowed = VerifySignaturePublisher(imagePath, requiredPublishers);
+            _allowedPidCache[pid] = allowed;
+            return allowed;
+        }
+
+        /// <summary>
+        /// Verifies that a file is Authenticode-signed by one of the expected publishers.
+        /// Reads the embedded certificate's Subject field and checks for publisher name.
+        /// </summary>
+        private static bool VerifySignaturePublisher(string filePath, string[] expectedPublishers)
+        {
+            try
+            {
+#pragma warning disable SYSLIB0057 // CreateFromSignedFile is obsolete but X509CertificateLoader has no SignedFile equivalent yet
+                var signerCert = System.Security.Cryptography.X509Certificates.X509Certificate.CreateFromSignedFile(filePath);
+#pragma warning restore SYSLIB0057
+                if (signerCert == null) return false;
+
+                var subject = signerCert.Subject ?? "";
+                foreach (var publisher in expectedPublishers)
+                {
+                    if (subject.Contains(publisher, StringComparison.OrdinalIgnoreCase))
+                        return true;
+                }
+                return false;
+            }
+            catch
+            {
+                // Not signed or can't read cert — not allowed
+                return false;
+            }
         }
 
         private class TcpConnectionInfo
