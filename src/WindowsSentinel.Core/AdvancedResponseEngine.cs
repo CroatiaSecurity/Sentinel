@@ -17,6 +17,10 @@ namespace WindowsSentinel.Core
         private IncidentResponseService? _incidentResponse;
         private DllUnloadEngine? _dllUnloadEngine;
         private ChainTracer? _chainTracer;
+        private ReinfectionCorrelator? _reinfectionCorrelator;
+
+        /// <summary>Set after DI construction to avoid circular dependency.</summary>
+        public void SetReinfectionCorrelator(ReinfectionCorrelator correlator) => _reinfectionCorrelator = correlator;
 
         public AdvancedResponseEngine(
             SentinelConfig config,
@@ -279,6 +283,7 @@ namespace WindowsSentinel.Core
                     ExecutionTimeMs = stopwatch.ElapsedMilliseconds
                 };
                 await _eventLogger.LogEventAsync("response", responseLog);
+                NotifyReinfectionCorrelator(detection);
             }
             else if (shouldIsolateNetwork)
             {
@@ -431,6 +436,7 @@ namespace WindowsSentinel.Core
                     ExecutionTimeMs = stopwatch.ElapsedMilliseconds
                 };
                 await _eventLogger.LogEventAsync("response", responseLog);
+                NotifyReinfectionCorrelator(detection);
             }
             else
             {
@@ -446,6 +452,35 @@ namespace WindowsSentinel.Core
                 };
                 await _eventLogger.LogEventAsync("response", responseLog);
             }
+        }
+
+        private void NotifyReinfectionCorrelator(DetectionEvent detection)
+        {
+            try
+            {
+                if (_reinfectionCorrelator == null) return;
+                var hash = detection.Metadata?.GetValueOrDefault("SHA256", "");
+                if (string.IsNullOrEmpty(hash))
+                {
+                    // Try to compute hash from process image
+                    try
+                    {
+                        using var proc = Process.GetProcessById(detection.ProcessId);
+                        var path = proc.MainModule?.FileName;
+                        if (!string.IsNullOrEmpty(path) && File.Exists(path))
+                        {
+                            using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                            hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(fs)).ToLowerInvariant();
+                        }
+                    }
+                    catch { }
+                }
+                if (!string.IsNullOrEmpty(hash))
+                {
+                    _reinfectionCorrelator.RegisterKilledHash(hash, detection.ProcessName ?? "unknown", detection.ProcessName ?? "unknown");
+                }
+            }
+            catch { }
         }
 
         private void RemoveCertificateFromStore(string thumbprint)

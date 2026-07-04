@@ -2,6 +2,16 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [1.2.2] - 2026-07-04
+
+### Added
+- **ReinfectionCorrelator**: Tracks all previously killed/quarantined file hashes across reboots. Scans running processes and persistence locations (Recycle Bin, System Volume Information, Temp, ProgramData) every 60 seconds for reappearance of known-bad hashes. Detects distributed self-healing malware that copies itself between pagefile, swap, secondary drives, and router. Kill-authorized on running process, quarantine on dormant copy.
+- **NetworkReinfectionDetector**: Monitors NIC state changes (interface up, DHCP lease, address change). Flags any new process that spawns within 15 seconds of network reconnection from a suspicious path (Temp, Recycle Bin, Downloads, Public) with no user-interactive parent chain (explorer, winlogon, etc.). Catches the pattern where an infected router or LAN device pushes malware back via SMB/UPnP immediately upon machine reconnect. Kill-authorized.
+- **AdvancedResponseEngine → ReinfectionCorrelator integration**: Every successful process kill now registers the binary's SHA256 hash with the correlator for cross-reboot tracking via a persistent kill log file.
+
+### Fixed
+- **Installer (setup.iss)**: All system tool calls now use `{sysnative}` instead of `{sys}` to bypass WOW64 redirection. Fixes "Access is denied" errors during upgrade when the 32-bit installer couldn't stop the 64-bit service. Added retry loop for Stop-Process.
+
 ## [1.2.1] - 2026-07-04
 
 ### Added

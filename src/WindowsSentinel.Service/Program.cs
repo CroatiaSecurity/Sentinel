@@ -17,7 +17,15 @@ namespace WindowsSentinel.Service
             // Secure Sentinel's installation directory permissions
             HardeningModule.SecureInstallationDirectory();
 
-            CreateHostBuilder(args).Build().Run();
+            var host = CreateHostBuilder(args).Build();
+
+            // Wire up ReinfectionCorrelator -> AdvancedResponseEngine (avoids circular DI)
+            var responseEngine = host.Services.GetService<AdvancedResponseEngine>();
+            var correlator = host.Services.GetService<ReinfectionCorrelator>();
+            if (responseEngine != null && correlator != null)
+                responseEngine.SetReinfectionCorrelator(correlator);
+
+            host.Run();
         }
 
         public static IHostBuilder CreateHostBuilder(string[] args) =>
@@ -168,6 +176,9 @@ namespace WindowsSentinel.Service
                     services.AddHostedService<BootIntegrityGuard>();
                     services.AddSingleton<PersistentConnectionMonitor>();
                     services.AddHostedService<PersistentConnectionMonitor>(sp => sp.GetRequiredService<PersistentConnectionMonitor>());
+                    services.AddSingleton<ReinfectionCorrelator>();
+                    services.AddHostedService<ReinfectionCorrelator>(sp => sp.GetRequiredService<ReinfectionCorrelator>());
+                    services.AddHostedService<NetworkReinfectionDetector>();
                     services.AddSingleton<IsolationResponseEngine>();
 
                     // v1.0.1: Blind spot monitors
