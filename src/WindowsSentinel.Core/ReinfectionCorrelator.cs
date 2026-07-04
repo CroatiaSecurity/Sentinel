@@ -58,10 +58,14 @@ namespace WindowsSentinel.Core
 
         /// <summary>
         /// Called by AdvancedResponseEngine after a successful kill to register the hash.
+        /// Excludes Windows system binaries to prevent false positives when the response
+        /// engine mistakenly hashes a service host process instead of the actual malware.
         /// </summary>
         public void RegisterKilledHash(string hash, string imagePath, string processName)
         {
             if (string.IsNullOrEmpty(hash)) return;
+            if (IsWindowsSystemBinary(imagePath) || IsWindowsSystemBinary(processName)) return;
+
             _killedHashes[hash] = new KilledEntry(imagePath, processName, DateTime.UtcNow);
 
             // Persist to kill log for cross-reboot tracking
@@ -72,6 +76,59 @@ namespace WindowsSentinel.Core
                 File.AppendAllText(KillLogPath, $"{hash}|{processName}|{imagePath}|{DateTime.UtcNow:O}\n");
             }
             catch { }
+        }
+
+        /// <summary>
+        /// Windows system binaries that must NEVER be tracked as "killed malware".
+        /// If the response engine kills a process hosted in svchost.exe or other system
+        /// binaries, we must not register that hash — it would cause every svchost instance
+        /// on the system to trigger reinfection alerts.
+        /// </summary>
+        private static readonly HashSet<string> SystemBinaryNames = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "svchost", "svchost.exe",
+            "csrss", "csrss.exe",
+            "wininit", "wininit.exe",
+            "winlogon", "winlogon.exe",
+            "lsass", "lsass.exe",
+            "services", "services.exe",
+            "smss", "smss.exe",
+            "dwm", "dwm.exe",
+            "explorer", "explorer.exe",
+            "conhost", "conhost.exe",
+            "taskhostw", "taskhostw.exe",
+            "sihost", "sihost.exe",
+            "RuntimeBroker", "RuntimeBroker.exe",
+            "dllhost", "dllhost.exe",
+            "spoolsv", "spoolsv.exe",
+            "SearchHost", "SearchHost.exe",
+            "ShellExperienceHost", "ShellExperienceHost.exe",
+            "StartMenuExperienceHost", "StartMenuExperienceHost.exe",
+            "SecurityHealthService", "SecurityHealthService.exe",
+            "MsMpEng", "MsMpEng.exe",
+            "WmiPrvSE", "WmiPrvSE.exe",
+            "wuauclt", "wuauclt.exe",
+            "TrustedInstaller", "TrustedInstaller.exe",
+        };
+
+        private static bool IsWindowsSystemBinary(string? pathOrName)
+        {
+            if (string.IsNullOrEmpty(pathOrName)) return false;
+
+            // Check by name
+            var fileName = Path.GetFileName(pathOrName);
+            if (SystemBinaryNames.Contains(fileName)) return true;
+            var nameNoExt = Path.GetFileNameWithoutExtension(pathOrName);
+            if (SystemBinaryNames.Contains(nameNoExt)) return true;
+
+            // Check by path — anything in Windows\System32 or Windows\SysWOW64 is a system binary
+            var normalized = pathOrName.Replace('/', '\\');
+            if (normalized.Contains(@"\Windows\System32\", StringComparison.OrdinalIgnoreCase) ||
+                normalized.Contains(@"\Windows\SysWOW64\", StringComparison.OrdinalIgnoreCase) ||
+                normalized.Contains(@"\Windows\WinSxS\", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            return false;
         }
 
         protected override async Task ExecuteAsync(CancellationToken ct)
@@ -157,6 +214,11 @@ namespace WindowsSentinel.Core
                         var procName = parts[1];
                         var path = parts[2];
                         DateTime.TryParse(parts[3], out var killedAt);
+
+                        // Skip system binaries that were incorrectly logged
+                        if (IsWindowsSystemBinary(path) || IsWindowsSystemBinary(procName))
+                            continue;
+
                         _killedHashes.TryAdd(hash, new KilledEntry(path, procName, killedAt));
                     }
                 }
@@ -176,6 +238,9 @@ namespace WindowsSentinel.Core
                     string? imagePath = null;
                     try { imagePath = proc.MainModule?.FileName; } catch { }
                     if (string.IsNullOrEmpty(imagePath) || !File.Exists(imagePath)) continue;
+
+                    // Never alert on Windows system binaries
+                    if (IsWindowsSystemBinary(imagePath)) continue;
 
                     var hash = ComputeFileHash(imagePath);
                     if (hash == null) continue;
