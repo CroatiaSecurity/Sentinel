@@ -2,6 +2,18 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [1.2.4] - 2026-07-04
+
+### Added
+- **AcousticThreatMonitor**: Real-time protection against harmful audio frequencies. Monitors system audio via WASAPI loopback and mutes output within 30ms when detecting:
+  - Infrasound attacks (1-20Hz) — nausea, disorientation
+  - Fear frequency (18-19Hz) — dread, visual disturbances
+  - Nausea band (6.5-8Hz) — organ resonance, chest pressure
+  - Ultrasonic beacons (17-22kHz) — cross-device tracking, headaches
+  - Sustained narrow-band tones at unusual amplitudes
+  - Uses Goertzel algorithm for efficient frequency detection without full FFT
+  - Whitelists solfeggio healing frequencies (174-963Hz) and Schumann (7.83Hz) so therapeutic tools like Harmony can coexist
+
 ## [1.2.3] - 2026-07-04
 
 ### Security Hardening
