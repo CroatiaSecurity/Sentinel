@@ -50,17 +50,42 @@ namespace WindowsSentinel.Core
                         try
                         {
                             if (proc.Id <= 4 || _alerted.Contains(proc.Id)) continue;
-                            if (AllowedCapture.Contains(proc.ProcessName)) continue;
 
-                            // Skip scanning games/Steam apps to prevent anti-tamper/anti-cheat false triggers
+                            // Name-based allowlist — but verify path is from a legitimate location.
+                            // An attacker naming malware "obs64.exe" from C:\Temp should NOT be skipped.
+                            if (AllowedCapture.Contains(proc.ProcessName))
+                            {
+                                var capturePath = SecurityValidation.GetProcessImagePath(proc.Id);
+                                if (!string.IsNullOrEmpty(capturePath))
+                                {
+                                    var lp = capturePath.ToLowerInvariant();
+                                    bool isTrustedLocation = lp.Contains(@"\program files") ||
+                                                             lp.Contains(@"\windows\") ||
+                                                             lp.Contains(@"\appdata\local\programs\") ||
+                                                             lp.Contains(@"\appdata\local\microsoft\") ||
+                                                             lp.Contains(@"\windowssentinel\");
+                                    if (isTrustedLocation) continue;
+                                }
+                                else
+                                {
+                                    continue; // Can't read path — give benefit of doubt for known names
+                                }
+                                // Name matches but path is suspicious — fall through to detection
+                            }
+
+                            // Skip games/Steam — verify with signature trust to prevent directory-name spoofing
                             var path = SecurityValidation.GetProcessImagePath(proc.Id);
                             if (path != null)
                             {
                                 var lowerPath = path.ToLowerInvariant();
-                                if (lowerPath.Contains(@"\steamapps\common\") ||
-                                    lowerPath.Contains(@"\steam\") ||
-                                    lowerPath.Contains(@"\gog games\") ||
-                                    lowerPath.Contains(@"\epic games\"))
+                                // Reject Temp/Downloads even if path contains "steam"
+                                bool isSuspiciousDir = lowerPath.Contains(@"\temp\") ||
+                                                      lowerPath.Contains(@"\downloads\");
+                                if (!isSuspiciousDir &&
+                                    (lowerPath.Contains(@"\steamapps\common\") ||
+                                     lowerPath.Contains(@"\steam\") ||
+                                     lowerPath.Contains(@"\gog games\") ||
+                                     lowerPath.Contains(@"\epic games\")))
                                 {
                                     continue;
                                 }

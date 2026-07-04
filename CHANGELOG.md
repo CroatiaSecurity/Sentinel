@@ -2,6 +2,18 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [1.2.3] - 2026-07-04
+
+### Security Hardening
+- **AppDnsExfilMonitor**: DoH allowlist now verifies Authenticode signature publisher (e.g., "Valve", "Discord Inc.") instead of path. Prevents attackers from naming malware `steamwebhelper.exe` to bypass DoH detection. Results cached per PID for performance.
+- **RawDiskAccessMonitor**: Name-based allowlist (defrag, vds, diskpart, etc.) now verifies the binary is running from System32/Program Files. An attacker naming malware `defrag.exe` in C:\Temp no longer bypasses raw disk access detection.
+- **RansomwareIoMonitor**: Whitelist for high-IO apps (browsers, Steam, etc.) now verifies the binary path is from a legitimate install location. Rejects Temp/Downloads directories. Cached per PID for hot-path performance.
+- **ScreenCaptureMonitor**: AllowedCapture list now verifies path is from a trusted location. Game directory exclusions now reject Temp/Downloads even if the path contains "steam" or "epic games".
+- **VolumeMountMonitor**: Game directory exclusion for SUBST attack detection now rejects Temp/Downloads paths even if they contain known game directory names.
+
+### Fixed
+- **AppDnsExfilMonitor**: Steam/Discord/Spotify/etc. no longer killed for using embedded Chromium DoH resolver (allowlist with signature verification).
+
 ## [1.2.2] - 2026-07-04
 
 ### Added

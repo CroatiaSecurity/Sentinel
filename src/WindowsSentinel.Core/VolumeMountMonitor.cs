@@ -724,13 +724,19 @@ namespace WindowsSentinel.Core
                         continue; // Process started more than 30s ago — probably not the creator
 
                     // Check if it's from a suspicious path (not Program Files, not System32, and not game directories)
+                    // SECURITY: Also reject Temp/Downloads even if they contain "steam" in path
+                    // to prevent an attacker creating C:\Temp\steam\malware.exe to bypass this check.
                     var lowerPath = exePath.ToLowerInvariant();
-                    if (lowerPath.StartsWith(@"c:\windows\") || 
+                    bool isSuspiciousDropLocation = lowerPath.Contains(@"\temp\") ||
+                                                   lowerPath.Contains(@"\downloads\") ||
+                                                   lowerPath.Contains(@"\appdata\local\temp\");
+                    if (!isSuspiciousDropLocation &&
+                        (lowerPath.StartsWith(@"c:\windows\") || 
                         lowerPath.StartsWith(@"c:\program files") ||
                         lowerPath.Contains(@"\steamapps\common\") ||
                         lowerPath.Contains(@"\steam\") ||
                         lowerPath.Contains(@"\gog games\") ||
-                        lowerPath.Contains(@"\epic games\"))
+                        lowerPath.Contains(@"\epic games\")))
                         continue;
 
                     // This is a recently-spawned, non-system, non-standard-path process.

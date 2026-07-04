@@ -25,6 +25,8 @@ namespace WindowsSentinel.Core
         private readonly ConcurrentDictionary<int, string> _processNames = new();
 
         // Browser and known high-IO apps that rename files legitimately (cache, IndexedDB, etc.)
+        // SECURITY: Name-only matching here is supplemented by path verification — an attacker
+        // naming malware "chrome.exe" from C:\Temp would still be caught.
         private static readonly HashSet<string> RansomwareIoWhitelist = new(StringComparer.OrdinalIgnoreCase)
         {
             "chrome", "msedge", "firefox", "brave", "opera", "vivaldi", "msedgewebview2",
@@ -33,6 +35,9 @@ namespace WindowsSentinel.Core
             "OneDrive", "Dropbox",
             "TmsaInstance64", "PtSessionAgent", "coreServiceShell",
         };
+
+        // Cache of PIDs we've verified as legitimately matching the whitelist
+        private readonly ConcurrentDictionary<int, bool> _verifiedWhitelistPids = new();
 
         public RansomwareIoMonitor(DetectionEngine detectionEngine, ILogger<RansomwareIoMonitor> logger)
         {
@@ -47,7 +52,47 @@ namespace WindowsSentinel.Core
         public void RecordRename(int processId, string processName)
         {
             if (processId <= 4) return;
-            if (RansomwareIoWhitelist.Contains(processName)) return;
+
+            // Name-based whitelist with path verification to prevent bypass-by-renaming.
+            // Hot path — cache the result per PID to avoid repeated I/O.
+            if (RansomwareIoWhitelist.Contains(processName))
+            {
+                if (_verifiedWhitelistPids.TryGetValue(processId, out var verified))
+                {
+                    if (verified) return;
+                    // Name matches but previously failed verification — fall through
+                }
+                else
+                {
+                    // First time seeing this PID — verify path
+                    bool legitimate = false;
+                    try
+                    {
+                        var imagePath = SecurityValidation.GetProcessImagePath(processId);
+                        if (!string.IsNullOrEmpty(imagePath))
+                        {
+                            // Must NOT be from Temp/Downloads (common malware drop locations)
+                            var lower = imagePath.ToLowerInvariant();
+                            bool isSuspiciousDir = lower.Contains(@"\temp\") ||
+                                                   lower.Contains(@"\downloads\") ||
+                                                   lower.Contains(@"\appdata\local\temp\");
+                            if (!isSuspiciousDir)
+                            {
+                                // Must be from Program Files, AppData\Local\Programs, or known app dirs
+                                legitimate = lower.Contains(@"\program files") ||
+                                             lower.Contains(@"\appdata\local\programs\") ||
+                                             lower.Contains(@"\appdata\local\google\") ||
+                                             lower.Contains(@"\appdata\local\microsoft\") ||
+                                             lower.Contains(@"\steam\") ||
+                                             lower.Contains(@"\windows\");
+                            }
+                        }
+                    }
+                    catch { }
+                    _verifiedWhitelistPids[processId] = legitimate;
+                    if (legitimate) return;
+                }
+            }
 
             _renameCountByPid.AddOrUpdate(processId, 1, (_, count) => count + 1);
             _processNames.TryAdd(processId, processName);

@@ -133,8 +133,17 @@ namespace WindowsSentinel.Core
 
                         var procName = proc.ProcessName;
 
-                        // Skip allowed processes
-                        if (AllowedProcesses.Contains(procName)) continue;
+                        // Skip allowed processes — but only if running from expected system paths.
+                        // An attacker could name malware "defrag.exe" to bypass name-only checks.
+                        // Windows system tools always run from System32/SysWOW64.
+                        if (AllowedProcesses.Contains(procName))
+                        {
+                            string? allowedPath = null;
+                            try { allowedPath = proc.MainModule?.FileName; } catch { }
+                            if (!string.IsNullOrEmpty(allowedPath) && IsSystemOrTrustedPath(allowedPath))
+                                continue;
+                            // Name matches but path is suspicious — fall through to detection
+                        }
 
                         // Check if process has any open device handles matching raw disk patterns
                         var deviceHandles = GetProcessDeviceHandles(proc.Id);
@@ -326,6 +335,20 @@ namespace WindowsSentinel.Core
             }
             catch { return null; }
             finally { Marshal.FreeHGlobal(buffer); }
+        }
+
+        /// <summary>
+        /// Verifies a binary is running from a system-protected or trusted path.
+        /// Used to validate that an "allowed" process name actually belongs to the real tool.
+        /// </summary>
+        private static bool IsSystemOrTrustedPath(string imagePath)
+        {
+            return imagePath.Contains(@"\Windows\System32\", StringComparison.OrdinalIgnoreCase) ||
+                   imagePath.Contains(@"\Windows\SysWOW64\", StringComparison.OrdinalIgnoreCase) ||
+                   imagePath.Contains(@"\Windows\WinSxS\", StringComparison.OrdinalIgnoreCase) ||
+                   imagePath.StartsWith(@"C:\Program Files\", StringComparison.OrdinalIgnoreCase) ||
+                   imagePath.StartsWith(@"C:\Program Files (x86)\", StringComparison.OrdinalIgnoreCase) ||
+                   imagePath.Contains(@"\WindowsSentinel\", StringComparison.OrdinalIgnoreCase);
         }
 
         private static bool IsRawDiskPath(string path)
