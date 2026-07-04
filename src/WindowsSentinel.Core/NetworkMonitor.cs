@@ -40,6 +40,62 @@ namespace WindowsSentinel.Core
 
         private static readonly HashSet<int> StandardPorts = new() { 80, 443, 53, 8080, 8443 };
 
+        /// <summary>
+        /// Ports that are blocked by the IPSec policy (IPSecPolicy.ps1). Any active connection
+        /// on these ports means the policy was disabled/removed/bypassed. These are remote access,
+        /// lateral movement, database, and known backdoor ports that should never be in use.
+        /// </summary>
+        private static readonly HashSet<int> KnownMaliciousPorts = new()
+        {
+            21,    // FTP
+            22,    // SSH
+            23,    // Telnet
+            111,   // RPCBind/Portmapper
+            135,   // RPC/DCOM
+            137,   // NetBIOS Name Service
+            138,   // NetBIOS Datagram
+            139,   // NetBIOS Session
+            445,   // SMB
+            666,   // Known trojan port
+            1337,  // Known backdoor port
+            1433,  // MSSQL
+            2049,  // NFS
+            3306,  // MySQL
+            3389,  // RDP
+            4444,  // Meterpreter/Metasploit default
+            5432,  // PostgreSQL
+            5900,  // VNC
+            5985,  // WinRM HTTP
+            5986,  // WinRM HTTPS
+            31337  // BackOrifice
+        };
+
+        private static string GetPortDescription(int port) => port switch
+        {
+            21 => "FTP",
+            22 => "SSH",
+            23 => "Telnet",
+            111 => "RPCBind/Portmapper",
+            135 => "RPC/DCOM",
+            137 => "NetBIOS Name",
+            138 => "NetBIOS Datagram",
+            139 => "NetBIOS Session",
+            445 => "SMB",
+            666 => "Trojan",
+            1337 => "Backdoor",
+            1433 => "MSSQL",
+            2049 => "NFS",
+            3306 => "MySQL",
+            3389 => "RDP",
+            4444 => "Meterpreter",
+            5432 => "PostgreSQL",
+            5900 => "VNC",
+            5985 => "WinRM-HTTP",
+            5986 => "WinRM-HTTPS",
+            31337 => "BackOrifice",
+            _ => $"Port {port}"
+        };
+
         public NetworkMonitor(
             DetectionEngine detectionEngine,
             TelemetryFusionEngine fusionEngine,
@@ -234,6 +290,43 @@ namespace WindowsSentinel.Core
                                     { "RemotePort", remotePort.ToString() },
                                     { "LocalAddress", localIp },
                                     { "LocalPort", localPort.ToString() }
+                                }
+                            });
+                        }
+
+                        // C. Connection on known-malicious/attack ports (IPSec policy bypass detection)
+                        // If IPSec policy is disabled or removed, these ports should never have active
+                        // connections. Detect both inbound (listening) and outbound (established).
+                        if (KnownMaliciousPorts.Contains(remotePort) || KnownMaliciousPorts.Contains(localPort))
+                        {
+                            int suspiciousPort = KnownMaliciousPorts.Contains(remotePort) ? remotePort : localPort;
+                            bool isOutbound = KnownMaliciousPorts.Contains(remotePort);
+                            string direction = isOutbound ? "outbound to" : "inbound from";
+                            string targetAddr = isOutbound ? remoteIp : localIp;
+
+                            _ = _detectionEngine.EmitAsync(new DetectionEvent
+                            {
+                                RuleName = "Network Policy Violation: Connection on Blocked Port",
+                                Evidence = $"Process '{processName}' (PID {owningPid}) has {direction} {targetAddr}:{suspiciousPort}. " +
+                                           $"This port should be blocked by IPSec policy. Full connection: {localIp}:{localPort} → {remoteIp}:{remotePort}",
+                                Reasoning = $"Port {suspiciousPort} ({GetPortDescription(suspiciousPort)}) is blocked by the system IPSec policy. " +
+                                            "An active connection on this port indicates the IPSec policy was disabled, removed, or bypassed. " +
+                                            "These ports are associated with remote access, lateral movement, or known backdoor tools.",
+                                Confidence = 0.85,
+                                Tier = DetectionTier.Tier1Behavioral,
+                                AuthorizedResponse = ResponseAction.KillProcessTree,
+                                ProcessName = processName,
+                                ProcessId = owningPid,
+                                SignalType = SignalType.NetworkC2,
+                                Metadata = new Dictionary<string, string>
+                                {
+                                    { "RemoteAddress", remoteIp },
+                                    { "RemotePort", remotePort.ToString() },
+                                    { "LocalAddress", localIp },
+                                    { "LocalPort", localPort.ToString() },
+                                    { "SuspiciousPort", suspiciousPort.ToString() },
+                                    { "Direction", isOutbound ? "Outbound" : "Inbound" },
+                                    { "TargetIP", isOutbound ? remoteIp : localIp }
                                 }
                             });
                         }
