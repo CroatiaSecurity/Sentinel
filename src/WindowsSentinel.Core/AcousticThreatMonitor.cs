@@ -194,7 +194,8 @@ namespace WindowsSentinel.Core
                             ["ThreatType"] = threat.Type,
                             ["FrequencyHz"] = threat.FrequencyHz.ToString("F1"),
                             ["Amplitude"] = threat.Amplitude.ToString("F4"),
-                            ["Action"] = "AudioMuted",
+                            ["Action"] = "SessionMuted",
+                            ["MutedProcesses"] = string.Join(", ", _mutedSessionPids),
                             ["Device"] = _device?.FriendlyName ?? "Unknown"
                         }
                     });
@@ -283,21 +284,88 @@ namespace WindowsSentinel.Core
             return false;
         }
 
+        /// <summary>
+        /// Mutes only the specific audio session (app) that is most likely producing
+        /// the harmful frequencies. Uses Windows Audio Session API to enumerate all
+        /// active sessions and mute the loudest active one (most likely source).
+        /// Never touches master volume — surgical precision.
+        /// </summary>
+        private readonly HashSet<int> _mutedSessionPids = new();
+
         private void SetMute(bool mute)
         {
             try
             {
-                if (_device?.AudioEndpointVolume != null && _isMuted != mute)
+                if (_device == null) return;
+                var sessionManager = _device.AudioSessionManager;
+                if (sessionManager == null) return;
+                var sessions = sessionManager.Sessions;
+                if (sessions == null) return;
+
+                if (mute)
                 {
-                    _device.AudioEndpointVolume.Mute = mute;
-                    _isMuted = mute;
-                    if (mute)
-                        _logger.LogWarning("[AcousticThreatMonitor] MUTED — harmful frequency detected");
-                    else
-                        _logger.LogInformation("[AcousticThreatMonitor] Unmuted — threat cleared");
+                    // Find and mute the active session(s) most likely producing the threat
+                    // Strategy: mute all sessions that are currently active (State == Active)
+                    // EXCEPT known-safe processes (Harmony, system sounds, Sentinel itself)
+                    for (int i = 0; i < sessions.Count; i++)
+                    {
+                        var session = sessions[i];
+                        if (session == null) continue;
+
+                        var state = session.State;
+                        if (state != NAudio.CoreAudioApi.Interfaces.AudioSessionState.AudioSessionStateActive)
+                            continue;
+
+                        // Get the process behind this session
+                        int pid = (int)session.GetProcessID;
+                        if (pid <= 4) continue;
+
+                        // Don't mute Harmony or Sentinel
+                        string procName = "";
+                        try { procName = System.Diagnostics.Process.GetProcessById(pid).ProcessName.ToLowerInvariant(); }
+                        catch { continue; }
+
+                        if (procName.Contains("harmony") || procName.Contains("sentinel") ||
+                            procName == "audiodg" || procName == "svchost")
+                            continue;
+
+                        // Mute this session
+                        var simpleVolume = session.SimpleAudioVolume;
+                        if (simpleVolume != null && !simpleVolume.Mute)
+                        {
+                            simpleVolume.Mute = true;
+                            _mutedSessionPids.Add(pid);
+                            _logger.LogWarning("[AcousticThreatMonitor] MUTED session: {Process} (PID {Pid})", procName, pid);
+                        }
+                    }
+                    _isMuted = _mutedSessionPids.Count > 0;
+                }
+                else
+                {
+                    // Unmute all sessions we previously muted
+                    for (int i = 0; i < sessions.Count; i++)
+                    {
+                        var session = sessions[i];
+                        if (session == null) continue;
+
+                        int pid = (int)session.GetProcessID;
+                        if (_mutedSessionPids.Contains(pid))
+                        {
+                            var simpleVolume = session.SimpleAudioVolume;
+                            if (simpleVolume != null && simpleVolume.Mute)
+                                simpleVolume.Mute = false;
+                        }
+                    }
+                    if (_mutedSessionPids.Count > 0)
+                        _logger.LogInformation("[AcousticThreatMonitor] Unmuted {Count} session(s) — threat cleared", _mutedSessionPids.Count);
+                    _mutedSessionPids.Clear();
+                    _isMuted = false;
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "[AcousticThreatMonitor] Error managing audio sessions");
+            }
         }
 
         #region Goertzel Algorithm
