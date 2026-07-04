@@ -2,6 +2,29 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [1.2.1] - 2026-07-04
+
+### Added
+- **ChromeRemoteDebuggingRule**: Detects browser processes launched with `--remote-debugging-port` by a non-browser parent process, which enables full session/cookie access via Chrome DevTools Protocol. Kill-authorized.
+
+### Fixed
+- **CanaryFileMonitor**: Fixed potential `InvalidOperationException` from mutating `_canaryPaths` list during iteration. Now iterates a snapshot and applies removals after the loop.
+- **DllLoadFailureMonitor**: Replaced O(N) `EventLog.Entries` full scan with `EventLogQuery` using time-bounded XPath filter. Eliminates CPU/disk overhead on machines with large Application logs.
+- **BrowserCredentialGuard**: Changed response from `KillProcessTree` to `LogOnly` when PID is 0 (accessor process already exited). The previous kill action was a no-op since the response engine requires PID > 4.
+- **MtpTransferGuard.GetCreatorProcess**: Replaced inaccurate start-time heuristic (which frequently misidentified the creator) with WPD module-based process identification.
+- **SyscallStubMonitor**: Replaced `File.ReadAllBytes(ntdll.dll)` with streaming `FileStream` + `SHA256.HashData` to eliminate ~4MB/min GC pressure from reading the full file into memory every 30 seconds.
+- **AttackToolsRule**: Short APT tool names (`fscan`, `kscan`, `searchall`, etc.) now require word-boundary or exact filename match to prevent false positives from substring matches (e.g., "fscan" matching inside "filesystem_scanner.exe").
+- **DeviceInstallMonitor**: Added startup baseline of all existing services. Only drivers registered AFTER startup now trigger alerts, eliminating continuous false positives from legitimate third-party drivers (NVIDIA, Logitech, etc.).
+- **BootIntegrityGuard**: Dynamic EFI drive letter selection — finds a free letter at runtime instead of hardcoding S–W. Prevents conflicts with existing volumes.
+- **AntiTamperGuard**: `_serviceAlertSuppressed` flag now resets on successful service re-registration, allowing detection of subsequent deletions instead of permanently silencing the check.
+- **NullSessionGuard**: Reduced security policy tamper alert dedup window from 1 hour to 5 minutes. Attackers can no longer silently revert null-session protections by waiting between attempts.
+- **PhantomDeviceMonitor**: Added startup cleanup of orphaned `Sentinel-Block-PhantomDevice-*` firewall rules from previous sessions. Previously, service restarts left blocked devices permanently blocked.
+- **AdvancedResponseEngine**: President's Law check now delegates to `ScoringEngine.IsPresidentsLawRule()` instead of maintaining a divergent parallel keyword list. Eliminates the risk of the two systems producing different results.
+- **DetectionEngine**: Background reputation check `Task.Run` now passes `_cts.Token` for proper cancellation on shutdown. Added `OperationCanceledException` catch to prevent log noise during normal shutdown.
+- **RemoteAccessMonitor**: Added per-PID deduplication. Once a remote access process is alerted on, it won't fire again until that PID exits. Eliminates per-minute alert spam for installed tools like TeamViewer.
+- **WmiPersistenceMonitor**: Replaced count-based baseline with name-based snapshot. Now detects specific new subscriptions even if the total count doesn't change (e.g., one removed and one added simultaneously).
+- **PublicIpMonitor**: Wired public IP changes to `DetectionEngine` as Tier2 detections instead of silently logging to internal logger. Now provides visibility into potential VPN/proxy/BGP changes.
+
 ## [1.2.0] - 2026-07-03
 
 ### Added

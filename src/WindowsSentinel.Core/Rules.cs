@@ -372,6 +372,8 @@ namespace WindowsSentinel.Core
             (S("shdocvw.dll",",openurl"), "LOLLib:shdocvw"),
             (S("shell32.dll",",shellexec_rundll"), "LOLLib:shell32"),
             // === Chinese APT / Earth Lamia / StrikeShark Toolsets ===
+            // Short names require exact filename or word-boundary matching to avoid
+            // false positives from substring matches (e.g. "fscan" in "filesystem_scanner")
             ("fscan", "APTTool:fscan"),
             ("kscan", "APTTool:kscan"),
             ("stowaway", "APTTool:stowaway"),
@@ -388,6 +390,24 @@ namespace WindowsSentinel.Core
             (".onion.", "Exfil:Tor"),
             ("tor2web", "Exfil:Tor"),
         };
+
+        /// <summary>
+        /// Checks if a pattern appears in the text at a word boundary (preceded/followed by
+        /// non-alphanumeric characters or string start/end). Prevents substring false positives
+        /// where e.g. "fscan" matches inside "filesystem_scanner.exe".
+        /// </summary>
+        private static bool HasWordBoundaryMatch(string text, string pattern)
+        {
+            int idx = -1;
+            while ((idx = text.IndexOf(pattern, idx + 1, StringComparison.OrdinalIgnoreCase)) >= 0)
+            {
+                bool leftBound = idx == 0 || !char.IsLetterOrDigit(text[idx - 1]);
+                int endIdx = idx + pattern.Length;
+                bool rightBound = endIdx >= text.Length || !char.IsLetterOrDigit(text[endIdx]);
+                if (leftBound && rightBound) return true;
+            }
+            return false;
+        }
 
         public DetectionEvent? Evaluate(FusedTelemetryContext context)
         {
@@ -425,6 +445,18 @@ namespace WindowsSentinel.Core
                     if (cmd.Contains(pattern, StringComparison.OrdinalIgnoreCase) ||
                         image.Contains(pattern, StringComparison.OrdinalIgnoreCase))
                     {
+                        // For short APT tool names, require word-boundary or filename-exact match
+                        // to avoid false positives from substring matches
+                        if (category.StartsWith("APTTool:", StringComparison.OrdinalIgnoreCase))
+                        {
+                            var fileName = Path.GetFileNameWithoutExtension(pt.ImagePath).ToLowerInvariant();
+                            bool isExactFilename = fileName.Equals(pattern, StringComparison.OrdinalIgnoreCase);
+                            // Check for word boundary in command line: pattern preceded/followed by non-alphanumeric
+                            bool hasWordBoundary = HasWordBoundaryMatch(cmd, pattern);
+                            if (!isExactFilename && !hasWordBoundary)
+                                continue; // Substring match without boundary — skip
+                        }
+
                         return new DetectionEvent
                         {
                             RuleName = Name,
@@ -702,6 +734,55 @@ namespace WindowsSentinel.Core
                             };
                         }
                     }
+                }
+            }
+            return null;
+        }
+    }
+
+    public class ChromeRemoteDebuggingRule : IDetectionRule
+    {
+        public string Name => "ChromeRemoteDebuggingRule";
+
+        private static readonly HashSet<string> BrowserProcesses = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "chrome", "msedge", "brave", "vivaldi", "opera", "chromium"
+        };
+
+        public DetectionEvent? Evaluate(FusedTelemetryContext context)
+        {
+            if (context.TriggeringEvent is ProcessTelemetry pt)
+            {
+                // Detect browser launched with --remote-debugging-port which enables
+                // full session/cookie access via Chrome DevTools Protocol (CDP)
+                var procName = pt.ProcessName.Replace(".exe", "", StringComparison.OrdinalIgnoreCase);
+                if (!BrowserProcesses.Contains(procName)) return null;
+
+                var cmd = pt.CommandLine;
+                if (cmd.Contains("--remote-debugging-port", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Check who launched it — if parent is a known browser (self-spawn), skip
+                    if (!string.IsNullOrEmpty(pt.ParentProcessName))
+                    {
+                        var parentName = pt.ParentProcessName.Replace(".exe", "", StringComparison.OrdinalIgnoreCase);
+                        if (BrowserProcesses.Contains(parentName))
+                            return null; // Browser spawning its own subprocess with debug port — normal
+                    }
+
+                    return new DetectionEvent
+                    {
+                        RuleName = Name,
+                        ProcessName = pt.ProcessName,
+                        ProcessId = pt.ProcessId,
+                        SignalType = SignalType.CredentialTheft,
+                        Confidence = 0.90,
+                        Tier = DetectionTier.Tier1Behavioral,
+                        AuthorizedResponse = ResponseAction.KillProcessTree,
+                        Evidence = $"Browser '{pt.ProcessName}' (PID {pt.ProcessId}) launched with --remote-debugging-port: {cmd}",
+                        Reasoning = "A browser was launched with the Chrome DevTools Protocol remote debugging port enabled by a non-browser parent process. " +
+                                    "This allows full programmatic access to all open tabs, cookies, session tokens, and saved passwords " +
+                                    "without touching any credential file on disk. Common technique in session hijacking attacks."
+                    };
                 }
             }
             return null;

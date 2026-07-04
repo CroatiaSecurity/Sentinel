@@ -133,11 +133,12 @@ namespace WindowsSentinel.Core
                                             }
                                         }
                                     }
+                                    catch (OperationCanceledException) { }
                                     catch (Exception ex)
                                     {
                                         _logger.LogError(ex, "[DetectionEngine] Error checking process reputation for {ProcessName} (PID {ProcessId})", pt.ProcessName, pt.ProcessId);
                                     }
-                                });
+                                }, _cts.Token);
                             }
 
                             foreach (var rule in _rules)

@@ -413,7 +413,9 @@ namespace WindowsSentinel.Core
                 try
                 {
                     await Task.Delay(10000, ct);
-                    foreach (var path in _canaryPaths)
+                    // Iterate a snapshot to avoid mutating the list while enumerating it
+                    var toRemove = new List<string>();
+                    foreach (var path in _canaryPaths.ToArray())
                     {
                         if (!File.Exists(path))
                         {
@@ -426,10 +428,11 @@ namespace WindowsSentinel.Core
                                 AuthorizedResponse = ResponseAction.KillProcessTree,
                                 ProcessName = "SYSTEM", ProcessId = 0
                             });
-                            _canaryPaths.Remove(path);
-                            break;
+                            toRemove.Add(path);
                         }
                     }
+                    foreach (var path in toRemove)
+                        _canaryPaths.Remove(path);
                 }
                 catch (OperationCanceledException) { break; }
                 catch (Exception ex) { _logger.LogDebug(ex, "[CanaryFileMonitor] Error"); }
@@ -532,9 +535,12 @@ namespace WindowsSentinel.Core
                                 {
                                     RuleName = $"Browser {dataType} Theft: {browserName} {fileName} Modified While Browser Closed",
                                     Evidence = $"{browserName} {fileName} modified at {current:O} while {processName}.exe is not running",
-                                    Reasoning = $"{browserName} {description} store was modified while the browser was not running, indicating {description}.",
+                                    Reasoning = $"{browserName} {description} store was modified while the browser was not running, indicating {description}. " +
+                                                "No browser process is running to attribute the access — check recent process history for credential theft tools.",
                                     Confidence = 0.85, Tier = DetectionTier.Tier1Behavioral,
-                                    AuthorizedResponse = ResponseAction.KillProcessTree,
+                                    // Cannot kill PID 0 — the accessor process has already exited or was not identified.
+                                    // Log the event for correlation; the analyst or a follow-up scan should identify the stealer.
+                                    AuthorizedResponse = ResponseAction.LogOnly,
                                     ProcessName = "SYSTEM", ProcessId = 0
                                 });
                             }
@@ -556,6 +562,8 @@ namespace WindowsSentinel.Core
         private readonly DetectionEngine _detectionEngine;
         private readonly ILogger<DeviceInstallMonitor> _logger;
         private DateTime _lastCheck;
+        // Baseline of driver service names present at startup — only alert on NEW entries
+        private readonly HashSet<string> _baselineDrivers = new(StringComparer.OrdinalIgnoreCase);
 
         public DeviceInstallMonitor(DetectionEngine de, ILogger<DeviceInstallMonitor> l) { _detectionEngine = de; _logger = l; }
 
@@ -581,13 +589,13 @@ namespace WindowsSentinel.Core
             _logger.LogInformation("[DeviceInstallMonitor] Started");
             _lastCheck = DateTime.UtcNow;
 
-            while (!ct.IsCancellationRequested)
+            // Capture baseline of all existing non-Windows kernel drivers at startup.
+            // Only drivers that appear AFTER this snapshot will trigger alerts.
+            try
             {
-                try
+                using var key = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Services");
+                if (key != null)
                 {
-                    await Task.Delay(30000, ct);
-                    using var key = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Services");
-                    if (key == null) continue;
                     foreach (var svcName in key.GetSubKeyNames())
                     {
                         try
@@ -600,7 +608,50 @@ namespace WindowsSentinel.Core
                             {
                                 var imagePath = svc.GetValue("ImagePath")?.ToString() ?? "";
                                 if (!string.IsNullOrEmpty(imagePath) && !IsWindowsDriverPath(imagePath))
+                                    _baselineDrivers.Add(svcName);
+                                else
+                                    _baselineDrivers.Add(svcName); // Always baseline regardless
+                            }
+                            else
+                            {
+                                _baselineDrivers.Add(svcName); // Baseline all services to avoid noise
+                            }
+                        }
+                        catch { }
+                    }
+                }
+                _logger.LogInformation("[DeviceInstallMonitor] Baseline captured: {Count} services", _baselineDrivers.Count);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "[DeviceInstallMonitor] Baseline capture failed");
+            }
+
+            while (!ct.IsCancellationRequested)
+            {
+                try
+                {
+                    await Task.Delay(30000, ct);
+                    using var key = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Services");
+                    if (key == null) continue;
+                    foreach (var svcName in key.GetSubKeyNames())
+                    {
+                        // Skip anything present at startup
+                        if (_baselineDrivers.Contains(svcName)) continue;
+
+                        try
+                        {
+                            using var svc = key.OpenSubKey(svcName);
+                            if (svc == null) continue;
+                            var startVal = svc.GetValue("Start");
+                            var typeVal = svc.GetValue("Type");
+                            if (startVal is int start && typeVal is int type && start == 1 && type == 1)
+                            {
+                                var imagePath = svc.GetValue("ImagePath")?.ToString() ?? "";
+                                if (!string.IsNullOrEmpty(imagePath) && !IsWindowsDriverPath(imagePath))
                                 {
+                                    // Add to baseline so we only alert once per new driver
+                                    _baselineDrivers.Add(svcName);
                                     await _detectionEngine.EmitAsync(new DetectionEvent
                                     {
                                         RuleName = "Device Install: Non-Windows Kernel Driver",
@@ -611,6 +662,14 @@ namespace WindowsSentinel.Core
                                         ProcessName = "SYSTEM", ProcessId = 0
                                     });
                                 }
+                                else
+                                {
+                                    _baselineDrivers.Add(svcName);
+                                }
+                            }
+                            else
+                            {
+                                _baselineDrivers.Add(svcName);
                             }
                         }
                         catch { }
@@ -789,6 +848,9 @@ namespace WindowsSentinel.Core
 
         public DllLoadFailureMonitor(DetectionEngine de, ILogger<DllLoadFailureMonitor> l) { _detectionEngine = de; _logger = l; }
 
+        // Tracks the most recent event RecordNumber we have processed to avoid re-scanning
+        private long _lastProcessedRecordNumber = -1;
+
         protected override async Task ExecuteAsync(CancellationToken ct)
         {
             _logger.LogInformation("[DllLoadFailureMonitor] Started");
@@ -798,20 +860,35 @@ namespace WindowsSentinel.Core
                 try
                 {
                     await Task.Delay(15000, ct);
-                    // Check Application event log for SideBySide errors (Event ID 33, 59, 80)
+                    // Use EventLogQuery with a time-bounded XPath filter instead of iterating
+                    // all entries — avoids O(N) scan on large Application logs every 15s.
                     try
                     {
-                        var log = new EventLog("Application");
-                        var cutoff = DateTime.UtcNow.AddSeconds(-20);
-                        foreach (EventLogEntry entry in log.Entries)
+                        var cutoff = DateTime.UtcNow.AddSeconds(-20).ToUniversalTime()
+                            .ToString("o", System.Globalization.CultureInfo.InvariantCulture);
+                        // Query only SideBySide error events in the last 20 seconds
+                        var query = new System.Diagnostics.Eventing.Reader.EventLogQuery(
+                            "Application",
+                            System.Diagnostics.Eventing.Reader.PathType.LogName,
+                            $"*[System[Provider[@Name='SideBySide'] and Level=2 and TimeCreated[@SystemTime>='{cutoff}']]]");
+
+                        using var reader = new System.Diagnostics.Eventing.Reader.EventLogReader(query);
+                        System.Diagnostics.Eventing.Reader.EventRecord? record;
+                        while ((record = reader.ReadEvent()) != null)
                         {
-                            if (entry.TimeGenerated.ToUniversalTime() < cutoff) continue;
-                            if (entry.Source == "SideBySide" && entry.EntryType == EventLogEntryType.Error)
+                            using (record)
                             {
+                                // Skip events we have already emitted
+                                if (record.RecordId.HasValue && record.RecordId.Value <= _lastProcessedRecordNumber)
+                                    continue;
+                                if (record.RecordId.HasValue)
+                                    _lastProcessedRecordNumber = record.RecordId.Value;
+
+                                var desc = record.FormatDescription() ?? "";
                                 await _detectionEngine.EmitAsync(new DetectionEvent
                                 {
                                     RuleName = "DLL Load Failure: SideBySide Error",
-                                    Evidence = $"SideBySide error at {entry.TimeGenerated}: {entry.Message?.Substring(0, Math.Min(200, entry.Message?.Length ?? 0))}",
+                                    Evidence = $"SideBySide error at {record.TimeCreated}: {desc.Substring(0, Math.Min(200, desc.Length))}",
                                     Reasoning = "A DLL side-by-side loading failure was detected, which may indicate DLL hijacking or corruption.",
                                     Confidence = 0.50, Tier = DetectionTier.Tier2Indicator,
                                     ProcessName = "SYSTEM", ProcessId = 0
@@ -1256,7 +1333,20 @@ namespace WindowsSentinel.Core
                     var currentIp = await GetPublicIp(ct);
                     if (_baselineIp != null && currentIp != null && currentIp != _baselineIp)
                     {
-                        _logger.LogInformation("[PublicIpMonitor] Public IP changed from {Old} to {New}", _baselineIp, currentIp);
+                        await _detectionEngine.EmitAsync(new DetectionEvent
+                        {
+                            RuleName = "Network: Public IP Address Changed",
+                            Evidence = $"Public IP changed from {_baselineIp} to {currentIp}",
+                            Reasoning = "The system's public IP address changed at runtime. This may indicate VPN activation/deactivation, network switch, or traffic rerouting via a compromised gateway.",
+                            Confidence = 0.50, Tier = DetectionTier.Tier2Indicator,
+                            AuthorizedResponse = ResponseAction.LogOnly,
+                            ProcessName = "SYSTEM", ProcessId = 0,
+                            Metadata = new Dictionary<string, string>
+                            {
+                                ["OldIP"] = _baselineIp,
+                                ["NewIP"] = currentIp
+                            }
+                        });
                         _baselineIp = currentIp;
                     }
                 }
@@ -1283,6 +1373,8 @@ namespace WindowsSentinel.Core
     {
         private readonly DetectionEngine _detectionEngine;
         private readonly ILogger<RemoteAccessMonitor> _logger;
+        // Per-PID dedup: once we alert on a PID, don't alert again until the process exits
+        private readonly ConcurrentDictionary<int, DateTime> _alertedPids = new();
 
         // 35+ known remote access tools — both legitimate and commonly abused
         // Detection is Tier2 (LogOnly) because running these isn't proof of compromise.
@@ -1328,6 +1420,14 @@ namespace WindowsSentinel.Core
                 try
                 {
                     await Task.Delay(60000, ct);
+
+                    // Prune alerted PIDs for processes that have exited (every cycle)
+                    foreach (var pid in _alertedPids.Keys.ToArray())
+                    {
+                        try { Process.GetProcessById(pid); }
+                        catch (ArgumentException) { _alertedPids.TryRemove(pid, out _); }
+                    }
+
                     foreach (var proc in Process.GetProcesses())
                     {
                         try
@@ -1335,6 +1435,9 @@ namespace WindowsSentinel.Core
                             var name = proc.ProcessName.ToLowerInvariant();
                             if (RemoteAccessProcessNames.Any(r => name.Contains(r)))
                             {
+                                // Skip if we already alerted on this PID
+                                if (_alertedPids.ContainsKey(proc.Id)) continue;
+                                _alertedPids[proc.Id] = DateTime.UtcNow;
                                 // Higher confidence for tunneling tools (ngrok, frpc, chisel)
                                 // — these are almost never legitimate on endpoints
                                 bool isTunnel = name.Contains("ngrok") || name.Contains("frpc") ||
@@ -1552,7 +1655,12 @@ namespace WindowsSentinel.Core
             var ntdllPath = Path.Combine(Environment.SystemDirectory, "ntdll.dll");
             if (File.Exists(ntdllPath))
             {
-                try { _baselineNtdllHash = SHA256.HashData(File.ReadAllBytes(ntdllPath)); } catch { }
+                try
+                {
+                    using var fs = new FileStream(ntdllPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                    _baselineNtdllHash = SHA256.HashData(fs);
+                }
+                catch { }
             }
 
             while (!ct.IsCancellationRequested)
@@ -1561,7 +1669,11 @@ namespace WindowsSentinel.Core
                 {
                     await Task.Delay(30000, ct);
                     if (_baselineNtdllHash == null || !File.Exists(ntdllPath)) continue;
-                    var currentHash = SHA256.HashData(File.ReadAllBytes(ntdllPath));
+                    byte[] currentHash;
+                    using (var fs = new FileStream(ntdllPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                    {
+                        currentHash = SHA256.HashData(fs);
+                    }
                     if (!currentHash.SequenceEqual(_baselineNtdllHash))
                     {
                         await _detectionEngine.EmitAsync(new DetectionEvent
@@ -2731,33 +2843,34 @@ namespace WindowsSentinel.Core
     {
         private readonly DetectionEngine _detectionEngine;
         private readonly ILogger<WmiPersistenceMonitor> _logger;
-        private int _baselineSubscriptionCount;
+        private readonly HashSet<string> _baselineSubscriptions = new(StringComparer.OrdinalIgnoreCase);
 
         public WmiPersistenceMonitor(DetectionEngine de, ILogger<WmiPersistenceMonitor> l) { _detectionEngine = de; _logger = l; }
 
         protected override async Task ExecuteAsync(CancellationToken ct)
         {
             _logger.LogInformation("[WmiPersistenceMonitor] Started");
-            _baselineSubscriptionCount = CountWmiSubscriptions();
+            SnapshotSubscriptions(_baselineSubscriptions);
 
             while (!ct.IsCancellationRequested)
             {
                 try
                 {
                     await Task.Delay(30000, ct);
-                    var current = CountWmiSubscriptions();
-                    if (current > _baselineSubscriptionCount)
+                    var current = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    SnapshotSubscriptions(current);
+                    foreach (var sub in current.Except(_baselineSubscriptions))
                     {
                         await _detectionEngine.EmitAsync(new DetectionEvent
                         {
                             RuleName = "Persistence: New WMI Event Subscription",
-                            Evidence = $"WMI event subscriptions increased from {_baselineSubscriptionCount} to {current}",
-                            Reasoning = "New WMI event subscriptions were created, which is a common persistence and living-off-the-land technique.",
+                            Evidence = $"New WMI event subscription detected: '{sub}'",
+                            Reasoning = "A new WMI event subscription was created, which is a common persistence and living-off-the-land technique.",
                             Confidence = 0.75, Tier = DetectionTier.Tier1Behavioral,
                             AuthorizedResponse = ResponseAction.LogOnly,
                             ProcessName = "SYSTEM", ProcessId = 0
                         });
-                        _baselineSubscriptionCount = current;
+                        _baselineSubscriptions.Add(sub);
                     }
                 }
                 catch (OperationCanceledException) { break; }
@@ -2765,17 +2878,19 @@ namespace WindowsSentinel.Core
             }
         }
 
-        private static int CountWmiSubscriptions()
+        private static void SnapshotSubscriptions(HashSet<string> target)
         {
-            int count = 0;
             try
             {
                 using var searcher = new ManagementObjectSearcher("root\\subscription",
                     "SELECT * FROM __EventConsumer");
-                foreach (var _ in searcher.Get()) count++;
+                foreach (ManagementObject obj in searcher.Get())
+                {
+                    var name = obj["Name"]?.ToString() ?? obj.GetHashCode().ToString();
+                    target.Add(name);
+                }
             }
             catch { }
-            return count;
         }
     }
 
@@ -3298,6 +3413,10 @@ namespace WindowsSentinel.Core
         {
             _logger.LogInformation("[PhantomDeviceMonitor] Started");
 
+            // Clean up any orphaned firewall rules from previous sessions
+            // (service restart leaves Sentinel-Block-PhantomDevice-* rules behind)
+            CleanupOrphanedFirewallRules();
+
             // Always trust the default gateway and local machine IPs — never alert on them
             foreach (var gw in GetDefaultGatewayIps())
                 _trustedIps.Add(gw);
@@ -3390,6 +3509,40 @@ namespace WindowsSentinel.Core
                 }
                 catch (OperationCanceledException) { break; }
                 catch (Exception ex) { _logger.LogDebug(ex, "[PhantomDeviceMonitor] Error"); }
+            }
+        }
+
+        /// <summary>
+        /// On startup, removes any firewall rules from a previous session that were left behind
+        /// (e.g., after a service restart). Without this, blocked devices stay blocked forever
+        /// because the in-memory _blockedIps dictionary is empty on restart.
+        /// </summary>
+        private void CleanupOrphanedFirewallRules()
+        {
+            try
+            {
+                var policyType = Type.GetTypeFromProgID("HNetCfg.FwPolicy2");
+                if (policyType == null) return;
+                dynamic? policy = Activator.CreateInstance(policyType);
+                if (policy == null) return;
+
+                var toRemove = new List<string>();
+                foreach (dynamic rule in policy.Rules)
+                {
+                    string name = (string)rule.Name;
+                    if (name.StartsWith("Sentinel-Block-PhantomDevice-"))
+                        toRemove.Add(name);
+                }
+                foreach (var name in toRemove)
+                {
+                    try { policy.Rules.Remove(name); } catch { }
+                }
+                if (toRemove.Count > 0)
+                    _logger.LogInformation("[PhantomDeviceMonitor] Cleaned up {Count} orphaned firewall rules from previous session", toRemove.Count);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "[PhantomDeviceMonitor] Failed to clean up orphaned firewall rules");
             }
         }
 
@@ -4202,21 +4355,24 @@ namespace WindowsSentinel.Core
 
         private static (int pid, string name) GetCreatorProcess(string filePath)
         {
+            // The start-time heuristic (find a process that started within N seconds of the
+            // file's last-write) is unreliable on busy machines and is exploitable by a
+            // sacrificial decoy process.  We now scan WPD/Explorer modules as a tighter
+            // proxy: if a process has WPD transfer DLLs loaded AND was recently active,
+            // that is the most likely candidate.  If we still cannot identify it, return
+            // (0, "Unknown") — the caller treats that as LogOnly, which is correct.
             try
             {
-                var lastWrite = File.GetLastWriteTimeUtc(filePath);
                 foreach (var proc in Process.GetProcesses())
                 {
                     try
                     {
-                        if (proc.StartTime.ToUniversalTime() <= lastWrite &&
-                            proc.StartTime.ToUniversalTime() > lastWrite.AddSeconds(-10) &&
-                            proc.Id > 4)
-                        {
+                        if (proc.Id <= 4) continue;
+                        if (IsWpdProcess(proc))
                             return (proc.Id, proc.ProcessName);
-                        }
                     }
                     catch { }
+                    finally { proc.Dispose(); }
                 }
             }
             catch { }
@@ -4310,7 +4466,7 @@ namespace WindowsSentinel.Core
                             }
                         });
                     }
-                    else if (anyChanged && DateTime.UtcNow - _lastTamperAlert > TimeSpan.FromHours(1))
+                    else if (anyChanged && DateTime.UtcNow - _lastTamperAlert > TimeSpan.FromMinutes(5))
                     {
                         _lastTamperAlert = DateTime.UtcNow;
                         await _detectionEngine.EmitAsync(new DetectionEvent
@@ -4835,6 +4991,7 @@ namespace WindowsSentinel.Core
             "0.0.0.0 sessions.bugsnag.com\r\n" +
             "0.0.0.0 browser.sentry-cdn.com\r\n" +
             "0.0.0.0 app.getsentry.com\r\n" +
+            "0.0.0.0 amazonaws.com\r\n" +
             "0.0.0.0 amazonaax.com\r\n" +
             "0.0.0.0 amazonclix.com\r\n" +
             "0.0.0.0 assoc-amazon.com\r\n" +
@@ -5234,9 +5391,9 @@ namespace WindowsSentinel.Core
             catch (Exception ex) { _logger.LogDebug(ex, "[BootIntegrityGuard] EFI check error"); }
             finally
             {
-                if (mountedByUs)
+                if (mountedByUs && efiDir != null)
                 {
-                    UnmountEfiVolume();
+                    UnmountEfiVolume(efiDir);
                 }
             }
         }
@@ -5310,36 +5467,60 @@ namespace WindowsSentinel.Core
         {
             try
             {
-                // Check if EFI partition is already mounted
-                var paths = new[] { @"S:\", @"T:\", @"Z:\", @"Y:\", @"X:\", @"W:\" };
-                foreach (var p in paths)
+                // Check all drive letters A-Z for an already-mounted EFI partition
+                for (char c = 'A'; c <= 'Z'; c++)
                 {
-                    if (Directory.Exists(Path.Combine(p, "EFI")))
+                    var candidate = $@"{c}:\";
+                    try
                     {
-                        return (p, false);
+                        if (Directory.Exists(Path.Combine(candidate, "EFI")))
+                            return (candidate, false);
+                    }
+                    catch { }
+                }
+
+                // Find a free drive letter to mount onto — avoid any letter already in use
+                var usedLetters = new HashSet<char>(
+                    DriveInfo.GetDrives()
+                        .Where(d => d.Name.Length >= 1)
+                        .Select(d => char.ToUpperInvariant(d.Name[0])));
+
+                // Prefer letters near the end of the alphabet that are unlikely to conflict
+                char mountLetter = '\0';
+                foreach (char preferred in "ZYXWVUTSRQPONMLKJIHGFEDCBA")
+                {
+                    if (!usedLetters.Contains(preferred))
+                    {
+                        mountLetter = preferred;
+                        break;
                     }
                 }
 
-                // Try mounting via mountvol S: /S
-                var psi = new ProcessStartInfo("mountvol.exe", @"S: /S")
+                if (mountLetter == '\0') return (null, false); // No free letter
+
+                var mountPath = $@"{mountLetter}:\";
+                var psi = new ProcessStartInfo("mountvol.exe", $@"{mountPath} /S")
                 { CreateNoWindow = true, UseShellExecute = false };
                 using var proc = Process.Start(psi);
                 proc?.WaitForExit(5000);
 
-                if (Directory.Exists(@"S:\EFI"))
-                {
-                    return (@"S:\", true);
-                }
+                if (Directory.Exists(Path.Combine(mountPath, "EFI")))
+                    return (mountPath, true);
+
+                // Mount failed or no EFI folder — clean up immediately
+                UnmountEfiVolume(mountPath);
             }
             catch { }
             return (null, false);
         }
 
-        private static void UnmountEfiVolume()
+        private static void UnmountEfiVolume(string? mountPath = null)
         {
+            // If no path given, try to unmount S:\ for backward compat
+            var target = mountPath ?? @"S:\";
             try
             {
-                var psi = new ProcessStartInfo("mountvol.exe", @"S: /D")
+                var psi = new ProcessStartInfo("mountvol.exe", $@"{target} /D")
                 { CreateNoWindow = true, UseShellExecute = false };
                 using var proc = Process.Start(psi);
                 proc?.WaitForExit(5000);

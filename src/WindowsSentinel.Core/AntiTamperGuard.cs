@@ -251,6 +251,8 @@ namespace WindowsSentinel.Core
                         Process.Start(psi)?.WaitForExit(5000);
 
                         _logger.LogWarning("[AntiTamperGuard] Re-registered service '{Service}'", ServiceName);
+                        // Reset the suppression flag so we can detect and fix subsequent deletions
+                        _serviceAlertSuppressed = false;
                     }
                     catch (Exception ex)
                     {

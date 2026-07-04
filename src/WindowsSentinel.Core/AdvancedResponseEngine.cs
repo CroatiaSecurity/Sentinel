@@ -52,19 +52,9 @@ namespace WindowsSentinel.Core
 
         private bool IsPresidentsLawRule(DetectionEvent detection)
         {
-            var rule = detection.RuleName ?? string.Empty;
-            var lower = rule.ToLowerInvariant();
-
-            foreach (var keyword in PresidentsLawKeywords)
-            {
-                if (lower.Contains(keyword))
-                    return true;
-            }
-            return false;
-            // NOTE: "beaconing" removed from President's Law (v0.8.2).
-            // NOTE: Broad terms like "dns", "registry", "attack", "privilege", "arp"
-            // removed in v1.1.6 to prevent over-killing of Tier2 advisory rules that
-            // happen to contain these words in their names.
+            // Delegate to ScoringEngine's authoritative enum-based categorization
+            // to avoid divergence between the two parallel President's Law checks.
+            return ScoringEngine.IsPresidentsLawRule(detection.RuleName);
         }
 
         public async Task HandleAsync(DetectionEvent detection)
