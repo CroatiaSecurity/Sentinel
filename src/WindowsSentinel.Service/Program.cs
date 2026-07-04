@@ -179,6 +179,7 @@ namespace WindowsSentinel.Service
                     services.AddSingleton<ReinfectionCorrelator>();
                     services.AddHostedService<ReinfectionCorrelator>(sp => sp.GetRequiredService<ReinfectionCorrelator>());
                     services.AddHostedService<NetworkReinfectionDetector>();
+                    services.AddHostedService<AcousticThreatMonitor>();
                     services.AddSingleton<IsolationResponseEngine>();
 
                     // v1.0.1: Blind spot monitors
