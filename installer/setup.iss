@@ -88,17 +88,8 @@ begin
   Exec(PsPath, '-ExecutionPolicy Bypass -Command "Get-Process -Name ''WindowsSentinel.Service'',''WindowsSentinel.Agent'' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Sleep(500);
 
-  // If still locked, try renaming the exe out of the way (Windows allows rename even on locked files)
-  if FileExists(ExpandConstant('{app}\WindowsSentinel.Service.exe')) then
-  begin
-    RenameFile(ExpandConstant('{app}\WindowsSentinel.Service.exe'), ExpandConstant('{app}\WindowsSentinel.Service.exe.old'));
-  end;
-  if FileExists(ExpandConstant('{app}\WindowsSentinel.Agent.exe')) then
-  begin
-    RenameFile(ExpandConstant('{app}\WindowsSentinel.Agent.exe'), ExpandConstant('{app}\WindowsSentinel.Agent.exe.old'));
-  end;
-
-  // Take ownership of the directories recursively to ensure we can modify ACLs
+  // Take ownership IMMEDIATELY after kill — before antitamper can re-lock
+  // (The process is dead at this point, so no race condition)
   if DirExists(ExpandConstant('{app}')) then
   begin
     Exec(ExpandConstant('{sysnative}\takeown.exe'), ExpandConstant('/F "{app}" /R /A /D Y'), '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
@@ -120,19 +111,21 @@ begin
     Exec(ExpandConstant('{sysnative}\icacls.exe'), ExpandConstant('"{commonpf32}\WindowsSentinel" /grant SYSTEM:F /T /C /Q'), '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   end;
 
-  // Explicitly remove any Deny rules for Users (which override Administrator allows)
+  // Remove Deny rules that AntiTamperGuard sets on the directory
   if DirExists(ExpandConstant('{app}')) then
   begin
     Exec(ExpandConstant('{sysnative}\icacls.exe'), ExpandConstant('"{app}" /remove:d Users /T /C /Q'), '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     Exec(ExpandConstant('{sysnative}\icacls.exe'), ExpandConstant('"{app}" /remove:d *S-1-5-32-545 /T /C /Q'), '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec(ExpandConstant('{sysnative}\icacls.exe'), ExpandConstant('"{app}" /remove:d Everyone /T /C /Q'), '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   end;
   if DirExists(ExpandConstant('{commonpf32}\WindowsSentinel')) then
   begin
     Exec(ExpandConstant('{sysnative}\icacls.exe'), ExpandConstant('"{commonpf32}\WindowsSentinel" /remove:d Users /T /C /Q'), '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     Exec(ExpandConstant('{sysnative}\icacls.exe'), ExpandConstant('"{commonpf32}\WindowsSentinel" /remove:d *S-1-5-32-545 /T /C /Q'), '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec(ExpandConstant('{sysnative}\icacls.exe'), ExpandConstant('"{commonpf32}\WindowsSentinel" /remove:d Everyone /T /C /Q'), '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   end;
 
-  // Reset to inherited defaults to clean up any remaining anti-tamper permission states
+  // Reset to inherited defaults
   if DirExists(ExpandConstant('{app}')) then
   begin
     Exec(ExpandConstant('{sysnative}\icacls.exe'), ExpandConstant('"{app}" /reset /T /C /Q'), '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
@@ -140,6 +133,16 @@ begin
   if DirExists(ExpandConstant('{commonpf32}\WindowsSentinel')) then
   begin
     Exec(ExpandConstant('{sysnative}\icacls.exe'), ExpandConstant('"{commonpf32}\WindowsSentinel" /reset /T /C /Q'), '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  end;
+
+  // NOW try rename as final fallback (ACLs are reset, file should be writable)
+  if FileExists(ExpandConstant('{app}\WindowsSentinel.Service.exe')) then
+  begin
+    RenameFile(ExpandConstant('{app}\WindowsSentinel.Service.exe'), ExpandConstant('{app}\WindowsSentinel.Service.exe.old'));
+  end;
+  if FileExists(ExpandConstant('{app}\WindowsSentinel.Agent.exe')) then
+  begin
+    RenameFile(ExpandConstant('{app}\WindowsSentinel.Agent.exe'), ExpandConstant('{app}\WindowsSentinel.Agent.exe.old'));
   end;
 end;
 
