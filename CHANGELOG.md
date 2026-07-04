@@ -6,6 +6,7 @@ All notable changes to Windows Sentinel are documented in this file.
 
 ### Added
 - **ChromeRemoteDebuggingRule**: Detects browser processes launched with `--remote-debugging-port` by a non-browser parent process, which enables full session/cookie access via Chrome DevTools Protocol. Kill-authorized.
+- **IPSec Policy Bypass Detection (NetworkMonitor)**: Monitors all 21 ports blocked by `IPSecPolicy.ps1` (21, 22, 23, 111, 135, 137-139, 445, 666, 1337, 1433, 2049, 3306, 3389, 4444, 5432, 5900, 5985, 5986, 31337) for active connections. If any process has an established connection on these ports, it means the IPSec policy was disabled or bypassed — fires Tier1 with KillProcessTree within 200ms.
 
 ### Fixed
 - **CanaryFileMonitor**: Fixed potential `InvalidOperationException` from mutating `_canaryPaths` list during iteration. Now iterates a snapshot and applies removals after the loop.
