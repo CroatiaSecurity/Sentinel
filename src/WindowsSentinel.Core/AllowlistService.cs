@@ -133,10 +133,8 @@ namespace WindowsSentinel.Core
 
             if (matchesEntry)
             {
-                // Verify the binary is signed by a trusted publisher, or lives in a secure system path
-                if (imagePath.StartsWith(@"C:\Windows\", StringComparison.OrdinalIgnoreCase) ||
-                    imagePath.StartsWith(@"C:\Program Files", StringComparison.OrdinalIgnoreCase) ||
-                    _signerTrust.IsTrustedProcessByPath(imagePath))
+                // Only verify the binary is validly signed — no path-based trust
+                if (_signerTrust.IsSignedFile(imagePath))
                 {
                     return true;
                 }

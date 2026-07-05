@@ -65,7 +65,12 @@ namespace WindowsSentinel.Core
             "steam", "steamwebhelper", "discord", "spotify", "teams",
             "onedrive", "dropbox", "googledrive",
             "svchost", "SearchHost", "WindowsSentinel.Service",
-            "WindowsSentinel.Agent", "Code", "kiro"
+            "WindowsSentinel.Agent", "Code", "kiro",
+            // Games: MMOs and multiplayer titles routinely drop and reconnect to
+            // multiple game servers during zone transitions / instance switches.
+            "GameClient", "StarTrekOnline", "WowClassic", "Wow",
+            "FortniteClient-Win64-Shipping", "EscapeFromTarkov",
+            "VALORANT-Win64-Shipping", "r5apex", "eldenring"
         };
 
         // Dedup: don't fire the same alert for the same process+endpoint repeatedly
@@ -204,6 +209,12 @@ namespace WindowsSentinel.Core
                         _alertDedup[dedupKey] = now;
                         var targets = string.Join(", ", newConnFromSamePid.Take(5).Select(c => $"{c.RemoteIp}:{c.RemotePort}"));
 
+                        // Signed binaries get demoted to Tier2 (log-only). Unsigned get full Tier1 kill.
+                        bool isSigned = _signerTrust?.IsSignedProcess(drop.State.Pid) ?? false;
+                        var effectiveTier = isSigned ? DetectionTier.Tier2Indicator : DetectionTier.Tier1Behavioral;
+                        var effectiveResponse = isSigned ? ResponseAction.LogOnly : ResponseAction.KillProcessTree;
+                        var effectiveConfidence = isSigned ? 0.45 : 0.90;
+
                         _ = _detectionEngine.EmitAsync(new DetectionEvent
                         {
                             RuleName = "C2 Pairing: Failover After Connection Drop",
@@ -213,13 +224,14 @@ namespace WindowsSentinel.Core
                             Reasoning = "A process maintained a long-lived connection (webhook/pairing pattern) to a remote host. " +
                                         "When that connection was severed, the process immediately initiated connections to multiple " +
                                         "alternative endpoints. This is characteristic of C2 implants with failover logic — " +
-                                        "when the primary relay dies, they cycle through backup servers.",
-                            Confidence = 0.90,
-                            Tier = DetectionTier.Tier1Behavioral,
-                            AuthorizedResponse = ResponseAction.KillProcessTree,
+                                        "when the primary relay dies, they cycle through backup servers." +
+                                        (isSigned ? " Process is Authenticode-signed; demoted to log-only." : ""),
+                            Confidence = effectiveConfidence,
+                            Tier = effectiveTier,
+                            AuthorizedResponse = effectiveResponse,
                             ProcessName = drop.State.ProcessName,
                             ProcessId = drop.State.Pid,
-                            SignalType = SignalType.SecurityEvasion,
+                            SignalType = SignalType.NetworkC2,
                             Metadata = new Dictionary<string, string>
                             {
                                 { "OriginalTarget", $"{drop.State.RemoteIp}:{drop.State.RemotePort}" },
@@ -269,6 +281,12 @@ namespace WindowsSentinel.Core
                                 catch { return "unknown"; }
                             }));
 
+                            // Signed binaries get demoted to Tier2 (log-only)
+                            bool isSignedSpawn = _signerTrust?.IsSignedProcess(drop.State.Pid) ?? false;
+                            var spawnTier = isSignedSpawn ? DetectionTier.Tier2Indicator : DetectionTier.Tier1Behavioral;
+                            var spawnResponse = isSignedSpawn ? ResponseAction.LogOnly : ResponseAction.KillProcessTree;
+                            var spawnConfidence = isSignedSpawn ? 0.42 : 0.85;
+
                             _ = _detectionEngine.EmitAsync(new DetectionEvent
                             {
                                 RuleName = "C2 Pairing: Defensive Process Spawn After Drop",
@@ -277,13 +295,14 @@ namespace WindowsSentinel.Core
                                            $"child processes within 10s: {childNames}",
                                 Reasoning = "After losing a long-held C2 connection, the process immediately spawned multiple child " +
                                             "processes. This is a defensive reaction — the implant is launching recovery routines, " +
-                                            "persistence re-establishment, or alternative communication channels.",
-                                Confidence = 0.85,
-                                Tier = DetectionTier.Tier1Behavioral,
-                                AuthorizedResponse = ResponseAction.KillProcessTree,
+                                            "persistence re-establishment, or alternative communication channels." +
+                                            (isSignedSpawn ? " Process is Authenticode-signed; demoted to log-only." : ""),
+                                Confidence = spawnConfidence,
+                                Tier = spawnTier,
+                                AuthorizedResponse = spawnResponse,
                                 ProcessName = drop.State.ProcessName,
                                 ProcessId = drop.State.Pid,
-                                SignalType = SignalType.SecurityEvasion,
+                                SignalType = SignalType.NetworkC2,
                                 Metadata = new Dictionary<string, string>
                                 {
                                     { "OriginalTarget", $"{drop.State.RemoteIp}:{drop.State.RemotePort}" },
@@ -346,7 +365,7 @@ namespace WindowsSentinel.Core
                         Reasoning = "After a long-held connection was severed, the process immediately began flooding DNS " +
                                     "queries — attempting to re-resolve the C2 host or find alternative relay domains. " +
                                     "Legitimate software retries gracefully with backoff. Malware hammers DNS immediately.",
-                        Confidence = 0.88,
+                        Confidence = _signerTrust != null ? _signerTrust.AdjustConfidence(0.88, pid) : 0.88,
                         Tier = DetectionTier.Tier1Behavioral,
                         AuthorizedResponse = ResponseAction.KillProcessTree,
                         ProcessName = drop.State.ProcessName,
@@ -378,15 +397,8 @@ namespace WindowsSentinel.Core
         {
             if (string.IsNullOrEmpty(processName)) return false;
 
-            // Fast path: known-good names (still check, but also verify signature if available)
+            // Fast path: known-good process names (system, browsers, dev tools)
             if (LegitimateProcesses.Contains(processName)) return true;
-
-            // Signer-based trust: if the binary is signed by a known publisher, it's legitimate
-            if (_signerTrust != null && pid > 4)
-            {
-                try { return _signerTrust.IsTrustedProcess(pid); }
-                catch { }
-            }
 
             return false;
         }

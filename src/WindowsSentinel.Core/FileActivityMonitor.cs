@@ -260,7 +260,7 @@ namespace WindowsSentinel.Core
                     if (File.Exists(e.FullPath))
                     {
                         if (SecurityValidation.VerifyAuthenticodeSignature(e.FullPath) ||
-                            _signerTrust.IsTrustedFile(e.FullPath))
+                            _signerTrust.IsSignedFile(e.FullPath))
                         {
                             SubmitEvent(e.FullPath, e.ChangeType.ToString().ToUpperInvariant(), null, 0, "System (Trusted File)");
                             return;
@@ -487,7 +487,7 @@ namespace WindowsSentinel.Core
                                 return true;
                             }
 
-                            if (_signerTrust.IsTrustedFile(filePath))
+                            if (_signerTrust.IsSignedFile(filePath))
                             {
                                 return true;
                             }
@@ -517,7 +517,7 @@ namespace WindowsSentinel.Core
                      }
 
                      // Trust any Authenticode-signed Microsoft updater/setup tool running from non-standard paths (e.g. dxsetup.exe from Steam)
-                     if (_signerTrust.IsTrustedFile(imagePath))
+                     if (_signerTrust.IsSignedFile(imagePath))
                      {
                          return true;
                      }

@@ -14,6 +14,7 @@ namespace WindowsSentinel.Core
         private readonly ConcurrentDictionary<string, HashSet<string>> _processSubnets = new();
         private readonly DetectionEngine _detectionEngine;
         private readonly ProcessAncestryCache _ancestryCache;
+        private readonly SignerTrustService? _signerTrust;
         private readonly System.Threading.Timer _timer;
 
         [StructLayout(LayoutKind.Sequential)]
@@ -82,10 +83,11 @@ namespace WindowsSentinel.Core
             "WindowsSentinel.Service", "WindowsSentinel.Agent"
         };
 
-        public AppNetworkPolicyMonitor(DetectionEngine detectionEngine, ProcessAncestryCache ancestryCache)
+        public AppNetworkPolicyMonitor(DetectionEngine detectionEngine, ProcessAncestryCache ancestryCache, SignerTrustService? signerTrust = null)
         {
             _detectionEngine = detectionEngine;
             _ancestryCache = ancestryCache;
+            _signerTrust = signerTrust;
             // Scan TCP connections every 500 milliseconds to prevent TOCTOU gaps
             _timer = new System.Threading.Timer(ScanNetworkConnections, null, TimeSpan.FromMilliseconds(500), TimeSpan.FromMilliseconds(500));
         }
@@ -270,12 +272,22 @@ namespace WindowsSentinel.Core
 
         private void EmitPolicyAlert(int pid, string processName, string ipAddress, string subnet)
         {
+            // Base confidence for unknown subnet connection
+            double confidence = 0.55;
+
+            // If the binary is signed, lower confidence — signed software connecting
+            // to new subnets is less suspicious (games, updaters, etc.) but still tracked.
+            if (_signerTrust != null && pid > 4)
+            {
+                confidence = _signerTrust.AdjustConfidence(confidence, pid);
+            }
+
             var alert = new DetectionEvent
             {
                 RuleName = "Network Policy: Unusual Destination",
                 ProcessName = processName,
                 ProcessId = pid,
-                Confidence = 0.55,
+                Confidence = confidence,
                 Tier = DetectionTier.Tier2Indicator,
                 Evidence = $"Process '{processName}' connected to unfamiliar /24 subnet: {subnet} (IP: {ipAddress})",
                 Reasoning = "Outbound network connection to a subnet not baselined during the initial 30-minute learning phase.",

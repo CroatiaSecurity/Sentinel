@@ -76,11 +76,8 @@ namespace WindowsSentinel.Core
 
                         if (isDev || isBrowser)
                         {
-                            // Enforce strict Authenticode signature and secure path verification
-                            if (!string.IsNullOrEmpty(imagePath) && 
-                                (imagePath.StartsWith(@"C:\Windows\", StringComparison.OrdinalIgnoreCase) ||
-                                 imagePath.StartsWith(@"C:\Program Files", StringComparison.OrdinalIgnoreCase) ||
-                                 _signerTrust.IsTrustedProcessByPath(imagePath)))
+                            // Only skip if the binary is validly signed — no path-based trust
+                            if (!string.IsNullOrEmpty(imagePath) && _signerTrust.IsSignedFile(imagePath))
                             {
                                 continue;
                             }

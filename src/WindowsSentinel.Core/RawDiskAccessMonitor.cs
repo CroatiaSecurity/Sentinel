@@ -140,7 +140,7 @@ namespace WindowsSentinel.Core
                         {
                             string? allowedPath = null;
                             try { allowedPath = proc.MainModule?.FileName; } catch { }
-                            if (!string.IsNullOrEmpty(allowedPath) && IsSystemOrTrustedPath(allowedPath))
+                            if (!string.IsNullOrEmpty(allowedPath) && IsSignedSystemBinary(allowedPath))
                                 continue;
                             // Name matches but path is suspicious — fall through to detection
                         }
@@ -164,7 +164,7 @@ namespace WindowsSentinel.Core
                             {
                                 var mainModule = proc.MainModule?.FileName;
                                 if (mainModule != null)
-                                    isTrusted = _signerTrust.IsTrustedFile(mainModule);
+                                    isTrusted = _signerTrust.IsSignedFile(mainModule);
                             }
                             catch { }
 
@@ -338,17 +338,12 @@ namespace WindowsSentinel.Core
         }
 
         /// <summary>
-        /// Verifies a binary is running from a system-protected or trusted path.
-        /// Used to validate that an "allowed" process name actually belongs to the real tool.
+        /// Verifies a binary is a legitimate system tool by checking its Authenticode signature.
+        /// No path-based trust — only signature verification.
         /// </summary>
-        private static bool IsSystemOrTrustedPath(string imagePath)
+        private bool IsSignedSystemBinary(string imagePath)
         {
-            return imagePath.Contains(@"\Windows\System32\", StringComparison.OrdinalIgnoreCase) ||
-                   imagePath.Contains(@"\Windows\SysWOW64\", StringComparison.OrdinalIgnoreCase) ||
-                   imagePath.Contains(@"\Windows\WinSxS\", StringComparison.OrdinalIgnoreCase) ||
-                   imagePath.StartsWith(@"C:\Program Files\", StringComparison.OrdinalIgnoreCase) ||
-                   imagePath.StartsWith(@"C:\Program Files (x86)\", StringComparison.OrdinalIgnoreCase) ||
-                   imagePath.Contains(@"\WindowsSentinel\", StringComparison.OrdinalIgnoreCase);
+            return _signerTrust.IsSignedFile(imagePath);
         }
 
         private static bool IsRawDiskPath(string path)

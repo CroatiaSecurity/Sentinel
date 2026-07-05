@@ -481,7 +481,7 @@ namespace WindowsSentinel.Core
                 // Skip processes signed by a trusted publisher (Google, Microsoft, Mozilla, etc.)
                 // This cannot be bypassed by renaming a malicious binary to "chrome.exe" —
                 // the attacker would need the publisher's private code-signing key.
-                if (!string.IsNullOrEmpty(imagePath) && _signerTrust.IsTrustedFile(imagePath))
+                if (!string.IsNullOrEmpty(imagePath) && _signerTrust.IsSignedFile(imagePath))
                     return true;
 
                 // Also skip our own agent process by name (it won't have a third-party signature)

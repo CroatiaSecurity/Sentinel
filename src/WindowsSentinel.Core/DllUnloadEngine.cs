@@ -96,8 +96,9 @@ namespace WindowsSentinel.Core
                 try { procDir = Path.GetDirectoryName(proc.MainModule?.FileName); } catch { }
                 if (string.IsNullOrEmpty(procDir)) return result;
 
-                // Skip if process is in a system directory — legitimate loads
-                if (procDir.StartsWith(@"C:\Windows", StringComparison.OrdinalIgnoreCase))
+                // Skip if process is in the Windows directory — legitimate loads
+                var winDir = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+                if (procDir.StartsWith(winDir, StringComparison.OrdinalIgnoreCase))
                     return result;
 
                 var sideloadedFiles = new List<string>();
@@ -111,9 +112,9 @@ namespace WindowsSentinel.Core
 
                         if (!SideloadTargets.Contains(modName)) continue;
 
-                        // Sideloaded if the DLL is in the process directory (not System32)
+                        // Sideloaded if the DLL is in the process directory (not a Windows system folder)
                         if (modDir.Equals(procDir, StringComparison.OrdinalIgnoreCase) &&
-                            !modDir.StartsWith(@"C:\Windows", StringComparison.OrdinalIgnoreCase))
+                            !modDir.StartsWith(winDir, StringComparison.OrdinalIgnoreCase))
                         {
                             var key = $"{processId}:{modName}";
                             if (_remediationHistory.ContainsKey(key)) continue;

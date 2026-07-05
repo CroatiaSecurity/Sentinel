@@ -45,9 +45,9 @@ namespace WindowsSentinel.Core
 
         private static readonly string[] SystemPaths = new[]
         {
-            @"C:\Windows\System32\",
-            @"C:\Windows\SysWOW64\",
-            @"C:\Windows\",
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "System32") + @"\",
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "SysWOW64") + @"\",
+            Environment.GetFolderPath(Environment.SpecialFolder.Windows) + @"\",
         };
 
         public ChainTracer(

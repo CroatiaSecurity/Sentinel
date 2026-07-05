@@ -32,18 +32,18 @@ namespace WindowsSentinel.Core
     public sealed class LsassDumpCanaryMonitor : IDisposable
     {
         private readonly DetectionEngine _detectionEngine;
+        private readonly SignerTrustService? _signerTrust;
         private readonly ILogger<LsassDumpCanaryMonitor> _logger;
         private readonly System.Threading.Timer _timer;
         private readonly ConcurrentDictionary<string, DateTimeOffset> _alertedProcesses = new();
 
-        // Known legitimate processes that access LSASS (by verified path prefix)
-        private static readonly string[] TrustedLsassAccessorPaths = new[]
+        // Dynamically resolved system paths where legitimate LSASS accessors live
+        private static readonly string[] SystemLsassAccessorPaths = new[]
         {
-            @"C:\Windows\System32\",
-            @"C:\Windows\SysWOW64\",
-            @"C:\ProgramData\Microsoft\Windows Defender\Platform\",
-            @"C:\Program Files\Windows Defender\",
-            @"C:\Program Files\Microsoft Security Client\",
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "System32") + @"\",
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "SysWOW64") + @"\",
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), @"Microsoft\Windows Defender\Platform") + @"\",
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Windows Defender") + @"\",
         };
 
         private static readonly TimeSpan ScanInterval = TimeSpan.FromSeconds(30);
@@ -52,10 +52,12 @@ namespace WindowsSentinel.Core
 
         public LsassDumpCanaryMonitor(
             DetectionEngine detectionEngine,
-            ILogger<LsassDumpCanaryMonitor> logger)
+            ILogger<LsassDumpCanaryMonitor> logger,
+            SignerTrustService? signerTrust = null)
         {
             _detectionEngine = detectionEngine;
             _logger = logger;
+            _signerTrust = signerTrust;
             _timer = new System.Threading.Timer(CheckLsassAccess, null, ScanInterval, ScanInterval);
         }
 
@@ -270,10 +272,16 @@ namespace WindowsSentinel.Core
             catch { }
         }
 
-        private static bool IsTrustedPath(string? path)
+        private bool IsTrustedPath(string? path)
         {
             if (string.IsNullOrEmpty(path)) return false;
-            return TrustedLsassAccessorPaths.Any(t => path.StartsWith(t, StringComparison.OrdinalIgnoreCase));
+            // Must be in a known system folder AND be signed
+            bool inSystemFolder = SystemLsassAccessorPaths.Any(t => path.StartsWith(t, StringComparison.OrdinalIgnoreCase));
+            if (!inSystemFolder) return false;
+            // Verify signature — unsigned binaries in system folders are suspicious
+            if (_signerTrust != null)
+                return _signerTrust.IsSignedFile(path);
+            return true; // If no signer service available, fall back to path-only (degraded mode)
         }
 
         private static string? ExtractXmlField(string xml, string fieldName)

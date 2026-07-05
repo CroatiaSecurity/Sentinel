@@ -98,7 +98,7 @@ namespace WindowsSentinel.Core
                         }
 
                         // Bypass memory scanner entirely for trusted processes signed by reputable publishers
-                        if (_signerTrust.IsTrustedProcess(proc.Id))
+                        if (_signerTrust.IsSignedProcess(proc.Id))
                         {
                             continue;
                         }
