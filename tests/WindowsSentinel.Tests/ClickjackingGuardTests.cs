@@ -44,7 +44,7 @@ namespace WindowsSentinel.Tests
             var (engine, logger, tempDir) = CreateTestEngine();
             try
             {
-                var guard = new ClickjackingGuard(engine, NullLogger<ClickjackingGuard>.Instance);
+                var guard = new ClickjackingGuard(engine, new SignerTrustService(NullLogger<SignerTrustService>.Instance), NullLogger<ClickjackingGuard>.Instance);
 
                 await guard.StartAsync(CancellationToken.None);
                 await Task.Delay(100);
@@ -65,7 +65,7 @@ namespace WindowsSentinel.Tests
             var (engine, logger, tempDir) = CreateTestEngine();
             try
             {
-                var guard = new ClickjackingGuard(engine, NullLogger<ClickjackingGuard>.Instance);
+                var guard = new ClickjackingGuard(engine, new SignerTrustService(NullLogger<SignerTrustService>.Instance), NullLogger<ClickjackingGuard>.Instance);
                 var cts = new CancellationTokenSource();
 
                 await guard.StartAsync(cts.Token);

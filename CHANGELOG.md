@@ -2,6 +2,14 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [1.2.5] - 2026-07-05
+
+### Security Hardening
+- **ClickjackingGuard**: Fake UAC/credential prompt detection now uses Authenticode signature verification (`SignerTrustService`) instead of a hardcoded process-name allowlist. Previously, browsers like Chrome were killed when their window title contained "Windows Security" (e.g., viewing a GitHub repo about security policies). Now, any process signed by a trusted publisher (Google, Microsoft, Mozilla, Brave, etc.) is exempt. An attacker renaming malware to `chrome.exe` will still be caught — they can't forge Google's code-signing key.
+
+### Fixed
+- **ClickjackingGuard**: Chrome/Edge/Firefox no longer crash when viewing GitHub repos or web pages with "Windows Security" or "Group Policy" in the title.
+
 ## [1.2.4] - 2026-07-04
 
 ### Added

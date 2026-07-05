@@ -27,6 +27,7 @@ namespace WindowsSentinel.Core
     public sealed class ClickjackingGuard : BackgroundService
     {
         private readonly DetectionEngine _detectionEngine;
+        private readonly SignerTrustService _signerTrust;
         private readonly ILogger<ClickjackingGuard> _logger;
 
         // Mouse hook handle
@@ -49,13 +50,6 @@ namespace WindowsSentinel.Core
 
         // Fake UAC dedup
         private readonly ConcurrentDictionary<int, DateTime> _fakeUacAlerted = new();
-
-        // Known system processes allowed to create elevated-looking UI
-        private static readonly HashSet<string> SystemUiProcesses = new(StringComparer.OrdinalIgnoreCase)
-        {
-            "consent", "CredentialUIBroker", "LogonUI", "RuntimeBroker",
-            "SystemSettings", "SecurityHealthSystray", "WindowsSentinel.Agent"
-        };
 
         // Crypto address patterns — these detect clipper malware, NOT perform clipping.
         // Patterns are constructed at runtime to avoid static heuristic signature matching
@@ -147,9 +141,10 @@ namespace WindowsSentinel.Core
 
         #endregion
 
-        public ClickjackingGuard(DetectionEngine de, ILogger<ClickjackingGuard> l)
+        public ClickjackingGuard(DetectionEngine de, SignerTrustService signerTrust, ILogger<ClickjackingGuard> l)
         {
             _detectionEngine = de;
+            _signerTrust = signerTrust;
             _logger = l;
         }
 
@@ -483,13 +478,14 @@ namespace WindowsSentinel.Core
                 }
                 catch { }
 
-                // Skip legitimate system UI processes
-                if (SystemUiProcesses.Contains(procName)) return true;
+                // Skip processes signed by a trusted publisher (Google, Microsoft, Mozilla, etc.)
+                // This cannot be bypassed by renaming a malicious binary to "chrome.exe" —
+                // the attacker would need the publisher's private code-signing key.
+                if (!string.IsNullOrEmpty(imagePath) && _signerTrust.IsTrustedFile(imagePath))
+                    return true;
 
-                // Skip if it's from System32/SysWOW64
-                if (!string.IsNullOrEmpty(imagePath) &&
-                    (imagePath.Contains(@"\System32\", StringComparison.OrdinalIgnoreCase) ||
-                     imagePath.Contains(@"\SysWOW64\", StringComparison.OrdinalIgnoreCase)))
+                // Also skip our own agent process by name (it won't have a third-party signature)
+                if (string.Equals(procName, "WindowsSentinel.Agent", StringComparison.OrdinalIgnoreCase))
                     return true;
 
                 // This is a non-system process with a UAC-like window title — fake UAC
