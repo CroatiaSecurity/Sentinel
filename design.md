@@ -101,6 +101,7 @@ The fusion layer is PASSIVE â€” it never blocks, kills, or modifies telemet
 | `SandboxEscapeMonitor` | **1.0.1** Monitors Windows Sandbox, Docker containers, and Hyper-V for escape indicators: privileged containers, host namespace access, sensitive path mappings in .wsb files, processes spawned by container runtime from host paths. Scans every 15s. | No |
 | `AppDnsExfilMonitor` | **1.0.1** Detects application-level DNS-over-HTTPS bypass where non-browser processes communicate directly with known DoH resolvers (Cloudflare, Google, Quad9, etc.) on port 443, evading Windows DNS Client event log and hosts file. Scans every 10s. | No |
 | `CastDeviceGuard` | **1.0.4** Kills ALL connections to Cast ports (8008/8009) on LAN unless target IP is in explicit `TrustedCastDevices` allowlist. No baseline, no OUI trust, no heuristics. Self-healing firewall rules block rogue Cast IPs. Scans every 5s. | No |
+| `ApplicationIntegrityMonitor` | **1.2.5** Cuckoo Egg Detection — baselines protected application executables (SHA-256 + Authenticode publisher) at startup. Detects unauthorized replacement via hash change + publisher mismatch. FileSystemWatcher for real-time + periodic scan every 30s. Active response: kills offending process tree, quarantines impostor, restores original from DPAPI-encrypted backup. Generates forensic incident report suitable for law enforcement filing. Legitimate updates (same publisher, different hash) auto-re-baseline silently. | No |
 
 ### Engine
 

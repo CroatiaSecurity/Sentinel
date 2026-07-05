@@ -40,6 +40,10 @@ namespace WindowsSentinel.Service
                     var threatReportingConfig = new ThreatReportingConfig();
                     hostContext.Configuration.GetSection("ThreatReporting").Bind(threatReportingConfig);
 
+                    var appIntegrityConfig = new ApplicationIntegrityConfig();
+                    hostContext.Configuration.GetSection("ApplicationIntegrity").Bind(appIntegrityConfig);
+                    services.AddSingleton(appIntegrityConfig);
+
                     // CLI flag overrides
                     for (int i = 0; i < args.Length; i++)
                     {
@@ -198,6 +202,9 @@ namespace WindowsSentinel.Service
                     // v1.1.0: Defensive isolation containment
                     services.AddSingleton<PseudoSandbox>();
                     services.AddHostedService<PseudoSandbox>(sp => sp.GetRequiredService<PseudoSandbox>());
+
+                    // v1.2.5: Application Integrity (Cuckoo Egg Detection)
+                    services.AddHostedService<ApplicationIntegrityMonitor>();
                 });
     }
 }

@@ -2,7 +2,7 @@
 
 **Userland IDS/EDR for Windows — Behavioral Threat Detection & Automated Response**
 
-> Version: 1.2.5 | Author: [Gorstak](https://gorstak.eu) | License: MIT
+> Version: 1.2.6 | Author: [Gorstak](https://gorstak.eu) | License: MIT
 
 [![Release](https://img.shields.io/github/v/release/CroatiaSecurity/Sentinel?style=flat-square)](https://github.com/CroatiaSecurity/Sentinel/releases/latest)
 [![License](https://img.shields.io/github/license/CroatiaSecurity/Sentinel?style=flat-square)](LICENSE)
@@ -63,6 +63,7 @@ Telemetry → Fusion → Rules → Scoring → Response → Chain Trace
 | 🔒 **Null Session** | Blank-password network auth, SMB null-session | Registry policy enforcement + FCM push block |
 | 🥾 **Boot Persistence** | Bootkits, EFI rootkits, driver load hijack | BCD monitoring, EFI partition scan, boot driver baseline |
 | 🔗 **Multi-Signal Correlation** | Attack chains (inject+C2, cred+exfil, evasion+persist) | 10 composite detections from independent signal sources |
+| 🥚 **Cuckoo Egg (App Replacement)** | Unauthorized software substitution | SHA-256 + Authenticode publisher baseline, FileSystemWatcher + 30s periodic scan, forensic report generation |
 
 ---
 
@@ -76,6 +77,35 @@ Telemetry → Fusion → Rules → Scoring → Response → Chain Trace
 | **QuarantineAndKill** | Unload DLL from memory (FreeLibrary) + kill if unload fails + quarantine file + lock path |
 | **RemoveRegistryEntry** | Delete malicious Run key / service / CLSID |
 | **BYOVD Chain** | Remove cert + stop driver service + delete registry + quarantine .sys |
+
+---
+
+## 🥚 Cuckoo Egg Protection (Application Integrity)
+
+Prevents unauthorized software replacement — detects when someone swaps a legitimate application with an impostor (e.g., replacing your IDE with a lookalike from a different publisher).
+
+**How it works:**
+1. At startup, baselines each protected app: SHA-256 hash + Authenticode publisher certificate
+2. Monitors for changes via FileSystemWatcher (real-time) + periodic scan (every 30s)
+3. If the hash changes but the publisher stays the same → legitimate update, re-baseline silently
+4. If the hash changes AND the publisher is different or missing → **CUCKOO EGG DETECTED**
+
+**Response (when ActiveResponse is enabled):**
+- Kills the process tree of the software that performed the replacement
+- Quarantines the impostor binary (DPAPI-encrypted vault)
+- Restores the original application from backup
+- Generates a full forensic incident report with evidence for law enforcement filing
+
+**Forensic report includes:**
+- Victim application details (hash, publisher, version, path)
+- Impostor details (hash, publisher, certificate chain)
+- Offender process (PID, image path, command line, process ancestry)
+- Network connections at time of detection (for IP-based perpetrator identification)
+- Timeline of events
+- Legal classification (applicable computer fraud statutes)
+- Recommended actions for filing with authorities
+
+Reports are saved to `%ProgramData%\WindowsSentinel\IncidentReports\`.
 
 ---
 
@@ -132,6 +162,17 @@ Both communicate through shared detection/response pipeline via the `DetectionEn
     "MalwareBazaarApiKey": null,
     "ReportToMalwareBazaar": true,
     "ReportToUrlhaus": true
+  },
+  "ApplicationIntegrity": {
+    "Enabled": true,
+    "ScanIntervalSeconds": 30,
+    "ProtectedApps": [
+      {
+        "Name": "Kiro IDE",
+        "ExecutablePath": "C:\\Users\\Admin\\AppData\\Local\\Programs\\kiro\\Kiro.exe",
+        "ExpectedPublisher": "Amazon.com Services LLC"
+      }
+    ]
   }
 }
 ```
@@ -140,6 +181,8 @@ Both communicate through shared detection/response pipeline via the `DetectionEn
 - `ActiveResponse: false` — log-only mode, no active response
 - `LogPath` — custom path for events.jsonl (default: `%ProgramData%\WindowsSentinel\`)
 - `WatchPath` — custom directory for FileActivityMonitor (default: all user profiles)
+- `ApplicationIntegrity.ProtectedApps` — list of executables to protect from replacement (cuckoo egg detection)
+- `ExpectedPublisher` — Authenticode CN of the legitimate publisher; hash changes from the same publisher are treated as legitimate updates
 
 ---
 
