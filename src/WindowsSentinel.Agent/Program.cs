@@ -56,6 +56,7 @@ namespace WindowsSentinel.Agent
                     services.AddSingleton<FileVerdictAds>();
                     services.AddSingleton<IoCScanner>();
                     services.AddSingleton<AllowlistService>();
+                    services.AddSingleton<SignerTrustService>();
                     services.AddSingleton<ScoringEngine>();
                     services.AddSingleton<ChainTracer>();
                     services.AddSingleton<DllUnloadEngine>();
