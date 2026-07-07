@@ -27,7 +27,7 @@ namespace WindowsSentinel.Core
         private readonly ILogger<AntiTamperGuard> _logger;
         private readonly SentinelConfig _config;
 
-        private const string ServiceName = "WindowsSentinel";
+        private const string ServiceName = "Windows Sentinel";
         private const int SuspendThresholdMs = 10_000; // 10s gap = suspended
         private readonly int _timingTickMs;
         private readonly int _integrityTickMs;
@@ -209,7 +209,7 @@ namespace WindowsSentinel.Core
                 {
                     try
                     {
-                        var psi = new ProcessStartInfo("sc.exe", $"config {ServiceName} start=auto")
+                        var psi = new ProcessStartInfo("sc.exe", $"config \"{ServiceName}\" start=auto")
                         { CreateNoWindow = true, UseShellExecute = false };
                         Process.Start(psi)?.WaitForExit(5000);
                         _logger.LogWarning("[AntiTamperGuard] Enforced service '{Service}' StartType back to Automatic.", ServiceName);
@@ -246,7 +246,7 @@ namespace WindowsSentinel.Core
                     try
                     {
                         var psi = new ProcessStartInfo("sc.exe",
-                            $"create {ServiceName} binPath=\"{_ownExePath}\" start=auto DisplayName=\"Windows Sentinel\"")
+                            $"create \"{ServiceName}\" binPath=\"{_ownExePath}\" start=auto DisplayName=\"Windows Sentinel\"")
                         { CreateNoWindow = true, UseShellExecute = false };
                         Process.Start(psi)?.WaitForExit(5000);
 

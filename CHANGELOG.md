@@ -2,6 +2,11 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [1.2.8] - 2026-07-07
+
+### Fixed
+- **AntiTamperGuard: Service name mismatch causing 10-second detection spam** — The `ServiceName` constant was set to `"WindowsSentinel"` (no space) but the actual SCM registration uses `"Windows Sentinel"` (with space). `ServiceController` lookup failed every 10 seconds, triggering a false "Service Registration Deleted" detection, flooding `events.jsonl` (~6 MB/day) and the Windows Application Event Log with ~8,640 warning entries per day. Fixed the constant to match the registered name and quoted it in `sc.exe` commands for space-safe operation.
+
 ## [1.2.5] - 2026-07-05
 
 ### Security Hardening
