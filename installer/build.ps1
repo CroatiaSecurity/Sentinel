@@ -93,3 +93,14 @@ Write-Host "Build completed successfully!" -ForegroundColor Green
 Write-Host "Installer output: installer\WindowsSentinelSetup-$Version.exe" -ForegroundColor Green
 Write-Host "==============================================" -ForegroundColor Green
 
+# 6. Copy installer to releases folder for push.ps1 pickup
+$ReleasesDir = Join-Path $PSScriptRoot "..\releases\$Version"
+if (-not (Test-Path $ReleasesDir)) { New-Item -ItemType Directory -Path $ReleasesDir -Force | Out-Null }
+$InstallerPath = Join-Path $PSScriptRoot "WindowsSentinelSetup-$Version.exe"
+if (Test-Path $InstallerPath) {
+    Copy-Item $InstallerPath -Destination $ReleasesDir -Force
+    Write-Host "Copied installer to releases\$Version\ for GitHub Release upload" -ForegroundColor Green
+} else {
+    Write-Host "WARNING: Installer not found at expected path, skipping releases copy" -ForegroundColor Yellow
+}
+
