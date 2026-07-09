@@ -42,18 +42,21 @@ namespace WindowsSentinel.Core
 
                 // Final safeguard: never kill BSOD-critical processes or user shells regardless of what triggered the kill
                 var name = proc.ProcessName;
-                if (string.Equals(name, "csrss", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(name, "wininit", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(name, "services", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(name, "smss", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(name, "lsass", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(name, "winlogon", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(name, "dwm", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(name, "System", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(name, "cmd", StringComparison.OrdinalIgnoreCase))
+                if (IsCriticalProcessName(name))
                 {
-                    Debug.WriteLine($"SafeKillProcessTree: REFUSED to kill critical process {name} (PID {processId})");
-                    return;
+                    // HARDENING: Verify the binary actually resides in a system directory.
+                    // An attacker can manipulate the PEB ProcessName field to masquerade as
+                    // "csrss" or "explorer" — but they cannot move their binary into System32
+                    // without triggering FileActivityMonitor's System32 write detection.
+                    var imagePath = SecurityValidation.GetProcessImagePath(processId);
+                    if (imagePath != null && IsInSystemDirectory(imagePath))
+                    {
+                        Debug.WriteLine($"SafeKillProcessTree: REFUSED to kill critical process {name} (PID {processId}) at verified system path");
+                        return;
+                    }
+                    // Name matches critical process but path is NOT in system directory —
+                    // this is masquerading. Allow the kill to proceed.
+                    Debug.WriteLine($"SafeKillProcessTree: Process claims to be '{name}' but path is '{imagePath}' — masquerading detected, allowing kill");
                 }
 
                 proc.Kill(entireProcessTree: true);
@@ -62,6 +65,25 @@ namespace WindowsSentinel.Core
             {
                 Debug.WriteLine($"Failed to kill process tree for PID {processId}: {ex.Message}");
             }
+        }
+
+        private static bool IsCriticalProcessName(string name)
+        {
+            return string.Equals(name, "csrss", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(name, "wininit", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(name, "services", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(name, "smss", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(name, "lsass", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(name, "winlogon", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(name, "dwm", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(name, "System", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(name, "cmd", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsInSystemDirectory(string imagePath)
+        {
+            var winDir = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+            return imagePath.StartsWith(winDir, StringComparison.OrdinalIgnoreCase);
         }
 
         public static void SecureInstallationDirectory()

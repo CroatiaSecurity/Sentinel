@@ -247,7 +247,16 @@ namespace WindowsSentinel.Core
             {
                 if (DateTime.UtcNow - _startTime < TimeSpan.FromMinutes(LearningPhaseDurationMinutes))
                 {
-                    // Learning phase: record subnet
+                    // Learning phase: record subnet — but NEVER learn from unsigned binaries
+                    // in suspicious staging paths. Malware that activates during the learning
+                    // window (e.g., via Run key persistence) would otherwise have its C2 subnets
+                    // baselined as "normal" and never trigger enforcement-phase alerts.
+                    if (pid > 4 && IsUntrustedStagingProcess(pid))
+                    {
+                        EmitPolicyAlert(pid, processName, remoteAddress, subnet);
+                        return;
+                    }
+
                     if (subnets.Count < MaxSubnetsPerProcess)
                     {
                         subnets.Add(subnet);
@@ -299,6 +308,40 @@ namespace WindowsSentinel.Core
             };
 
             _ = _detectionEngine.EmitAsync(alert);
+        }
+
+        /// <summary>
+        /// Checks if a process is unsigned and running from a suspicious staging directory.
+        /// Used to prevent learning-phase baseline poisoning by malware that activates early.
+        /// An attacker with persistence (Run key, scheduled task) would otherwise have their
+        /// C2 subnets learned as normal within the first 30 minutes.
+        /// </summary>
+        private bool IsUntrustedStagingProcess(int pid)
+        {
+            try
+            {
+                var imagePath = SecurityValidation.GetProcessImagePath(pid);
+                if (string.IsNullOrEmpty(imagePath)) return true; // No path = suspicious
+
+                // If the binary is Authenticode-signed, allow it into the learning phase
+                if (_signerTrust != null && _signerTrust.IsSignedFile(imagePath))
+                    return false;
+
+                // Unsigned binary — check if it's in a suspicious staging location
+                var pathLower = imagePath.ToLowerInvariant();
+                return pathLower.Contains(@"\temp\") ||
+                       pathLower.Contains(@"\tmp\") ||
+                       pathLower.Contains(@"\downloads\") ||
+                       pathLower.Contains(@"\appdata\local\temp\") ||
+                       pathLower.Contains(@"\users\public\") ||
+                       pathLower.Contains(@"\programdata\") ||
+                       pathLower.Contains(@"\windows\temp\") ||
+                       pathLower.Contains(@"\recycle");
+            }
+            catch
+            {
+                return false; // Err on side of allowing learning if we can't check
+            }
         }
 
         public void Dispose()

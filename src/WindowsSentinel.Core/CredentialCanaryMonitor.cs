@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading;
 using Microsoft.Extensions.Logging;
@@ -7,9 +8,13 @@ using Microsoft.Extensions.Logging;
 namespace WindowsSentinel.Core
 {
     /// <summary>
-    /// Plants a dummy credential in Windows Credential Manager and monitors it.
+    /// Plants multiple dummy credentials in Windows Credential Manager and monitors them.
     /// Any unauthorized access/modification indicates active credential harvesting.
     /// Purely behavioral honeypot — no tool names or signatures.
+    /// 
+    /// HARDENING: Uses randomized target names from a pool of realistic-looking templates.
+    /// A credential dumping tool cannot trivially filter these by name since the names
+    /// change every boot and look like legitimate service credentials.
     /// </summary>
     public sealed class CredentialCanaryMonitor : IDisposable
     {
@@ -17,9 +22,23 @@ namespace WindowsSentinel.Core
         private readonly ILogger<CredentialCanaryMonitor> _logger;
         private readonly System.Threading.Timer _timer;
 
-        private const string CanaryTarget = "WindowsBackup_AutoSync_Token";
-        private const string CanaryUsername = "svc_backup_sync";
-        private bool _canaryPlanted = false;
+        // HARDENING: Randomized canary names from realistic service templates.
+        // Previously used a fixed name ("WindowsBackup_AutoSync_Token") that any
+        // credential dumper could be patched to skip in 30 seconds.
+        private static readonly (string TargetTemplate, string Username, string Comment)[] CanaryTemplates = new[]
+        {
+            ("Exchange_SMTP_Relay_{0}", "svc_mail_relay", "Exchange SMTP relay service credential"),
+            ("VPN_AutoConnect_{0}", "vpn_service", "Corporate VPN auto-connect token"),
+            ("SharePoint_Sync_{0}", "sp_crawler", "SharePoint document sync credential"),
+            ("Azure_DevOps_PAT_{0}", "devops_agent", "Azure DevOps build agent token"),
+            ("SQL_Replication_{0}", "sql_repl_svc", "SQL Server replication service account"),
+            ("SCCM_Client_Auth_{0}", "sccm_client", "SCCM client authentication credential"),
+            ("Backup_Exec_Agent_{0}", "bkup_agent", "Backup Exec remote agent credential"),
+            ("Print_Spooler_Svc_{0}", "print_svc", "Network print spooler service token"),
+        };
+
+        private readonly List<string> _plantedCanaryTargets = new();
+        private readonly object _canaryLock = new();
 
         private static readonly TimeSpan CheckInterval = TimeSpan.FromSeconds(15);
 
@@ -29,8 +48,8 @@ namespace WindowsSentinel.Core
         {
             _detectionEngine = detectionEngine;
             _logger = logger;
-            PlantCanary();
-            _timer = new System.Threading.Timer(CheckCanary, null, CheckInterval, CheckInterval);
+            PlantCanaries();
+            _timer = new System.Threading.Timer(CheckCanaries, null, CheckInterval, CheckInterval);
         }
 
         [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
@@ -62,11 +81,34 @@ namespace WindowsSentinel.Core
         private const int CRED_TYPE_GENERIC = 1;
         private const int CRED_PERSIST_LOCAL_MACHINE = 2;
 
-        private void PlantCanary()
+        private void PlantCanaries()
+        {
+            // Plant 3-5 randomized canaries from the template pool
+            var rng = new Random();
+            int count = 3 + rng.Next(3); // 3 to 5 canaries
+            var shuffled = CanaryTemplates.OrderBy(_ => rng.Next()).Take(count).ToArray();
+
+            foreach (var (targetTemplate, username, comment) in shuffled)
+            {
+                var suffix = Guid.NewGuid().ToString("N")[..6];
+                var target = string.Format(targetTemplate, suffix);
+                if (PlantSingleCanary(target, username, comment))
+                {
+                    lock (_canaryLock)
+                    {
+                        _plantedCanaryTargets.Add(target);
+                    }
+                }
+            }
+
+            _logger.LogDebug("[CredentialCanaryMonitor] Planted {Count} canary credentials", _plantedCanaryTargets.Count);
+        }
+
+        private bool PlantSingleCanary(string target, string username, string comment)
         {
             try
             {
-                var password = "SentinelCanary_" + Guid.NewGuid().ToString("N").Substring(0, 8);
+                var password = "Svc_" + Guid.NewGuid().ToString("N")[..12] + "!";
                 var passBytes = System.Text.Encoding.Unicode.GetBytes(password);
                 var passPtr = Marshal.AllocHGlobal(passBytes.Length);
                 Marshal.Copy(passBytes, 0, passPtr, passBytes.Length);
@@ -74,62 +116,96 @@ namespace WindowsSentinel.Core
                 var cred = new CREDENTIAL
                 {
                     Type = CRED_TYPE_GENERIC,
-                    TargetName = CanaryTarget,
-                    UserName = CanaryUsername,
+                    TargetName = target,
+                    UserName = username,
                     CredentialBlob = passPtr,
                     CredentialBlobSize = passBytes.Length,
                     Persist = CRED_PERSIST_LOCAL_MACHINE,
-                    Comment = "Windows Backup sync credential — do not modify"
+                    Comment = comment
                 };
 
-                if (CredWrite(ref cred, 0))
-                {
-                    _canaryPlanted = true;
-                    _logger.LogDebug("[CredentialCanaryMonitor] Canary credential planted");
-                }
-                else
-                {
-                    _logger.LogWarning("[CredentialCanaryMonitor] CredWrite failed: {Error}", Marshal.GetLastWin32Error());
-                }
-
+                bool success = CredWrite(ref cred, 0);
                 Marshal.FreeHGlobal(passPtr);
+
+                if (!success)
+                {
+                    _logger.LogDebug("[CredentialCanaryMonitor] CredWrite failed for '{Target}': {Error}",
+                        target, Marshal.GetLastWin32Error());
+                }
+                return success;
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "[CredentialCanaryMonitor] Failed to plant canary");
+                _logger.LogDebug(ex, "[CredentialCanaryMonitor] Failed to plant canary '{Target}'", target);
+                return false;
             }
         }
 
-        private void CheckCanary(object? state)
+        private void CheckCanaries(object? state)
         {
-            if (!_canaryPlanted) return;
-
-            try
+            List<string> targets;
+            lock (_canaryLock)
             {
-                if (!CredRead(CanaryTarget, CRED_TYPE_GENERIC, 0, out var credPtr))
+                if (_plantedCanaryTargets.Count == 0) return;
+                targets = new List<string>(_plantedCanaryTargets);
+            }
+
+            foreach (var target in targets)
+            {
+                try
                 {
-                    // Canary was deleted — credential harvester detected
-                    _ = _detectionEngine.EmitAsync(new DetectionEvent
+                    if (!CredRead(target, CRED_TYPE_GENERIC, 0, out var credPtr))
                     {
-                        RuleName = "Credential Theft: Canary Credential Deleted",
-                        Evidence = $"Honeypot credential '{CanaryTarget}' was removed from Windows Credential Manager",
-                        Reasoning = "A canary credential planted by Sentinel was deleted, indicating active credential harvesting. Legitimate tools do not interact with this credential.",
-                        Confidence = 0.85, Tier = DetectionTier.Tier2Indicator,
-                        AuthorizedResponse = ResponseAction.LogOnly,
-                        ProcessName = "SYSTEM", ProcessId = 0
-                    });
-                    _canaryPlanted = false;
-                    // Re-plant after detection
-                    PlantCanary();
+                        // Canary was deleted — credential harvester detected
+                        _ = _detectionEngine.EmitAsync(new DetectionEvent
+                        {
+                            RuleName = "Credential Theft: Canary Credential Deleted",
+                            Evidence = $"Honeypot credential '{target}' was removed from Windows Credential Manager",
+                            Reasoning = "A canary credential planted by Sentinel was deleted, indicating active " +
+                                        "credential harvesting. Legitimate tools do not interact with this credential. " +
+                                        "Multiple canaries with randomized names are planted — deletion of any one " +
+                                        "indicates bulk credential enumeration/deletion by a harvesting tool.",
+                            Confidence = 0.88, Tier = DetectionTier.Tier1Behavioral,
+                            AuthorizedResponse = ResponseAction.LogOnly,
+                            ProcessName = "SYSTEM", ProcessId = 0,
+                            Metadata = new Dictionary<string, string>
+                            {
+                                ["DeletedTarget"] = target,
+                                ["TotalCanaries"] = _plantedCanaryTargets.Count.ToString()
+                            }
+                        });
+
+                        // Remove from tracking and re-plant a replacement with a new random name
+                        lock (_canaryLock)
+                        {
+                            _plantedCanaryTargets.Remove(target);
+                        }
+                        ReplantSingleCanary();
+                    }
+                    else
+                    {
+                        CredFree(credPtr);
+                    }
                 }
-                else
+                catch (Exception ex)
                 {
-                    CredFree(credPtr);
+                    _logger.LogDebug(ex, "[CredentialCanaryMonitor] Check error for '{Target}'", target);
                 }
             }
-            catch (Exception ex)
+        }
+
+        private void ReplantSingleCanary()
+        {
+            var rng = new Random();
+            var template = CanaryTemplates[rng.Next(CanaryTemplates.Length)];
+            var suffix = Guid.NewGuid().ToString("N")[..6];
+            var target = string.Format(template.TargetTemplate, suffix);
+            if (PlantSingleCanary(target, template.Username, template.Comment))
             {
-                _logger.LogDebug(ex, "[CredentialCanaryMonitor] Check error");
+                lock (_canaryLock)
+                {
+                    _plantedCanaryTargets.Add(target);
+                }
             }
         }
 

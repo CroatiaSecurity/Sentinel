@@ -99,13 +99,18 @@ namespace WindowsSentinel.Core
                     await Task.Delay(_pollInterval, ct);
                     PruneStats();
 
-                    // Read recent DNS Client Operational log events (last 30 seconds only)
+                    // Read recent DNS Client Operational log events
+                    // HARDENING: Removed time filter (timediff <= 30000). Previously, events older
+                    // than 30s were invisible even if lastRecordId hadn't processed them yet.
+                    // A fast C2 that resolves a domain between polls could age out before the next
+                    // poll cycle. Now we rely solely on lastRecordId for deduplication — this is
+                    // correct because the record ID monotonically increases and we never re-process.
                     try
                     {
                         var query = new System.Diagnostics.Eventing.Reader.EventLogQuery(
                             "Microsoft-Windows-DNS Client Events/Operational",
                             System.Diagnostics.Eventing.Reader.PathType.LogName,
-                            "*[System[(EventID=3006 or EventID=3008) and TimeCreated[timediff(@SystemTime) <= 30000]]]");
+                            "*[System[(EventID=3006 or EventID=3008)]]");
 
                         using var reader = new System.Diagnostics.Eventing.Reader.EventLogReader(query);
                         System.Diagnostics.Eventing.Reader.EventRecord? record;

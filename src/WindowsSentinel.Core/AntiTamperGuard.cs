@@ -28,7 +28,10 @@ namespace WindowsSentinel.Core
         private readonly SentinelConfig _config;
 
         private const string ServiceName = "Windows Sentinel";
-        private const int SuspendThresholdMs = 10_000; // 10s gap = suspended
+        // HARDENING: Lowered from 10s to 4s (2x tick interval). An attacker suspending
+        // Sentinel for 9s had a full operating window undetected. Now any suspension
+        // beyond 4s (double the expected 2s tick) triggers the alert.
+        private const int SuspendThresholdMs = 4_000;
         private readonly int _timingTickMs;
         private readonly int _integrityTickMs;
 
@@ -38,6 +41,18 @@ namespace WindowsSentinel.Core
         private bool _exitHandlerRegistered;
         private bool _serviceAlertSuppressed; // Only alert once about missing service registration
         private bool _systemJustResumed;
+
+        // HARDENING: QueryPerformanceCounter as secondary time source.
+        // DateTime/DateTimeOffset can be manipulated by usermode time adjustment (SetSystemTime).
+        // QPC is monotonic and hardware-driven — immune to clock skew attacks.
+        private long _lastPerfCount;
+        private readonly long _perfFrequency;
+
+        [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+        private static extern bool QueryPerformanceCounter(out long lpPerformanceCount);
+
+        [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+        private static extern bool QueryPerformanceFrequency(out long lpFrequency);
 
         public AntiTamperGuard(
             DetectionEngine detectionEngine,
@@ -56,6 +71,10 @@ namespace WindowsSentinel.Core
             
             _timingTickMs = config.AntiTamperTimingTickMs > 0 ? config.AntiTamperTimingTickMs : 2000;
             _integrityTickMs = config.AntiTamperIntegrityTickMs > 0 ? config.AntiTamperIntegrityTickMs : 10000;
+
+            // Initialize QPC baseline
+            QueryPerformanceFrequency(out _perfFrequency);
+            QueryPerformanceCounter(out _lastPerfCount);
         }
 
         public override Task StartAsync(CancellationToken cancellationToken)
@@ -110,6 +129,20 @@ namespace WindowsSentinel.Core
                     var now = DateTimeOffset.UtcNow;
                     var elapsed = (now - _lastTick).TotalMilliseconds;
                     _lastTick = now;
+
+                    // HARDENING: Use QPC as secondary/authoritative time source.
+                    // An attacker might manipulate system clock to hide the gap from
+                    // DateTimeOffset, but QPC is hardware-monotonic and unaffected.
+                    double qpcElapsedMs = 0;
+                    if (_perfFrequency > 0)
+                    {
+                        QueryPerformanceCounter(out long currentPerfCount);
+                        qpcElapsedMs = (currentPerfCount - _lastPerfCount) * 1000.0 / _perfFrequency;
+                        _lastPerfCount = currentPerfCount;
+                    }
+
+                    // Use the LARGER of DateTime and QPC elapsed — prevents clock manipulation
+                    elapsed = Math.Max(elapsed, qpcElapsedMs);
 
                     if (_systemJustResumed)
                     {

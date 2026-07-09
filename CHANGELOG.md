@@ -2,6 +2,23 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [1.2.9] - 2026-07-09
+
+### Security Hardening (Red-Team Audit — 12 patches)
+
+- **WmiProcessMonitor**: Added 250ms fast-poll process gap coverage. Closes the 1-2s WMI latency blind spot where ephemeral payloads (credential dumpers, droppers) could execute and exit undetected.
+- **FileActivityMonitor**: Replaced blanket `\AppData\` exclusion with targeted noise suppression. Only browser caches, UWP sandboxed state, IDE extensions, and package manager caches are excluded. `\Temp\`, `\Roaming\Microsoft\`, and app install directories under AppData are now monitored.
+- **AppNetworkPolicyMonitor**: Learning phase now rejects unsigned binaries from suspicious staging paths (Temp, Downloads, Public, ProgramData). Malware activating during the 30-minute window can no longer have its C2 subnets baselined as "normal."
+- **HardeningModule.SafeKillProcessTree**: Kill protection now verifies image path resides in a Windows system directory, not just process name. Malware masquerading as `csrss.exe` or `explorer.exe` from a temp folder will be killed.
+- **BehavioralCorrelationEngine**: Tier1 signals now pass through composite correlation even for signed Electron/JIT apps. Supply-chain compromises of signed apps (Discord, VS Code, Slack) can no longer evade composite detection.
+- **BeaconingDetector**: Diversity trust signal revoked when total destinations ≤4 (trivially manufactured). DLL sideload indicators in the process directory force KillProcess regardless of Authenticode trust score.
+- **GhostProcessMonitor**: Immediate alert (first scan) for ghost PIDs connecting to high-confidence ports (4444, 5555, 1337, 31337, 9001, 9090) or blocked phantom devices. Closes the single-cycle exfiltration window.
+- **AntiTamperGuard**: Suspend detection threshold lowered from 10s to 4s. Added QueryPerformanceCounter as hardware-monotonic secondary time source immune to clock manipulation.
+- **SecureCacheStore**: HMAC key derivation now combines boot time, machine GUID, installation-specific random entropy (ACL-locked), and Sentinel's PID. Prevents baseline poisoning by attackers who can read System process start time.
+- **CredentialCanaryMonitor**: Now plants 3-5 canaries per boot with randomized names from 8 realistic service credential templates. Credential dumping tools can no longer skip a single known target name.
+- **DnsQueryMonitor**: Removed `timediff(@SystemTime) <= 30000` time filter from event log XPath query. Relies solely on `lastRecordId` for deduplication, ensuring short-lived C2 DNS resolutions between polls are never dropped.
+- **ProcessAncestryCache**: ETW/WMI-sourced entries are now authoritative and preserved across refresh cycles. Dead PIDs retained for 60 seconds post-exit, enabling ChainTracer to walk parent chains of killed processes.
+
 ## [1.2.8] - 2026-07-07
 
 ### Fixed

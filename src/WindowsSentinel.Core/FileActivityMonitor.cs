@@ -243,7 +243,14 @@ namespace WindowsSentinel.Core
         private void OnFileEvent(object sender, FileSystemEventArgs e)
         {
             var pathLower = e.FullPath.ToLowerInvariant();
-            if (pathLower.Contains(@"\appdata\") || pathLower.Contains(@"\.git\") || pathLower.Contains(@"\.gemini\"))
+            if (pathLower.Contains(@"\.git\") || pathLower.Contains(@"\.gemini\"))
+            {
+                return;
+            }
+
+            // Targeted AppData noise suppression — only skip known high-noise, low-threat subpaths.
+            // DO NOT blanket-exclude \appdata\ — attackers stage payloads in Temp, Roaming\Microsoft, etc.
+            if (IsNoisyAppDataPath(pathLower))
             {
                 return;
             }
@@ -321,7 +328,12 @@ namespace WindowsSentinel.Core
         private void OnFileRenamed(object sender, RenamedEventArgs e)
         {
             var pathLower = e.FullPath.ToLowerInvariant();
-            if (pathLower.Contains(@"\appdata\") || pathLower.Contains(@"\.git\") || pathLower.Contains(@"\.gemini\"))
+            if (pathLower.Contains(@"\.git\") || pathLower.Contains(@"\.gemini\"))
+            {
+                return;
+            }
+
+            if (IsNoisyAppDataPath(pathLower))
             {
                 return;
             }
@@ -440,6 +452,44 @@ namespace WindowsSentinel.Core
             }
 
             return (0, "unknown");
+        }
+
+        /// <summary>
+        /// Returns true only for AppData subpaths known to generate high-volume, low-threat
+        /// file events (browser caches, IDE extensions, package caches). All other AppData
+        /// paths — including \Temp\, \Roaming\Microsoft\, and app installation directories —
+        /// are monitored to catch payload staging and DLL drops.
+        /// </summary>
+        private static bool IsNoisyAppDataPath(string pathLower)
+        {
+            // Browser caches — hundreds of writes/second, all sandboxed
+            if (pathLower.Contains(@"\appdata\local\google\chrome\user data\")) return true;
+            if (pathLower.Contains(@"\appdata\local\microsoft\edge\user data\")) return true;
+            if (pathLower.Contains(@"\appdata\local\mozilla\firefox\profiles\")) return true;
+            if (pathLower.Contains(@"\appdata\local\bravesoftware\brave-browser\user data\")) return true;
+
+            // UWP sandboxed app state (already isolated by Windows)
+            if (pathLower.Contains(@"\appdata\local\packages\")) return true;
+
+            // IDE/editor extension caches
+            if (pathLower.Contains(@"\appdata\roaming\code\")) return true;
+            if (pathLower.Contains(@"\appdata\local\.cursor\")) return true;
+            if (pathLower.Contains(@"\appdata\roaming\jetbrains\")) return true;
+
+            // Package manager caches (read-heavy, low-risk)
+            if (pathLower.Contains(@"\appdata\local\nuget\")) return true;
+            if (pathLower.Contains(@"\appdata\local\npm-cache\")) return true;
+            if (pathLower.Contains(@"\appdata\local\pip\cache\")) return true;
+            if (pathLower.Contains(@"\appdata\local\yarn\cache\")) return true;
+
+            // Windows app state logs
+            if (pathLower.Contains(@"\appdata\local\connecteddevicesplatform\")) return true;
+            if (pathLower.Contains(@"\appdata\local\d3dscache\")) return true;
+            if (pathLower.Contains(@"\appdata\local\fontcache\")) return true;
+
+            // NOT excluded: \appdata\local\temp\, \appdata\roaming\microsoft\,
+            // \appdata\local\programs\, general \appdata\ — these are attack staging areas
+            return false;
         }
 
         private static bool IsProtectedOsDirectory(string pathLower)

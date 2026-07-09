@@ -45,7 +45,27 @@ namespace WindowsSentinel.Core
                 var path = ResolveImagePath(pid);
                 if (!string.IsNullOrEmpty(path) && SecurityValidation.VerifyAuthenticodeSignature(path))
                 {
-                    return; // Exclude from composite correlation ONLY if signed
+                    // HARDENING: Never exclude Tier1 signals from correlation, even for signed
+                    // Electron apps. A supply-chain compromise (e.g., malicious update to Discord,
+                    // Slack, or VS Code) would run under the signed binary's identity. If the
+                    // signal is Tier1 or this PID already has buffered signals, it MUST participate
+                    // in composite correlation to detect "Injected C2 Beacon", "Credential Dump",
+                    // and similar high-severity chains.
+                    if (signal.Tier != DetectionTier.Tier1Behavioral)
+                    {
+                        var existingBuffer = _signalBuffers.GetValueOrDefault(pid);
+                        bool hasExistingSignals = false;
+                        if (existingBuffer != null)
+                        {
+                            lock (existingBuffer)
+                            {
+                                hasExistingSignals = existingBuffer.Count > 0;
+                            }
+                        }
+                        if (!hasExistingSignals)
+                            return; // Exclude Tier2 from correlation if no prior signals
+                    }
+                    // Tier1 or PID already has signals — allow into correlation
                 }
             }
 

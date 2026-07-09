@@ -89,6 +89,9 @@ namespace WindowsSentinel.Core
 
         private static byte[] GenerateBootBoundKey()
         {
+            using var ms = new MemoryStream();
+
+            // 1. Boot time (publicly readable, but adds temporal binding)
             long bootTimeTicks;
             try
             {
@@ -99,10 +102,59 @@ namespace WindowsSentinel.Core
             {
                 bootTimeTicks = DateTime.UtcNow.Date.Ticks; // Fallback
             }
+            ms.Write(BitConverter.GetBytes(bootTimeTicks));
 
-            // Derive key using SHA256 of the ticks
-            var bytes = BitConverter.GetBytes(bootTimeTicks);
-            return SHA256.HashData(bytes);
+            // 2. HARDENING: Machine GUID (requires registry access — standard users can read,
+            // but combined with other entropy provides defense in depth)
+            try
+            {
+                using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(
+                    @"SOFTWARE\Microsoft\Cryptography");
+                var machineGuid = key?.GetValue("MachineGuid")?.ToString() ?? "";
+                if (!string.IsNullOrEmpty(machineGuid))
+                {
+                    ms.Write(Encoding.UTF8.GetBytes(machineGuid));
+                }
+            }
+            catch { }
+
+            // 3. HARDENING: Installation-specific random entropy stored in our ACL-locked directory.
+            // An attacker would need SYSTEM/Admin access to read this file, and if they have that,
+            // they already have broader access. This raises the bar for baseline poisoning from
+            // "read System process start time" to "read a SYSTEM-ACL-protected file."
+            try
+            {
+                var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
+                var entropyFile = Path.Combine(programData, "WindowsSentinel", "Secure", ".install_entropy");
+                if (File.Exists(entropyFile))
+                {
+                    var entropy = File.ReadAllBytes(entropyFile);
+                    if (entropy.Length == 32)
+                    {
+                        ms.Write(entropy);
+                    }
+                }
+                else
+                {
+                    // First run: generate and persist random entropy
+                    var entropy = new byte[32];
+                    using (var rng = RandomNumberGenerator.Create())
+                    {
+                        rng.GetBytes(entropy);
+                    }
+                    var dir = Path.GetDirectoryName(entropyFile)!;
+                    if (!Directory.Exists(dir))
+                        Directory.CreateDirectory(dir);
+                    File.WriteAllBytes(entropyFile, entropy);
+                    ms.Write(entropy);
+                }
+            }
+            catch { }
+
+            // 4. HARDENING: Process ID of Sentinel itself (changes per boot, not predictable)
+            ms.Write(BitConverter.GetBytes(Environment.ProcessId));
+
+            return SHA256.HashData(ms.ToArray());
         }
 
         public void Save(string cacheName, string key, string value)

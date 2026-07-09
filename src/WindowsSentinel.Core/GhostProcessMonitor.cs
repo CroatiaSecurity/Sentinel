@@ -119,8 +119,19 @@ namespace WindowsSentinel.Core
                     state.LastSeen = DateTimeOffset.UtcNow;
                     state.Connections = group.ToList();
 
-                    // Need at least 2 sightings (30s window) to fire — avoids race with process startup
-                    if (state.SeenCount >= 2)
+                    // HARDENING: Immediate alert for high-confidence indicators without
+                    // waiting for 2 scans. An attacker can exfiltrate data within a single
+                    // 15-second scan cycle and close the connection before the second scan.
+                    bool hasHighConfidencePort = group.Any(c =>
+                        SuspiciousMasqueradePorts.Contains(c.RemotePort) ||
+                        c.RemotePort == 4444 || c.RemotePort == 5555 ||  // Common reverse shells (meterpreter, etc.)
+                        c.RemotePort == 1337 || c.RemotePort == 31337 || // Hacker convention ports
+                        c.RemotePort == 9001 || c.RemotePort == 9090);   // Tor/common C2
+
+                    bool connectsToBlockedDevice = _phantomDeviceMonitor != null &&
+                        group.Any(c => _phantomDeviceMonitor.IsBlockedDevice(c.RemoteAddress));
+
+                    if (hasHighConfidencePort || connectsToBlockedDevice || state.SeenCount >= 2)
                     {
                         await EmitGhostDetection(pid, resolution, state, ct);
                         _alertedPids[pid] = DateTimeOffset.UtcNow;

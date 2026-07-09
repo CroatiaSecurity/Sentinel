@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.Management;
 using System.Diagnostics;
+using System.Threading;
 
 namespace WindowsSentinel.Core
 {
@@ -12,6 +14,11 @@ namespace WindowsSentinel.Core
         private readonly BehavioralBaselineService? _behavioralBaseline;
         private ManagementEventWatcher? _watcher;
         private volatile bool _disabled;
+
+        // Fast-poll gap coverage: catches processes that spawn+exit within WMI's 1-2s latency
+        private System.Threading.Timer? _fastPollTimer;
+        private HashSet<int> _lastKnownPids = new();
+        private readonly object _fastPollLock = new();
 
         /// <summary>
         /// When true, WMI process monitoring is active (ETW failed or hasn't started).
@@ -64,6 +71,91 @@ namespace WindowsSentinel.Core
             {
                 Debug.WriteLine($"Failed to start WmiProcessMonitor: {ex.Message}");
             }
+
+            // Start fast-poll gap coverage (250ms) to catch ephemeral processes
+            // that spawn and exit within WMI's 1-2s event delivery latency
+            InitializeFastPoll();
+            _fastPollTimer = new System.Threading.Timer(FastPollProcesses, null, 250, 250);
+        }
+
+        private void InitializeFastPoll()
+        {
+            try
+            {
+                var pids = new HashSet<int>();
+                foreach (var proc in Process.GetProcesses())
+                {
+                    pids.Add(proc.Id);
+                    proc.Dispose();
+                }
+                lock (_fastPollLock)
+                {
+                    _lastKnownPids = pids;
+                }
+            }
+            catch { }
+        }
+
+        /// <summary>
+        /// Rapid process snapshot every 250ms. Detects new PIDs that appear between
+        /// WMI event deliveries — critical for catching sub-second payloads (credential
+        /// dumpers, droppers, stagers) that execute and exit before WMI fires.
+        /// </summary>
+        private void FastPollProcesses(object? state)
+        {
+            if (_disabled) return;
+            try
+            {
+                var currentPids = new HashSet<int>();
+                var newProcesses = new List<Process>();
+
+                foreach (var proc in Process.GetProcesses())
+                {
+                    currentPids.Add(proc.Id);
+                    bool isNew;
+                    lock (_fastPollLock)
+                    {
+                        isNew = !_lastKnownPids.Contains(proc.Id);
+                    }
+
+                    if (isNew && proc.Id > 4)
+                    {
+                        newProcesses.Add(proc);
+                    }
+                    else
+                    {
+                        proc.Dispose();
+                    }
+                }
+
+                lock (_fastPollLock)
+                {
+                    _lastKnownPids = currentPids;
+                }
+
+                // Process new PIDs — record them into ancestry cache immediately
+                foreach (var proc in newProcesses)
+                {
+                    try
+                    {
+                        var pid = proc.Id;
+                        var name = proc.ProcessName;
+                        var imagePath = SecurityValidation.GetProcessImagePath(pid) ?? "";
+
+                        // Record into ancestry cache so ChainTracer/GhostProcessMonitor can resolve it
+                        // even if the process exits before the next WMI event
+                        _ancestryCache.RecordProcessStart(pid, 0, name, imagePath);
+
+                        _behavioralBaseline?.RecordProcess(name, imagePath, 0, "");
+                    }
+                    catch { }
+                    finally
+                    {
+                        proc.Dispose();
+                    }
+                }
+            }
+            catch { }
         }
 
         private void OnProcessStarted(object sender, EventArrivedEventArgs e)
@@ -109,6 +201,7 @@ namespace WindowsSentinel.Core
 
         public void Dispose()
         {
+            _fastPollTimer?.Dispose();
             try
             {
                 _watcher?.Stop();
