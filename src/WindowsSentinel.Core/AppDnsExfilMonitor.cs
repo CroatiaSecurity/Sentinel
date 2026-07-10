@@ -69,20 +69,18 @@ namespace WindowsSentinel.Core
         };
 
         // Legitimate apps that use DoH for their own resolution.
-        // SECURITY: We verify the binary's Authenticode signature publisher to prevent
-        // attackers from naming malware "steamwebhelper.exe". Path-based checks are
-        // insufficient because users install apps to arbitrary locations.
-        // Empty publisher = DNS resolver tools, allowed from anywhere without sig check.
+        // HARDENING v1.3.0: ALL entries now require Authenticode signature verification.
+        // Previously, DNS resolver tools (nextdns, cloudflared, etc.) were allowed unconditionally
+        // without any signature check — an attacker could name malware "cloudflared.exe" and bypass
+        // DoH exfiltration detection entirely. Now every entry requires publisher verification.
         private static readonly Dictionary<string, string[]> AllowedDohApps = new(StringComparer.OrdinalIgnoreCase)
         {
-            // DNS resolver tools — these ARE DNS resolvers, allow unconditionally
-            ["nextdns"] = Array.Empty<string>(),
-            ["cloudflared"] = Array.Empty<string>(),
-            ["dnscrypt-proxy"] = Array.Empty<string>(),
-            ["stubby"] = Array.Empty<string>(),
-            ["adguardhome"] = Array.Empty<string>(),
-            ["pihole-FTL"] = Array.Empty<string>(),
-            ["unbound"] = Array.Empty<string>(),
+            // DNS resolver tools — require known publishers (Cloudflare, NextDNS, etc.)
+            ["nextdns"] = new[] { "NextDNS" },
+            ["cloudflared"] = new[] { "Cloudflare" },
+            ["dnscrypt-proxy"] = new[] { "Frank Denis" },
+            ["stubby"] = new[] { "Sinodun" },
+            ["adguardhome"] = new[] { "AdGuard" },
             // Steam (Valve signed)
             ["steamwebhelper"] = new[] { "Valve" },
             ["steam"] = new[] { "Valve" },
@@ -350,11 +348,13 @@ namespace WindowsSentinel.Core
                 return false;
             }
 
-            // Empty array = DNS resolver tools, allow unconditionally
+            // HARDENING v1.3.0: No more unconditional allow for empty publisher arrays.
+            // All entries must have their signature verified against expected publishers.
             if (requiredPublishers.Length == 0)
             {
-                _allowedPidCache[pid] = true;
-                return true;
+                // Should not happen with new config, but fail-closed if it does
+                _allowedPidCache[pid] = false;
+                return false;
             }
 
             // Verify Authenticode signature publisher

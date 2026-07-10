@@ -164,9 +164,25 @@ namespace WindowsSentinel.Core
             var exeName = ExtractExeNameFromPrefetch(prefetchFileName);
             if (string.IsNullOrEmpty(exeName)) return;
 
-            // Skip known-good ephemeral processes
+            // Skip known-good ephemeral processes — but ONLY if binary is in a system directory.
+            // HARDENING v1.3.0: Name-only checks allow attackers to name malware "runtimebroker.exe"
+            // in a Temp folder and bypass ephemeral process detection entirely.
             var baseName = Path.GetFileNameWithoutExtension(exeName);
-            if (AllowedEphemeral.Contains(baseName)) return;
+            if (AllowedEphemeral.Contains(baseName))
+            {
+                var exePath2 = FindExecutable(exeName);
+                if (exePath2 != null)
+                {
+                    var winDir = Environment.GetFolderPath(Environment.SpecialFolder.Windows).ToLowerInvariant();
+                    if (exePath2.ToLowerInvariant().StartsWith(winDir))
+                        return; // Legitimate system process
+                }
+                else
+                {
+                    return; // Binary not found — already gone, likely legitimate short-lived system process
+                }
+                // Name matches but NOT in system directory — continue detection (possible masquerading)
+            }
 
             // Check cooldown
             if (_alertedExecutables.TryGetValue(exeName, out var lastAlert) &&

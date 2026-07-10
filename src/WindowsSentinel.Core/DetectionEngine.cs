@@ -183,9 +183,16 @@ namespace WindowsSentinel.Core
             var key = (detection.RuleName, detection.ProcessId);
             var now = DateTime.UtcNow;
 
-            // 60-second deduplication (atomic via AddOrUpdate)
+            // HARDENING v1.3.0: Reduced dedup window from 60s to 10s for Tier1 detections.
+            // Previously, an attacker could trigger one alert and then operate freely for 60s
+            // knowing the same rule wouldn't fire again. Tier2 indicators keep 30s dedup
+            // to reduce noise, but Tier1 behavioral detections need rapid re-alerting.
+            var dedupWindow = detection.Tier == DetectionTier.Tier1Behavioral
+                ? TimeSpan.FromSeconds(10)
+                : TimeSpan.FromSeconds(30);
+
             var lastTime = _dedupCache.AddOrUpdate(key, now, (k, oldTime) =>
-                now - oldTime < TimeSpan.FromSeconds(60) ? oldTime : now);
+                now - oldTime < dedupWindow ? oldTime : now);
 
             if (lastTime != now)
             {

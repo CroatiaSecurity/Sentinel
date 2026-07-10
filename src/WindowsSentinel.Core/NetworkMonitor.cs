@@ -185,17 +185,34 @@ namespace WindowsSentinel.Core
             return lower.Contains(@"\temp\") || lower.Contains(@"\downloads\");
         }
 
-        private static bool IsKnownBrowser(string? processName)
+        /// <summary>
+        /// HARDENING v1.3.0: Verifies browser identity by checking BOTH name AND that the
+        /// binary resides in a Program Files or Windows Apps directory (not Temp/Downloads).
+        /// Previously name-only — malware named "chrome.exe" in Temp bypassed network detection.
+        /// </summary>
+        private static bool IsKnownBrowser(string? processName, string? imagePath = null)
         {
             if (string.IsNullOrEmpty(processName)) return false;
             var lower = processName.ToLowerInvariant();
-            return lower == "chrome" || lower == "chrome.exe" ||
+            bool nameMatches = lower == "chrome" || lower == "chrome.exe" ||
                    lower == "msedge" || lower == "msedge.exe" ||
                    lower == "firefox" || lower == "firefox.exe" ||
                    lower == "brave" || lower == "brave.exe" ||
                    lower == "opera" || lower == "opera.exe" ||
                    lower == "vivaldi" || lower == "vivaldi.exe" ||
                    lower == "safari" || lower == "safari.exe";
+
+            if (!nameMatches) return false;
+
+            // Name matches — verify path is legitimate (not temp/downloads/staging)
+            if (string.IsNullOrEmpty(imagePath)) return false;
+            var pathLower = imagePath.ToLowerInvariant();
+            return pathLower.Contains(@"\program files") ||
+                   pathLower.Contains(@"\windowsapps\") ||
+                   pathLower.Contains(@"\appdata\local\google\") ||
+                   pathLower.Contains(@"\appdata\local\microsoft\edge\") ||
+                   pathLower.Contains(@"\appdata\local\bravesoftware\") ||
+                   pathLower.Contains(@"\appdata\local\vivaldi\");
         }
 
         private static string? GetProcessImagePath(int pid)
@@ -271,7 +288,7 @@ namespace WindowsSentinel.Core
                         }
 
                         // B. Outbound connection from temp/downloads path
-                        if (IsSuspiciousPath(imagePath) && !IsKnownBrowser(processName))
+                        if (IsSuspiciousPath(imagePath) && !IsKnownBrowser(processName, imagePath))
                         {
                             _ = _detectionEngine.EmitAsync(new DetectionEvent
                             {

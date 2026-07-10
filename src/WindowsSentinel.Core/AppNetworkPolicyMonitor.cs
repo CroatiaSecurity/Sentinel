@@ -204,7 +204,12 @@ namespace WindowsSentinel.Core
             var stem = processName.Replace(".exe", "", StringComparison.OrdinalIgnoreCase);
             if (string.IsNullOrWhiteSpace(stem) || stem.Equals("unknown", StringComparison.OrdinalIgnoreCase)) return;
 
-            if (NetworkAllowlist.Contains(stem)) return;
+            // HARDENING v1.3.0: NetworkAllowlist now requires Authenticode signature verification.
+            // Previously, name-only matching meant an attacker could name their binary "chrome.exe"
+            // or "svchost.exe" and bypass all network policy monitoring.
+            // Now: name must match AND the binary must be signed (or reside in a system directory).
+            if (NetworkAllowlist.Contains(stem) && IsVerifiedAllowlistProcess(pid, stem))
+                return;
 
             // Determine /24 subnet (IPv4) or /32 prefix (IPv6)
             string subnet;
@@ -308,6 +313,58 @@ namespace WindowsSentinel.Core
             };
 
             _ = _detectionEngine.EmitAsync(alert);
+        }
+
+        /// <summary>
+        /// Verifies that a process claiming to be in the NetworkAllowlist is actually
+        /// the legitimate binary — not malware renamed to "chrome.exe" or "svchost.exe".
+        /// Requires EITHER a valid Authenticode signature OR residence in a system/protected directory.
+        /// Results are cached per PID to avoid repeated verification (expensive).
+        /// </summary>
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<int, bool> _allowlistVerificationCache = new();
+
+        private bool IsVerifiedAllowlistProcess(int pid, string stem)
+        {
+            if (_allowlistVerificationCache.TryGetValue(pid, out var cached))
+                return cached;
+
+            bool verified = false;
+            try
+            {
+                var imagePath = SecurityValidation.GetProcessImagePath(pid);
+                if (string.IsNullOrEmpty(imagePath))
+                {
+                    // Can't resolve path — don't trust
+                    _allowlistVerificationCache[pid] = false;
+                    return false;
+                }
+
+                var pathLower = imagePath.ToLowerInvariant();
+
+                // System processes (svchost, lsass, etc.) must reside in Windows directory
+                bool isSystemEntry = stem.Equals("svchost", StringComparison.OrdinalIgnoreCase) ||
+                                     stem.Equals("lsass", StringComparison.OrdinalIgnoreCase) ||
+                                     stem.Equals("sihost", StringComparison.OrdinalIgnoreCase) ||
+                                     stem.Equals("taskhostw", StringComparison.OrdinalIgnoreCase) ||
+                                     stem.Equals("RuntimeBroker", StringComparison.OrdinalIgnoreCase) ||
+                                     stem.Equals("SearchHost", StringComparison.OrdinalIgnoreCase) ||
+                                     stem.Equals("System", StringComparison.OrdinalIgnoreCase);
+
+                if (isSystemEntry)
+                {
+                    var winDir = Environment.GetFolderPath(Environment.SpecialFolder.Windows).ToLowerInvariant();
+                    verified = pathLower.StartsWith(winDir);
+                }
+                else
+                {
+                    // Non-system allowlisted processes must be Authenticode signed
+                    verified = _signerTrust != null && _signerTrust.IsSignedFile(imagePath);
+                }
+            }
+            catch { }
+
+            _allowlistVerificationCache[pid] = verified;
+            return verified;
         }
 
         /// <summary>

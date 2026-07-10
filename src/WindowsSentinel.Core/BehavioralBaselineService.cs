@@ -29,7 +29,11 @@ namespace WindowsSentinel.Core
         private readonly ConcurrentDictionary<string, NetworkDestination> _knownNetworkDestinations = new(StringComparer.OrdinalIgnoreCase);
 
         private DateTimeOffset _lastSave = DateTimeOffset.UtcNow;
-        private const int EstablishedThreshold = 3;
+        // HARDENING v1.3.0: Raised from 3 to 10. Previously, malware only needed 3 executions
+        // (e.g., 3 reboots with persistence) to become "established" and receive -15 scoring
+        // reduction from the ScoringEngine. Now requires 10 executions over multiple days,
+        // making it significantly harder for malware to achieve baseline trust.
+        private const int EstablishedThreshold = 10;
 
         public BehavioralBaselineService(SecureCacheStore cache, ILogger<BehavioralBaselineService> logger)
         {

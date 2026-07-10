@@ -112,9 +112,12 @@ namespace WindowsSentinel.Core
 
         private bool IsUserAllowlisted(string processName, string? imagePath)
         {
+            // HARDENING v1.3.0: Never allowlist when imagePath is null/missing.
+            // Previously fell back to name-only matching, letting any process claim
+            // an allowlisted name without proving it's the actual binary.
             if (string.IsNullOrEmpty(imagePath) || !System.IO.File.Exists(imagePath))
             {
-                return _userAllowlist.ContainsKey(processName.ToLowerInvariant());
+                return false;
             }
 
             // Exclude temp/downloads directories from any name-only baseline trust

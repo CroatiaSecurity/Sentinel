@@ -13,7 +13,10 @@ namespace WindowsSentinel.Core
         private readonly ConcurrentDictionary<int, List<TelemetryEvent>> _processChains = new();
         private readonly System.Threading.Timer _cleanupTimer;
 
-        private const int MaxEventsPerChain = 100;
+        // HARDENING v1.3.0: Increased from 100 to 500. An attacker could flood 100+ events
+        // to push malicious telemetry off the chain (FIFO eviction = evidence erasure).
+        // 500 events per chain makes this significantly more expensive to exploit.
+        private const int MaxEventsPerChain = 500;
         private static readonly TimeSpan ChainRetention = TimeSpan.FromMinutes(10);
 
         public TelemetryFusionEngine(EventGraph eventGraph)

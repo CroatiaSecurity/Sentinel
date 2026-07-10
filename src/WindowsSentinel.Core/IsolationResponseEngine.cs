@@ -126,6 +126,14 @@ namespace WindowsSentinel.Core
         /// <param name="containerId">Docker container ID or name.</param>
         public async Task HandleDockerThreatAsync(string containerId)
         {
+            // HARDENING v1.3.0: Sanitize containerId to prevent command injection.
+            // Docker container IDs are hex strings (64 chars) or names matching [a-zA-Z0-9_.-]+
+            if (string.IsNullOrWhiteSpace(containerId) || !IsValidDockerIdentifier(containerId))
+            {
+                _logger.LogWarning("[IsolationResponse] Rejected invalid containerId: '{ContainerId}'", containerId);
+                return;
+            }
+
             _logger.LogInformation("[IsolationResponse] Handling Docker threat — ContainerId {ContainerId}", containerId);
 
             var stopwatch = Stopwatch.StartNew();
@@ -202,6 +210,13 @@ namespace WindowsSentinel.Core
         /// <param name="vmName">Display name of the virtual machine for logging.</param>
         public async Task HandleVmThreatAsync(int vmHostProcessId, string vmName)
         {
+            // HARDENING v1.3.0: Sanitize vmName
+            if (!string.IsNullOrEmpty(vmName) && !IsValidVmName(vmName))
+            {
+                _logger.LogWarning("[IsolationResponse] Rejected invalid vmName: '{VmName}'", vmName);
+                vmName = "SANITIZED";
+            }
+
             _logger.LogInformation("[IsolationResponse] Handling VM threat — PID {VmHostProcessId}, VmName {VmName}",
                 vmHostProcessId, vmName);
 
@@ -293,6 +308,34 @@ namespace WindowsSentinel.Core
             }
 
             return false;
+        }
+
+        /// <summary>
+        /// Validates a Docker container ID or name. IDs are 64-char hex; names are [a-zA-Z0-9][a-zA-Z0-9_.-]*
+        /// </summary>
+        private static bool IsValidDockerIdentifier(string id)
+        {
+            if (id.Length > 128) return false;
+            foreach (var c in id)
+            {
+                if (!char.IsLetterOrDigit(c) && c != '_' && c != '.' && c != '-' && c != ':')
+                    return false;
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// Validates a VM name — alphanumeric, spaces, hyphens, underscores only.
+        /// </summary>
+        private static bool IsValidVmName(string name)
+        {
+            if (name.Length > 256) return false;
+            foreach (var c in name)
+            {
+                if (!char.IsLetterOrDigit(c) && c != ' ' && c != '-' && c != '_' && c != '.')
+                    return false;
+            }
+            return true;
         }
 
         /// <summary>

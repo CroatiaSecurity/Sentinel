@@ -150,44 +150,63 @@ namespace WindowsSentinel.Core
             }
 
             // Behavioral baseline reduction
+            // HARDENING v1.3.0: Cap total baseline/trust reductions to -20.
+            // Previously, an attacker running for a week could accumulate -15 (established) +
+            // -10 (parent-child) + -15 (network dest) + -30 (safe process) = -70 score reduction,
+            // effectively making any detection toothless. Now capped at -20 total.
+            int totalBaselineReduction = 0;
+            const int MaxBaselineReduction = 20;
+
             if (_baseline != null)
             {
                 if (_baseline.IsEstablishedProcess(detection.ProcessName))
                 {
-                    int baselinePenalty = 15;
-                    adjustments.Add(new ScoreAdjustment("Behavioral baseline established process", -baselinePenalty,
-                        $"Process '{detection.ProcessName}' is established in behavioral baseline"));
-                    baseScore -= baselinePenalty;
+                    int baselinePenalty = Math.Min(10, MaxBaselineReduction - totalBaselineReduction);
+                    if (baselinePenalty > 0)
+                    {
+                        adjustments.Add(new ScoreAdjustment("Behavioral baseline established process", -baselinePenalty,
+                            $"Process '{detection.ProcessName}' is established in behavioral baseline"));
+                        baseScore -= baselinePenalty;
+                        totalBaselineReduction += baselinePenalty;
+                    }
                 }
 
-                if (detection.Metadata.TryGetValue("ParentProcessName", out var parentName) &&
+                if (totalBaselineReduction < MaxBaselineReduction &&
+                    detection.Metadata.TryGetValue("ParentProcessName", out var parentName) &&
                     _baseline.IsKnownParentChild(parentName, detection.ProcessName))
                 {
-                    int pcPenalty = 10;
-                    adjustments.Add(new ScoreAdjustment("Behavioral baseline parent-child relationship", -pcPenalty,
-                        $"Parent-child '{parentName} -> {detection.ProcessName}' is known in baseline"));
-                    baseScore -= pcPenalty;
+                    int pcPenalty = Math.Min(5, MaxBaselineReduction - totalBaselineReduction);
+                    if (pcPenalty > 0)
+                    {
+                        adjustments.Add(new ScoreAdjustment("Behavioral baseline parent-child relationship", -pcPenalty,
+                            $"Parent-child '{parentName} -> {detection.ProcessName}' is known in baseline"));
+                        baseScore -= pcPenalty;
+                        totalBaselineReduction += pcPenalty;
+                    }
                 }
 
-                if (detection.Metadata.TryGetValue("RemoteAddress", out var remoteAddr) &&
+                if (totalBaselineReduction < MaxBaselineReduction &&
+                    detection.Metadata.TryGetValue("RemoteAddress", out var remoteAddr) &&
                     detection.Metadata.TryGetValue("RemotePort", out var remotePortStr) &&
                     int.TryParse(remotePortStr, out var remotePort) &&
                     _baseline.IsKnownNetworkDestination(detection.ProcessName, remoteAddr, remotePort))
                 {
-                    int netPenalty = 15;
-                    adjustments.Add(new ScoreAdjustment("Behavioral baseline network destination", -netPenalty,
-                        $"Network destination '{remoteAddr}:{remotePort}' is known for {detection.ProcessName} in baseline"));
-                    baseScore -= netPenalty;
+                    int netPenalty = Math.Min(5, MaxBaselineReduction - totalBaselineReduction);
+                    if (netPenalty > 0)
+                    {
+                        adjustments.Add(new ScoreAdjustment("Behavioral baseline network destination", -netPenalty,
+                            $"Network destination '{remoteAddr}:{remotePort}' is known for {detection.ProcessName} in baseline"));
+                        baseScore -= netPenalty;
+                        totalBaselineReduction += netPenalty;
+                    }
                 }
             }
 
-            // Safe process consensus reduction: -30 for safe processes running demoted non-President's Law rules
+            // Safe process consensus: removed the -30 blanket reduction.
+            // This was too aggressive — a process marked "safe" by consensus could still be
+            // compromised via injection or sideloading. Trust is now handled by the capped
+            // baseline reduction above.
             bool isPresidentsLaw = IsPresidentsLawRule(detection);
-            if (detection.Tier == DetectionTier.Tier1Behavioral && !isPresidentsLaw && _exemptionRegistry.IsSafeProcess(detection.ProcessId))
-            {
-                adjustments.Add(new ScoreAdjustment("Safe process consensus reduction", -30, "Consensus safe process with demoted rule"));
-                baseScore -= 30;
-            }
 
             baseScore = Math.Max(0, baseScore);
 

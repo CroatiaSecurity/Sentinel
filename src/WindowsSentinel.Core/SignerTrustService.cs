@@ -22,8 +22,11 @@ namespace WindowsSentinel.Core
     {
         private readonly ILogger<SignerTrustService> _logger;
 
-        // Cache: file path → (isSigned, signerName)
-        private readonly ConcurrentDictionary<string, (bool IsSigned, string Signer)> _cache = new(StringComparer.OrdinalIgnoreCase);
+        // Cache: file path → (isSigned, signerName, lastWriteTime)
+        // HARDENING v1.3.0: Added lastWriteTime tracking. If the file is modified after
+        // caching (e.g., attacker replaces a signed binary with malware), the stale cache
+        // entry is invalidated and re-verified. Previously the cache was permanent.
+        private readonly ConcurrentDictionary<string, (bool IsSigned, string Signer, DateTime LastWrite)> _cache = new(StringComparer.OrdinalIgnoreCase);
 
         /// <summary>
         /// Confidence reduction factor for signed binaries.
@@ -64,10 +67,28 @@ namespace WindowsSentinel.Core
             if (string.IsNullOrEmpty(filePath)) return false;
 
             if (_cache.TryGetValue(filePath, out var cached))
-                return cached.IsSigned;
+            {
+                // HARDENING v1.3.0: Invalidate cache if file was modified since caching
+                try
+                {
+                    var currentWrite = File.GetLastWriteTimeUtc(filePath);
+                    if (currentWrite != cached.LastWrite)
+                    {
+                        _cache.TryRemove(filePath, out _);
+                        // Fall through to re-verify
+                    }
+                    else
+                    {
+                        return cached.IsSigned;
+                    }
+                }
+                catch { return cached.IsSigned; }
+            }
 
             var (isSigned, signer) = VerifyAndExtractSigner(filePath);
-            _cache[filePath] = (isSigned, signer);
+            DateTime writeTime = DateTime.MinValue;
+            try { writeTime = File.GetLastWriteTimeUtc(filePath); } catch { }
+            _cache[filePath] = (isSigned, signer, writeTime);
             return isSigned;
         }
 
@@ -80,10 +101,26 @@ namespace WindowsSentinel.Core
             if (string.IsNullOrEmpty(filePath)) return null;
 
             if (_cache.TryGetValue(filePath, out var cached))
-                return cached.IsSigned ? cached.Signer : null;
+            {
+                try
+                {
+                    var currentWrite = File.GetLastWriteTimeUtc(filePath);
+                    if (currentWrite != cached.LastWrite)
+                    {
+                        _cache.TryRemove(filePath, out _);
+                    }
+                    else
+                    {
+                        return cached.IsSigned ? cached.Signer : null;
+                    }
+                }
+                catch { return cached.IsSigned ? cached.Signer : null; }
+            }
 
             var (isSigned, signer) = VerifyAndExtractSigner(filePath);
-            _cache[filePath] = (isSigned, signer);
+            DateTime writeTime = DateTime.MinValue;
+            try { writeTime = File.GetLastWriteTimeUtc(filePath); } catch { }
+            _cache[filePath] = (isSigned, signer, writeTime);
             return isSigned ? signer : null;
         }
 

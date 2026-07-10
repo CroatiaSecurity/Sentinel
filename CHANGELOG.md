@@ -2,6 +2,40 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [1.3.0] - 2026-07-10
+
+### Security Hardening (Red-Team Audit Pass 2 — 18 patches)
+
+#### CRITICAL
+
+- **AdvancedResponseEngine**: Removed blanket demotion of non-President's-Law Tier1 detections to LogOnly. ALL Tier1 detections now execute their AuthorizedResponse (Kill, Quarantine, NetworkIsolate). Previously, C2 Beaconing, Ghost Process, DLL Sideloading, Attack Tools, and System Integrity rules all fired but never killed anything.
+- **FileVerdictScanner**: Removed `temp`, `tmp`, `cache`, `localcache` from ExcludedPaths. These are primary malware staging areas that were previously invisible to hash reputation scanning.
+- **HashReputationService**: Fail-closed on API failure. Unknown results are no longer cached — files will be re-checked on next scan cycle. Only definitive Safe/Unsafe verdicts are persisted to disk.
+
+#### HIGH
+
+- **AppNetworkPolicyMonitor**: NetworkAllowlist now requires Authenticode signature verification (or system directory residence). Malware renamed to `chrome.exe` or `svchost.exe` will no longer bypass network policy monitoring.
+- **AppDnsExfilMonitor**: All DoH allowlist entries now require Authenticode publisher verification. Previously, DNS resolver tool names (`cloudflared`, `nextdns`, `stubby`, etc.) were allowed unconditionally without signature checks.
+- **DnsQueryMonitor**: TrustedBaseDomains reduced from ~30 to ~12 entries. Removed: `google.com`, `googleapis.com`, `youtube.com`, `cloudflare.com`, `cloudfront.net`, `amazonaws.com`, `github.com`, `steam`, `discord`, `spotify`, `akamai`, `azurefd`. C2 hosted on CDN/cloud platforms will now trigger DGA and rapid-query detection.
+- **BehavioralBaselineService**: EstablishedThreshold raised from 3 to 10 executions. Malware can no longer achieve "established" status after just 3 runs.
+- **AllowlistService**: No longer falls back to name-only matching when `imagePath` is null. Processes without resolvable paths cannot claim allowlist status.
+- **DetectionEngine**: Deduplication window reduced to 10s for Tier1 detections (was 60s). Tier2 indicators use 30s. Attackers can no longer trigger one alert and operate freely for a full minute.
+
+#### MEDIUM
+
+- **ScoringEngine**: Total baseline/trust reductions capped at -20 (was uncapped, could reach -70). Removed -30 "safe process consensus" reduction entirely.
+- **EphemeralProcessMonitor**: AllowedEphemeral list now verifies binary resides in Windows system directory. Malware named `runtimebroker.exe` in Temp no longer skips detection.
+- **NetworkMonitor**: `IsKnownBrowser` now verifies image path is in a legitimate browser installation directory.
+- **SignerTrustService**: Cache now tracks file modification time. Replacing a signed binary with malware invalidates the stale "signed" cache entry.
+- **TelemetryFusionEngine**: MaxEventsPerChain increased from 100 to 500. Prevents evidence erasure via event flooding.
+- **SecurityValidation**: Removed PowerShell fallback for Authenticode verification. Eliminates PATH poisoning attack vector on signature checks.
+
+#### LOW
+
+- **DataExfiltrationMonitor**: MinBaselineBytes lowered from 20MB to 5MB. Detects exfiltration spikes above 50MB/15s (was 200MB).
+- **PseudoSandbox**: Job object naming randomized (`WinSvc_<GUID>` instead of predictable `SentinelSandboxJob_` prefix).
+- **IsolationResponseEngine**: Input sanitization on Docker containerId and VM names prevents command injection in response actions.
+
 ## [1.2.9] - 2026-07-09
 
 ### Security Hardening (Red-Team Audit — 12 patches)

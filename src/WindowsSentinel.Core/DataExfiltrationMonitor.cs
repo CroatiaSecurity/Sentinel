@@ -24,7 +24,9 @@ namespace WindowsSentinel.Core
 
         private static readonly TimeSpan Interval = TimeSpan.FromSeconds(15);
         private const long SpikeMultiplier = 10;
-        private const long MinBaselineBytes = 20_000_000; // 20MB baseline minimum (prevents tiny 100KB false-positive alerts)
+        // HARDENING v1.3.0: Lowered from 20MB to 5MB. Previously, exfiltration under 200MB
+        // in a single 15s window went undetected. Now detects spikes above 50MB/15s.
+        private const long MinBaselineBytes = 5_000_000;
         private const int WarmupSamples = 10;
 
         public DataExfiltrationMonitor(DetectionEngine de, ILogger<DataExfiltrationMonitor> l)

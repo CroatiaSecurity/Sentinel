@@ -95,13 +95,12 @@ namespace WindowsSentinel.Core
                 effectiveKillAuthorized = false;
                 reason = "LogOnly (Suppressed by allowlist)";
             }
-            else if (effectiveTier == DetectionTier.Tier1Behavioral && !isPresidentsLaw)
-            {
-                effectiveTier = DetectionTier.Tier2Indicator;
-                effectiveResponse = ResponseAction.LogOnly;
-                effectiveKillAuthorized = false;
-                reason = "LogOnly (Demoted non-President's-law rule)";
-            }
+            // HARDENING v1.3.0: Removed blanket demotion of non-President's-Law Tier1 detections.
+            // Previously, ANY Tier1 detection that wasn't in the President's Law categories was
+            // demoted to LogOnly — meaning C2 Beaconing, Ghost Process, DLL Sideloading, Attack Tools,
+            // and System Integrity detections all fired but never killed anything.
+            // Now: Tier1 detections execute their AuthorizedResponse as-is. The detection rules
+            // themselves are responsible for setting appropriate response levels.
 
             if (effectiveResponse == ResponseAction.QuarantineAndKill && effectiveTier == DetectionTier.Tier1Behavioral)
             {

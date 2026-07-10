@@ -239,35 +239,13 @@ namespace WindowsSentinel.Core
 
                 if (result == 0) return true;
 
-                // Fallback for catalog-signed Windows system files (e.g. in System32 / SysWOW64)
-                if (filePath.Contains(@"\System32\", StringComparison.OrdinalIgnoreCase) ||
-                    filePath.Contains(@"\SysWOW64\", StringComparison.OrdinalIgnoreCase))
-                {
-                    try
-                    {
-                        var escapedPath = filePath.Replace("'", "''");
-                        var psi = new ProcessStartInfo("powershell.exe", $"-Command \"(Get-AuthenticodeSignature '{escapedPath}').Status -eq 'Valid'\"")
-                        {
-                            CreateNoWindow = true,
-                            UseShellExecute = false,
-                            RedirectStandardOutput = true
-                        };
-                        using var proc = Process.Start(psi);
-                        if (proc != null)
-                        {
-                            string output = proc.StandardOutput.ReadToEnd().Trim();
-                            proc.WaitForExit(3000);
-                            if (output.Equals("True", StringComparison.OrdinalIgnoreCase))
-                            {
-                                return true;
-                            }
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        logger?.LogDebug(ex, "[SecurityValidation] Catalog signature check failed for '{Path}'", filePath);
-                    }
-                }
+                // HARDENING v1.3.0: Removed PowerShell fallback for catalog-signed files.
+                // The PowerShell path was exploitable via PATH poisoning — an attacker could
+                // place a malicious powershell.exe earlier in PATH and fake signature verification.
+                // WinVerifyTrust already handles catalog signatures when the catalog is properly
+                // installed. If it returns non-zero, the file is unsigned or signature is invalid.
+                // System32/SysWOW64 files that are catalog-signed will be verified by WinVerifyTrust
+                // if the catalog is present in the system catalog store.
 
                 return false;
             }

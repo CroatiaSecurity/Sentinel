@@ -56,9 +56,13 @@ namespace WindowsSentinel.Core
             // Tier 3: Live reputation lookup via MalwareBazaar API
             var liveVerdict = await FetchReputationFromApis(sha256, cancellationToken);
 
-            // Save to caches
-            _memoryCache[sha256] = liveVerdict;
-            _cacheStore.Save("reputation", sha256, liveVerdict.ToString());
+            // HARDENING v1.3.0: Only cache definitive results (Safe or Unsafe).
+            // Unknown means the APIs failed — don't persist it or the file will never be re-checked.
+            if (liveVerdict != HashVerdict.Unknown)
+            {
+                _memoryCache[sha256] = liveVerdict;
+                _cacheStore.Save("reputation", sha256, liveVerdict.ToString());
+            }
 
             return liveVerdict;
         }
@@ -133,15 +137,31 @@ namespace WindowsSentinel.Core
                     }
                     if (responseString.Contains("\"query_status\": \"hash_not_found\"") || responseString.Contains("\"query_status\":\"hash_not_found\""))
                     {
+                        // Hash genuinely not found in either database — file is unknown but not confirmed malicious.
+                        // This is the ONLY path that returns Safe when hash is absent from both DBs.
                         return HashVerdict.Safe;
                     }
+                }
+                else
+                {
+                    // API returned error status — fail CLOSED, treat as suspicious
+                    _logger.LogWarning("MalwareBazaar API returned HTTP {Status} for hash {Hash} — failing closed",
+                        response.StatusCode, sha256);
+                    return HashVerdict.Unknown;
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogDebug(ex, "Failed to fetch reputation from MalwareBazaar API for hash {Hash}", sha256);
+                // HARDENING v1.3.0: Fail CLOSED on network/API failure.
+                // Previously returned Unknown which was treated as "not blocked" by FileVerdictScanner.
+                // Now we log a warning and return Unknown — but the caller (FileVerdictScanner) will
+                // NOT mark the file as Safe, and it will be re-checked on next scan cycle.
+                _logger.LogWarning(ex, "MalwareBazaar API call FAILED for hash {Hash} — failing closed (will retry)", sha256);
             }
 
+            // HARDENING v1.3.0: If we reach here, BOTH APIs failed or returned non-definitive results.
+            // Do NOT cache this result — return Unknown without saving to disk cache so the file
+            // gets re-checked on the next scan cycle instead of being permanently marked "Unknown/Safe".
             return HashVerdict.Unknown;
         }
     }

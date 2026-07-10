@@ -63,8 +63,11 @@ namespace WindowsSentinel.Core
 
             try
             {
-                // 1. Create a secure Job Object
-                hJob = CreateJobObject(IntPtr.Zero, "SentinelSandboxJob_" + Guid.NewGuid().ToString("N")[..8]);
+                // 1. Create a secure Job Object with randomized name to prevent detection
+                // HARDENING v1.3.0: Previously used predictable "SentinelSandboxJob_XXXXXXXX" prefix
+                // that malware could enumerate via NtQueryObject to detect sandboxing.
+                var jobName = $"WinSvc_{Guid.NewGuid():N}";
+                hJob = CreateJobObject(IntPtr.Zero, jobName);
                 if (hJob == IntPtr.Zero)
                 {
                     _logger.LogError("[PseudoSandbox] CreateJobObject failed: {Error}", Marshal.GetLastWin32Error());

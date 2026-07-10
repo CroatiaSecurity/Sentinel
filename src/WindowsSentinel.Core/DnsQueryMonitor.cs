@@ -39,21 +39,24 @@ namespace WindowsSentinel.Core
 
         private static readonly HashSet<string> TrustedBaseDomains = new(StringComparer.OrdinalIgnoreCase)
         {
-            "microsoft.com", "windows.com", "windowsupdate.com", "azure.com",
-            "office.com", "office365.com", "live.com", "msn.com", "bing.com",
-            "google.com", "googleapis.com", "gstatic.com", "googlevideo.com",
-            "youtube.com", "ytimg.com", "googleusercontent.com",
-            "cloudflare.com", "cloudflare-dns.com", "cloudfront.net",
-            "amazonaws.com", "aws.amazon.com",
-            "github.com", "githubusercontent.com", "github.io",
-            "steam-chat.com", "steamcontent.com", "steampowered.com", "steamstatic.com",
-            "discord.com", "discord.gg", "discordapp.com",
-            "spotify.com", "scdn.co",
-            "azurefd.net", "akamai.net", "akamaized.net",
+            // HARDENING v1.3.0: Drastically reduced trusted domains list.
+            // Previously included amazonaws.com, cloudfront.net, akamai.net, azurefd.net —
+            // attackers routinely host C2 on these CDN/cloud platforms and subdomains were
+            // completely invisible to DGA and rapid-query detection.
+            // Now: only Microsoft OS update domains, Sentinel's own API endpoints, and
+            // local resolution names are trusted. Everything else gets monitored.
+            
+            // Windows Update & OS telemetry (required for system stability)
+            "windowsupdate.com", "windows.com", "microsoft.com",
+            "office.com", "office365.com", "live.com",
+            
+            // Local resolution
             "wpad", "local", "localhost", "mshome.net",
+            
+            // Sentinel's own API dependencies (hash reputation lookups)
             "gorstak.eu",
-            "circl.lu", "hashlookup.circl.lu", // CIRCL hash reputation API used by FileVerdictScanner
-            "abuse.ch", "mb-api.abuse.ch", // MalwareBazaar API used by HashReputationService
+            "circl.lu", "hashlookup.circl.lu",
+            "abuse.ch", "mb-api.abuse.ch",
         };
 
         private static readonly HashSet<string> LocalHostNames = BuildLocalHostNames();
