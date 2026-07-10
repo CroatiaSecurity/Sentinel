@@ -26,7 +26,7 @@ namespace WindowsSentinel.Core
         // Directories to exclude from scanning (temp, build artifacts, browser updates)
         private static readonly HashSet<string> ExcludedPaths = new(StringComparer.OrdinalIgnoreCase)
         {
-            "temp", "tmp", "downloads", "uupdump", "ntlite", "mount", "extracted",
+            "temp", "tmp", "uupdump", "ntlite", "mount", "extracted",
             "cache", "localcache", "opera autoupdate", "google\\update", "edge\\update"
         };
 
@@ -79,7 +79,39 @@ namespace WindowsSentinel.Core
         private static bool IsScannable(string filePath)
         {
             var ext = Path.GetExtension(filePath);
-            return !string.IsNullOrEmpty(ext) && ScanExtensions.Contains(ext);
+            if (!string.IsNullOrEmpty(ext) && ScanExtensions.Contains(ext))
+                return true;
+
+            // HARDENING: Files without extensions (or unknown extensions) may still be
+            // Windows PE executables — MalwareBazaar dumps, renamed payloads, and staged
+            // binaries often lack extensions to evade extension-based scanning.
+            // Check PE magic bytes (MZ header) for extensionless files.
+            if (string.IsNullOrEmpty(ext) || !ext.Contains('.'))
+            {
+                return HasPeMagicBytes(filePath);
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Checks if a file starts with the MZ magic bytes (0x4D 0x5A) indicating
+        /// a Windows PE executable. Used to detect extensionless malware on disk.
+        /// </summary>
+        private static bool HasPeMagicBytes(string filePath)
+        {
+            try
+            {
+                using var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                if (fs.Length < 2) return false;
+                var b1 = fs.ReadByte();
+                var b2 = fs.ReadByte();
+                return b1 == 0x4D && b2 == 0x5A; // 'M' 'Z'
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private void OnFileCreated(object sender, FileSystemEventArgs e)
