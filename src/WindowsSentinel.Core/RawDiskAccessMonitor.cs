@@ -49,7 +49,7 @@ namespace WindowsSentinel.Core
             "vboxsvc", "vboxheadless", "vmware-vmx", "vmms",
             "wudfhost", "storagecraft", "veeam", "acronis",
             "macrium", "clonezilla", "dd", "wimgapi",
-            "sentinelservice" // Self
+            "WindowsSentinel.Service", "WindowsSentinel.Agent" // Self-exclusion
         };
 
         // NT kernel object manager paths that indicate raw disk access
@@ -125,11 +125,15 @@ namespace WindowsSentinel.Core
             // This is more reliable than NtQuerySystemInformation for userland
             try
             {
+                var selfPid = Environment.ProcessId;
                 foreach (var proc in Process.GetProcesses())
                 {
                     try
                     {
                         if (ct.IsCancellationRequested) break;
+
+                        // Hard self-exclusion: never detect our own process
+                        if (proc.Id == selfPid) continue;
 
                         var procName = proc.ProcessName;
 

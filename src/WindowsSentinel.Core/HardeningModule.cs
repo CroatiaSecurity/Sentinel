@@ -36,6 +36,9 @@ namespace WindowsSentinel.Core
         {
             if (processId <= 4) return; // Never target System/Idle
 
+            // CRITICAL: Never kill our own process or our Agent sibling
+            if (processId == Environment.ProcessId) return;
+
             try
             {
                 using var proc = Process.GetProcessById(processId);
