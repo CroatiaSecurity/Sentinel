@@ -2,6 +2,18 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [1.4.0] - 2026-07-10
+
+### Added — SentinelOrchestrator (Phase 1: Unified Coordination Layer)
+
+Sentinel now operates as a coordinated unit rather than a collection of independent monitors.
+
+- **IncidentManager**: Detections are grouped into unified incidents by PID, parent process chain, or file hash (reinfection). Each incident has a lifecycle (Open → Active → Responded → Closed) with automatic severity escalation based on corroborating signals. Multiple detections on the same attack chain are presented as one incident, not 5 separate log entries.
+- **MonitorRegistry**: All monitors are now supervised with heartbeat tracking (60s warning, 3m critical). Crashed monitors are automatically restarted (up to 5 attempts). Monitor death fires an anti-tamper detection — if an attacker kills a monitor, the system notices and alerts.
+- **StartupSequencer**: Phased dependency-ordered boot sequence (Infrastructure → Engines → Monitors → Validators). Each phase runs components in parallel, waits for readiness before the next phase begins. Timeout enforcement prevents hung components from blocking startup. Startup report logged with per-component timing.
+- **SentinelOrchestrator**: Central coordination point that routes all detections through incident grouping before response. Per-PID response locks prevent duplicate kills and quarantine races. Unified system health status aggregates monitor, incident, and pipeline state.
+- **Response Coordination**: The response engine no longer fires independently — it's gated by the orchestrator which checks for in-progress responses on the same PID. No more race conditions where ChainTracer walks a chain while another thread is killing processes in it.
+
 ## [1.3.1] - 2026-07-10
 
 ### Added — Multi-Signal File Reputation Engine

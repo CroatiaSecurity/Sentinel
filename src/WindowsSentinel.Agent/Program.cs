@@ -62,6 +62,12 @@ namespace WindowsSentinel.Agent
                     services.AddSingleton<DllUnloadEngine>();
                     services.AddSingleton<FileReputationEngine>();
                     services.AddSingleton<DetectionEngine>();
+
+                    // v1.4.0: Orchestration layer
+                    services.AddSingleton<IncidentManager>();
+                    services.AddSingleton<MonitorRegistry>();
+                    services.AddSingleton<StartupSequencer>();
+                    services.AddSingleton<SentinelOrchestrator>();
                     services.AddSingleton<TelemetryFusionEngine>();
                     services.AddSingleton<AdvancedResponseEngine>();
                     services.AddSingleton<BehavioralCorrelationEngine>();

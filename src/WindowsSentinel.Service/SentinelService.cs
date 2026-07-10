@@ -56,12 +56,16 @@ namespace WindowsSentinel.Service
             IncidentResponseService incidentResponseService,
             DllUnloadEngine dllUnloadEngine,
             ParentPidSpoofDetector parentPidSpoofDetector,
-            ChainTracer chainTracer)
+            ChainTracer chainTracer,
+            SentinelOrchestrator orchestrator)
         {
             // Wire incident response into response engine (late binding to avoid circular DI)
             responseEngine.SetIncidentResponseService(incidentResponseService);
             responseEngine.SetDllUnloadEngine(dllUnloadEngine);
             responseEngine.SetChainTracer(chainTracer);
+
+            // v1.4.0: Wire orchestrator into detection engine
+            detectionEngine.SetOrchestrator(orchestrator);
 
             _logger = logger;
             _config = config;

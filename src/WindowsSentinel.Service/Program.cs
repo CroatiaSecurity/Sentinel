@@ -111,6 +111,12 @@ namespace WindowsSentinel.Service
                     services.AddSingleton<FileReputationEngine>();
                     services.AddSingleton<DetectionEngine>();
 
+                    // v1.4.0: Orchestration layer
+                    services.AddSingleton<IncidentManager>();
+                    services.AddSingleton<MonitorRegistry>();
+                    services.AddSingleton<StartupSequencer>();
+                    services.AddSingleton<SentinelOrchestrator>();
+
                     // IMonitor implementations (started by SentinelService)
                     services.AddSingleton<IMonitor, DnsQueryMonitor>();
                     services.AddSingleton<IMonitor, EtwProcessMonitor>();

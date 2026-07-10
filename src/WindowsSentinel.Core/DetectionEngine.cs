@@ -31,6 +31,13 @@ namespace WindowsSentinel.Core
         private readonly ILogger<DetectionEngine> _logger;
         private readonly CancellationTokenSource _cts = new();
         private readonly Task _processingTask;
+        private SentinelOrchestrator? _orchestrator;
+
+        /// <summary>
+        /// Late-bound orchestrator injection to avoid circular DI.
+        /// Called by SentinelService during startup wiring.
+        /// </summary>
+        public void SetOrchestrator(SentinelOrchestrator orchestrator) => _orchestrator = orchestrator;
 
         public DetectionEngine(
             IEnumerable<IDetectionRule> rules,
@@ -284,8 +291,16 @@ namespace WindowsSentinel.Core
             // Log the event
             await _eventLogger.LogEventAsync("detection", detection);
 
-            // Forward to response engine
-            await _responseEngine.HandleAsync(detection);
+            // v1.4.0: Route through SentinelOrchestrator for incident grouping and response coordination
+            if (_orchestrator != null)
+            {
+                await _orchestrator.ProcessDetectionAsync(detection);
+            }
+            else
+            {
+                // Fallback: direct to response engine (should not happen in production)
+                await _responseEngine.HandleAsync(detection);
+            }
         }
 
         public void Stop()

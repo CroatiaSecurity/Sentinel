@@ -1,33 +1,40 @@
-## What's New in v1.3.1
+## What's New in v1.4.0
 
-### Multi-Signal File Reputation Engine
+### SentinelOrchestrator — Phase 1: Operating as a Unit
 
-Sentinel now evaluates every binary with a composite trust score (0-100) derived from 4 independent signal sources — matching how enterprise EDRs like CrowdStrike and SentinelOne assess file risk.
+Sentinel is no longer a bag of independent monitors. It's now a coordinated EDR with centralized incident management, monitor supervision, and response coordination.
 
-#### How It Works
+#### Incident Manager
 
-Every file scanned on disk or executed as a process receives a composite score:
+Multiple detections on the same attack are now ONE incident:
+- Grouped by PID, parent process chain, or file hash (reinfection detection)
+- Lifecycle: Open → Active → Responded → Closed
+- Severity escalation: Low → Medium → High → Critical based on corroborating signals
+- Logged as `incident_created` / `incident_closed` events for analyst review
 
-| Score | Verdict | Action |
-|-------|---------|--------|
-| 0-20 | Trusted | No action |
-| 21-40 | Low Risk | No action |
-| 41-60 | Suspicious | Logged for review, feeds correlation engine |
-| 61-80 | High Risk | Kill process, deny execution ACL |
-| 81-100 | Malicious | Kill process tree, deny execution, quarantine |
+#### Monitor Registry & Watchdog
 
-#### Signal Sources
+Every monitor is now supervised:
+- Heartbeat tracking with 60s stale warning, 3m critical timeout
+- Automatic restart of crashed monitors (up to 5 attempts)
+- Anti-tamper detection fires when monitors die unexpectedly
+- Real-time dashboard of all monitor states
 
-1. **Hash Reputation Consensus** (weight: 40%) — Parallel queries to CIRCL, MalwareBazaar, and VirusTotal with weighted voting
-2. **Static PE Analysis** (weight: 25%) — Entropy, suspicious imports, packer detection, section anomalies
-3. **Signer Trust** (weight: 20%) — Authenticode verification as continuous trust signal
-4. **Contextual Risk** (weight: 15%) — File path, age on disk, prevalence across system
+#### Startup Sequencer
 
-#### Rate Limiting & Efficiency
+Dependency-ordered boot:
+- Phase 1: Infrastructure (logging, cache, crypto)
+- Phase 2: Engines (detection, response, reputation)
+- Phase 3: Monitors (all 40+ detection monitors)
+- Phase 4: Validators (self-test, health check)
+- Per-component timeout enforcement
+- Startup report with timing for every component
 
-- 4 concurrent CIRCL lookups, 2 MalwareBazaar, 1 VirusTotal (4/min)
-- In-flight deduplication: same hash queried by multiple threads = single API call
-- Intelligent caching: Safe=7d TTL, Unknown=24h (retry), Malicious=permanent
-- Prevalence map: widely-seen files get lower risk scores automatically
+#### Response Coordination
 
-**Full Changelog**: https://github.com/CroatiaSecurity/Sentinel/compare/v1.3.0...v1.3.1
+No more duplicate kills or race conditions:
+- Per-PID response lock prevents multiple threads from killing the same process
+- Orchestrator gates response engine — incidents are grouped first, then responded
+- ChainTracer can safely walk parent chains without another thread interfering
+
+**Full Changelog**: https://github.com/CroatiaSecurity/Sentinel/compare/v1.3.1...v1.4.0
