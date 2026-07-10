@@ -108,6 +108,7 @@ namespace WindowsSentinel.Service
                     services.AddSingleton<IDetectionRule, DynamicRulesEvaluator>();
 
                     // Detection Engine
+                    services.AddSingleton<FileReputationEngine>();
                     services.AddSingleton<DetectionEngine>();
 
                     // IMonitor implementations (started by SentinelService)

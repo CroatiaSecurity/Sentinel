@@ -25,6 +25,7 @@ namespace WindowsSentinel.Core
         private readonly AdvancedResponseEngine _responseEngine;
         private readonly IoCScanner _iocScanner;
         private readonly HashReputationService _reputationService;
+        private readonly FileReputationEngine _fileReputationEngine;
         private readonly BehavioralCorrelationEngine _correlationEngine;
         private readonly ScoringEngine _scoringEngine;
         private readonly ILogger<DetectionEngine> _logger;
@@ -38,6 +39,7 @@ namespace WindowsSentinel.Core
             AdvancedResponseEngine responseEngine,
             IoCScanner iocScanner,
             HashReputationService reputationService,
+            FileReputationEngine fileReputationEngine,
             BehavioralCorrelationEngine correlationEngine,
             ScoringEngine scoringEngine,
             ILogger<DetectionEngine> logger)
@@ -48,6 +50,7 @@ namespace WindowsSentinel.Core
             _responseEngine = responseEngine;
             _iocScanner = iocScanner;
             _reputationService = reputationService;
+            _fileReputationEngine = fileReputationEngine;
             _correlationEngine = correlationEngine;
             _scoringEngine = scoringEngine;
             _logger = logger;
@@ -102,34 +105,87 @@ namespace WindowsSentinel.Core
                                         var imagePath = pt.ImagePath;
                                         if (!string.IsNullOrEmpty(imagePath) && System.IO.File.Exists(imagePath))
                                         {
-                                            string hash = string.Empty;
-                                            using (var sha = System.Security.Cryptography.SHA256.Create())
-                                            await using (var fs = System.IO.File.OpenRead(imagePath))
-                                            {
-                                                var hashBytes = await sha.ComputeHashAsync(fs, _cts.Token);
-                                                hash = Convert.ToHexString(hashBytes).ToLowerInvariant();
-                                            }
+                                            // v1.3.1: Use multi-signal FileReputationEngine for on-execute verdicts
+                                            var repoResult = await _fileReputationEngine.EvaluateFileAsync(imagePath, _cts.Token);
 
-                                            if (!string.IsNullOrEmpty(hash))
-                                            {
-                                                bool isIoC = _iocScanner.IsKnownBadHash(hash);
-                                                var apiVerdict = await _reputationService.GetVerdictAsync(hash, _cts.Token);
+                                            // Also check local IoC cache for immediate known-bad
+                                            string hash = repoResult.Sha256;
+                                            bool isIoC = !string.IsNullOrEmpty(hash) && _iocScanner.IsKnownBadHash(hash);
 
-                                                if (isIoC || apiVerdict == HashVerdict.Unsafe)
+                                            if (isIoC || repoResult.Verdict == FileVerdict.Malicious)
+                                            {
+                                                var reputationEvent = new DetectionEvent
                                                 {
-                                                    var reputationEvent = new DetectionEvent
+                                                    RuleName = "File Reputation: Malicious Binary Executed",
+                                                    Evidence = $"Process '{pt.ProcessName}' (PID {pt.ProcessId}) binary scored {repoResult.CompositeScore}/100 " +
+                                                               $"(Verdict: {repoResult.Verdict}, SHA256: {hash})",
+                                                    Reasoning = "The executed binary's composite reputation score exceeds the malicious threshold. " +
+                                                                "Score is derived from hash reputation (CIRCL + MalwareBazaar + VirusTotal), " +
+                                                                "static PE analysis (entropy, imports, packing), signer trust, and contextual risk.",
+                                                    Confidence = 0.95,
+                                                    Tier = DetectionTier.Tier1Behavioral,
+                                                    AuthorizedResponse = ResponseAction.KillProcessTree,
+                                                    ProcessName = pt.ProcessName,
+                                                    ProcessId = pt.ProcessId,
+                                                    SignalType = SignalType.SuspiciousProcess,
+                                                    Metadata = new Dictionary<string, string>
                                                     {
-                                                        RuleName = "IoC Scanner: Known Malicious File Hash",
-                                                        Evidence = $"Process '{pt.ProcessName}' (PID {pt.ProcessId}) image file hash matches known malicious reputation signature: {hash}",
-                                                        Reasoning = "The executed process's file hash matches a known malicious signature in the local threat intelligence IoC cache or the online reputation lookup service.",
-                                                        Confidence = 0.95,
-                                                        Tier = DetectionTier.Tier2Indicator,
-                                                        ProcessName = pt.ProcessName,
-                                                        ProcessId = pt.ProcessId,
-                                                        Metadata = new Dictionary<string, string> { { "SHA256", hash } }
-                                                    };
-                                                    await ProcessDetectionAsync(reputationEvent);
-                                                }
+                                                        { "SHA256", hash },
+                                                        { "CompositeScore", repoResult.CompositeScore.ToString() },
+                                                        { "FileVerdict", repoResult.Verdict.ToString() },
+                                                        { "Signed", repoResult.IsSigned.ToString() },
+                                                        { "Entropy", repoResult.StaticAnalysis.Entropy.ToString("F2") }
+                                                    }
+                                                };
+                                                await ProcessDetectionAsync(reputationEvent);
+                                            }
+                                            else if (repoResult.Verdict == FileVerdict.HighRisk)
+                                            {
+                                                var reputationEvent = new DetectionEvent
+                                                {
+                                                    RuleName = "File Reputation: High-Risk Binary Executed",
+                                                    Evidence = $"Process '{pt.ProcessName}' (PID {pt.ProcessId}) binary scored {repoResult.CompositeScore}/100 " +
+                                                               $"(Verdict: {repoResult.Verdict}, Signed: {repoResult.IsSigned})",
+                                                    Reasoning = "The binary's reputation score indicates high risk based on multi-signal analysis. " +
+                                                                "Flagged by one or more threat intelligence sources or exhibits suspicious static properties.",
+                                                    Confidence = 0.80,
+                                                    Tier = DetectionTier.Tier1Behavioral,
+                                                    AuthorizedResponse = ResponseAction.KillProcess,
+                                                    ProcessName = pt.ProcessName,
+                                                    ProcessId = pt.ProcessId,
+                                                    SignalType = SignalType.SuspiciousProcess,
+                                                    Metadata = new Dictionary<string, string>
+                                                    {
+                                                        { "SHA256", hash },
+                                                        { "CompositeScore", repoResult.CompositeScore.ToString() },
+                                                        { "FileVerdict", repoResult.Verdict.ToString() }
+                                                    }
+                                                };
+                                                await ProcessDetectionAsync(reputationEvent);
+                                            }
+                                            else if (repoResult.Verdict == FileVerdict.Suspicious)
+                                            {
+                                                var reputationEvent = new DetectionEvent
+                                                {
+                                                    RuleName = "File Reputation: Suspicious Binary Executed",
+                                                    Evidence = $"Process '{pt.ProcessName}' (PID {pt.ProcessId}) binary scored {repoResult.CompositeScore}/100 " +
+                                                               $"(Unknown to reputation DBs, Entropy: {repoResult.StaticAnalysis.Entropy:F2})",
+                                                    Reasoning = "The binary is unknown to all reputation sources and exhibits some suspicious characteristics. " +
+                                                                "Logged as a Tier2 indicator to feed the correlation engine.",
+                                                    Confidence = 0.55,
+                                                    Tier = DetectionTier.Tier2Indicator,
+                                                    AuthorizedResponse = ResponseAction.LogOnly,
+                                                    ProcessName = pt.ProcessName,
+                                                    ProcessId = pt.ProcessId,
+                                                    SignalType = SignalType.SuspiciousProcess,
+                                                    Metadata = new Dictionary<string, string>
+                                                    {
+                                                        { "SHA256", hash },
+                                                        { "CompositeScore", repoResult.CompositeScore.ToString() },
+                                                        { "FileVerdict", repoResult.Verdict.ToString() }
+                                                    }
+                                                };
+                                                await ProcessDetectionAsync(reputationEvent);
                                             }
                                         }
                                     }

@@ -1,32 +1,33 @@
-## What's New in v1.3.0
+## What's New in v1.3.1
 
-### Security Hardening: 18 Patches from Red-Team Audit Pass 2
+### Multi-Signal File Reputation Engine
 
-Comprehensive hardening of the scoring pipeline, response engine, exclusion lists, and trust verification across all monitors. This release fixes the most critical issue since inception: **Sentinel was detecting threats but refusing to act on most of them.**
+Sentinel now evaluates every binary with a composite trust score (0-100) derived from 4 independent signal sources — matching how enterprise EDRs like CrowdStrike and SentinelOne assess file risk.
 
-#### CRITICAL — Response Engine Was Firing Blanks
+#### How It Works
 
-- **Tier1 detections now KILL** — Previously, any Tier1 detection not in the "President's Law" categories was silently demoted to LogOnly. C2 Beaconing, Ghost Processes, DLL Sideloading, Attack Tools — all detected but never killed. Fixed.
-- **Hash scanner no longer skips Temp/Cache dirs** — Malware staging areas were excluded from reputation scanning
-- **API failures no longer mark files as "safe"** — Unknown verdicts are retried instead of permanently cached
+Every file scanned on disk or executed as a process receives a composite score:
 
-#### HIGH — Name-Only Bypasses Eliminated
+| Score | Verdict | Action |
+|-------|---------|--------|
+| 0-20 | Trusted | No action |
+| 21-40 | Low Risk | No action |
+| 41-60 | Suspicious | Logged for review, feeds correlation engine |
+| 61-80 | High Risk | Kill process, deny execution ACL |
+| 81-100 | Malicious | Kill process tree, deny execution, quarantine |
 
-- **All allowlists now require signature or path verification** — NetworkAllowlist, DoH allowlist, browser checks, ephemeral process lists all previously used name-only matching. An attacker naming malware `chrome.exe` or `cloudflared.exe` bypassed detection entirely.
-- **DNS trusted domains slashed** — Removed googleapis.com, amazonaws.com, cloudfront.net, github.com, and 15+ other CDN/cloud domains that attackers use for C2 hosting
-- **Baseline trust harder to earn** — 10 executions required (was 3), scoring reductions capped at -20 (was uncapped at -70)
-- **Dedup window tightened** — 10s for Tier1 (was 60s), attackers can't trigger one alert then operate freely
+#### Signal Sources
 
-#### MEDIUM — Defense in Depth
+1. **Hash Reputation Consensus** (weight: 40%) — Parallel queries to CIRCL, MalwareBazaar, and VirusTotal with weighted voting
+2. **Static PE Analysis** (weight: 25%) — Entropy, suspicious imports, packer detection, section anomalies
+3. **Signer Trust** (weight: 20%) — Authenticode verification as continuous trust signal
+4. **Contextual Risk** (weight: 15%) — File path, age on disk, prevalence across system
 
-- Signature cache invalidates when files are modified on disk
-- PowerShell signature fallback removed (PATH poisoning vector)
-- Telemetry chain buffer increased 5x to prevent evidence flooding
-- Exfiltration detection threshold lowered 4x
+#### Rate Limiting & Efficiency
 
-#### LOW — Anti-Detection & Input Safety
+- 4 concurrent CIRCL lookups, 2 MalwareBazaar, 1 VirusTotal (4/min)
+- In-flight deduplication: same hash queried by multiple threads = single API call
+- Intelligent caching: Safe=7d TTL, Unknown=24h (retry), Malicious=permanent
+- Prevalence map: widely-seen files get lower risk scores automatically
 
-- Sandbox job object names randomized (anti-fingerprinting)
-- Docker/VM response inputs sanitized against command injection
-
-**Full Changelog**: https://github.com/CroatiaSecurity/Sentinel/compare/v1.2.9...v1.3.0
+**Full Changelog**: https://github.com/CroatiaSecurity/Sentinel/compare/v1.3.0...v1.3.1

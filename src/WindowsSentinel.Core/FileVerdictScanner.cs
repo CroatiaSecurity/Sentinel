@@ -14,6 +14,7 @@ namespace WindowsSentinel.Core
     {
         private readonly HashReputationService _reputationService;
         private readonly FileVerdictAds _verdictAds;
+        private readonly FileReputationEngine _reputationEngine;
         private readonly ILogger<FileVerdictScanner> _logger;
         private readonly List<FileSystemWatcher> _watchers = new();
 
@@ -39,10 +40,12 @@ namespace WindowsSentinel.Core
         public FileVerdictScanner(
             HashReputationService reputationService,
             FileVerdictAds verdictAds,
+            FileReputationEngine reputationEngine,
             ILogger<FileVerdictScanner> logger)
         {
             _reputationService = reputationService;
             _verdictAds = verdictAds;
+            _reputationEngine = reputationEngine;
             _logger = logger;
         }
 
@@ -242,25 +245,47 @@ namespace WindowsSentinel.Core
                 var existingVerdict = _verdictAds.GetVerdict(filePath, hash);
                 if (existingVerdict != HashVerdict.Unknown) return;
 
-                // Throttle API calls to avoid rate-limiting
-                await _apiThrottle.WaitAsync();
+                // v1.3.1: Use the multi-signal FileReputationEngine for composite scoring
+                var reputationResult = await _reputationEngine.EvaluateFileAsync(filePath);
+
+                // Map composite verdict to legacy HashVerdict for ADS tagging
                 HashVerdict verdict;
-                try
+                switch (reputationResult.Verdict)
                 {
-                    verdict = await _reputationService.GetVerdictAsync(hash);
-                }
-                finally
-                {
-                    _apiThrottle.Release();
+                    case FileVerdict.Malicious:
+                    case FileVerdict.HighRisk:
+                        verdict = HashVerdict.Unsafe;
+                        break;
+                    case FileVerdict.Trusted:
+                    case FileVerdict.LowRisk:
+                        verdict = HashVerdict.Safe;
+                        break;
+                    default:
+                        verdict = HashVerdict.Unknown;
+                        break;
                 }
 
-                _verdictAds.SetVerdict(filePath, hash, verdict);
+                // Only persist definitive verdicts (not Unknown — will be retried)
+                if (verdict != HashVerdict.Unknown)
+                {
+                    _verdictAds.SetVerdict(filePath, hash, verdict);
+                }
 
-                // If known-malicious, deny execute permission immediately so it can't run
+                // If malicious/high-risk, deny execute permission immediately
                 if (verdict == HashVerdict.Unsafe)
                 {
                     DenyExecution(filePath);
-                    _logger.LogWarning("[FileVerdictScanner] Blocked known-malicious file: {FilePath} (SHA256: {Hash})", filePath, hash);
+                    _logger.LogWarning(
+                        "[FileVerdictScanner] Blocked file: {FilePath} (SHA256: {Hash}, Score={Score}, Verdict={Verdict})",
+                        filePath, hash, reputationResult.CompositeScore, reputationResult.Verdict);
+                }
+                else if (reputationResult.Verdict == FileVerdict.Suspicious && reputationResult.CompositeScore >= 55)
+                {
+                    // Log suspicious files for analyst review without blocking
+                    _logger.LogInformation(
+                        "[FileVerdictScanner] Suspicious file: {FilePath} (Score={Score}, Entropy={Entropy:F2}, Signed={Signed})",
+                        filePath, reputationResult.CompositeScore,
+                        reputationResult.StaticAnalysis.Entropy, reputationResult.IsSigned);
                 }
             }
             catch (Exception ex)

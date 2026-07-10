@@ -60,6 +60,7 @@ namespace WindowsSentinel.Agent
                     services.AddSingleton<ScoringEngine>();
                     services.AddSingleton<ChainTracer>();
                     services.AddSingleton<DllUnloadEngine>();
+                    services.AddSingleton<FileReputationEngine>();
                     services.AddSingleton<DetectionEngine>();
                     services.AddSingleton<TelemetryFusionEngine>();
                     services.AddSingleton<AdvancedResponseEngine>();

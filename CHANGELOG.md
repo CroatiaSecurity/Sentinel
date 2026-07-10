@@ -2,6 +2,22 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [1.3.1] - 2026-07-10
+
+### Added — Multi-Signal File Reputation Engine
+
+- **FileReputationEngine**: New composite file trust scoring system (0-100) that aggregates 4 independent signal sources:
+  - **Hash reputation consensus**: Parallel queries to CIRCL Hashlookup, MalwareBazaar, and VirusTotal (public/no-key) with weighted voting. Each source contributes independently — CIRCL validates known-good, MalwareBazaar confirms known-bad, VirusTotal provides multi-engine detection rates.
+  - **Static PE analysis**: Entropy calculation (detects packing/encryption >7.0), suspicious import scanning (VirtualAllocEx, WriteProcessMemory, CreateRemoteThread, etc.), packer section detection (UPX, Themida, VMP, ASPack), and compile timestamp analysis.
+  - **Signer trust**: Authenticode verification integrated as a trust signal (signed = -40 risk points, unsigned = +10).
+  - **Contextual risk**: File origin path (Temp/Downloads = high risk, Program Files = low risk), age on disk (new files = elevated risk), and prevalence tracking (widely-seen files = lower risk).
+
+- **On-disk scanning**: FileVerdictScanner now uses composite scoring instead of binary safe/unsafe. Files scoring 61+ are blocked (ACL deny-execute), 41-60 are logged for review.
+- **On-execute gating**: DetectionEngine fires Tier1 Kill detections for Malicious/HighRisk binaries at process start, Tier2 indicators for Suspicious files (feeds correlation engine).
+- **Smart rate limiting**: Per-source throttling (4 concurrent CIRCL, 2 MalwareBazaar, 1 VT at 4/min), in-flight deduplication prevents redundant API calls for the same hash.
+- **Intelligent caching**: 7-day TTL for Safe verdicts, 24h for Unknown (retry), permanent for Malicious. Results persisted to SecureCacheStore for cross-session retention.
+- **Prevalence tracking**: Tracks how many distinct file paths share the same hash — widely-deployed files receive lower risk scores.
+
 ## [1.3.0] - 2026-07-10
 
 ### Security Hardening (Red-Team Audit Pass 2 — 18 patches)
