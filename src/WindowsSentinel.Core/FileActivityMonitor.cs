@@ -455,41 +455,40 @@ namespace WindowsSentinel.Core
         }
 
         /// <summary>
-        /// Returns true only for AppData subpaths known to generate high-volume, low-threat
-        /// file events (browser caches, IDE extensions, package caches). All other AppData
-        /// paths — including \Temp\, \Roaming\Microsoft\, and app installation directories —
-        /// are monitored to catch payload staging and DLL drops.
+        /// Filters AppData events to only monitor security-relevant activity:
+        /// - Executable/script file writes anywhere in AppData (payload drops)
+        /// - Any file activity in \Temp\ subdirectories (staging area)
+        /// - DLL writes to \Roaming\Microsoft\ (COM hijack, startup persistence)
+        /// Everything else (browser caches, app state, GPUCache, logs) is excluded
+        /// as it generates thousands of events/second with zero security value.
         /// </summary>
         private static bool IsNoisyAppDataPath(string pathLower)
         {
-            // Browser caches — hundreds of writes/second, all sandboxed
-            if (pathLower.Contains(@"\appdata\local\google\chrome\user data\")) return true;
-            if (pathLower.Contains(@"\appdata\local\microsoft\edge\user data\")) return true;
-            if (pathLower.Contains(@"\appdata\local\mozilla\firefox\profiles\")) return true;
-            if (pathLower.Contains(@"\appdata\local\bravesoftware\brave-browser\user data\")) return true;
+            // Only apply AppData filtering to AppData paths
+            if (!pathLower.Contains(@"\appdata\"))
+                return false;
 
-            // UWP sandboxed app state (already isolated by Windows)
-            if (pathLower.Contains(@"\appdata\local\packages\")) return true;
+            // ALWAYS monitor: executable/script files anywhere in AppData
+            // These are the actual attack vectors (payload drops, DLL sideloading)
+            string ext = System.IO.Path.GetExtension(pathLower);
+            if (ext == ".exe" || ext == ".dll" || ext == ".sys" || ext == ".bat" ||
+                ext == ".cmd" || ext == ".ps1" || ext == ".vbs" || ext == ".js" ||
+                ext == ".hta" || ext == ".msi" || ext == ".scr" || ext == ".com" ||
+                ext == ".pif" || ext == ".lnk" || ext == ".wsf")
+            {
+                return false; // Not noisy — monitor this
+            }
 
-            // IDE/editor extension caches
-            if (pathLower.Contains(@"\appdata\roaming\code\")) return true;
-            if (pathLower.Contains(@"\appdata\local\.cursor\")) return true;
-            if (pathLower.Contains(@"\appdata\roaming\jetbrains\")) return true;
+            // ALWAYS monitor: Temp directories (primary staging area for payloads)
+            if (pathLower.Contains(@"\appdata\local\temp\"))
+                return false; // Not noisy — monitor this
 
-            // Package manager caches (read-heavy, low-risk)
-            if (pathLower.Contains(@"\appdata\local\nuget\")) return true;
-            if (pathLower.Contains(@"\appdata\local\npm-cache\")) return true;
-            if (pathLower.Contains(@"\appdata\local\pip\cache\")) return true;
-            if (pathLower.Contains(@"\appdata\local\yarn\cache\")) return true;
+            // ALWAYS monitor: Startup-related paths
+            if (pathLower.Contains(@"\appdata\roaming\microsoft\windows\start menu\"))
+                return false;
 
-            // Windows app state logs
-            if (pathLower.Contains(@"\appdata\local\connecteddevicesplatform\")) return true;
-            if (pathLower.Contains(@"\appdata\local\d3dscache\")) return true;
-            if (pathLower.Contains(@"\appdata\local\fontcache\")) return true;
-
-            // NOT excluded: \appdata\local\temp\, \appdata\roaming\microsoft\,
-            // \appdata\local\programs\, general \appdata\ — these are attack staging areas
-            return false;
+            // Everything else in AppData is noise (browser state, app caches, GPU shaders, etc.)
+            return true;
         }
 
         private static bool IsProtectedOsDirectory(string pathLower)

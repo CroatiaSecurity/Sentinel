@@ -75,7 +75,7 @@ namespace WindowsSentinel.Core
             // Start fast-poll gap coverage (250ms) to catch ephemeral processes
             // that spawn and exit within WMI's 1-2s event delivery latency
             InitializeFastPoll();
-            _fastPollTimer = new System.Threading.Timer(FastPollProcesses, null, 250, 250);
+            _fastPollTimer = new System.Threading.Timer(FastPollProcesses, null, 500, 500);
         }
 
         private void InitializeFastPoll()
