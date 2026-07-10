@@ -37,6 +37,7 @@ namespace WindowsSentinel.Core
         private readonly SignerTrustService _signerTrust;
         private readonly SecureCacheStore _cacheStore;
         private readonly ILogger<FileReputationEngine> _logger;
+        private readonly ContextBus? _contextBus;
 
         // Composite score cache: SHA256 → (score, timestamp)
         private readonly ConcurrentDictionary<string, (FileReputationResult Result, DateTimeOffset CachedAt)> _resultCache = new();
@@ -78,12 +79,14 @@ namespace WindowsSentinel.Core
             HashReputationService hashRepService,
             SignerTrustService signerTrust,
             SecureCacheStore cacheStore,
-            ILogger<FileReputationEngine> logger)
+            ILogger<FileReputationEngine> logger,
+            ContextBus? contextBus = null)
         {
             _hashRepService = hashRepService;
             _signerTrust = signerTrust;
             _cacheStore = cacheStore;
             _logger = logger;
+            _contextBus = contextBus;
         }
 
         /// <summary>
@@ -185,6 +188,20 @@ namespace WindowsSentinel.Core
             _logger.LogDebug(
                 "[FileReputationEngine] {Path} → Score={Score}, Verdict={Verdict}, Hash={Hash}, Signed={Signed}",
                 filePath, result.CompositeScore, result.Verdict, hash[..12], isSigned);
+
+            // Publish enrichment signal for cross-monitor consumption
+            _contextBus?.Publish(new FileVerdictSignal
+            {
+                ProcessId = 0, // File-level, no specific PID
+                ProcessName = System.IO.Path.GetFileName(filePath),
+                SourceMonitor = "FileReputationEngine",
+                FilePath = filePath,
+                Sha256 = hash,
+                CompositeScore = result.CompositeScore,
+                Verdict = result.Verdict,
+                IsSigned = isSigned,
+                SignerName = signerName
+            });
 
             return result;
         }

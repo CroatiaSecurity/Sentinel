@@ -115,6 +115,9 @@ namespace WindowsSentinel.Service
                     services.AddSingleton<IncidentManager>();
                     services.AddSingleton<MonitorRegistry>();
                     services.AddSingleton<StartupSequencer>();
+                    // v1.5.0: Context Bus + Response Coordinator
+                    services.AddSingleton<ContextBus>();
+                    services.AddSingleton<ResponseCoordinator>();
                     services.AddSingleton<SentinelOrchestrator>();
 
                     // IMonitor implementations (started by SentinelService)

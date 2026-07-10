@@ -13,19 +13,19 @@ namespace WindowsSentinel.Core
     ///
     /// SentinelOrchestrator is the "brain" that ties all components together:
     ///   - Routes detections through IncidentManager before response
+    ///   - Coordinates responses via ResponseCoordinator (no duplicate kills, no races)
     ///   - Supervises monitors via MonitorRegistry
     ///   - Manages startup via StartupSequencer
-    ///   - Prevents duplicate/conflicting responses on the same PID
-    ///   - Provides unified health status for the entire system
+    ///   - Hosts the ContextBus for cross-monitor enrichment
+    ///   - Monitors pipeline backpressure and health
     ///
     /// All detection events flow through here:
-    ///   Monitor → TelemetryFusion → DetectionEngine → Orchestrator → ResponseEngine
-    ///                                                      ↓
-    ///                                              IncidentManager
-    ///                                              (group, escalate)
+    ///   Monitor → TelemetryFusion → DetectionEngine → Orchestrator → ResponseCoordinator → ResponseEngine
+    ///                                                      ↓                    ↓
+    ///                                              IncidentManager        ContextBus
+    ///                                              (group, escalate)   (cross-enrichment)
     ///
-    /// This replaces the previous fire-and-forget pattern where DetectionEngine
-    /// routed directly to ResponseEngine with no coordination.
+    /// v1.5.0: Added ContextBus, ResponseCoordinator, backpressure monitoring.
     /// </summary>
     public sealed class SentinelOrchestrator : IDisposable
     {
@@ -33,12 +33,18 @@ namespace WindowsSentinel.Core
         private readonly MonitorRegistry _monitorRegistry;
         private readonly StartupSequencer _startupSequencer;
         private readonly AdvancedResponseEngine _responseEngine;
+        private readonly ResponseCoordinator _responseCoordinator;
+        private readonly ContextBus _contextBus;
         private readonly JsonlEventLogger _eventLogger;
         private readonly ILogger<SentinelOrchestrator> _logger;
 
-        // Response lock: prevents duplicate kill attempts on the same PID
-        private readonly ConcurrentDictionary<int, DateTimeOffset> _responseInProgress = new();
-        private static readonly TimeSpan ResponseLockDuration = TimeSpan.FromSeconds(30);
+        // Pipeline backpressure monitoring
+        private readonly System.Threading.Timer _backpressureTimer;
+        private long _detectionsProcessed;
+        private long _detectionsDroppedBackpressure;
+        private DateTimeOffset _lastBackpressureAlert = DateTimeOffset.MinValue;
+        private static readonly TimeSpan BackpressureCheckInterval = TimeSpan.FromSeconds(10);
+        private static readonly TimeSpan BackpressureAlertCooldown = TimeSpan.FromMinutes(2);
 
         private bool _isRunning;
         private DateTimeOffset _startTime;
@@ -48,6 +54,8 @@ namespace WindowsSentinel.Core
             MonitorRegistry monitorRegistry,
             StartupSequencer startupSequencer,
             AdvancedResponseEngine responseEngine,
+            ResponseCoordinator responseCoordinator,
+            ContextBus contextBus,
             JsonlEventLogger eventLogger,
             ILogger<SentinelOrchestrator> logger)
         {
@@ -55,9 +63,24 @@ namespace WindowsSentinel.Core
             _monitorRegistry = monitorRegistry;
             _startupSequencer = startupSequencer;
             _responseEngine = responseEngine;
+            _responseCoordinator = responseCoordinator;
+            _contextBus = contextBus;
             _eventLogger = eventLogger;
             _logger = logger;
+
+            _backpressureTimer = new System.Threading.Timer(
+                CheckBackpressure, null, BackpressureCheckInterval, BackpressureCheckInterval);
         }
+
+        /// <summary>
+        /// Exposes the ContextBus for DI wiring (monitors receive it via constructor).
+        /// </summary>
+        public ContextBus ContextBus => _contextBus;
+
+        /// <summary>
+        /// Exposes the ResponseCoordinator for ChainTracer hold management.
+        /// </summary>
+        public ResponseCoordinator ResponseCoordinator => _responseCoordinator;
 
         /// <summary>
         /// The unified detection→incident→response pipeline entry point.
@@ -65,63 +88,37 @@ namespace WindowsSentinel.Core
         ///
         /// Flow:
         ///   1. Register detection with IncidentManager (group into incident)
-        ///   2. Check if response is already in progress for this PID (prevent duplicates)
-        ///   3. If incident severity warrants response, acquire response lock and execute
-        ///   4. Mark incident as responded
+        ///   2. Route through ResponseCoordinator (dedup, lock, chain trace hold)
+        ///   3. ResponseCoordinator executes via AdvancedResponseEngine
+        ///   4. Incident marked as responded
         /// </summary>
         public async Task ProcessDetectionAsync(DetectionEvent detection)
         {
+            Interlocked.Increment(ref _detectionsProcessed);
+
             // 1. Group into incident
             var incident = _incidentManager.RegisterDetection(detection);
 
-            // 2. Route to response engine (it makes the kill/log decision)
-            //    But first check response lock to prevent duplicate kills
-            if (detection.KillAuthorized && detection.ProcessId > 0)
+            // 2. Route through ResponseCoordinator (handles dedup, locking, chain trace holds)
+            var result = await _responseCoordinator.ExecuteResponseAsync(detection);
+
+            if (result.Outcome == ResponseOutcome.Executed)
             {
-                if (!TryAcquireResponseLock(detection.ProcessId))
-                {
-                    _logger.LogDebug(
-                        "[Orchestrator] Response already in progress for PID {Pid} — skipping duplicate",
-                        detection.ProcessId);
-                    return;
-                }
+                _logger.LogDebug("[Orchestrator] Response executed for PID {Pid}: {Action}",
+                    detection.ProcessId, detection.AuthorizedResponse);
             }
-
-            // 3. Execute response
-            await _responseEngine.HandleAsync(detection);
-
-            // 4. If response was a kill action, mark incident as responded
-            if (detection.KillAuthorized && detection.Tier == DetectionTier.Tier1Behavioral)
+            else if (result.Outcome == ResponseOutcome.Deduplicated)
             {
-                _incidentManager.MarkRespondedByPid(detection.ProcessId,
-                    detection.AuthorizedResponse.ToString());
+                _logger.LogDebug("[Orchestrator] Response deduplicated for PID {Pid}", detection.ProcessId);
             }
         }
 
         /// <summary>
-        /// Acquires a per-PID response lock. Returns false if another response is
-        /// already in progress (prevents duplicate kills, quarantine races).
-        /// </summary>
-        private bool TryAcquireResponseLock(int pid)
-        {
-            var now = DateTimeOffset.UtcNow;
-
-            // Clean stale locks
-            foreach (var (lockedPid, lockTime) in _responseInProgress)
-            {
-                if (now - lockTime > ResponseLockDuration)
-                    _responseInProgress.TryRemove(lockedPid, out _);
-            }
-
-            return _responseInProgress.TryAdd(pid, now);
-        }
-
-        /// <summary>
-        /// Releases the response lock for a PID (called after response completes).
+        /// Releases the response lock for a PID (legacy compatibility).
         /// </summary>
         public void ReleaseResponseLock(int pid)
         {
-            _responseInProgress.TryRemove(pid, out _);
+            // Delegated to ResponseCoordinator internally
         }
 
         // ═══════════════════════════════════════════════════════════════
@@ -178,9 +175,13 @@ namespace WindowsSentinel.Core
             var monStats = _monitorRegistry.GetStats();
             var incStats = _incidentManager.GetStats();
             var startupReport = _startupSequencer.GetLastReport();
+            var busStats = _contextBus.GetStats();
+            var respStats = _responseCoordinator.GetStats();
 
             var overallHealth = SystemHealth.Healthy;
             if (monStats.Failed > 0 || monStats.Stale > 0)
+                overallHealth = SystemHealth.Degraded;
+            if (busStats.DropRate > 0.05) // >5% signal drop rate
                 overallHealth = SystemHealth.Degraded;
             if (monStats.Failed > monStats.TotalRegistered / 3)
                 overallHealth = SystemHealth.Critical;
@@ -194,11 +195,15 @@ namespace WindowsSentinel.Core
                 Uptime = _isRunning ? DateTimeOffset.UtcNow - _startTime : TimeSpan.Zero,
                 MonitorStats = monStats,
                 IncidentStats = incStats,
+                ContextBusStats = busStats,
+                ResponseCoordinatorStats = respStats,
                 StartupDurationMs = startupReport?.TotalDurationMs ?? 0,
                 DegradedMode = startupReport?.DegradedMode ?? false,
                 ActiveIncidents = _incidentManager.GetActiveIncidents(),
                 UnhealthyMonitors = _monitorRegistry.GetUnhealthyMonitors(),
-                ResponseLocksHeld = _responseInProgress.Count
+                ResponseLocksHeld = respStats.ActiveLocks,
+                DetectionsProcessed = Interlocked.Read(ref _detectionsProcessed),
+                DetectionsDropped = Interlocked.Read(ref _detectionsDroppedBackpressure)
             };
         }
 
@@ -216,10 +221,42 @@ namespace WindowsSentinel.Core
         /// </summary>
         public Incident? GetIncidentForPid(int pid) => _incidentManager.GetIncidentForPid(pid);
 
+        // ═══════════════════════════════════════════════════════════════
+        // Pipeline Backpressure Monitoring
+        // ═══════════════════════════════════════════════════════════════
+
+        private void CheckBackpressure(object? state)
+        {
+            if (!_isRunning) return;
+
+            var busStats = _contextBus.GetStats();
+
+            // Alert if >5% of signals are being dropped (channel full)
+            if (busStats.DropRate > 0.05 && busStats.TotalPublished > 100)
+            {
+                if (DateTimeOffset.UtcNow - _lastBackpressureAlert > BackpressureAlertCooldown)
+                {
+                    _lastBackpressureAlert = DateTimeOffset.UtcNow;
+                    _logger.LogWarning(
+                        "[Orchestrator] BACKPRESSURE: ContextBus drop rate {Rate:P1} ({Dropped}/{Published}). " +
+                        "Pending: {Pending}/{Capacity}. Subscribers may be too slow.",
+                        busStats.DropRate, busStats.TotalDropped, busStats.TotalPublished,
+                        busStats.PendingInChannel, busStats.ChannelCapacity);
+                }
+            }
+
+            // Periodic housekeeping
+            _contextBus.PruneExpiredCache();
+            _responseCoordinator.PruneStaleState();
+        }
+
         public void Dispose()
         {
+            _backpressureTimer.Dispose();
             _incidentManager.Dispose();
             _monitorRegistry.Dispose();
+            _contextBus.Dispose();
+            _responseCoordinator.Dispose();
         }
     }
 
@@ -242,10 +279,14 @@ namespace WindowsSentinel.Core
         public TimeSpan Uptime { get; set; }
         public MonitorRegistryStats MonitorStats { get; set; } = new();
         public IncidentStats IncidentStats { get; set; } = new();
+        public ContextBusStats? ContextBusStats { get; set; }
+        public ResponseCoordinatorStats? ResponseCoordinatorStats { get; set; }
         public long StartupDurationMs { get; set; }
         public bool DegradedMode { get; set; }
         public IReadOnlyList<Incident> ActiveIncidents { get; set; } = Array.Empty<Incident>();
         public IReadOnlyList<MonitorStatus> UnhealthyMonitors { get; set; } = Array.Empty<MonitorStatus>();
         public int ResponseLocksHeld { get; set; }
+        public long DetectionsProcessed { get; set; }
+        public long DetectionsDropped { get; set; }
     }
 }

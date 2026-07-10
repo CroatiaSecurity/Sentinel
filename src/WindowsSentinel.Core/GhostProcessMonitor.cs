@@ -35,6 +35,7 @@ namespace WindowsSentinel.Core
         private readonly DetectionEngine _detectionEngine;
         private readonly ProcessAncestryCache _ancestryCache;
         private readonly PhantomDeviceMonitor? _phantomDeviceMonitor;
+        private readonly ContextBus? _contextBus;
         private readonly ILogger<GhostProcessMonitor> _logger;
 
         // Track already-alerted PIDs to avoid flooding
@@ -64,11 +65,13 @@ namespace WindowsSentinel.Core
             DetectionEngine detectionEngine,
             ProcessAncestryCache ancestryCache,
             ILogger<GhostProcessMonitor> logger,
-            PhantomDeviceMonitor? phantomDeviceMonitor = null)
+            PhantomDeviceMonitor? phantomDeviceMonitor = null,
+            ContextBus? contextBus = null)
         {
             _detectionEngine = detectionEngine;
             _ancestryCache = ancestryCache;
             _phantomDeviceMonitor = phantomDeviceMonitor;
+            _contextBus = contextBus;
             _logger = logger;
         }
 
@@ -135,6 +138,18 @@ namespace WindowsSentinel.Core
                     {
                         await EmitGhostDetection(pid, resolution, state, ct);
                         _alertedPids[pid] = DateTimeOffset.UtcNow;
+
+                        // Publish enrichment signal for cross-monitor consumption
+                        _contextBus?.Publish(new GhostProcessSignal
+                        {
+                            ProcessId = pid,
+                            ProcessName = resolution.Name ?? "UNRESOLVABLE",
+                            SourceMonitor = "GhostProcessMonitor",
+                            Destinations = state.Connections.Select(c => $"{c.RemoteAddress}:{c.RemotePort}").Distinct().Take(10).ToList(),
+                            ScansSeen = state.SeenCount,
+                            ConnectsToBlockedDevice = connectsToBlockedDevice,
+                            HasSuspiciousPort = hasHighConfidencePort
+                        });
                     }
                 }
                 else if (resolution.IsEmptyName)

@@ -18,6 +18,7 @@ namespace WindowsSentinel.Core
     {
         private readonly DetectionEngine _detectionEngine;
         private readonly ILogger<DataExfiltrationMonitor> _logger;
+        private readonly ContextBus? _contextBus;
         private long _lastBytesSent;
         private long _baselineRate; // bytes per interval
         private int _samples;
@@ -29,10 +30,11 @@ namespace WindowsSentinel.Core
         private const long MinBaselineBytes = 5_000_000;
         private const int WarmupSamples = 10;
 
-        public DataExfiltrationMonitor(DetectionEngine de, ILogger<DataExfiltrationMonitor> l)
+        public DataExfiltrationMonitor(DetectionEngine de, ILogger<DataExfiltrationMonitor> l, ContextBus? contextBus = null)
         {
             _detectionEngine = de;
             _logger = l;
+            _contextBus = contextBus;
         }
 
         protected override async Task ExecuteAsync(CancellationToken ct)
@@ -74,6 +76,17 @@ namespace WindowsSentinel.Core
                             Confidence = 0.60, Tier = DetectionTier.Tier2Indicator,
                             AuthorizedResponse = ResponseAction.LogOnly,
                             ProcessName = "SYSTEM", ProcessId = 0
+                        });
+
+                        _contextBus?.Publish(new ExfiltrationSpikeSignal
+                        {
+                            ProcessId = 0,
+                            ProcessName = "SYSTEM",
+                            SourceMonitor = "DataExfiltrationMonitor",
+                            BytesDelta = delta,
+                            BaselineRate = _baselineRate,
+                            SpikeMultiplier = (double)delta / Math.Max(1, _baselineRate),
+                            Interval = Interval
                         });
                     }
                 }

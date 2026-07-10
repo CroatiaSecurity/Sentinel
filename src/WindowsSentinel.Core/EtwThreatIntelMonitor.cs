@@ -25,6 +25,7 @@ namespace WindowsSentinel.Core
         private readonly DetectionEngine _detectionEngine;
         private readonly TelemetryFusionEngine _fusionEngine;
         private readonly ILogger<EtwThreatIntelMonitor> _logger;
+        private readonly ContextBus? _contextBus;
         private CancellationTokenSource? _cts;
         private Task? _monitorTask;
 
@@ -42,11 +43,13 @@ namespace WindowsSentinel.Core
         public EtwThreatIntelMonitor(
             DetectionEngine detectionEngine,
             TelemetryFusionEngine fusionEngine,
-            ILogger<EtwThreatIntelMonitor> logger)
+            ILogger<EtwThreatIntelMonitor> logger,
+            ContextBus? contextBus = null)
         {
             _detectionEngine = detectionEngine;
             _fusionEngine = fusionEngine;
             _logger = logger;
+            _contextBus = contextBus;
         }
 
         public Task StartAsync(CancellationToken ct)
@@ -177,6 +180,18 @@ namespace WindowsSentinel.Core
                                     ["ImagePath"] = imagePath
                                 }
                             });
+
+                            // Publish enrichment signal for cross-monitor consumption
+                            _contextBus?.Publish(new InjectionSignal
+                            {
+                                ProcessId = proc.Id,
+                                ProcessName = name,
+                                SourceMonitor = "EtwThreatIntelMonitor",
+                                ThreadId = thread.Id,
+                                StartAddress = $"0x{startAddress.ToString("X")}",
+                                ImagePath = imagePath
+                            });
+
                             break; // Stop scanning this process on first hit
                         }
                     }

@@ -15,6 +15,7 @@ namespace WindowsSentinel.Core
         private readonly DetectionEngine _detectionEngine;
         private readonly ProcessAncestryCache _ancestryCache;
         private readonly SignerTrustService? _signerTrust;
+        private readonly ContextBus? _contextBus;
         private readonly System.Threading.Timer _timer;
 
         [StructLayout(LayoutKind.Sequential)]
@@ -83,11 +84,12 @@ namespace WindowsSentinel.Core
             "WindowsSentinel.Service", "WindowsSentinel.Agent"
         };
 
-        public AppNetworkPolicyMonitor(DetectionEngine detectionEngine, ProcessAncestryCache ancestryCache, SignerTrustService? signerTrust = null)
+        public AppNetworkPolicyMonitor(DetectionEngine detectionEngine, ProcessAncestryCache ancestryCache, SignerTrustService? signerTrust = null, ContextBus? contextBus = null)
         {
             _detectionEngine = detectionEngine;
             _ancestryCache = ancestryCache;
             _signerTrust = signerTrust;
+            _contextBus = contextBus;
             // Scan TCP connections every 500 milliseconds to prevent TOCTOU gaps
             _timer = new System.Threading.Timer(ScanNetworkConnections, null, TimeSpan.FromMilliseconds(500), TimeSpan.FromMilliseconds(500));
         }
@@ -313,6 +315,16 @@ namespace WindowsSentinel.Core
             };
 
             _ = _detectionEngine.EmitAsync(alert);
+
+            _contextBus?.Publish(new NetworkPolicyViolationSignal
+            {
+                ProcessId = pid,
+                ProcessName = processName,
+                SourceMonitor = "AppNetworkPolicyMonitor",
+                RemoteAddress = ipAddress,
+                Subnet = subnet,
+                IsEnforcementPhase = DateTime.UtcNow - _startTime >= TimeSpan.FromMinutes(LearningPhaseDurationMinutes)
+            });
         }
 
         /// <summary>

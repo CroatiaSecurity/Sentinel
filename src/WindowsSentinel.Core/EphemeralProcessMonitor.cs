@@ -35,6 +35,7 @@ namespace WindowsSentinel.Core
         private readonly DetectionEngine _detectionEngine;
         private readonly TelemetryFusionEngine _fusionEngine;
         private readonly HashReputationService _reputationService;
+        private readonly ContextBus? _contextBus;
         private readonly ILogger<EphemeralProcessMonitor> _logger;
 
         private readonly HashSet<string> _baselinePrefetch = new(StringComparer.OrdinalIgnoreCase);
@@ -71,10 +72,12 @@ namespace WindowsSentinel.Core
             DetectionEngine detectionEngine,
             TelemetryFusionEngine fusionEngine,
             HashReputationService reputationService,
-            ILogger<EphemeralProcessMonitor> logger)
+            ILogger<EphemeralProcessMonitor> logger,
+            ContextBus? contextBus = null)
         {
             _detectionEngine = detectionEngine;
             _fusionEngine = fusionEngine;
+            _contextBus = contextBus;
             _reputationService = reputationService;
             _logger = logger;
         }
@@ -269,6 +272,19 @@ namespace WindowsSentinel.Core
                     ["SelfDeleted"] = selfDeleted.ToString(),
                     ["SuspiciousPath"] = isSuspiciousPath.ToString()
                 }
+            });
+
+            // Publish enrichment signal for cross-monitor consumption
+            _contextBus?.Publish(new EphemeralProcessSignal
+            {
+                ProcessId = 0,
+                ProcessName = exeName,
+                SourceMonitor = "EphemeralProcessMonitor",
+                ExecutableName = exeName,
+                ExecutablePath = exePath,
+                SelfDeleted = selfDeleted,
+                SuspiciousPath = isSuspiciousPath,
+                PrefetchFile = prefetchFileName
             });
 
             // If the binary still exists, check reputation

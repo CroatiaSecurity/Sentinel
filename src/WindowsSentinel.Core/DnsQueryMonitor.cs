@@ -29,6 +29,7 @@ namespace WindowsSentinel.Core
         private readonly SentinelConfig _config;
         private readonly ILogger<DnsQueryMonitor> _logger;
         private readonly PersistentConnectionMonitor? _persistentConnMon;
+        private readonly ContextBus? _contextBus;
         private readonly TimeSpan _pollInterval;
         private CancellationTokenSource? _cts;
         private Task? _monitorTask;
@@ -73,12 +74,14 @@ namespace WindowsSentinel.Core
             DetectionEngine detectionEngine,
             SentinelConfig config,
             ILogger<DnsQueryMonitor> logger,
-            PersistentConnectionMonitor? persistentConnMon = null)
+            PersistentConnectionMonitor? persistentConnMon = null,
+            ContextBus? contextBus = null)
         {
             _detectionEngine = detectionEngine;
             _config = config;
             _logger = logger;
             _persistentConnMon = persistentConnMon;
+            _contextBus = contextBus;
             _pollInterval = TimeSpan.FromSeconds(config.DnsPollIntervalSeconds > 0 ? config.DnsPollIntervalSeconds : 15);
         }
 
@@ -174,6 +177,16 @@ namespace WindowsSentinel.Core
                     Tier = DetectionTier.Tier1Behavioral,
                     ProcessName = "SYSTEM", ProcessId = pid
                 });
+
+                _contextBus?.Publish(new DnsAnomalySignal
+                {
+                    ProcessId = pid,
+                    ProcessName = "SYSTEM",
+                    SourceMonitor = "DnsQueryMonitor",
+                    Domain = baseDomain,
+                    AnomalyType = DnsAnomalyType.RapidQueryVolume,
+                    QueryCount = stats.QueryCount
+                });
             }
 
             // DGA detection via entropy
@@ -183,14 +196,25 @@ namespace WindowsSentinel.Core
                 var subdomain = labels[0];
                 if (subdomain.Length > 12 && CalculateEntropy(subdomain) > EntropyThreshold)
                 {
+                    var entropy = CalculateEntropy(subdomain);
                     _ = _detectionEngine.EmitAsync(new DetectionEvent
                     {
                         RuleName = "DNS: High-Entropy Subdomain (DGA Indicator)",
-                        Evidence = $"Domain '{domain}' has high-entropy subdomain (entropy={CalculateEntropy(subdomain):F2})",
+                        Evidence = $"Domain '{domain}' has high-entropy subdomain (entropy={entropy:F2})",
                         Reasoning = "The queried domain contains a high-entropy subdomain label, consistent with domain generation algorithms used by malware to evade domain blocklists.",
                         Confidence = 0.65,
                         Tier = DetectionTier.Tier2Indicator,
                         ProcessName = "SYSTEM", ProcessId = pid
+                    });
+
+                    _contextBus?.Publish(new DnsAnomalySignal
+                    {
+                        ProcessId = pid,
+                        ProcessName = "SYSTEM",
+                        SourceMonitor = "DnsQueryMonitor",
+                        Domain = domain,
+                        AnomalyType = DnsAnomalyType.HighEntropySubdomain,
+                        Entropy = entropy
                     });
                 }
             }

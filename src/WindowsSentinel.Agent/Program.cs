@@ -67,6 +67,8 @@ namespace WindowsSentinel.Agent
                     services.AddSingleton<IncidentManager>();
                     services.AddSingleton<MonitorRegistry>();
                     services.AddSingleton<StartupSequencer>();
+                    services.AddSingleton<ContextBus>();
+                    services.AddSingleton<ResponseCoordinator>();
                     services.AddSingleton<SentinelOrchestrator>();
                     services.AddSingleton<TelemetryFusionEngine>();
                     services.AddSingleton<AdvancedResponseEngine>();

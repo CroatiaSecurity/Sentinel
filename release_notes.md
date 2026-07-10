@@ -1,40 +1,44 @@
-## What's New in v1.4.0
+# v1.5.0 — Context Bus + Cross-Monitor Intelligence
 
-### SentinelOrchestrator — Phase 1: Operating as a Unit
+Sentinel is no longer a collection of independent detections. Monitors now share intelligence in real-time through a unified Context Bus, and all responses are serialized through a Response Coordinator that prevents races and duplicates.
 
-Sentinel is no longer a bag of independent monitors. It's now a coordinated EDR with centralized incident management, monitor supervision, and response coordination.
+## What's New
 
-#### Incident Manager
+### Context Bus (Cross-Monitor Enrichment)
+- Thread-safe pub/sub with bounded channels (10K capacity, backpressure-aware)
+- Per-PID signal cache for synchronous queries (monitors can ask "what do we know about PID X?")
+- 9 typed enrichment signals flow between monitors:
+  - `NetworkC2Signal`, `GhostProcessSignal`, `DnsAnomalySignal`, `FileVerdictSignal`
+  - `InjectionSignal`, `EphemeralProcessSignal`, `ExfiltrationSpikeSignal`
+  - `CredentialAccessSignal`, `NetworkPolicyViolationSignal`
+- TTL-based expiry, drop rate alerting, LRU cache eviction
 
-Multiple detections on the same attack are now ONE incident:
-- Grouped by PID, parent process chain, or file hash (reinfection detection)
-- Lifecycle: Open → Active → Responded → Closed
-- Severity escalation: Low → Medium → High → Critical based on corroborating signals
-- Logged as `incident_created` / `incident_closed` events for analyst review
+### Response Coordinator
+- Per-PID semaphore locking (one response action per process at a time)
+- 30-second deduplication window (5 detections on same PID = 1 kill, not 5)
+- ChainTracer hold system (don't kill a process while tracing its parent chain)
+- Response escalation (stronger action overrides weaker within dedup window)
+- Full audit trail of every response decision (executed, deduplicated, deferred, failed)
 
-#### Monitor Registry & Watchdog
+### Pipeline Backpressure Monitoring
+- Orchestrator health check every 10s
+- Alerts when ContextBus signal drop rate exceeds 5%
+- Auto-prunes expired cache and stale response state
+- SystemHealthStatus now includes ContextBus + ResponseCoordinator metrics
 
-Every monitor is now supervised:
-- Heartbeat tracking with 60s stale warning, 3m critical timeout
-- Automatic restart of crashed monitors (up to 5 attempts)
-- Anti-tamper detection fires when monitors die unexpectedly
-- Real-time dashboard of all monitor states
+### Cross-Monitor Intelligence (examples)
+- BeaconingDetector confirms C2 → GhostProcessMonitor immediately validates ghost PIDs against it
+- GhostProcessMonitor finds orphan → BeaconingDetector flags it for priority beaconing analysis
+- DnsQueryMonitor detects DGA → GhostProcessMonitor correlates ghost connections with DGA domains
+- FileReputationEngine scores a binary → AppNetworkPolicyMonitor adjusts alert severity
 
-#### Startup Sequencer
+## Architecture
 
-Dependency-ordered boot:
-- Phase 1: Infrastructure (logging, cache, crypto)
-- Phase 2: Engines (detection, response, reputation)
-- Phase 3: Monitors (all 40+ detection monitors)
-- Phase 4: Validators (self-test, health check)
-- Per-component timeout enforcement
-- Startup report with timing for every component
+```
+Monitor → TelemetryFusion → DetectionEngine → Orchestrator → ResponseCoordinator → ResponseEngine
+                                                    ↓                    ↓
+                                            IncidentManager        ContextBus
+                                            (group, escalate)   (cross-enrichment)
+```
 
-#### Response Coordination
-
-No more duplicate kills or race conditions:
-- Per-PID response lock prevents multiple threads from killing the same process
-- Orchestrator gates response engine — incidents are grouped first, then responded
-- ChainTracer can safely walk parent chains without another thread interfering
-
-**Full Changelog**: https://github.com/CroatiaSecurity/Sentinel/compare/v1.3.1...v1.4.0
+Every detection is grouped into an incident, every response is coordinated, and every monitor shares what it knows with every other monitor that needs it.

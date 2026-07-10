@@ -2,7 +2,7 @@
 
 **Userland IDS/EDR for Windows — Behavioral Threat Detection & Automated Response**
 
-> Version: 1.4.0 | Author: [Gorstak](https://gorstak.eu) | License: MIT
+> Version: 1.5.0 | Author: [Gorstak](https://gorstak.eu) | License: MIT
 
 [![Release](https://img.shields.io/github/v/release/CroatiaSecurity/Sentinel?style=flat-square)](https://github.com/CroatiaSecurity/Sentinel/releases/latest)
 [![License](https://img.shields.io/github/license/CroatiaSecurity/Sentinel?style=flat-square)](LICENSE)

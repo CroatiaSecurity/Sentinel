@@ -2,6 +2,31 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
+## [1.5.0] - 2026-07-10
+
+### Added — Phase 2: Context Bus + Cross-Monitor Enrichment + Response Coordinator
+
+Monitors now share intelligence with each other in real-time. The system is no longer a collection of detections — it's a unified intelligence network where each monitor enriches the others.
+
+- **ContextBus**: Thread-safe pub/sub bus for cross-monitor enrichment signals. Bounded channels (10K capacity) with backpressure monitoring, per-PID signal cache for synchronous queries, TTL-based expiry, and drop rate alerting. Monitors publish enrichment context (not detections) that other monitors consume to make better decisions.
+- **ResponseCoordinator**: Per-PID semaphore-based response serialization. Prevents duplicate kills (30s deduplication window), coordinates with ChainTracer (hold system defers kills during tree walks), supports response escalation (stronger action overrides weaker), and provides full response audit trail.
+- **Enrichment Signal Types**: 9 typed signals flow through the bus:
+  - `NetworkC2Signal` (BeaconingDetector → GhostProcessMonitor, ChainTracer)
+  - `GhostProcessSignal` (GhostProcessMonitor → BeaconingDetector, AppNetworkPolicyMonitor)
+  - `DnsAnomalySignal` (DnsQueryMonitor → GhostProcessMonitor, BeaconingDetector)
+  - `FileVerdictSignal` (FileReputationEngine → AppNetworkPolicyMonitor, BeaconingDetector)
+  - `InjectionSignal` (EtwThreatIntelMonitor → ChainTracer, CorrelationEngine)
+  - `EphemeralProcessSignal` (EphemeralProcessMonitor → ChainTracer, FileReputationEngine)
+  - `ExfiltrationSpikeSignal` (DataExfiltrationMonitor → BeaconingDetector, AppNetworkPolicyMonitor)
+  - `CredentialAccessSignal` (CredentialCanaryMonitor → CorrelationEngine, ChainTracer)
+  - `NetworkPolicyViolationSignal` (AppNetworkPolicyMonitor → BeaconingDetector, GhostProcessMonitor)
+- **Pipeline Backpressure Monitoring**: Orchestrator checks bus health every 10s. Alerts when signal drop rate exceeds 5%. Auto-prunes expired cache entries and stale response state.
+- **Cross-Monitor Intelligence Examples**:
+  - BeaconingDetector publishes C2 signal → GhostProcessMonitor queries it to confirm ghost PIDs are C2-connected
+  - GhostProcessMonitor publishes ghost signal → BeaconingDetector prioritizes analysis of ghost PIDs
+  - DnsQueryMonitor publishes DGA signal → GhostProcessMonitor correlates ghost connections with DGA domains
+  - FileReputationEngine publishes verdict → AppNetworkPolicyMonitor demotes alerts for known-good binaries
+
 ## [1.4.0] - 2026-07-10
 
 ### Added — SentinelOrchestrator (Phase 1: Unified Coordination Layer)

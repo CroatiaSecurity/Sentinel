@@ -75,18 +75,21 @@ namespace WindowsSentinel.Core
         private readonly AllowlistService? _allowlist;
         private readonly BehavioralBaselineService? _baseline;
         private readonly FileVerdictAds? _fileVerdictAds;
+        private readonly ContextBus? _contextBus;
 
         public BeaconingDetector(
             DetectionEngine de,
             ILogger<BeaconingDetector> l,
             AllowlistService? allowlist = null,
             BehavioralBaselineService? baseline = null,
-            FileVerdictAds? fileVerdictAds = null)
+            FileVerdictAds? fileVerdictAds = null,
+            ContextBus? contextBus = null)
         {
             _detectionEngine = de;
             _logger = l;
             _allowlist = allowlist;
             _baseline = baseline;
+            _contextBus = contextBus;
             _fileVerdictAds = fileVerdictAds;
         }
 
@@ -198,6 +201,20 @@ namespace WindowsSentinel.Core
                         ["CoefficientOfVariation"] = cv.ToString("F4"),
                         ["ObservationCount"] = intervals.Count.ToString()
                     }
+                });
+
+                // Publish enrichment signal for cross-monitor consumption
+                _contextBus?.Publish(new NetworkC2Signal
+                {
+                    ProcessId = history.ProcessId,
+                    ProcessName = history.ProcessName,
+                    SourceMonitor = "BeaconingDetector",
+                    RemoteAddress = history.RemoteAddress,
+                    RemotePort = history.RemotePort,
+                    CoefficientOfVariation = cv,
+                    MeanIntervalSeconds = mean,
+                    Confidence = confidence,
+                    ObservationCount = intervals.Count
                 });
             }
         }
