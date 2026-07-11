@@ -401,7 +401,8 @@ namespace WindowsSentinel.Core
                                 {
                                     // A known sideload target DLL exists in the same directory as the signed binary
                                     var winDir = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
-                                    if (!dir.StartsWith(winDir, StringComparison.OrdinalIgnoreCase))
+                                    var winDirTrailing = winDir.EndsWith('\\') ? winDir : winDir + '\\';
+                                    if (!dir.StartsWith(winDirTrailing, StringComparison.OrdinalIgnoreCase))
                                     {
                                         return true;
                                     }

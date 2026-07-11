@@ -365,7 +365,8 @@ namespace WindowsSentinel.Core
                 if (isSystemEntry)
                 {
                     var winDir = Environment.GetFolderPath(Environment.SpecialFolder.Windows).ToLowerInvariant();
-                    verified = pathLower.StartsWith(winDir);
+                    var winDirTrailing = winDir.EndsWith('\\') ? winDir : winDir + '\\';
+                    verified = pathLower.StartsWith(winDirTrailing);
                 }
                 else
                 {

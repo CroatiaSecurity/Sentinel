@@ -1,7 +1,18 @@
 # Changelog
-
+ 
 All notable changes to Windows Sentinel are documented in this file.
-
+ 
+## [1.3.5] - 2026-07-11
+ 
+### Fixed & Hardened — EDR Stability, False Positives, and IPSec Policy Configuration
+- Fixed ProcessAncestryCache's parent name resolution cache walk bug returning shifted child names.
+- Fixed `RawDiskAccessMonitor` access-denied bug (using `SecurityValidation.GetProcessImagePath` instead of `proc.MainModule?.FileName` for system processes) and allowed system processes (`services`, `svchost`, etc.) to prevent SCM tree-kills triggering system reboots / BSODs.
+- Fixed file locking/contention on UUP dump offline downloads by bypassing Restart Manager and reputation checks for files matching the `\uups\` folder structure.
+- Prevented false positive kills of browser auto-updaters (like `GoogleUpdate.exe` or `BraveUpdate.exe`) in `NetworkReinfectionDetector` by checking their digital signature (`SignerTrustService`).
+- Prevented browser process kills in `CastDeviceGuard` by changing default action from `KillProcessTree` to `LogOnly` (connections are already firewall-blocked).
+- Hardened all Windows directory checks (`.StartsWith(winDir)`) to enforce a trailing backslash to prevent folder path/namespace spoofing bypasses.
+- Ported the legacy IPSec policy creation into a self-contained C# initialization routine within `HardeningModule` to configure secure port blocks on first run without external script or registry dependencies.
+ 
 ## [1.3.3] - 2026-07-10
 
 ### Added — Phase 2: Context Bus + Cross-Monitor Enrichment + Response Coordinator

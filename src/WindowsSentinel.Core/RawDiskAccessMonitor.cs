@@ -59,7 +59,8 @@ namespace WindowsSentinel.Core
             "vboxsvc", "vboxheadless", "vmware-vmx", "vmms",
             "wudfhost", "storagecraft", "veeam", "acronis",
             "macrium", "clonezilla", "dd", "wimgapi",
-            "WindowsSentinel.Service", "WindowsSentinel.Agent" // Self-exclusion
+            "WindowsSentinel.Service", "WindowsSentinel.Agent", // Self-exclusion
+            "svchost", "taskhostw", "services", "system" // Legitimate system processes accessing raw disk
         };
 
         // NT kernel object manager paths that indicate raw disk access
@@ -153,7 +154,7 @@ namespace WindowsSentinel.Core
                         if (AllowedProcesses.Contains(procName))
                         {
                             string? allowedPath = null;
-                            try { allowedPath = proc.MainModule?.FileName; } catch { }
+                            try { allowedPath = SecurityValidation.GetProcessImagePath(proc.Id); } catch { }
                             if (!string.IsNullOrEmpty(allowedPath) &&
                                 IsInWindowsDirectory(allowedPath) &&
                                 IsSignedSystemBinary(allowedPath))
@@ -178,7 +179,7 @@ namespace WindowsSentinel.Core
                             bool isTrusted = false;
                             try
                             {
-                                var mainModule = proc.MainModule?.FileName;
+                                var mainModule = SecurityValidation.GetProcessImagePath(proc.Id);
                                 if (mainModule != null)
                                     isTrusted = _signerTrust.IsSignedFile(mainModule);
                             }
@@ -189,7 +190,7 @@ namespace WindowsSentinel.Core
                             var response = isTrusted ? ResponseAction.LogOnly : ResponseAction.KillProcessTree;
 
                             string imagePath = "";
-                            try { imagePath = proc.MainModule?.FileName ?? ""; } catch { }
+                            try { imagePath = SecurityValidation.GetProcessImagePath(proc.Id) ?? ""; } catch { }
 
                             await _detectionEngine.EmitAsync(new DetectionEvent
                             {
@@ -373,7 +374,8 @@ namespace WindowsSentinel.Core
             if (string.IsNullOrEmpty(imagePath)) return false;
             var winDir = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
             if (string.IsNullOrEmpty(winDir)) return false;
-            return imagePath.StartsWith(winDir, StringComparison.OrdinalIgnoreCase);
+            var winDirTrailing = winDir.EndsWith('\\') ? winDir : winDir + '\\';
+            return imagePath.StartsWith(winDirTrailing, StringComparison.OrdinalIgnoreCase);
         }
 
         private static bool IsRawDiskPath(string path)

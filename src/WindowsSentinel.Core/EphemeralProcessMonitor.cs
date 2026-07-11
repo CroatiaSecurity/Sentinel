@@ -185,7 +185,8 @@ namespace WindowsSentinel.Core
                 if (exePath2 != null)
                 {
                     var winDir = Environment.GetFolderPath(Environment.SpecialFolder.Windows).ToLowerInvariant();
-                    if (exePath2.ToLowerInvariant().StartsWith(winDir))
+                    var winDirTrailing = winDir.EndsWith('\\') ? winDir : winDir + '\\';
+                    if (exePath2.ToLowerInvariant().StartsWith(winDirTrailing))
                         return; // Legitimate system process
                 }
                 else

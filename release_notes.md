@@ -1,44 +1,21 @@
-# v1.3.3 — Context Bus + Cross-Monitor Intelligence
+# v1.3.5 — EDR Stability, Hardening, and Self-Contained IPSec Policy
 
-Sentinel is no longer a collection of independent detections. Monitors now share intelligence in real-time through a unified Context Bus, and all responses are serialized through a Response Coordinator that prevents races and duplicates.
+This release resolves critical EDR false positives, stabilizes system-level process terminations (preventing unexpected reboots and BSODs), addresses download file locking contentions, hardens directory path checks, and packages the legacy IPSec policy builder as a fully self-contained C# feature.
 
 ## What's New
 
-### Context Bus (Cross-Monitor Enrichment)
-- Thread-safe pub/sub with bounded channels (10K capacity, backpressure-aware)
-- Per-PID signal cache for synchronous queries (monitors can ask "what do we know about PID X?")
-- 9 typed enrichment signals flow between monitors:
-  - `NetworkC2Signal`, `GhostProcessSignal`, `DnsAnomalySignal`, `FileVerdictSignal`
-  - `InjectionSignal`, `EphemeralProcessSignal`, `ExfiltrationSpikeSignal`
-  - `CredentialAccessSignal`, `NetworkPolicyViolationSignal`
-- TTL-based expiry, drop rate alerting, LRU cache eviction
+### EDR Stability & BSOD Prevention
+- **Process Ancestry Lookup Fix**: Corrected a bug in parent name resolution cache walk that returned shifted child process names. Legitimate system processes like `services.exe` are now correctly identified and protected from tree-kills.
+- **Robust Image Path Querying**: Replaced buggy `MainModule.FileName` queries in `RawDiskAccessMonitor` and `NetworkReinfectionDetector` (which throw "Access Denied" for elevated system binaries, leading to untrusted process classification) with robust low-privilege `GetProcessImagePath` API calls.
+- **Disk Access Allowlist**: Added `services.exe`, `svchost.exe`, `taskhostw.exe`, and `System` to the raw disk access allowlist, preventing unintended Service Control Manager terminations that triggered Windows reboots and BSODs.
 
-### Response Coordinator
-- Per-PID semaphore locking (one response action per process at a time)
-- 30-second deduplication window (5 detections on same PID = 1 kill, not 5)
-- ChainTracer hold system (don't kill a process while tracing its parent chain)
-- Response escalation (stronger action overrides weaker within dedup window)
-- Full audit trail of every response decision (executed, deduplicated, deferred, failed)
+### File Contention & Download Fixes
+- **UUP Dump Offline Downloads**: Added directory exclusion checks for `\uups\` and `uup` folders to bypass Restart Manager handle locks and reputation checks. This resolves "file in use by another process" sharing violations in `aria2c` downloader scripts.
 
-### Pipeline Backpressure Monitoring
-- Orchestrator health check every 10s
-- Alerts when ContextBus signal drop rate exceeds 5%
-- Auto-prunes expired cache and stale response state
-- SystemHealthStatus now includes ContextBus + ResponseCoordinator metrics
+### False Positive Mitigation
+- **Signed Updaters Protection**: `NetworkReinfectionDetector` now integrates `SignerTrustService` to check Authenticode signatures, skipping immediate alerts/kills on signed browser updaters (GoogleUpdate, BraveUpdate) launching right after network-up events.
+- **Cast Device Guard Relaxation**: Changed the default action of unauthorized local Cast connections from `KillProcessTree` to `LogOnly`. Because connections are already blocked via the Windows Firewall, this keeps browsers (Chrome/Brave) alive while maintaining security.
 
-### Cross-Monitor Intelligence (examples)
-- BeaconingDetector confirms C2 → GhostProcessMonitor immediately validates ghost PIDs against it
-- GhostProcessMonitor finds orphan → BeaconingDetector flags it for priority beaconing analysis
-- DnsQueryMonitor detects DGA → GhostProcessMonitor correlates ghost connections with DGA domains
-- FileReputationEngine scores a binary → AppNetworkPolicyMonitor adjusts alert severity
-
-## Architecture
-
-```
-Monitor → TelemetryFusion → DetectionEngine → Orchestrator → ResponseCoordinator → ResponseEngine
-                                                    ↓                    ↓
-                                            IncidentManager        ContextBus
-                                            (group, escalate)   (cross-enrichment)
-```
-
-Every detection is grouped into an incident, every response is coordinated, and every monitor shares what it knows with every other monitor that needs it.
+### Security Hardening
+- **Directory Path Hijack Prevention**: Hardened all Windows directory validation checks (`.StartsWith(winDir)`) to enforce a trailing backslash (`\`) suffix. This blocks path-traversal / namespace spoofing bypasses where malware runs from folders like `C:\WindowsTemp\`.
+- **Self-Contained IPSec Policy**: Ported the entire `IPSecPolicy.ps1` script (port tables, rules, filters) directly into native C# within the `HardeningModule`. The policy is applied dynamically on the first boot (creating a `.ipsec_applied` common flag to skip on subsequent boots), eliminating any external script or registry dependencies.

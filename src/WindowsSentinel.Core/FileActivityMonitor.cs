@@ -487,6 +487,7 @@ namespace WindowsSentinel.Core
             return pathLower.Contains(@"\ntlite\") ||
                    pathLower.Contains(@"\uupdump\") ||
                    pathLower.Contains(@"\uup\") ||
+                   pathLower.Contains(@"\uups\") ||
                    pathLower.Contains(@"\msmg\") ||
                    pathLower.Contains(@"\mount\") ||
                    pathLower.Contains(@"\extracted\") ||

@@ -33,6 +33,8 @@ namespace WindowsSentinel.Core
         private readonly ProcessAncestryCache _ancestryCache;
         private readonly ILogger<NetworkReinfectionDetector> _logger;
 
+        private readonly SignerTrustService? _signerTrust;
+
         // Track NIC up events
         private readonly ConcurrentDictionary<string, DateTime> _nicUpEvents = new();
 
@@ -73,11 +75,13 @@ namespace WindowsSentinel.Core
         public NetworkReinfectionDetector(
             DetectionEngine detectionEngine,
             ProcessAncestryCache ancestryCache,
-            ILogger<NetworkReinfectionDetector> logger)
+            ILogger<NetworkReinfectionDetector> logger,
+            SignerTrustService? signerTrust = null)
         {
             _detectionEngine = detectionEngine;
             _ancestryCache = ancestryCache;
             _logger = logger;
+            _signerTrust = signerTrust;
         }
 
         protected override async Task ExecuteAsync(CancellationToken ct)
@@ -193,11 +197,15 @@ namespace WindowsSentinel.Core
 
                     // Get image path
                     string? imagePath = null;
-                    try { imagePath = proc.MainModule?.FileName; } catch { }
+                    try { imagePath = SecurityValidation.GetProcessImagePath(proc.Id); } catch { }
                     if (string.IsNullOrEmpty(imagePath)) continue;
 
                     // Must be from a suspicious path
                     if (!IsSuspiciousPath(imagePath)) continue;
+
+                    // Skip if the binary is signed by a trusted publisher (e.g. GoogleUpdate, BraveUpdate)
+                    if (_signerTrust != null && _signerTrust.IsSignedFile(imagePath))
+                        continue;
 
                     // Check parent chain — if parent is user-interactive, skip
                     if (HasUserInteractiveParent(proc.Id)) continue;

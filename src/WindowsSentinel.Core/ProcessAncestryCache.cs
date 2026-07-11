@@ -150,7 +150,13 @@ namespace WindowsSentinel.Core
         {
             if (_cache.TryGetValue(pid, out var info))
             {
-                return (info.parentId, info.name);
+                var parentId = info.parentId;
+                string parentName = "unknown";
+                if (parentId > 0 && _cache.TryGetValue(parentId, out var parentInfo))
+                {
+                    parentName = parentInfo.name;
+                }
+                return (parentId, parentName);
             }
             return (0, "unknown");
         }

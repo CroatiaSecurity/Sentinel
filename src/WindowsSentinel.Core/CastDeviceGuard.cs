@@ -134,7 +134,7 @@ namespace WindowsSentinel.Core
                                 "to stream screen content and relay C2 through the browser.",
                     Confidence = 0.92,
                     Tier = DetectionTier.Tier1Behavioral,
-                    AuthorizedResponse = ResponseAction.KillProcessTree,
+                    AuthorizedResponse = ResponseAction.LogOnly,
                     ProcessName = procName,
                     ProcessId = conn.OwnerPid,
                     SignalType = SignalType.NetworkC2,

@@ -32,7 +32,7 @@ namespace WindowsSentinel.Core
         private static readonly HashSet<string> ExcludedPaths = new(StringComparer.OrdinalIgnoreCase)
         {
             // OS image/servicing tools — extract hundreds of signed Microsoft binaries
-            "uupdump", "ntlite", "mount", "extracted", "msmg", "offlineimage",
+            "uupdump", "uup", "uups", "ntlite", "mount", "extracted", "msmg", "offlineimage",
             "winpe", "\\wim\\", "\\scratch\\",
             // Browser auto-updaters (self-signed, ephemeral)
             "opera autoupdate", "google\\update", "edge\\update"
