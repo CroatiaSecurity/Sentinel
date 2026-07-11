@@ -64,7 +64,7 @@ namespace WindowsSentinel.Service
             responseEngine.SetDllUnloadEngine(dllUnloadEngine);
             responseEngine.SetChainTracer(chainTracer);
 
-            // v1.4.0: Wire orchestrator into detection engine
+            // v1.3.2: Wire orchestrator into detection engine
             detectionEngine.SetOrchestrator(orchestrator);
 
             _logger = logger;

@@ -63,7 +63,7 @@ namespace WindowsSentinel.Agent
                     services.AddSingleton<FileReputationEngine>();
                     services.AddSingleton<DetectionEngine>();
 
-                    // v1.4.0: Orchestration layer
+                    // v1.3.2: Orchestration layer
                     services.AddSingleton<IncidentManager>();
                     services.AddSingleton<MonitorRegistry>();
                     services.AddSingleton<StartupSequencer>();

@@ -25,7 +25,7 @@ namespace WindowsSentinel.Core
     ///                                              IncidentManager        ContextBus
     ///                                              (group, escalate)   (cross-enrichment)
     ///
-    /// v1.5.0: Added ContextBus, ResponseCoordinator, backpressure monitoring.
+    /// v1.3.3: Added ContextBus, ResponseCoordinator, backpressure monitoring.
     /// </summary>
     public sealed class SentinelOrchestrator : IDisposable
     {

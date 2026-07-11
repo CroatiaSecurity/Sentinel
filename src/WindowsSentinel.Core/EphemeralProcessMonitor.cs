@@ -47,7 +47,12 @@ namespace WindowsSentinel.Core
         private static readonly string PrefetchPath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.Windows), "Prefetch");
 
-        // Executables that commonly create short-lived processes
+        // Executables that commonly create short-lived processes.
+        // SECURITY: Name-only trust is verified by path check below — only system-directory
+        // binaries are auto-cleared. Non-system instances with these names still trigger detection.
+        // Exception: tools commonly extracted temporarily by legitimate scripts (aria2c, 7z, etc.)
+        // which are gone before we can verify their path. These produce ResponseAction.LogOnly
+        // detections regardless, so the security impact of false-positive suppression is minimal.
         private static readonly HashSet<string> AllowedEphemeral = new(StringComparer.OrdinalIgnoreCase)
         {
             "conhost", "consent", "ctfmon", "backgroundtaskhost",
@@ -55,7 +60,10 @@ namespace WindowsSentinel.Core
             "searchfilterhost", "audiodg", "fontdrvhost", "dwm",
             "wmiprvse", "taskhostw", "sihost", "compattelrunner",
             "microsoftedgeupdate", "googleupdate", "spotifywebhelper",
-            "msmpeng", "nissrv", "mpcmdrun"
+            "msmpeng", "nissrv", "mpcmdrun",
+            // Download/archive tools commonly used by UUP dump, Chocolatey, winget, etc.
+            // These are extracted to temp dirs, execute, then cleaned up by the calling script.
+            "aria2c", "7z", "7za", "wimlib-imagex", "cabextract"
         };
 
         // Suspicious paths for ephemeral processes

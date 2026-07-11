@@ -2,7 +2,7 @@
 
 All notable changes to Windows Sentinel are documented in this file.
 
-## [1.5.0] - 2026-07-10
+## [1.3.3] - 2026-07-10
 
 ### Added — Phase 2: Context Bus + Cross-Monitor Enrichment + Response Coordinator
 
@@ -27,7 +27,7 @@ Monitors now share intelligence with each other in real-time. The system is no l
   - DnsQueryMonitor publishes DGA signal → GhostProcessMonitor correlates ghost connections with DGA domains
   - FileReputationEngine publishes verdict → AppNetworkPolicyMonitor demotes alerts for known-good binaries
 
-## [1.4.0] - 2026-07-10
+## [1.3.2] - 2026-07-10
 
 ### Added — SentinelOrchestrator (Phase 1: Unified Coordination Layer)
 

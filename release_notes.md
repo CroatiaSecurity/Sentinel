@@ -1,4 +1,4 @@
-# v1.5.0 — Context Bus + Cross-Monitor Intelligence
+# v1.3.3 — Context Bus + Cross-Monitor Intelligence
 
 Sentinel is no longer a collection of independent detections. Monitors now share intelligence in real-time through a unified Context Bus, and all responses are serialized through a Response Coordinator that prevents races and duplicates.
 

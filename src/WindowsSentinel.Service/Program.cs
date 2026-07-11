@@ -111,11 +111,11 @@ namespace WindowsSentinel.Service
                     services.AddSingleton<FileReputationEngine>();
                     services.AddSingleton<DetectionEngine>();
 
-                    // v1.4.0: Orchestration layer
+                    // v1.3.2: Orchestration layer
                     services.AddSingleton<IncidentManager>();
                     services.AddSingleton<MonitorRegistry>();
                     services.AddSingleton<StartupSequencer>();
-                    // v1.5.0: Context Bus + Response Coordinator
+                    // v1.3.3: Context Bus + Response Coordinator
                     services.AddSingleton<ContextBus>();
                     services.AddSingleton<ResponseCoordinator>();
                     services.AddSingleton<SentinelOrchestrator>();

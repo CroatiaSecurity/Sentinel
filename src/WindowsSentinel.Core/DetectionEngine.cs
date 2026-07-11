@@ -291,7 +291,7 @@ namespace WindowsSentinel.Core
             // Log the event
             await _eventLogger.LogEventAsync("detection", detection);
 
-            // v1.4.0: Route through SentinelOrchestrator for incident grouping and response coordination
+            // v1.3.2: Route through SentinelOrchestrator for incident grouping and response coordination
             if (_orchestrator != null)
             {
                 await _orchestrator.ProcessDetectionAsync(detection);

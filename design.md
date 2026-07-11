@@ -61,8 +61,8 @@ The fusion layer is PASSIVE â€” it never blocks, kills, or modifies telemet
 | `FileActivityMonitor` | `FileSystemWatcher` on user profile (or configured path) | No |
 | `HollowProcessMonitor` | `GetMappedFileName` + `EnumProcessModules` P/Invoke, scans every 30s | No (own integrity level) |
 | `PhantomKeystrokeGuard` | **0.8.3** Intercepts and actively blocks software-injected keystrokes (e.g., via `SendInput`) to prevent automated typing via global `WH_KEYBOARD_LL` hook. | No |
-| `ScreenCaptureMonitor` | **1.5.0** Detects background DXGI screen capture + transparent overlay phishing windows via `EnumWindows` + `GetWindowLong`, scans every 15â€“25s | No |
-| `LocalServerMonitor` | **1.5.0** Detects suspicious processes listening on localhost via `GetExtendedTcpTable` (LISTEN state), flags mounted ISO/VHD/removable origins, scans every 30s | No |
+| `ScreenCaptureMonitor` | **1.3.3** Detects background DXGI screen capture + transparent overlay phishing windows via `EnumWindows` + `GetWindowLong`, scans every 15â€“25s | No |
+| `LocalServerMonitor` | **1.3.3** Detects suspicious processes listening on localhost via `GetExtendedTcpTable` (LISTEN state), flags mounted ISO/VHD/removable origins, scans every 30s | No |
 | `WebcamMicMonitor` | **1.6.0** Detects background processes accessing camera/microphone via DLL analysis (Media Foundation, DirectShow, WASAPI). Allowlists browsers, conferencing, streaming apps. Confirmation threshold prevents transient FPs. Scans every 20s | No |
 | `NamedPipeMonitor` | **3.1.0** Polls `\\.\pipe\` for C2/lateral movement pipe patterns (Cobalt Strike, PsExec, Impacket, Metasploit). Uses `GetNamedPipeServerProcessId` for owner attribution. Scans every 15s | No |
 | `WmiPersistenceMonitor` | **3.1.0** Periodic WMI namespace scan for `__EventFilter`/`__EventConsumer`/`__FilterToConsumerBinding` persistence (T1546.003). Scans every 5min | No |
@@ -248,7 +248,7 @@ Composite detections are emitted as Tier1 `DetectionEvent`s directly into the de
 | `SecureCacheStore` | Format v2: boot-nonce-bound HMAC key | Defeats SYSTEM-context replay from previous boot sessions. |
 | `DumperNames` list | Retained for threat intel correlation only | Not used for detection decisions â€” clearly documented. |
 
-## Added in 1.5.0
+## Added in 1.3.3
 
 | Component | Purpose |
 |-----------|---------|

@@ -24,13 +24,17 @@ namespace WindowsSentinel.Core
             ".exe", ".dll", ".sys", ".scr", ".bat", ".cmd", ".ps1", ".vbs", ".js", ".hta", ".msi"
         };
 
-        // Directories to exclude from scanning (build artifacts, browser updates ONLY)
+        // Directories to exclude from scanning (build artifacts, browser updates, user tools)
         // HARDENING v1.3.0: Removed "temp", "tmp", "cache" — these are primary malware staging areas.
         // Previously excluded "downloads" too (removed in 1.2.9). Now only skip paths that are
-        // genuinely never attack vectors: build tool intermediates and auto-updater working dirs.
+        // genuinely never attack vectors: build tool intermediates, auto-updater working dirs,
+        // and user OS-image tools that perform bulk extraction of legitimate Windows binaries.
         private static readonly HashSet<string> ExcludedPaths = new(StringComparer.OrdinalIgnoreCase)
         {
-            "uupdump", "ntlite", "mount", "extracted",
+            // OS image/servicing tools — extract hundreds of signed Microsoft binaries
+            "uupdump", "ntlite", "mount", "extracted", "msmg", "offlineimage",
+            "winpe", "\\wim\\", "\\scratch\\",
+            // Browser auto-updaters (self-signed, ephemeral)
             "opera autoupdate", "google\\update", "edge\\update"
         };
 

@@ -40,12 +40,22 @@ namespace WindowsSentinel.Core
         private readonly ConcurrentDictionary<(int Pid, string Device), DateTimeOffset> _alertedAccess = new();
         private static readonly TimeSpan AlertCooldown = TimeSpan.FromMinutes(5);
 
-        // Legitimate processes that access raw disk
+        // Legitimate processes that access raw disk.
+        // SECURITY NOTE: Name-only matching is NOT sufficient. The allowlist check
+        // in ScanForRawDiskHandles also verifies the binary is:
+        //   1. Located in a Windows system directory (%SystemRoot%)
+        //   2. Has a valid Authenticode signature (via IsSignedSystemBinary)
+        // An attacker naming malware "Taskmgr.exe" in a non-system path will FAIL
+        // both checks and be detected normally.
         private static readonly HashSet<string> AllowedProcesses = new(StringComparer.OrdinalIgnoreCase)
         {
+            // Windows built-in disk/system management tools
             "vds", "vdsldr", "diskmgmt", "diskpart", "defrag",
             "chkdsk", "sfc", "dism", "wbengine", "vssvc",
             "msiexec", "trustedinstaller", "tiworker",
+            // Windows monitoring tools that legitimately enumerate disk handles
+            "Taskmgr", "resmon", "perfmon", "mmc", "SystemInformer",
+            // Hypervisor/VM tools
             "vboxsvc", "vboxheadless", "vmware-vmx", "vmms",
             "wudfhost", "storagecraft", "veeam", "acronis",
             "macrium", "clonezilla", "dd", "wimgapi",
@@ -137,16 +147,18 @@ namespace WindowsSentinel.Core
 
                         var procName = proc.ProcessName;
 
-                        // Skip allowed processes — but only if running from expected system paths.
-                        // An attacker could name malware "defrag.exe" to bypass name-only checks.
-                        // Windows system tools always run from System32/SysWOW64.
+                        // Skip allowed processes — but only if running from expected system paths
+                        // AND validly signed. An attacker could name malware "Taskmgr.exe" in a
+                        // user-writable directory — the dual check (path + signature) prevents bypass.
                         if (AllowedProcesses.Contains(procName))
                         {
                             string? allowedPath = null;
                             try { allowedPath = proc.MainModule?.FileName; } catch { }
-                            if (!string.IsNullOrEmpty(allowedPath) && IsSignedSystemBinary(allowedPath))
+                            if (!string.IsNullOrEmpty(allowedPath) &&
+                                IsInWindowsDirectory(allowedPath) &&
+                                IsSignedSystemBinary(allowedPath))
                                 continue;
-                            // Name matches but path is suspicious — fall through to detection
+                            // Name matches but path or signature is suspicious — fall through to detection
                         }
 
                         // Check if process has any open device handles matching raw disk patterns
@@ -348,6 +360,20 @@ namespace WindowsSentinel.Core
         private bool IsSignedSystemBinary(string imagePath)
         {
             return _signerTrust.IsSignedFile(imagePath);
+        }
+
+        /// <summary>
+        /// Checks if a binary resides within the Windows directory hierarchy.
+        /// This includes System32, SysWOW64, WinSxS, and other Windows-owned paths.
+        /// Used as a FIRST gate before signature verification to reduce attack surface.
+        /// An attacker cannot place files in %SystemRoot% without elevation + bypassing WRP.
+        /// </summary>
+        private static bool IsInWindowsDirectory(string imagePath)
+        {
+            if (string.IsNullOrEmpty(imagePath)) return false;
+            var winDir = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+            if (string.IsNullOrEmpty(winDir)) return false;
+            return imagePath.StartsWith(winDir, StringComparison.OrdinalIgnoreCase);
         }
 
         private static bool IsRawDiskPath(string path)

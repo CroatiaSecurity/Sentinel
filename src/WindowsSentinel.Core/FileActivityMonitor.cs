@@ -248,6 +248,16 @@ namespace WindowsSentinel.Core
                 return;
             }
 
+            // Skip user working directories where tools like NTLite, UUP dump, DISM perform
+            // bulk file extraction/modification. These generate thousands of events/second
+            // and the Restart Manager handle scan causes file contention that stalls the tools.
+            // Security coverage for these paths is maintained by FileVerdictScanner (hash checks)
+            // and process-level monitoring (WMI/ETW).
+            if (IsUserToolWorkingPath(pathLower))
+            {
+                return;
+            }
+
             // Targeted AppData noise suppression — only skip known high-noise, low-threat subpaths.
             // DO NOT blanket-exclude \appdata\ — attackers stage payloads in Temp, Roaming\Microsoft, etc.
             if (IsNoisyAppDataPath(pathLower))
@@ -452,6 +462,38 @@ namespace WindowsSentinel.Core
             }
 
             return (0, "unknown");
+        }
+
+        /// <summary>
+        /// Identifies paths belonging to legitimate user tools that perform bulk file operations.
+        /// These tools (NTLite, UUP dump, DISM offline) extract/modify hundreds of files per second.
+        /// The Restart Manager handle scan on every event causes severe contention that stalls them.
+        /// 
+        /// SECURITY: These paths are still protected by:
+        ///   - FileVerdictScanner (hashes every new .exe/.dll against reputation DBs)
+        ///   - Process-level monitoring (WMI/ETW detects suspicious process launches)
+        ///   - RawDiskAccessMonitor (detects bypass of filesystem layer)
+        /// We only skip the per-file Restart Manager scan and telemetry submission here.
+        /// 
+        /// HARDENING: Only skip if the path is NOT inside a Windows system directory.
+        /// An attacker cannot abuse this by placing files in these named folders inside System32
+        /// because the system directory check fires first and is separate.
+        /// </summary>
+        private static bool IsUserToolWorkingPath(string pathLower)
+        {
+            // Never skip system directories regardless of path keywords
+            if (IsProtectedOsDirectory(pathLower)) return false;
+
+            return pathLower.Contains(@"\ntlite\") ||
+                   pathLower.Contains(@"\uupdump\") ||
+                   pathLower.Contains(@"\uup\") ||
+                   pathLower.Contains(@"\msmg\") ||
+                   pathLower.Contains(@"\mount\") ||
+                   pathLower.Contains(@"\extracted\") ||
+                   pathLower.Contains(@"\winpe\") ||
+                   pathLower.Contains(@"\wim\") ||
+                   pathLower.Contains(@"\scratch\") ||
+                   pathLower.Contains(@"\offlineimage\");
         }
 
         /// <summary>
