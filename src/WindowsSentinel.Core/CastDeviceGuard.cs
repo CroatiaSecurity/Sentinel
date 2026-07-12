@@ -76,6 +76,11 @@ namespace WindowsSentinel.Core
                 trusted.Length,
                 trusted.Length > 0 ? string.Join(", ", trusted) : "NONE — all Cast connections killed");
 
+            // v1.4.2: Delete Windows built-in "Cast to Device" inbound firewall rules.
+            // These allow ANY LAN device to push RTSP/HTTP streams INTO this machine.
+            // A rogue Cast device uses exactly these rules to connect inbound.
+            DeleteCastToDeviceInboundRules();
+
             while (!ct.IsCancellationRequested)
             {
                 try
@@ -85,6 +90,55 @@ namespace WindowsSentinel.Core
                 }
                 catch (OperationCanceledException) { break; }
                 catch (Exception ex) { _logger.LogDebug(ex, "[CastDeviceGuard] Error"); }
+            }
+        }
+
+        /// <summary>
+        /// Deletes all Windows built-in "Cast to Device" inbound firewall rules and
+        /// "Media Center Extenders" rules. These allow any LAN device to connect inbound
+        /// on RTSP/HTTP streaming ports — the exact attack surface for rogue Cast relays.
+        /// Self-healing: runs every service start in case Windows Update re-creates them.
+        /// </summary>
+        private void DeleteCastToDeviceInboundRules()
+        {
+            try
+            {
+                var policyType = Type.GetTypeFromProgID("HNetCfg.FwPolicy2");
+                if (policyType == null) return;
+                dynamic? policy = Activator.CreateInstance(policyType);
+                if (policy == null) return;
+
+                var toDelete = new List<string>();
+                foreach (dynamic rule in policy.Rules)
+                {
+                    string name = (string)rule.Name;
+                    int direction = (int)rule.Direction; // 1 = Inbound
+
+                    if (direction == 1 &&
+                        (name.Contains("Cast to Device", StringComparison.OrdinalIgnoreCase) ||
+                         name.Contains("Media Center Extenders", StringComparison.OrdinalIgnoreCase) ||
+                         name.Contains("RTSP-Streaming-In", StringComparison.OrdinalIgnoreCase) ||
+                         name.Contains("HTTP-Streaming-In", StringComparison.OrdinalIgnoreCase) ||
+                         name.Contains("RTCP-Streaming-In", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        toDelete.Add(name);
+                    }
+                }
+
+                foreach (var name in toDelete)
+                {
+                    try { policy.Rules.Remove(name); } catch { }
+                }
+
+                if (toDelete.Count > 0)
+                {
+                    _logger.LogWarning("[CastDeviceGuard] DELETED {Count} inbound Cast/Media streaming firewall rules (attack surface removal)",
+                        toDelete.Count);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "[CastDeviceGuard] Failed to delete Cast inbound rules");
             }
         }
 

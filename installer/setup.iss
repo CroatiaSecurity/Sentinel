@@ -1,6 +1,6 @@
 [Setup]
 AppName=Windows Sentinel
-AppVersion=1.4.1
+AppVersion=1.4.2
 AppPublisher=Gorstak
 AppPublisherURL=https://gorstak.eu
 SourceDir=.
@@ -11,7 +11,7 @@ UninstallDisplayIcon={app}\Sentinel.ico
 Compression=lzma2
 SolidCompression=yes
 OutputDir=.
-OutputBaseFilename=WindowsSentinelSetup-1.4.1
+OutputBaseFilename=WindowsSentinelSetup-1.4.2
 PrivilegesRequired=admin
 ; Allow upgrading over existing install
 UsePreviousAppDir=yes
@@ -32,6 +32,9 @@ Name: "{group}\Windows Sentinel Agent"; Filename: "{app}\WindowsSentinel.Agent.e
 [Registry]
 ; Auto-start agent on user login
 Root: HKLM; Subkey: "SOFTWARE\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "WindowsSentinelAgent"; ValueData: """{app}\WindowsSentinel.Agent.exe"""; Flags: uninsdeletevalue
+; v1.4.2: Register service for Safe Mode (both Minimal and Network)
+Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Control\SafeBoot\Minimal\Windows Sentinel"; ValueType: string; ValueName: ""; ValueData: "Service"; Flags: uninsdeletekey
+Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Control\SafeBoot\Network\Windows Sentinel"; ValueType: string; ValueName: ""; ValueData: "Service"; Flags: uninsdeletekey
 
 [Run]
 ; Restore root certificates from backup

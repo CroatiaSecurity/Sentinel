@@ -225,6 +225,9 @@ namespace WindowsSentinel.Service
                     // v1.4.1: Built-in Administrator account guard
                     services.AddHostedService<BuiltinAdminGuard>();
 
+                    // v1.4.2: Password rotation + UAC enforcement
+                    services.AddHostedService<PasswordRotationGuard>();
+
                     // v1.3.9: Agent watchdog — relaunches WindowsSentinel.Agent.exe in the
                     // user session if it dies, and fires an anti-tamper alert on repeated kills
                     services.AddHostedService<AgentWatchdog>();

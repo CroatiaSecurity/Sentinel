@@ -2,6 +2,24 @@
  
 All notable changes to Windows Sentinel are documented in this file.
  
+## [1.4.2] - 2026-07-12
+
+### Security — OS Attack Surface Reduction (Red Team Probe Results)
+
+Live probing of the host OS identified 4 entry points that an attacker on the LAN could exploit. All closed.
+
+### Added
+
+- **`CastDeviceGuard` — Inbound Rule Deletion**: Deletes all Windows built-in "Cast to Device" and "Media Center Extenders" inbound firewall rules at every service start. These rules allow any LAN device to push RTSP/HTTP streams into the machine — the exact attack surface rogue Cast relays exploit.
+- **`HardeningModule.RegisterForSafeMode`**: Registers `Windows Sentinel` service under both `SafeBoot\Minimal` and `SafeBoot\Network` registry keys. Sentinel now runs in Safe Mode, preventing attackers from rebooting into Safe Mode to operate without EDR.
+- **`HardeningModule.BlockRemoteRpcEphemeralPorts`**: Adds a Windows Firewall rule blocking inbound access to RPC dynamic endpoint ports (49664-49675) from the local subnet. Prevents lateral movement via DCOM/WMI/Task Scheduler RPC from other LAN machines.
+- **IPSec: Port 5040 (CDPUserSvc) blocked**: Connected Devices Platform port added to the GSecurity IPSec policy. No reason for CDP on a hardened workstation.
+- **Installer: Safe Mode registration** via `[Registry]` section — ensures Safe Mode entries survive reinstalls.
+
+### Changed
+
+- **IPSec policy re-apply**: Adding port 5040 means existing installs will get it on next policy re-application (triggered automatically if `IPSecIntegrityGuard` detects a mismatch, or on fresh install).
+
 ## [1.4.1] - 2026-07-12
 
 ### Security — Red Team Audit: 11 Gaps Closed

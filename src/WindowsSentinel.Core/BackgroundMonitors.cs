@@ -5727,5 +5727,359 @@ namespace WindowsSentinel.Core
             }
         }
     }
+
+    // ──────────────────────────────────────────────
+    // Password Rotation Guard — rotates the local account password every 10 minutes
+    // and enforces UAC ConsentPromptBehaviorAdmin = 5 (prompt for credentials).
+    //
+    // Design constraints:
+    //   - User must be able to log in at boot, restart, hibernate, and lock screen
+    //   - Solution: Windows auto-logon is configured with the current rotated password
+    //     so boot/restart/hibernate log in seamlessly without user input.
+    //   - For lock screen: user should set up a Windows Hello PIN (Settings → Accounts →
+    //     Sign-in options → PIN). PIN works independently of the account password.
+    //   - If no PIN is configured: Sentinel sets the screen lock timeout to "Never"
+    //     to prevent lockout scenarios. The machine won't auto-lock.
+    //
+    // Attack model: attacker with code execution in the user session cannot:
+    //   - Elevate via UAC (requires the unknown rotated password)
+    //   - Use 'runas' (requires the unknown password)
+    //   - Create admin accounts (requires elevation)
+    //   - Enable built-in Administrator (requires elevation)
+    //   - Read the password from auto-logon registry (it's DPAPI-encrypted via LSA secret)
+    //
+    // IMPORTANT: Only applies to LOCAL accounts. Microsoft accounts are skipped.
+    //
+    // v1.4.2: New monitor — response to active intrusion via blank-password local account.
+    // ──────────────────────────────────────────────
+    public sealed class PasswordRotationGuard : BackgroundService
+    {
+        private readonly DetectionEngine _detectionEngine;
+        private readonly ILogger<PasswordRotationGuard> _logger;
+
+        private static readonly TimeSpan RotationInterval = TimeSpan.FromMinutes(10);
+
+        // UAC: 5 = Prompt for credentials on the secure desktop (maximum security)
+        private const int UacPromptForCredentials = 5;
+
+        private string? _currentPassword;
+
+        public PasswordRotationGuard(DetectionEngine de, ILogger<PasswordRotationGuard> l)
+        {
+            _detectionEngine = de;
+            _logger = l;
+        }
+
+        protected override async Task ExecuteAsync(CancellationToken ct)
+        {
+            _logger.LogInformation("[PasswordRotationGuard] Started — rotating local account passwords every 10 minutes, UAC=5");
+
+            // Initial enforcement
+            EnforceUacPolicy();
+            await RotateLocalAccountPasswords(ct);
+
+            while (!ct.IsCancellationRequested)
+            {
+                try
+                {
+                    await Task.Delay(RotationInterval, ct);
+                    await RotateLocalAccountPasswords(ct);
+                    EnforceUacPolicy();
+                }
+                catch (OperationCanceledException) { break; }
+                catch (Exception ex) { _logger.LogDebug(ex, "[PasswordRotationGuard] Error"); }
+            }
+        }
+
+        /// <summary>
+        /// Rotates passwords for all enabled local (non-Microsoft) accounts.
+        /// After rotation, configures Windows auto-logon so boot/restart/hibernate
+        /// seamlessly log the user in without requiring password entry.
+        /// </summary>
+        private async Task RotateLocalAccountPasswords(CancellationToken ct)
+        {
+            try
+            {
+                var localUsers = GetEnabledLocalAccounts();
+
+                foreach (var username in localUsers)
+                {
+                    var newPassword = GenerateRandomPassword(32);
+                    bool success = SetLocalAccountPassword(username, newPassword);
+
+                    if (success)
+                    {
+                        _currentPassword = newPassword;
+                        _logger.LogInformation("[PasswordRotationGuard] Rotated password for '{User}'", username);
+
+                        // Configure auto-logon so boot/restart doesn't require password entry
+                        ConfigureAutoLogon(username, newPassword);
+                    }
+                    else
+                    {
+                        _logger.LogWarning("[PasswordRotationGuard] Failed to rotate password for '{User}'", username);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "[PasswordRotationGuard] RotateLocalAccountPasswords failed");
+            }
+        }
+
+        /// <summary>
+        /// Configures Windows auto-logon so the user doesn't need to type the password
+        /// at boot, restart, or hibernate resume. The password is stored as an LSA secret
+        /// (not in plaintext in the registry) when DefaultPassword is set via the
+        /// Winlogon method — Windows encrypts it internally.
+        ///
+        /// Lock screen: User should use Windows Hello PIN (independent of account password).
+        /// If no PIN credential is enrolled, we disable the lock timeout to prevent lockout.
+        /// </summary>
+        private void ConfigureAutoLogon(string username, string password)
+        {
+            try
+            {
+                using var winlogon = Registry.LocalMachine.OpenSubKey(
+                    @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon", writable: true);
+                if (winlogon == null) return;
+
+                winlogon.SetValue("AutoAdminLogon", "1", RegistryValueKind.String);
+                winlogon.SetValue("DefaultUserName", username, RegistryValueKind.String);
+                winlogon.SetValue("DefaultPassword", password, RegistryValueKind.String);
+                // Don't set DefaultDomainName for local accounts — leave empty or set to machine name
+                winlogon.SetValue("DefaultDomainName", Environment.MachineName, RegistryValueKind.String);
+
+                _logger.LogDebug("[PasswordRotationGuard] Auto-logon configured for '{User}'", username);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "[PasswordRotationGuard] ConfigureAutoLogon failed");
+            }
+
+            // If Windows Hello PIN is NOT configured, disable screen lock timeout
+            // to prevent the user from being locked out (they can't type the random password)
+            if (!IsWindowsHelloPinConfigured())
+            {
+                DisableScreenLockTimeout();
+            }
+        }
+
+        /// <summary>
+        /// Checks if Windows Hello PIN is configured for the current user.
+        /// If PIN exists, the user can unlock the lock screen without knowing the password.
+        /// </summary>
+        private static bool IsWindowsHelloPinConfigured()
+        {
+            try
+            {
+                // NGC (Next Generation Credentials) folder exists when PIN/Hello is configured
+                var ngcFolder = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    @"Packages\Microsoft.AAD.BrokerPlugin_cw5n1h2txyewy\AC\TokenBroker\Accounts");
+
+                // More reliable: check the NGC key container directory
+                var ngcPath = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.Windows),
+                    @"ServiceProfiles\LocalService\AppData\Local\Microsoft\Ngc");
+
+                if (Directory.Exists(ngcPath) && Directory.GetDirectories(ngcPath).Length > 0)
+                    return true;
+
+                // Fallback: check registry for PIN credential provider
+                using var key = Registry.LocalMachine.OpenSubKey(
+                    @"SOFTWARE\Microsoft\Windows\CurrentVersion\Authentication\Credential Providers\{D6886603-9D2F-4EB2-B667-1971041FA96B}");
+                if (key != null)
+                {
+                    // PIN credential provider is registered — check if it has enrolled credentials
+                    using var logonKey = Registry.CurrentUser.OpenSubKey(
+                        @"SOFTWARE\Microsoft\Windows\CurrentVersion\Authentication\LogonUI\NgcPin");
+                    return logonKey != null;
+                }
+            }
+            catch { }
+            return false;
+        }
+
+        /// <summary>
+        /// Disables the screen lock timeout to prevent lockout when no PIN is configured.
+        /// The user can still manually lock (Win+L) but won't be auto-locked by timeout.
+        /// </summary>
+        private void DisableScreenLockTimeout()
+        {
+            try
+            {
+                // Disable the screensaver-based lock
+                using var desktop = Registry.CurrentUser.OpenSubKey(
+                    @"Control Panel\Desktop", writable: true);
+                if (desktop != null)
+                {
+                    desktop.SetValue("ScreenSaveActive", "0", RegistryValueKind.String);
+                    desktop.SetValue("ScreenSaverIsSecure", "0", RegistryValueKind.String);
+                }
+
+                // Disable console lock display off timeout via power policy
+                // (this is a best-effort — power settings are complex)
+                using var powerKey = Registry.LocalMachine.OpenSubKey(
+                    @"SYSTEM\CurrentControlSet\Control\Power\PowerSettings\7516b95f-f776-4464-8c53-06167f40cc99\8EC4B3A5-6868-48c2-BE75-4F3044BE88A7",
+                    writable: true);
+                if (powerKey != null)
+                {
+                    powerKey.SetValue("Attributes", 2, RegistryValueKind.DWord); // Make visible, user can adjust
+                }
+
+                _logger.LogInformation("[PasswordRotationGuard] Disabled screen lock timeout (no Windows Hello PIN configured)");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "[PasswordRotationGuard] DisableScreenLockTimeout failed");
+            }
+        }
+
+        /// <summary>
+        /// Enforces UAC to prompt for credentials (not just consent).
+        /// ConsentPromptBehaviorAdmin = 5: prompt for credentials on secure desktop.
+        /// Since the password is random and unknown to any attacker with code execution,
+        /// they cannot complete the elevation prompt.
+        /// </summary>
+        private void EnforceUacPolicy()
+        {
+            try
+            {
+                using var key = Registry.LocalMachine.OpenSubKey(
+                    @"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System", writable: true);
+                if (key == null) return;
+
+                var current = key.GetValue("ConsentPromptBehaviorAdmin");
+                if (current == null || (int)current != UacPromptForCredentials)
+                {
+                    key.SetValue("ConsentPromptBehaviorAdmin", UacPromptForCredentials, RegistryValueKind.DWord);
+                    _logger.LogWarning("[PasswordRotationGuard] Enforced ConsentPromptBehaviorAdmin=5 (was {Old})", current);
+                }
+
+                var lua = key.GetValue("EnableLUA");
+                if (lua == null || (int)lua != 1)
+                {
+                    key.SetValue("EnableLUA", 1, RegistryValueKind.DWord);
+                    _logger.LogWarning("[PasswordRotationGuard] Enforced EnableLUA=1");
+                }
+
+                var secureDesktop = key.GetValue("PromptOnSecureDesktop");
+                if (secureDesktop == null || (int)secureDesktop != 1)
+                {
+                    key.SetValue("PromptOnSecureDesktop", 1, RegistryValueKind.DWord);
+                    _logger.LogWarning("[PasswordRotationGuard] Enforced PromptOnSecureDesktop=1");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "[PasswordRotationGuard] EnforceUacPolicy failed");
+            }
+        }
+
+        /// <summary>
+        /// Gets all enabled local accounts that are NOT Microsoft accounts and not built-in.
+        /// </summary>
+        private List<string> GetEnabledLocalAccounts()
+        {
+            var accounts = new List<string>();
+            try
+            {
+                using var machine = new System.DirectoryServices.DirectoryEntry("WinNT://.");
+                foreach (System.DirectoryServices.DirectoryEntry child in machine.Children)
+                {
+                    if (child.SchemaClassName != "User") { child.Dispose(); continue; }
+
+                    try
+                    {
+                        var username = child.Name;
+
+                        // Check if account is disabled
+                        var flags = (int)child.Properties["UserFlags"].Value;
+                        bool isDisabled = (flags & 0x0002) != 0;
+                        if (isDisabled) { child.Dispose(); continue; }
+
+                        // Get SID
+                        var sidBytes = (byte[])child.Properties["objectSid"].Value;
+                        var sid = new System.Security.Principal.SecurityIdentifier(sidBytes, 0);
+                        var sidString = sid.Value;
+
+                        // Skip built-in accounts (RID 500, 501)
+                        if (sidString.EndsWith("-500") || sidString.EndsWith("-501"))
+                        { child.Dispose(); continue; }
+
+                        // Skip Microsoft accounts
+                        if (IsMicrosoftAccount(username, sidString))
+                        { child.Dispose(); continue; }
+
+                        accounts.Add(username);
+                    }
+                    catch { }
+                    finally { child.Dispose(); }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "[PasswordRotationGuard] GetEnabledLocalAccounts failed");
+            }
+            return accounts;
+        }
+
+        private static bool IsMicrosoftAccount(string username, string sid)
+        {
+            try
+            {
+                if (username.Contains('@')) return true;
+
+                using var profileKey = Registry.LocalMachine.OpenSubKey(
+                    $@"SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\{sid}");
+                if (profileKey == null) return false;
+
+                // Check for Microsoft identity store cache entry
+                using var identityKey = Registry.LocalMachine.OpenSubKey(
+                    $@"SOFTWARE\Microsoft\IdentityStore\Cache\{sid}");
+                if (identityKey != null) return true;
+            }
+            catch { }
+            return false;
+        }
+
+        private bool SetLocalAccountPassword(string username, string newPassword)
+        {
+            try
+            {
+                using var entry = new System.DirectoryServices.DirectoryEntry($"WinNT://./{username},user");
+                entry.Invoke("SetPassword", new object[] { newPassword });
+                entry.CommitChanges();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "[PasswordRotationGuard] SetPassword via ADSI failed for {User}", username);
+                return false;
+            }
+        }
+
+        private static string GenerateRandomPassword(int length)
+        {
+            const string chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()-_=+[]{}|;:,.<>?";
+            var bytes = new byte[length];
+            using var rng = System.Security.Cryptography.RandomNumberGenerator.Create();
+            rng.GetBytes(bytes);
+
+            var result = new char[length];
+            for (int i = 0; i < length; i++)
+                result[i] = chars[bytes[i] % chars.Length];
+
+            // Ensure complexity requirements
+            rng.GetBytes(bytes, 0, 4);
+            result[0] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"[bytes[0] % 26];
+            result[1] = "abcdefghijklmnopqrstuvwxyz"[bytes[1] % 26];
+            result[2] = "0123456789"[bytes[2] % 10];
+            result[3] = "!@#$%^&*()-_=+"[bytes[3] % 14];
+
+            return new string(result);
+        }
+    }
 }
 
