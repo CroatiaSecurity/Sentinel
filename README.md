@@ -2,7 +2,7 @@
 
 **Userland IDS/EDR for Windows — Behavioral Threat Detection & Automated Response**
 
-> Version: 1.3.4 | Author: [Gorstak](https://gorstak.eu) | License: MIT
+> Version: 1.3.9 | Author: [Gorstak](https://gorstak.eu) | License: MIT
 
 [![Release](https://img.shields.io/github/v/release/CroatiaSecurity/Sentinel?style=flat-square)](https://github.com/CroatiaSecurity/Sentinel/releases/latest)
 [![License](https://img.shields.io/github/license/CroatiaSecurity/Sentinel?style=flat-square)](LICENSE)
@@ -60,6 +60,7 @@ Telemetry → Fusion → Rules → Scoring → Response → Chain Trace
 | 🔒 **Certificate Attacks** | MitM root CA, BYOVD driver signing | Root + TrustedPublisher store monitoring |
 | 🖥️ **DLL Sideloading** | System DLL in app directory | Module enumeration + in-memory FreeLibrary unload + quarantine + lock file |
 | 🛑 **Anti-Tamper** | Process suspend, binary deletion, service removal | 2s timing tick, binary integrity, SCM monitoring |
+| 🔁 **Agent Resilience** | Agent process killed/crashed | Service-side `AgentWatchdog` relaunches in user session; agent self-restarts on exit |
 | 🔒 **Null Session** | Blank-password network auth, SMB null-session | Registry policy enforcement + FCM push block |
 | 🥾 **Boot Persistence** | Bootkits, EFI rootkits, driver load hijack | BCD monitoring, EFI partition scan, boot driver baseline |
 | 🔗 **Multi-Signal Correlation** | Attack chains (inject+C2, cred+exfil, evasion+persist) | 10 composite detections from independent signal sources |
@@ -111,9 +112,9 @@ Reports are saved to `%ProgramData%\WindowsSentinel\IncidentReports\`.
 
 ## 🏗️ Architecture
 
-**Service (SYSTEM session):** ETW monitors, network scanning, registry monitoring, beaconing detection, route table protection, certificate monitoring, file activity, 50+ background monitors.
+**Service (SYSTEM session):** ETW monitors, network scanning, registry monitoring, beaconing detection, route table protection, certificate monitoring, file activity, 50+ background monitors, `AgentWatchdog` (relaunches the Agent in the user session if it dies and fires an anti-tamper alert on repeated kills).
 
-**Agent (user session):** Tray icon, clipboard sanitizer, screen capture detection, overlay phishing detection, shell watchdog, browser extension monitor.
+**Agent (user session):** Tray icon, clipboard sanitizer, screen capture detection, overlay phishing detection, shell watchdog, browser extension monitor. Self-restarts on crash; also supervised by the Service-side `AgentWatchdog`.
 
 Both communicate through shared detection/response pipeline via the `DetectionEngine` → `AdvancedResponseEngine` → `ChainTracer` chain.
 

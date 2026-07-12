@@ -112,6 +112,19 @@ namespace WindowsSentinel.Core
                                         var imagePath = pt.ImagePath;
                                         if (!string.IsNullOrEmpty(imagePath) && System.IO.File.Exists(imagePath))
                                         {
+                                            // HARDENING v1.3.8: Self-exclusion — never reputation-scan our own binaries.
+                                            // WindowsSentinel.Agent.exe and WindowsSentinel.Service.exe are unsigned
+                                            // dev builds unknown to reputation DBs, so they score ~43-48/100 (Suspicious).
+                                            // This generated false detections, fed the correlation engine with
+                                            // SuspiciousProcess signals, and created bogus incidents against ourselves.
+                                            //
+                                            // SECURITY: Path-verified, not name-based. An attacker naming their binary
+                                            // "WindowsSentinel.Agent.exe" in a different directory is NOT excluded.
+                                            // We verify the binary actually resides in our own installation directory.
+                                            var selfDir = AppContext.BaseDirectory.TrimEnd('\\');
+                                            if (imagePath.StartsWith(selfDir, StringComparison.OrdinalIgnoreCase))
+                                                return;
+
                                             // v1.3.1: Use multi-signal FileReputationEngine for on-execute verdicts
                                             var repoResult = await _fileReputationEngine.EvaluateFileAsync(imagePath, _cts.Token);
 

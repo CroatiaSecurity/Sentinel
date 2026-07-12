@@ -203,6 +203,26 @@ namespace WindowsSentinel.Core
             // CRITICAL: Never kill our own process or our Agent sibling
             if (processId == Environment.ProcessId) return;
 
+            // HARDENING v1.3.8: Never kill any process whose binary resides in our install directory.
+            // When explorer.exe was killed with entireProcessTree:true, it cascaded
+            // and killed the Agent tray app (child of explorer). This self-exclusion
+            // ensures even if a parent process tree kill occurs, our processes survive.
+            //
+            // SECURITY: Path-verified, not name-based. An attacker naming their binary
+            // "WindowsSentinel.Agent.exe" in a user-writable directory is NOT excluded.
+            try
+            {
+                var targetImagePath = SecurityValidation.GetProcessImagePath(processId);
+                var selfDir = AppContext.BaseDirectory.TrimEnd('\\');
+                if (targetImagePath != null &&
+                    targetImagePath.StartsWith(selfDir, StringComparison.OrdinalIgnoreCase))
+                {
+                    Debug.WriteLine($"SafeKillProcessTree: REFUSED to kill sibling Sentinel process PID {processId} at verified install path '{targetImagePath}'");
+                    return;
+                }
+            }
+            catch { /* process may have already exited — continue with kill attempt */ }
+
             try
             {
                 using var proc = Process.GetProcessById(processId);
@@ -243,6 +263,7 @@ namespace WindowsSentinel.Core
                    string.Equals(name, "lsass", StringComparison.OrdinalIgnoreCase) ||
                    string.Equals(name, "winlogon", StringComparison.OrdinalIgnoreCase) ||
                    string.Equals(name, "dwm", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(name, "explorer", StringComparison.OrdinalIgnoreCase) ||
                    string.Equals(name, "System", StringComparison.OrdinalIgnoreCase) ||
                    string.Equals(name, "cmd", StringComparison.OrdinalIgnoreCase);
         }

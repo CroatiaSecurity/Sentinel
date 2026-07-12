@@ -1,6 +1,6 @@
 # Windows Sentinel — Design Document
 
-**Version: 1.2.0**
+**Version: 1.3.9**
 
 ---
 
@@ -102,6 +102,7 @@ The fusion layer is PASSIVE â€” it never blocks, kills, or modifies telemet
 | `AppDnsExfilMonitor` | **1.0.1** Detects application-level DNS-over-HTTPS bypass where non-browser processes communicate directly with known DoH resolvers (Cloudflare, Google, Quad9, etc.) on port 443, evading Windows DNS Client event log and hosts file. Scans every 10s. | No |
 | `CastDeviceGuard` | **1.0.4** Kills ALL connections to Cast ports (8008/8009) on LAN unless target IP is in explicit `TrustedCastDevices` allowlist. No baseline, no OUI trust, no heuristics. Self-healing firewall rules block rogue Cast IPs. Scans every 5s. | No |
 | `ApplicationIntegrityMonitor` | **1.2.5** Cuckoo Egg Detection — baselines protected application executables (SHA-256 + Authenticode publisher) at startup. Detects unauthorized replacement via hash change + publisher mismatch. FileSystemWatcher for real-time + periodic scan every 30s. Active response: kills offending process tree, quarantines impostor, restores original from DPAPI-encrypted backup. Generates forensic incident report suitable for law enforcement filing. Legitimate updates (same publisher, different hash) auto-re-baseline silently. | No |
+| `AgentWatchdog` | **1.3.9** Service-side liveness monitor for `WindowsSentinel.Agent.exe`. Polls every 10s; if the agent is absent, relaunches it in the active console user's session via `WTSQueryUserToken` → `CreateEnvironmentBlock` → `CreateProcessAsUser` (standard SYSTEM→user session launch). 20s startup grace to avoid double-launch race with the HKLM Run key. 15s relaunch cooldown, max 5 relaunches per 5-minute window. Fires `Anti-Tamper: Agent Process Repeatedly Killed` (Tier1/0.70–0.90) if the agent is absent 3+ times in the window. | Yes (SE_ASSIGNPRIMARYTOKEN, SE_INCREASE_QUOTA — held by LocalSystem) |
 
 ### Engine
 
@@ -470,3 +471,12 @@ Composite detections are emitted as Tier1 `DetectionEvent`s directly into the de
 | Statistical beaconing detection | âœ… | âœ… |
 
 
+
+## Added in 1.3.9
+
+| Component | Purpose |
+|-----------|---------|
+| `AgentWatchdog` | Service-side liveness watchdog for `WindowsSentinel.Agent.exe`. Polls every 10s; relaunches the agent in the active console user's session via `WTSQueryUserToken` → `CreateEnvironmentBlock` → `CreateProcessAsUser` when absent. 20s startup grace, 15s relaunch cooldown, max 5 relaunches per 5-minute window. Fires `Anti-Tamper: Agent Process Repeatedly Killed` (Tier1/0.70–0.90) on 3+ kills in window. |
+| Agent self-restart | `Agent/Program.cs` wraps `host.Run()` in try/finally — `TryImmediateRestart()` relaunches the process on any exit (2s cooldown, max 5 self-restarts via `WS_AGENT_RESTART_COUNT` env var). `ScheduleDelayedRelaunch()` via detached `cmd.exe` covers fatal `IsTerminating` crashes where finally may not run. |
+| Orchestrator wiring (Agent) | `detectionEngine.SetOrchestrator(orchestrator)` now called in `Agent/Program.cs` post-`Build()`. Agent-side monitor detections (`ShellWatchdog`, `ClipboardSanitizer`, `ScreenCaptureMonitor`, etc.) now flow through incident grouping, response deduplication, and `ContextBus`. Previously bypassed the orchestrator entirely, falling back to bare `AdvancedResponseEngine`. |
+| appsettings path fix (Agent) | `ConfigureAppConfiguration` sets `BasePath` to `AppContext.BaseDirectory`. Fixes `appsettings.json` not found when agent is launched by `AgentWatchdog` with `System32` as CWD. |

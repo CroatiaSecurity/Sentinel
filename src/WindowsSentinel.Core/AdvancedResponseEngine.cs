@@ -73,6 +73,40 @@ namespace WindowsSentinel.Core
             bool shouldRemoveRegistryEntry = false;
             string reason = "LogOnly";
 
+            // HARDENING v1.3.8: Absolute self-exclusion — never take action against our own processes.
+            // The FileReputationEngine flags our unsigned dev builds as "Suspicious" (score ~43-48),
+            // and the correlation engine can escalate these to kill responses. Force LogOnly.
+            //
+            // SECURITY: Path-verified, not name-based. An attacker naming their binary
+            // "WindowsSentinel.Agent.exe" in a user-writable directory is NOT excluded.
+            // We resolve the actual image path and verify it resides in our installation directory.
+            if (detection.ProcessId > 0)
+            {
+                try
+                {
+                    var detectedImagePath = SecurityValidation.GetProcessImagePath(detection.ProcessId);
+                    var selfDir = AppContext.BaseDirectory.TrimEnd('\\');
+                    if (detectedImagePath != null &&
+                        detectedImagePath.StartsWith(selfDir, StringComparison.OrdinalIgnoreCase))
+                    {
+                        reason = "LogOnly (Self-exclusion: verified WindowsSentinel install path)";
+                        stopwatch.Stop();
+                        _metrics.RecordResponse(stopwatch.ElapsedMilliseconds);
+                        var selfLog = new ResponseEvent
+                        {
+                            ProcessId = detection.ProcessId,
+                            ProcessName = detection.ProcessName,
+                            ActionTaken = "LOG",
+                            Reason = reason,
+                            ExecutionTimeMs = stopwatch.ElapsedMilliseconds
+                        };
+                        await _eventLogger.LogEventAsync("response", selfLog);
+                        return;
+                    }
+                }
+                catch { /* process may have exited — continue with normal handling */ }
+            }
+
             var isPresidentsLaw = IsPresidentsLawRule(detection);
             var effectiveTier = detection.Tier;
             var effectiveResponse = detection.AuthorizedResponse;

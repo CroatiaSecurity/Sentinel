@@ -219,6 +219,10 @@ namespace WindowsSentinel.Service
 
                     // v1.2.5: Application Integrity (Cuckoo Egg Detection)
                     services.AddHostedService<ApplicationIntegrityMonitor>();
+
+                    // v1.3.9: Agent watchdog — relaunches WindowsSentinel.Agent.exe in the
+                    // user session if it dies, and fires an anti-tamper alert on repeated kills
+                    services.AddHostedService<AgentWatchdog>();
                 });
     }
 }

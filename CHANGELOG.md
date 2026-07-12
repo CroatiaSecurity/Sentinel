@@ -2,6 +2,24 @@
  
 All notable changes to Windows Sentinel are documented in this file.
  
+## [1.3.9] - 2026-07-12
+ 
+### Fixed — Agent Process Dying (No Recovery Mechanism)
+ 
+**Root cause:** `WindowsSentinel.Agent.exe` is a user-session process started via the HKLM Run key. Unlike the Service (which has `sc.exe` failure-restart configured: `restart/1000/restart/5000/restart/30000`), the Agent had zero recovery — if it crashed or was killed, it stayed dead until the next user login. The Service had no visibility into the Agent's liveness at all.
+ 
+**Three-layer fix:**
+ 
+- **`AgentWatchdog` (Service-side, primary)**: New `BackgroundService` in `WindowsSentinel.Core` that polls for `WindowsSentinel.Agent.exe` every 10 seconds. If absent, relaunches it in the active console user's session via `WTSQueryUserToken` → `CreateEnvironmentBlock` → `CreateProcessAsUser` (the standard Windows pattern for SYSTEM services spawning user-visible processes). Enforces a 15-second relaunch cooldown and a max of 5 relaunches per 5-minute window to prevent restart storms. Fires an `Anti-Tamper: Agent Process Repeatedly Killed` Tier1 detection if the Agent is absent 3+ times in the window — an attacker killing the agent to suppress tray notifications will now trigger an alert. A 20-second startup grace period prevents a double-launch race with the HKLM Run key on login.
+ 
+- **Agent self-restart (Agent-side, secondary)**: `Agent/Program.cs` now wraps `host.Run()` in a try/finally. On any exit — clean or crash — `TryImmediateRestart()` relaunches the process immediately (2-second cooldown). A restart counter passed via the `WS_AGENT_RESTART_COUNT` environment variable limits self-restarts to 5 before deferring to the `AgentWatchdog`. For terminal `IsTerminating` crashes (where the finally block may not run), `ScheduleDelayedRelaunch()` spawns a detached `cmd.exe` that waits ~3 seconds and then re-launches the agent.
+ 
+- **Orchestrator wiring fix (Agent-side, correctness)**: `Agent/Program.cs` now calls `detectionEngine.SetOrchestrator(orchestrator)` after `Build()` and before `Run()`, matching the pattern in `SentinelService.cs`. Previously, any detection emitted by Agent-side monitors (e.g., `ShellWatchdog`, `ClipboardSanitizer`, `ScreenCaptureMonitor`) bypassed the `SentinelOrchestrator` entirely — falling back to hitting `AdvancedResponseEngine` directly, skipping incident grouping, response deduplication, and the `ContextBus`.
+ 
+- **appsettings path fix**: Added `ConfigureAppConfiguration` to set `BasePath` to `AppContext.BaseDirectory`. Previously, if the Agent was launched by the `AgentWatchdog` (or any other non-Run-key path), its CWD could be `System32`, causing `appsettings.json` to not be found and all config values to fall back to defaults.
+ 
+- **`AgentWatchdog` registered** in `WindowsSentinel.Service/Program.cs` as a hosted service.
+ 
 ## [1.3.8] - 2026-07-12
  
 ### Fixed & Hardened — Missing Core Rules and Monitors Integration
