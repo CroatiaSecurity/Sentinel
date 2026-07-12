@@ -58,19 +58,13 @@ namespace WindowsSentinel.Core
                 {
                     if (_baselineListeners.Contains(listener)) continue;
 
-                    // Skip localhost listeners on ephemeral ports (IDE language servers, debug adapters, dev servers)
+                    // Parse listener details
                     var parts = listener.Split(':');
                     if (parts.Length == 2)
                     {
                         var addr = parts[0];
                         if (int.TryParse(parts[1], out var port))
                         {
-                            if ((addr == "127.0.0.1" || addr == "::1") && port >= 49152)
-                            {
-                                _baselineListeners.Add(listener);
-                                continue;
-                            }
-
                             // Skip well-known Windows service ports that can start/stop dynamically
                             // 2869 = SSDP/UPnP event notification, 5357 = WSDAPI, 5985 = WinRM HTTP
                             if (port is 2869 or 5357 or 5985 or 1900 or 3702)
@@ -78,10 +72,29 @@ namespace WindowsSentinel.Core
                                 _baselineListeners.Add(listener);
                                 continue;
                             }
+
+                            // v1.4.1: Localhost listeners on ephemeral ports are still logged
+                            // at lower confidence. Previously these were silently skipped, creating
+                            // a blind spot for local data exfiltration relays.
+                            if ((addr == "127.0.0.1" || addr == "::1") && port >= 49152)
+                            {
+                                _ = _detectionEngine.EmitAsync(new DetectionEvent
+                                {
+                                    RuleName = "Network: New Localhost High-Port Listener",
+                                    Evidence = $"New localhost TCP listener on ephemeral port: {listener}",
+                                    Reasoning = "A new localhost listener appeared on a high ephemeral port. " +
+                                                "While often legitimate (IDE language servers, debug adapters), " +
+                                                "this can also indicate a local relay for data exfiltration or C2 tunneling.",
+                                    Confidence = 0.35, Tier = DetectionTier.Tier2Indicator,
+                                    ProcessName = "SYSTEM", ProcessId = 0
+                                });
+                                _baselineListeners.Add(listener);
+                                continue;
+                            }
                         }
                     }
 
-                    // New listener appeared
+                    // New listener appeared on non-localhost or well-known port
                     _ = _detectionEngine.EmitAsync(new DetectionEvent
                     {
                         RuleName = "Network: New Local TCP Listener",

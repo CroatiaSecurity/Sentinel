@@ -77,6 +77,28 @@ namespace WindowsSentinel.Core
             int level, out IntPtr bufPtr, int prefMaxLen,
             out int entriesRead, out int totalEntries, ref IntPtr resumeHandle);
 
+        [DllImport("netapi32.dll", CharSet = CharSet.Unicode)]
+        private static extern int NetShareEnum(
+            string? serverName, int level, out IntPtr bufPtr, int prefMaxLen,
+            out int entriesRead, out int totalEntries, ref int resumeHandle);
+
+        // SHARE_INFO_2 structure for local share enumeration
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        private struct SHARE_INFO_2
+        {
+            [MarshalAs(UnmanagedType.LPWStr)] public string shi2_netname;
+            public uint shi2_type;
+            [MarshalAs(UnmanagedType.LPWStr)] public string? shi2_remark;
+            public uint shi2_permissions;
+            public uint shi2_max_uses;
+            public uint shi2_current_uses;
+            [MarshalAs(UnmanagedType.LPWStr)] public string? shi2_path;
+            [MarshalAs(UnmanagedType.LPWStr)] public string? shi2_passwd;
+        }
+
+        // Baseline of local shares at startup — new shares after this are suspicious
+        private readonly HashSet<string> _baselineLocalShares = new(StringComparer.OrdinalIgnoreCase);
+
         public NetworkShareMonitor(
             DetectionEngine detectionEngine,
             ProcessAncestryCache ancestryCache,
@@ -94,6 +116,9 @@ namespace WindowsSentinel.Core
             // Baseline currently mapped drives
             BaselineMappedDrives();
 
+            // Baseline currently exported local shares
+            BaselineLocalShares();
+
             while (!ct.IsCancellationRequested)
             {
                 try
@@ -101,6 +126,7 @@ namespace WindowsSentinel.Core
                     await Task.Delay(ScanInterval, ct);
 
                     await DetectNewShareMappings(ct);
+                    await DetectNewLocalShareCreation(ct);
                     await DetectAdminShareAccess(ct);
                     await DetectInboundSessions(ct);
                 }
@@ -153,6 +179,137 @@ namespace WindowsSentinel.Core
                     }
                 });
             }
+        }
+
+        /// <summary>
+        /// Detects new local SMB shares being created after service start.
+        /// An attacker can run 'net share PWNED=C:\ /grant:everyone,full' to expose drives
+        /// to the network without triggering any existing monitor.
+        /// v1.4.1: New detection — closes local share creation blind spot.
+        /// </summary>
+        private async Task DetectNewLocalShareCreation(CancellationToken ct)
+        {
+            try
+            {
+                var currentShares = EnumerateLocalShares();
+                foreach (var share in currentShares)
+                {
+                    if (_baselineLocalShares.Contains(share.Name)) continue;
+
+                    // New share appeared after startup
+                    _baselineLocalShares.Add(share.Name);
+
+                    // Default admin shares are always present — don't alert on them
+                    if (AdminShares.Contains(share.Name)) continue;
+
+                    // Determine severity based on what's being shared
+                    bool isFullDrive = !string.IsNullOrEmpty(share.Path) &&
+                        share.Path.Length <= 3 && share.Path.Contains(':');
+                    bool isSystemPath = !string.IsNullOrEmpty(share.Path) &&
+                        (share.Path.StartsWith(@"C:\Windows", StringComparison.OrdinalIgnoreCase) ||
+                         share.Path.StartsWith(@"C:\Users", StringComparison.OrdinalIgnoreCase) ||
+                         share.Path.StartsWith(@"C:\Program", StringComparison.OrdinalIgnoreCase));
+
+                    var confidence = isFullDrive ? 0.95 : isSystemPath ? 0.88 : 0.75;
+
+                    await _detectionEngine.EmitAsync(new DetectionEvent
+                    {
+                        RuleName = "Network Share: Unauthorized Local Share Created",
+                        Evidence = $"New SMB share '{share.Name}' created exposing path '{share.Path}' " +
+                                   $"(Type: {share.Type}, Remark: '{share.Remark}')",
+                        Reasoning = isFullDrive
+                            ? "A new network share was created exposing an ENTIRE DRIVE to the network. " +
+                              "This gives any network-reachable machine full read/write access to all files on the drive. " +
+                              "This is a critical data exposure — either an attacker creating exfiltration access or " +
+                              "preparing for remote file manipulation via passive FTP/SMB from a rogue device."
+                            : "A new network share was created after Sentinel startup. Runtime share creation " +
+                              "is uncommon in normal operation and may indicate an attacker exposing local files " +
+                              "for remote access, data exfiltration, or establishing a staging area.",
+                        Confidence = confidence,
+                        Tier = DetectionTier.Tier1Behavioral,
+                        AuthorizedResponse = ResponseAction.KillProcessTree,
+                        ProcessName = "SYSTEM",
+                        ProcessId = 0,
+                        Metadata = new Dictionary<string, string>
+                        {
+                            ["ShareName"] = share.Name,
+                            ["SharedPath"] = share.Path ?? "",
+                            ["ShareType"] = share.Type.ToString(),
+                            ["IsFullDrive"] = isFullDrive.ToString()
+                        }
+                    });
+
+                    // Auto-delete the unauthorized share
+                    try
+                    {
+                        var psi = new ProcessStartInfo("net.exe", $"share \"{share.Name}\" /delete /yes")
+                        {
+                            CreateNoWindow = true,
+                            UseShellExecute = false,
+                            RedirectStandardOutput = true,
+                            RedirectStandardError = true
+                        };
+                        using var proc = Process.Start(psi);
+                        proc?.WaitForExit(5000);
+                        _logger.LogWarning(
+                            "[NetworkShareMonitor] AUTO-DELETED unauthorized share '{Name}' exposing '{Path}'",
+                            share.Name, share.Path);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug(ex, "[NetworkShareMonitor] Failed to delete share {Name}", share.Name);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "[NetworkShareMonitor] DetectNewLocalShareCreation error");
+            }
+        }
+
+        private void BaselineLocalShares()
+        {
+            foreach (var share in EnumerateLocalShares())
+            {
+                _baselineLocalShares.Add(share.Name);
+            }
+            _logger.LogInformation("[NetworkShareMonitor] Baselined {Count} local shares", _baselineLocalShares.Count);
+        }
+
+        private List<LocalShareInfo> EnumerateLocalShares()
+        {
+            var shares = new List<LocalShareInfo>();
+            try
+            {
+                int resumeHandle = 0;
+                int result = NetShareEnum(null, 2, out IntPtr bufPtr, -1,
+                    out int entriesRead, out int totalEntries, ref resumeHandle);
+
+                if (result != 0 || bufPtr == IntPtr.Zero) return shares;
+
+                try
+                {
+                    int structSize = Marshal.SizeOf<SHARE_INFO_2>();
+                    for (int i = 0; i < entriesRead; i++)
+                    {
+                        var entry = Marshal.PtrToStructure<SHARE_INFO_2>(
+                            IntPtr.Add(bufPtr, i * structSize));
+                        shares.Add(new LocalShareInfo
+                        {
+                            Name = entry.shi2_netname,
+                            Type = entry.shi2_type,
+                            Path = entry.shi2_path,
+                            Remark = entry.shi2_remark
+                        });
+                    }
+                }
+                finally
+                {
+                    NetApiBufferFree(bufPtr);
+                }
+            }
+            catch { }
+            return shares;
         }
 
         private async Task DetectAdminShareAccess(CancellationToken ct)
@@ -371,6 +528,14 @@ namespace WindowsSentinel.Core
             public int FileAccessCount { get; set; }
             public DateTimeOffset FirstAccess { get; set; }
             public DateTimeOffset LastAccess { get; set; }
+        }
+
+        private class LocalShareInfo
+        {
+            public string Name { get; set; } = string.Empty;
+            public uint Type { get; set; }
+            public string? Path { get; set; }
+            public string? Remark { get; set; }
         }
     }
 }

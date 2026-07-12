@@ -2,6 +2,36 @@
  
 All notable changes to Windows Sentinel are documented in this file.
  
+## [1.4.1] - 2026-07-12
+
+### Security — Red Team Audit: 11 Gaps Closed
+
+Comprehensive red-team audit identified 11 potential bypass vectors. All addressed in this release.
+
+### Added
+
+- **`BuiltinAdminGuard`** (new BackgroundService): Monitors the built-in Administrator account (RID 500) every 15 seconds. If found active, immediately disables it via `net user Administrator /active:no` and emits a Tier1 alert. The built-in Admin account should never be enabled on a personal workstation — attackers enable it for backdoor access (no UAC, possibly blank password, survives user profile changes, visible on login screen).
+- **`IPSecIntegrityGuard`** (new BackgroundService): Verifies the GSecurity IPSec policy is active every 30 seconds. If an attacker deletes or unassigns the policy via `netsh ipsec static delete policy`, Sentinel automatically re-applies the full port block ruleset and emits a Tier1 anti-tamper alert.
+- **`NetworkShareMonitor` — Local Share Creation Detection**: Baselines local SMB shares at startup via `NetShareEnum`. Detects new shares created at runtime (e.g., `net share PWNED=C:\ /grant:everyone,full`), emits Tier1 alert with 0.95 confidence for full-drive exposure, and auto-deletes the unauthorized share.
+- **`FileActivityMonitor` — Junction/Symlink Detection**: Detects `FileAttributes.ReparsePoint` on newly created directories within monitored paths. Alerts on unauthorized junction/symlink creation that could redirect monitoring or exploit TOCTOU vulnerabilities.
+- **`LocalServerMonitor` — Localhost High-Port Logging**: Previously silently skipped localhost listeners on ephemeral ports (≥49152). Now emits Tier2 events at confidence 0.35 to close the local relay exfiltration blind spot.
+- **`VolumeMountMonitor` — WMI Subscription Persistence Removal**: `RemoveSubstPersistence` now also scans and deletes WMI `CommandLineEventConsumer` subscriptions containing `subst` or `DefineDosDevice` + the drive letter, including associated `__EventFilter` and `__FilterToConsumerBinding` objects.
+- **`VolumeMountMonitor` — Rapid SUBST Escalation**: If a SUBST drive reappears within 30 seconds of being killed, the process hunt escalates past Phase 4's signed-binary exemption to kill ALL recently-spawned non-system processes regardless of signature.
+
+### Changed
+
+- **`HardeningModule.ApplyIPSecPolicy`**: No longer uses `.ipsec_applied` flag file. Now calls `IsIPSecPolicyActive()` which queries actual IPSec engine state via `netsh ipsec static show policy`. Immune to flag-file race conditions and pre-creation attacks.
+- **`HardeningModule`**: Extracted `ReapplyIPSecPolicy()` and `IsIPSecPolicyActive()` as public static methods for use by `IPSecIntegrityGuard`.
+- **`FileActivityMonitor.IsUserToolWorkingPath`**: User tool exclusion paths (`\mount\`, `\scratch\`, `\extracted\`, etc.) now require `IsServicingProcessActive()` to return true. If no servicing tool (dism, ntlite, tiworker, trustedinstaller) is running, these paths are monitored normally — prevents attackers from creating directories matching exclusion patterns to evade monitoring.
+- **`ApplicationIntegrityMonitor.OnFileChanged`**: Replaced 1000ms fixed delay with a 100ms×5 retry loop. Shrinks the TOCTOU attack window from 1000ms to ~100ms. Hash is computed immediately on first attempt; retries only occur if the file is locked.
+
+### Fixed
+
+- **IPSec policy deletion bypass**: An admin-level attacker could run `netsh ipsec static delete policy name=GSecurity` and all port blocks would remain permanently removed until service restart. Now self-heals within 30 seconds.
+- **Local share creation blind spot**: `net share` exposing drives to the network generated zero telemetry. Now detected, alerted, and auto-remediated.
+- **Path exclusion exploitation**: Creating `C:\Users\Admin\mount\` as a payload staging directory bypassed `FileActivityMonitor` even without any servicing tool running.
+- **ApplicationIntegrity TOCTOU**: Binary could be replaced → executed → restored within the 1-second delay window before hash verification ran.
+
 ## [1.4.0] - 2026-07-12
 
 ### Fixed — svchost and powershell Quarantined (Critical False Positive)

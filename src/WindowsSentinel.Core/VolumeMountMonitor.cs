@@ -261,6 +261,19 @@ namespace WindowsSentinel.Core
                             await DismountFallbackDrive(vol);
                             await HuntSubstCreatorProcess(vol.DriveLetter);
                             await RemoveSubstPersistence(vol.DriveLetter);
+
+                            // v1.4.1: If the drive keeps reappearing (recreated faster than our scan),
+                            // escalate — scan ALL non-system processes using DefineDosDevice API.
+                            // This catches signed binaries from Program Files that Phase 4 skips.
+                            if (_alertedVolumes.TryGetValue(vol.DeviceId, out var prevAlert) &&
+                                DateTimeOffset.UtcNow - prevAlert < TimeSpan.FromSeconds(30))
+                            {
+                                _logger.LogWarning(
+                                    "[VolumeMountMonitor] SUBST drive {Drive} is being recreated rapidly — escalating to kill ALL DefineDosDevice callers",
+                                    vol.DriveLetter);
+                                await HuntRecentlySpawnedUnsignedProcesses(vol.DriveLetter.TrimEnd('\\', ':').ToUpperInvariant(), new HashSet<int>());
+                            }
+
                             continue;
                         }
 
@@ -804,6 +817,7 @@ namespace WindowsSentinel.Core
         /// Removes persistence mechanisms that recreate the SUBST drive:
         /// 1. Run/RunOnce registry entries containing 'subst' + the drive letter
         /// 2. Scheduled tasks with 'subst' in their action
+        /// 3. WMI event subscriptions that execute 'subst' commands
         /// This ensures the attacker's drive doesn't come back after Sentinel removes it.
         /// </summary>
         private async Task RemoveSubstPersistence(string driveLetter)
@@ -815,6 +829,9 @@ namespace WindowsSentinel.Core
 
             // 2. Scan and disable scheduled tasks with subst
             await RemoveSubstScheduledTasks(normalizedLetter);
+
+            // 3. v1.4.1: Scan and remove WMI event subscriptions that recreate SUBST drives
+            await RemoveSubstWmiSubscriptions(normalizedLetter);
         }
 
         private async Task RemoveSubstFromRunKeys(string driveLetter)
@@ -987,6 +1004,124 @@ namespace WindowsSentinel.Core
             {
                 _logger.LogDebug(ex, "[VolumeMountMonitor] Failed to scan scheduled tasks for SUBST persistence");
             }
+        }
+
+        /// <summary>
+        /// v1.4.1: Removes WMI event subscriptions that contain 'subst' + the drive letter.
+        /// An attacker can use WMI persistence (__EventFilter + CommandLineEventConsumer)
+        /// to recreate SUBST drives periodically, bypassing Run key and scheduled task detection.
+        /// </summary>
+        private async Task RemoveSubstWmiSubscriptions(string driveLetter)
+        {
+            try
+            {
+                var scope = new ManagementScope(@"root\subscription");
+                scope.Connect();
+
+                // Check CommandLineEventConsumer instances for subst commands
+                using var consumerSearcher = new ManagementObjectSearcher(scope,
+                    new ObjectQuery("SELECT * FROM CommandLineEventConsumer"));
+
+                foreach (ManagementObject consumer in consumerSearcher.Get())
+                {
+                    var cmdLine = consumer["CommandLineTemplate"]?.ToString() ?? "";
+                    var execPath = consumer["ExecutablePath"]?.ToString() ?? "";
+                    var name = consumer["Name"]?.ToString() ?? "";
+
+                    bool isSubstPersistence =
+                        (cmdLine.Contains("subst", StringComparison.OrdinalIgnoreCase) ||
+                         execPath.Contains("subst", StringComparison.OrdinalIgnoreCase)) &&
+                        (cmdLine.Contains(driveLetter, StringComparison.OrdinalIgnoreCase) ||
+                         execPath.Contains(driveLetter, StringComparison.OrdinalIgnoreCase));
+
+                    // Also catch DefineDosDevice-based persistence
+                    if (!isSubstPersistence)
+                    {
+                        isSubstPersistence =
+                            cmdLine.Contains("DefineDosDevice", StringComparison.OrdinalIgnoreCase) &&
+                            cmdLine.Contains(driveLetter, StringComparison.OrdinalIgnoreCase);
+                    }
+
+                    if (isSubstPersistence)
+                    {
+                        try
+                        {
+                            consumer.Delete();
+                            _logger.LogWarning(
+                                "[VolumeMountMonitor] REMOVED WMI SUBST persistence consumer: '{Name}' cmd='{Cmd}'",
+                                name, cmdLine);
+
+                            // Also find and delete the associated filter and binding
+                            await RemoveWmiBindingsForConsumer(scope, name);
+
+                            await _detectionEngine.EmitAsync(new DetectionEvent
+                            {
+                                RuleName = "Persistence Removed: SUBST Drive WMI Subscription",
+                                Evidence = $"Deleted WMI CommandLineEventConsumer '{name}' that recreates SUBST drive {driveLetter}: via '{cmdLine}'",
+                                Reasoning = "A WMI event subscription was configured to persistently recreate an attacker SUBST staging drive. " +
+                                            "WMI persistence survives reboots and is invisible to Run key / scheduled task scanners. Subscription removed.",
+                                Confidence = 0.92,
+                                Tier = DetectionTier.Tier1Behavioral,
+                                AuthorizedResponse = ResponseAction.LogOnly,
+                                ProcessName = "SYSTEM",
+                                ProcessId = 0
+                            });
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogDebug(ex, "[VolumeMountMonitor] Failed to delete WMI consumer {Name}", name);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "[VolumeMountMonitor] Failed to scan WMI subscriptions for SUBST persistence");
+            }
+        }
+
+        private static async Task RemoveWmiBindingsForConsumer(ManagementScope scope, string consumerName)
+        {
+            try
+            {
+                // Find FilterToConsumerBinding entries that reference this consumer
+                using var bindingSearcher = new ManagementObjectSearcher(scope,
+                    new ObjectQuery("SELECT * FROM __FilterToConsumerBinding"));
+
+                foreach (ManagementObject binding in bindingSearcher.Get())
+                {
+                    var consumerRef = binding["Consumer"]?.ToString() ?? "";
+                    if (consumerRef.Contains(consumerName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        // Extract filter name from binding and delete the filter
+                        var filterRef = binding["Filter"]?.ToString() ?? "";
+                        binding.Delete();
+
+                        // Try to delete the associated EventFilter
+                        if (!string.IsNullOrEmpty(filterRef))
+                        {
+                            try
+                            {
+                                using var filterSearcher = new ManagementObjectSearcher(scope,
+                                    new ObjectQuery("SELECT * FROM __EventFilter"));
+                                foreach (ManagementObject filter in filterSearcher.Get())
+                                {
+                                    var path = filter.Path.Path ?? "";
+                                    if (filterRef.Contains(filter["Name"]?.ToString() ?? "~NOMATCH~",
+                                        StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        filter.Delete();
+                                        break;
+                                    }
+                                }
+                            }
+                            catch { }
+                        }
+                    }
+                }
+            }
+            catch { }
+            await Task.CompletedTask;
         }
 
         /// <summary>

@@ -122,29 +122,52 @@ namespace WindowsSentinel.Core
             catch { }
         }
 
-        private static void ApplyIPSecPolicy()
+        /// <summary>
+        /// Verifies the GSecurity IPSec policy is currently assigned and active.
+        /// Returns true if the policy is confirmed active, false if missing/unassigned.
+        /// Uses 'netsh ipsec static show policy name=GSecurity' — exit code 0 + "assigned: yes"
+        /// means it's active. Anything else means it's been tampered with.
+        /// </summary>
+        public static bool IsIPSecPolicyActive()
         {
             try
             {
-                var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
-                var sentinelDir = Path.Combine(programData, "WindowsSentinel");
-                var flagFile = Path.Combine(sentinelDir, ".ipsec_applied");
-
-                if (File.Exists(flagFile))
+                var psi = new ProcessStartInfo("netsh.exe", "ipsec static show policy name=GSecurity")
                 {
-                    return; // Already applied
-                }
+                    CreateNoWindow = true,
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true
+                };
+                using var proc = Process.Start(psi);
+                if (proc == null) return false;
+                var output = proc.StandardOutput.ReadToEnd();
+                proc.WaitForExit(5000);
+                // Policy exists and is assigned if output contains "Assigned" and "Yes"
+                return proc.ExitCode == 0 &&
+                       output.Contains("Assign", StringComparison.OrdinalIgnoreCase) &&
+                       output.Contains("Yes", StringComparison.OrdinalIgnoreCase);
+            }
+            catch
+            {
+                return false;
+            }
+        }
 
-                // 1. Delete existing policy (this is idempotent)
+        /// <summary>
+        /// Re-applies the IPSec policy unconditionally. Called by the self-healing loop
+        /// when the policy is detected as missing or unassigned.
+        /// v1.4.1: Extracted from ApplyIPSecPolicy for reuse by IPSecIntegrityGuard.
+        /// </summary>
+        public static void ReapplyIPSecPolicy()
+        {
+            try
+            {
+                // Delete and recreate from scratch — handles partial corruption
                 RunNetsh("ipsec static delete policy name=GSecurity");
-
-                // 2. Create the policy
                 RunNetsh("ipsec static add policy name=GSecurity description=\"Blocks dangerous/unnecessary ports. Managed by Windows Sentinel.\" assign=yes");
-
-                // 3. Create the BlockAction filter action
                 RunNetsh("ipsec static add filteraction name=BlockAction action=block description=\"Block traffic\"");
 
-                // 4. Create rules and filters
                 foreach (var def in PortDefinitions)
                 {
                     var protocols = new List<string>();
@@ -164,31 +187,35 @@ namespace WindowsSentinel.Core
                         {
                             var filterListName = $"{direction}_{def.Name}_{proto}";
                             var ruleName = $"Block_{direction}_{def.Name}_{proto}";
-
                             string src = (direction == "Inbound") ? "Any" : "Me";
                             string dst = (direction == "Inbound") ? "Me" : "Any";
-
-                            // Create filter list
                             RunNetsh($"ipsec static add filterlist name={filterListName} description=\"{direction} {def.Name} port {def.Port} ({proto})\"");
-
-                            // Create filter
                             RunNetsh($"ipsec static add filter filterlist={filterListName} srcaddr={src} dstaddr={dst} protocol={proto} dstport={def.Port} mirrored=no");
-
-                            // Link filter list to rule
                             RunNetsh($"ipsec static add rule name={ruleName} policy=GSecurity filterlist={filterListName} filteraction=BlockAction");
                         }
                     }
                 }
 
-                // 5. Assign policy
                 RunNetsh("ipsec static set policy name=GSecurity assign=yes");
+            }
+            catch { }
+        }
 
-                // Write the flag file to avoid running on subsequent boots
-                if (!Directory.Exists(sentinelDir))
+        private static void ApplyIPSecPolicy()
+        {
+            try
+            {
+                // v1.4.1: Check actual policy state instead of relying on flag file.
+                // An attacker can delete the flag file to force re-application (benign),
+                // or create it before first run to prevent application (critical).
+                // Now we verify the policy is actually active in the IPSec engine.
+                if (IsIPSecPolicyActive())
                 {
-                    Directory.CreateDirectory(sentinelDir);
+                    return; // Policy confirmed active — no action needed
                 }
-                File.WriteAllText(flagFile, DateTimeOffset.UtcNow.ToString("o"));
+
+                // Policy is missing or unassigned — apply it
+                ReapplyIPSecPolicy();
             }
             catch
             {

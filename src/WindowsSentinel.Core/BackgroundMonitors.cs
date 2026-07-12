@@ -1096,64 +1096,6 @@ namespace WindowsSentinel.Core
     }
 
     // ──────────────────────────────────────────────
-    // Gateway Fingerprint Monitor — detects gateway change (rogue AP)
-    // ──────────────────────────────────────────────
-    public sealed class GatewayFingerprintMonitor : BackgroundService
-    {
-        private readonly DetectionEngine _detectionEngine;
-        private readonly ILogger<GatewayFingerprintMonitor> _logger;
-        private string? _baselineGateway;
-
-        public GatewayFingerprintMonitor(DetectionEngine de, ILogger<GatewayFingerprintMonitor> l) { _detectionEngine = de; _logger = l; }
-
-        protected override async Task ExecuteAsync(CancellationToken ct)
-        {
-            _logger.LogInformation("[GatewayFingerprintMonitor] Started");
-            _baselineGateway = GetDefaultGateway();
-
-            while (!ct.IsCancellationRequested)
-            {
-                try
-                {
-                    await Task.Delay(60000, ct);
-                    var current = GetDefaultGateway();
-                    if (_baselineGateway != null && current != null && current != _baselineGateway)
-                    {
-                        await _detectionEngine.EmitAsync(new DetectionEvent
-                        {
-                            RuleName = "Network: Default Gateway Changed",
-                            Evidence = $"Gateway changed from {_baselineGateway} to {current}",
-                            Reasoning = "The default network gateway changed at runtime, possibly indicating a rogue access point or network hijack.",
-                            Confidence = 0.75, Tier = DetectionTier.Tier1Behavioral,
-                            AuthorizedResponse = ResponseAction.NetworkIsolate,
-                            ProcessName = "SYSTEM", ProcessId = 0,
-                            Metadata = new Dictionary<string, string> { { "TargetIP", current ?? "" } }
-                        });
-                        _baselineGateway = current;
-                    }
-                }
-                catch (OperationCanceledException) { break; }
-                catch (Exception ex) { _logger.LogDebug(ex, "[GatewayFingerprintMonitor] Error"); }
-            }
-        }
-
-        private static string? GetDefaultGateway()
-        {
-            try
-            {
-                foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
-                {
-                    if (ni.OperationalStatus != OperationalStatus.Up) continue;
-                    var gw = ni.GetIPProperties().GatewayAddresses
-                        .FirstOrDefault(g => g.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork);
-                    if (gw != null) return gw.Address.ToString();
-                }
-            }
-            catch { }
-            return null;
-        }
-    }
-
     // ──────────────────────────────────────────────
     // Microsoft Account Guard — watches for token files
     // ──────────────────────────────────────────────
@@ -5535,6 +5477,254 @@ namespace WindowsSentinel.Core
                 proc?.WaitForExit(5000);
             }
             catch { }
+        }
+    }
+
+    // ──────────────────────────────────────────────
+    // Builtin Admin Guard — detects and disables the built-in Administrator account.
+    // The built-in Administrator account (RID 500) should NEVER be active on a
+    // personal workstation. Attackers enable it for backdoor access because it:
+    //   1. Has a blank password by default on many installs
+    //   2. Bypasses UAC entirely (no elevation prompts)
+    //   3. Survives user profile deletion
+    //   4. Is visible on the login screen, inviting interactive logon
+    // v1.4.1: Introduced after an active intrusion enabled it to establish persistence.
+    // ──────────────────────────────────────────────
+    public sealed class BuiltinAdminGuard : BackgroundService
+    {
+        private readonly DetectionEngine _detectionEngine;
+        private readonly SentinelConfig _config;
+        private readonly ILogger<BuiltinAdminGuard> _logger;
+
+        public BuiltinAdminGuard(DetectionEngine de, SentinelConfig config, ILogger<BuiltinAdminGuard> l)
+        {
+            _detectionEngine = de;
+            _config = config;
+            _logger = l;
+        }
+
+        protected override async Task ExecuteAsync(CancellationToken ct)
+        {
+            _logger.LogInformation("[BuiltinAdminGuard] Started — monitoring built-in Administrator account state");
+
+            // Check immediately at startup
+            await CheckAndDisableBuiltinAdmin("Startup", ct);
+
+            while (!ct.IsCancellationRequested)
+            {
+                try
+                {
+                    await Task.Delay(15000, ct); // Check every 15 seconds
+                    await CheckAndDisableBuiltinAdmin("PeriodicCheck", ct);
+                }
+                catch (OperationCanceledException) { break; }
+                catch (Exception ex) { _logger.LogDebug(ex, "[BuiltinAdminGuard] Error"); }
+            }
+        }
+
+        private async Task CheckAndDisableBuiltinAdmin(string trigger, CancellationToken ct)
+        {
+            try
+            {
+                // Query the built-in Administrator account state via SAM registry
+                // HKLM\SAM\SAM\Domains\Account\Users\000001F4 (RID 500 = 0x1F4)
+                // The "F" binary value at offset 0x38 contains account flags.
+                // Bit 0x0002 = Account Disabled. If NOT set, account is active.
+                //
+                // Alternative: use 'net user Administrator' but that's slower and spawns a process.
+                // We use WMI Win32_UserAccount for reliability.
+                bool isActive = IsBuiltinAdminActive();
+
+                if (isActive)
+                {
+                    _logger.LogWarning("[BuiltinAdminGuard] Built-in Administrator account is ENABLED (trigger: {Trigger}) — disabling immediately", trigger);
+
+                    // Disable it
+                    if (_config.ActiveResponse)
+                    {
+                        DisableBuiltinAdmin();
+                    }
+
+                    await _detectionEngine.EmitAsync(new DetectionEvent
+                    {
+                        RuleName = "Account Tampering: Built-in Administrator Enabled",
+                        Evidence = $"The built-in Administrator account (RID 500) was found ACTIVE (trigger: {trigger}). " +
+                                   (_config.ActiveResponse ? "Account has been disabled." : "Active response is off — account remains enabled."),
+                        Reasoning = "The built-in Administrator account should never be active on a personal workstation. " +
+                                    "It has no UAC restrictions, may have a blank password, and is a common attacker backdoor. " +
+                                    "An attacker with admin/SYSTEM access enables it via 'net user Administrator /active:yes' " +
+                                    "to establish a persistent, stealthy backdoor that survives user profile changes. " +
+                                    "This was detected during an active intrusion where the account was enabled alongside a system freeze.",
+                        Confidence = 0.97,
+                        Tier = DetectionTier.Tier1Behavioral,
+                        AuthorizedResponse = ResponseAction.LogOnly,
+                        ProcessName = "SYSTEM",
+                        ProcessId = 0,
+                        SignalType = SignalType.SecurityEvasion,
+                        Metadata = new Dictionary<string, string>
+                        {
+                            ["Trigger"] = trigger,
+                            ["Action"] = _config.ActiveResponse ? "Disabled" : "AlertOnly",
+                            ["AccountSID"] = "S-1-5-21-*-500"
+                        }
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "[BuiltinAdminGuard] CheckAndDisableBuiltinAdmin failed");
+            }
+        }
+
+        private static bool IsBuiltinAdminActive()
+        {
+            try
+            {
+                using var searcher = new ManagementObjectSearcher(
+                    "SELECT * FROM Win32_UserAccount WHERE LocalAccount=TRUE AND SID LIKE '%-500'");
+                foreach (ManagementObject account in searcher.Get())
+                {
+                    var disabled = account["Disabled"];
+                    if (disabled is bool d && !d)
+                        return true; // Account is active (not disabled)
+                    if (disabled is bool d2 && d2)
+                        return false; // Account is disabled
+                }
+            }
+            catch
+            {
+                // Fallback: use net user
+                try
+                {
+                    var psi = new ProcessStartInfo("net.exe", "user Administrator")
+                    {
+                        CreateNoWindow = true,
+                        UseShellExecute = false,
+                        RedirectStandardOutput = true
+                    };
+                    using var proc = Process.Start(psi);
+                    if (proc == null) return false;
+                    var output = proc.StandardOutput.ReadToEnd();
+                    proc.WaitForExit(5000);
+                    // "Account active               Yes"
+                    return output.Contains("Yes", StringComparison.OrdinalIgnoreCase) &&
+                           output.Contains("active", StringComparison.OrdinalIgnoreCase);
+                }
+                catch { }
+            }
+            return false;
+        }
+
+        private void DisableBuiltinAdmin()
+        {
+            try
+            {
+                var psi = new ProcessStartInfo("net.exe", "user Administrator /active:no")
+                {
+                    CreateNoWindow = true,
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true
+                };
+                using var proc = Process.Start(psi);
+                proc?.WaitForExit(5000);
+
+                if (proc?.ExitCode == 0)
+                {
+                    _logger.LogWarning("[BuiltinAdminGuard] DISABLED built-in Administrator account");
+                }
+                else
+                {
+                    _logger.LogError("[BuiltinAdminGuard] Failed to disable Administrator account (exit code: {Code})",
+                        proc?.ExitCode);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[BuiltinAdminGuard] Failed to disable Administrator account");
+            }
+        }
+    }
+
+    // ──────────────────────────────────────────────
+    // IPSec Integrity Guard — self-healing loop that detects and re-applies
+    // the GSecurity IPSec policy if an attacker deletes it at runtime.
+    // v1.4.1: Closes the audit finding where 'netsh ipsec static delete policy'
+    // removes all port blocks with no re-verification.
+    // ──────────────────────────────────────────────
+    public sealed class IPSecIntegrityGuard : BackgroundService
+    {
+        private readonly DetectionEngine _detectionEngine;
+        private readonly ILogger<IPSecIntegrityGuard> _logger;
+        private int _consecutiveFailures;
+
+        public IPSecIntegrityGuard(DetectionEngine de, ILogger<IPSecIntegrityGuard> l)
+        {
+            _detectionEngine = de;
+            _logger = l;
+        }
+
+        protected override async Task ExecuteAsync(CancellationToken ct)
+        {
+            _logger.LogInformation("[IPSecIntegrityGuard] Started — verifying GSecurity IPSec policy every 30s");
+
+            // Initial delay to allow HardeningModule to apply first
+            await Task.Delay(15000, ct);
+
+            while (!ct.IsCancellationRequested)
+            {
+                try
+                {
+                    if (!HardeningModule.IsIPSecPolicyActive())
+                    {
+                        _consecutiveFailures++;
+                        _logger.LogWarning(
+                            "[IPSecIntegrityGuard] IPSec policy GSecurity is MISSING or UNASSIGNED — re-applying (failure #{Count})",
+                            _consecutiveFailures);
+
+                        HardeningModule.ReapplyIPSecPolicy();
+
+                        // Verify it actually applied
+                        await Task.Delay(2000, ct);
+                        bool reapplied = HardeningModule.IsIPSecPolicyActive();
+
+                        await _detectionEngine.EmitAsync(new DetectionEvent
+                        {
+                            RuleName = "Anti-Tamper: IPSec Policy Deleted and Re-Applied",
+                            Evidence = $"GSecurity IPSec policy was found missing/unassigned. " +
+                                       $"Re-application {(reapplied ? "SUCCEEDED" : "FAILED")}. " +
+                                       $"Consecutive failures: {_consecutiveFailures}",
+                            Reasoning = "The IPSec policy that blocks dangerous ports (FTP, SSH, RDP, SMB, etc.) " +
+                                        "was removed or unassigned. This is a critical security tampering event — " +
+                                        "an attacker with admin privileges likely ran 'netsh ipsec static delete policy' " +
+                                        "to re-enable blocked network protocols for lateral movement or data exfiltration. " +
+                                        "Sentinel has re-applied the policy.",
+                            Confidence = 0.95,
+                            Tier = DetectionTier.Tier1Behavioral,
+                            AuthorizedResponse = ResponseAction.LogOnly,
+                            ProcessName = "SYSTEM",
+                            ProcessId = 0,
+                            SignalType = SignalType.AntiTamper,
+                            Metadata = new Dictionary<string, string>
+                            {
+                                ["Reapplied"] = reapplied.ToString(),
+                                ["ConsecutiveFailures"] = _consecutiveFailures.ToString()
+                            }
+                        });
+
+                        if (reapplied)
+                            _consecutiveFailures = 0;
+                    }
+                    else
+                    {
+                        _consecutiveFailures = 0;
+                    }
+                }
+                catch (OperationCanceledException) { break; }
+                catch (Exception ex) { _logger.LogDebug(ex, "[IPSecIntegrityGuard] Error"); }
+
+                await Task.Delay(30000, ct);
+            }
         }
     }
 }

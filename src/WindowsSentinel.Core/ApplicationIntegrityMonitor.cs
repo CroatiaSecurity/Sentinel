@@ -237,11 +237,24 @@ namespace WindowsSentinel.Core
                 return;
             _recentAlerts[filePath] = now;
 
-            // Trigger immediate integrity check (fire-and-forget, logged if fails)
+            // v1.4.1: Trigger immediate integrity check with retry loop instead of a fixed delay.
+            // The previous 1000ms delay created a TOCTOU window where an attacker could replace,
+            // execute, and restore a binary before the hash check ran.
             _ = Task.Run(async () =>
             {
-                // Small delay to let file operations complete
-                await Task.Delay(1000);
+                // Retry up to 5 times with short backoff if file is locked
+                for (int attempt = 0; attempt < 5; attempt++)
+                {
+                    var hash = ComputeFileHash(filePath);
+                    if (hash != null)
+                    {
+                        await CheckSingleApplicationAsync(filePath);
+                        return;
+                    }
+                    // File locked — very short retry (100ms) to minimize the TOCTOU window
+                    await Task.Delay(100);
+                }
+                // All retries failed (file locked for 500ms+) — still check, may catch on next periodic scan
                 await CheckSingleApplicationAsync(filePath);
             });
         }

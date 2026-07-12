@@ -177,7 +177,6 @@ namespace WindowsSentinel.Service
                     services.AddHostedService<ModuleValidationMonitor>();
                     services.AddHostedService<DiskWideDllScanner>();
                     services.AddHostedService<DeviceInstallMonitor>();
-                    services.AddHostedService<GatewayFingerprintMonitor>();
                     services.AddSingleton<BehavioralBaselineService>();
                     services.AddHostedService<BehavioralBaselineService>(sp => sp.GetRequiredService<BehavioralBaselineService>());
                     services.AddSingleton<PhantomDeviceMonitor>();
@@ -219,6 +218,12 @@ namespace WindowsSentinel.Service
 
                     // v1.2.5: Application Integrity (Cuckoo Egg Detection)
                     services.AddHostedService<ApplicationIntegrityMonitor>();
+
+                    // v1.4.1: IPSec self-healing guard
+                    services.AddHostedService<IPSecIntegrityGuard>();
+
+                    // v1.4.1: Built-in Administrator account guard
+                    services.AddHostedService<BuiltinAdminGuard>();
 
                     // v1.3.9: Agent watchdog — relaunches WindowsSentinel.Agent.exe in the
                     // user session if it dies, and fires an anti-tamper alert on repeated kills

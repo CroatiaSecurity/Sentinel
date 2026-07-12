@@ -248,6 +248,47 @@ namespace WindowsSentinel.Core
                 return;
             }
 
+            // v1.4.1: Detect junction/symlink creation targeting or within monitored directories.
+            // An attacker can create junctions to redirect monitored paths or to make excluded
+            // paths point to sensitive areas. Detect any reparse point creation.
+            if (e.ChangeType == WatcherChangeTypes.Created)
+            {
+                try
+                {
+                    if (Directory.Exists(e.FullPath))
+                    {
+                        var attrs = File.GetAttributes(e.FullPath);
+                        if ((attrs & FileAttributes.ReparsePoint) != 0)
+                        {
+                            var reparseCreator = GetProcessUsingFile(e.FullPath);
+                            // Allow TrustedInstaller/DISM reparse points (Windows component store uses them)
+                            if (!IsTrustedSystemWriter(reparseCreator.pid, reparseCreator.name, e.FullPath))
+                            {
+                                _ = _detectionEngine.EmitAsync(new DetectionEvent
+                                {
+                                    RuleName = "File Integrity: Junction/Symlink Created in Monitored Path",
+                                    Evidence = $"Reparse point (junction/symlink) created at '{e.FullPath}' by process '{reparseCreator.name}' (PID {reparseCreator.pid})",
+                                    Reasoning = "A directory junction or symbolic link was created within a monitored path. " +
+                                                "Attackers use junctions to redirect monitored directories to attacker-controlled locations, " +
+                                                "bypass file monitoring exclusions, or exploit TOCTOU vulnerabilities in privilege escalation attacks.",
+                                    Confidence = 0.85,
+                                    Tier = DetectionTier.Tier1Behavioral,
+                                    AuthorizedResponse = ResponseAction.KillProcessTree,
+                                    ProcessName = reparseCreator.name,
+                                    ProcessId = reparseCreator.pid,
+                                    Metadata = new Dictionary<string, string>
+                                    {
+                                        ["Path"] = e.FullPath,
+                                        ["Operation"] = "ReparsePointCreated"
+                                    }
+                                });
+                            }
+                        }
+                    }
+                }
+                catch { }
+            }
+
             // Skip user working directories where tools like NTLite, UUP dump, DISM perform
             // bulk file extraction/modification. These generate thousands of events/second
             // and the Restart Manager handle scan causes file contention that stalls the tools.
@@ -494,7 +535,10 @@ namespace WindowsSentinel.Core
                 pathLower.Contains(@"\windows\syswow64\"))
                 return false;
 
-            // User OS-image / debloat tool working directories
+            // v1.4.1: User OS-image / debloat tool working directories are ONLY excluded
+            // when an active servicing process is running. Without this check, an attacker
+            // could create a directory named "\mount\" or "\scratch\" and stage payloads
+            // that bypass file monitoring entirely.
             if (pathLower.Contains(@"\ntlite\") ||
                 pathLower.Contains(@"\uupdump\") ||
                 pathLower.Contains(@"\uup\") ||
@@ -506,11 +550,18 @@ namespace WindowsSentinel.Core
                 pathLower.Contains(@"\wim\") ||
                 pathLower.Contains(@"\scratch\") ||
                 pathLower.Contains(@"\offlineimage\"))
+            {
+                // Only suppress if a known servicing process is actually running
+                if (!IsServicingProcessActive())
+                    return false; // No servicing tool running — monitor this path normally
                 return true;
+            }
 
             // CBS / Windows component store — written en-masse by DISM and NTLite during
             // feature enable/disable. Generates thousands of manifest/delta/catalog writes
             // per feature operation; RM calls on every event cause minutes-long stalls.
+            // These paths are ALWAYS safe to suppress because they live under \Windows\
+            // and only TrustedInstaller/DISM can write there (ACLed at filesystem level).
             if (pathLower.Contains(@"\windows\winsxs\") ||
                 pathLower.Contains(@"\windows\servicing\") ||
                 pathLower.Contains(@"\windows\temp\cab") ||
@@ -519,6 +570,36 @@ namespace WindowsSentinel.Core
                 pathLower.Contains(@"\windows\logs\dism\"))
                 return true;
 
+            return false;
+        }
+
+        /// <summary>
+        /// Returns true if a known OS-image servicing process is currently running.
+        /// Used to validate that user tool working path exclusions are legitimate.
+        /// </summary>
+        private static bool IsServicingProcessActive()
+        {
+            try
+            {
+                foreach (var proc in System.Diagnostics.Process.GetProcesses())
+                {
+                    try
+                    {
+                        var n = proc.ProcessName;
+                        proc.Dispose();
+                        if (n.Equals("dism", StringComparison.OrdinalIgnoreCase) ||
+                            n.Equals("dismhost", StringComparison.OrdinalIgnoreCase) ||
+                            n.Equals("ntlite", StringComparison.OrdinalIgnoreCase) ||
+                            n.Equals("tiworker", StringComparison.OrdinalIgnoreCase) ||
+                            n.Equals("trustedinstaller", StringComparison.OrdinalIgnoreCase) ||
+                            n.Equals("msmgtoolkit", StringComparison.OrdinalIgnoreCase) ||
+                            n.Equals("imagex", StringComparison.OrdinalIgnoreCase))
+                            return true;
+                    }
+                    catch { }
+                }
+            }
+            catch { }
             return false;
         }
 
