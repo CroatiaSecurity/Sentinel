@@ -38,6 +38,8 @@ namespace WindowsSentinel.Core
         private Dictionary<string, string?> _runHkcuBaseline = new(StringComparer.OrdinalIgnoreCase);
         private Dictionary<string, string?> _servicesBaseline = new(StringComparer.OrdinalIgnoreCase);
         private Dictionary<string, string> _clsidBaseline = new(StringComparer.OrdinalIgnoreCase);
+        private Dictionary<string, string?> _proxyBaseline = new(StringComparer.OrdinalIgnoreCase);
+        private HashSet<string> _extensionBaseline = new(StringComparer.OrdinalIgnoreCase);
 
         // Whitelist: known-good autorun entry value names
         private static readonly HashSet<string> WhitelistedRunNames = new(StringComparer.OrdinalIgnoreCase)
@@ -114,6 +116,10 @@ namespace WindowsSentinel.Core
                     {
                         PollRegistryForChanges();
                     }
+
+                    AuditProxySettings();
+                    AuditExtensionPolicies();
+
                     await Task.Delay(wmiAvailable ? 5000 : 15000, stoppingToken);
                 }
             }
@@ -193,6 +199,8 @@ namespace WindowsSentinel.Core
             _runHkcuBaseline = SnapshotRegistryValues(Microsoft.Win32.Registry.CurrentUser,
                 @"Software\Microsoft\Windows\CurrentVersion\Run");
             _servicesBaseline = SnapshotServiceNames();
+            BuildProxyBaseline();
+            BuildExtensionBaseline();
         }
 
         private static Dictionary<string, string?> SnapshotRegistryValues(Microsoft.Win32.RegistryKey hive, string subPath)
@@ -715,6 +723,209 @@ namespace WindowsSentinel.Core
             {
                 _logger.LogDebug(ex, "[RegistryMonitor] CLSID scan error");
             }
+        }
+
+        private static readonly string[] ExtensionRegistryPaths = new[]
+        {
+            @"SOFTWARE\Policies\Google\Chrome\ExtensionInstallForcelist",
+            @"SOFTWARE\Policies\Microsoft\Edge\ExtensionInstallForcelist"
+        };
+
+        private void BuildProxyBaseline()
+        {
+            _proxyBaseline.Clear();
+            CaptureProxyKeys(Registry.CurrentUser, @"Software\Microsoft\Windows\CurrentVersion\Internet Settings", "HKCU");
+            CaptureProxyKeys(Registry.LocalMachine, @"Software\Microsoft\Windows\CurrentVersion\Internet Settings", "HKLM");
+        }
+
+        private void CaptureProxyKeys(RegistryKey hive, string path, string prefix)
+        {
+            try
+            {
+                using var key = hive.OpenSubKey(path, writable: false);
+                if (key == null) return;
+                foreach (var valueName in new[] { "ProxyEnable", "ProxyServer", "AutoConfigURL" })
+                {
+                    var val = key.GetValue(valueName)?.ToString();
+                    _proxyBaseline[$"{prefix}:{valueName}"] = val;
+                }
+            }
+            catch { }
+        }
+
+        private void AuditProxySettings()
+        {
+            CheckProxyKeys(Registry.CurrentUser, @"Software\Microsoft\Windows\CurrentVersion\Internet Settings", "HKCU");
+            CheckProxyKeys(Registry.LocalMachine, @"Software\Microsoft\Windows\CurrentVersion\Internet Settings", "HKLM");
+        }
+
+        private void CheckProxyKeys(RegistryKey hive, string path, string prefix)
+        {
+            try
+            {
+                using var key = hive.OpenSubKey(path, _config.ActiveResponse);
+                if (key == null) return;
+
+                foreach (var valueName in new[] { "ProxyEnable", "ProxyServer", "AutoConfigURL" })
+                {
+                    var currentVal = key.GetValue(valueName)?.ToString();
+                    var baselineKey = $"{prefix}:{valueName}";
+                    _proxyBaseline.TryGetValue(baselineKey, out var baselineVal);
+
+                    if (currentVal != baselineVal)
+                    {
+                        var evidence = $"Proxy setting '{valueName}' in {prefix} modified. Baseline: '{baselineVal}', Current: '{currentVal}'";
+                        var reasoning = $"Proxy hijacking reroutes user traffic. Sentinel detected an unauthorized modification to system proxy settings.";
+
+                        var detection = new DetectionEvent
+                        {
+                            RuleName = "Registry: Unauthorized Proxy Server Hijack",
+                            Evidence = evidence,
+                            Reasoning = reasoning,
+                            Confidence = 0.85,
+                            Tier = DetectionTier.Tier1Behavioral,
+                            AuthorizedResponse = _config.ActiveResponse ? ResponseAction.RemoveRegistryEntry : ResponseAction.LogOnly,
+                            ProcessName = "Unknown",
+                            ProcessId = 0,
+                            Metadata = new Dictionary<string, string>
+                            {
+                                { "Hive", prefix },
+                                { "KeyPath", path },
+                                { "ValueName", valueName },
+                                { "BaselineValue", baselineVal ?? "" },
+                                { "CurrentValue", currentVal ?? "" }
+                            }
+                        };
+
+                        _ = _detectionEngine.EmitAsync(detection);
+                        _toastService.ShowToast("Sentinel Alert: Proxy Hijack", $"Proxy '{valueName}' changed under {prefix}");
+
+                        if (_config.ActiveResponse)
+                        {
+                            try
+                            {
+                                if (baselineVal == null)
+                                {
+                                    key.DeleteValue(valueName, throwOnMissingValue: false);
+                                }
+                                else
+                                {
+                                    if (valueName == "ProxyEnable" && int.TryParse(baselineVal, out int enableVal))
+                                    {
+                                        key.SetValue(valueName, enableVal, RegistryValueKind.DWord);
+                                    }
+                                    else
+                                    {
+                                        key.SetValue(valueName, baselineVal, RegistryValueKind.String);
+                                    }
+                                }
+                                _logger.LogWarning("[RegistryMonitor] Actively restored hijacked proxy '{ValueName}' to baseline value '{Baseline}'", valueName, baselineVal);
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogError(ex, "[RegistryMonitor] Failed to restore proxy setting '{ValueName}'", valueName);
+                            }
+                        }
+                    }
+                }
+            }
+            catch { }
+        }
+
+        private void BuildExtensionBaseline()
+        {
+            _extensionBaseline.Clear();
+            foreach (var path in ExtensionRegistryPaths)
+            {
+                CaptureExtensionValues(Registry.LocalMachine, path, "HKLM");
+                CaptureExtensionValues(Registry.CurrentUser, path, "HKCU");
+            }
+        }
+
+        private void CaptureExtensionValues(RegistryKey hive, string path, string prefix)
+        {
+            try
+            {
+                using var key = hive.OpenSubKey(path, writable: false);
+                if (key == null) return;
+                foreach (var valueName in key.GetValueNames())
+                {
+                    var val = key.GetValue(valueName)?.ToString();
+                    if (!string.IsNullOrEmpty(val))
+                    {
+                        _extensionBaseline.Add($"{prefix}:{path}:{val}");
+                    }
+                }
+            }
+            catch { }
+        }
+
+        private void AuditExtensionPolicies()
+        {
+            foreach (var path in ExtensionRegistryPaths)
+            {
+                CheckExtensionValues(Registry.LocalMachine, path, "HKLM");
+                CheckExtensionValues(Registry.CurrentUser, path, "HKCU");
+            }
+        }
+
+        private void CheckExtensionValues(RegistryKey hive, string path, string prefix)
+        {
+            try
+            {
+                using var key = hive.OpenSubKey(path, _config.ActiveResponse);
+                if (key == null) return;
+
+                foreach (var valueName in key.GetValueNames())
+                {
+                    var currentVal = key.GetValue(valueName)?.ToString();
+                    if (string.IsNullOrEmpty(currentVal)) continue;
+
+                    var baselineKey = $"{prefix}:{path}:{currentVal}";
+                    if (!_extensionBaseline.Contains(baselineKey))
+                    {
+                        var browserName = path.Contains("Chrome") ? "Chrome" : "Edge";
+                        var evidence = $"Unauthorized force-installed extension policy detected in {prefix}\\{path}. Value: {currentVal}";
+                        var reasoning = $"Malicious extensions can read passwords, hijack tabs, and steal sessions. Sentinel detected an unauthorized force-installed browser extension.";
+
+                        var detection = new DetectionEvent
+                        {
+                            RuleName = $"Registry: Unauthorized {browserName} Extension Policy Injection",
+                            Evidence = evidence,
+                            Reasoning = reasoning,
+                            Confidence = 0.90,
+                            Tier = DetectionTier.Tier1Behavioral,
+                            AuthorizedResponse = _config.ActiveResponse ? ResponseAction.RemoveRegistryEntry : ResponseAction.LogOnly,
+                            ProcessName = "Unknown",
+                            ProcessId = 0,
+                            Metadata = new Dictionary<string, string>
+                            {
+                                { "Hive", prefix },
+                                { "KeyPath", path },
+                                { "ValueName", valueName },
+                                { "ExtensionConfig", currentVal }
+                            }
+                        };
+
+                        _ = _detectionEngine.EmitAsync(detection);
+                        _toastService.ShowToast("Sentinel Alert: Browser Policy Hijack", $"New force-installed extension in {browserName}");
+
+                        if (_config.ActiveResponse)
+                        {
+                            try
+                            {
+                                key.DeleteValue(valueName);
+                                _logger.LogWarning("[RegistryMonitor] Actively deleted unauthorized extension registry value '{ValueName}' ({Value})", valueName, currentVal);
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogError(ex, "[RegistryMonitor] Failed to delete unauthorized extension policy value '{ValueName}'", valueName);
+                            }
+                        }
+                    }
+                }
+            }
+            catch { }
         }
 
         public override void Dispose()

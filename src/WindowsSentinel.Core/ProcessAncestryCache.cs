@@ -38,19 +38,40 @@ namespace WindowsSentinel.Core
                 var processes = Process.GetProcesses();
                 var currentCache = _cache;
                 var livingPids = new HashSet<int>();
-                var newCache = new Dictionary<int, (int parentId, string name, string imagePath)>();
+                foreach (var proc in processes)
+                {
+                    livingPids.Add(proc.Id);
+                }
 
-                // 1. Always preserve authoritative entries (ETW/WMI/fast-poll sourced)
+                var now = DateTimeOffset.UtcNow;
+
+                // 1. Prune authoritative entries for PIDs dead longer than retention window
+                foreach (var pid in _authoritativeEntries.Keys.ToArray())
+                {
+                    if (!livingPids.Contains(pid) &&
+                        _deadPidRetention.TryGetValue(pid, out var deathTime) &&
+                        now - deathTime >= DeadPidRetentionDuration)
+                    {
+                        _authoritativeEntries.TryRemove(pid, out _);
+                    }
+                    else if (!livingPids.Contains(pid) && !_deadPidRetention.ContainsKey(pid))
+                    {
+                        // Dead but not tracked yet — start tracking
+                        _deadPidRetention.TryAdd(pid, now);
+                    }
+                }
+
+                // 2. Always preserve remaining authoritative entries (ETW/WMI/fast-poll sourced)
+                var newCache = new Dictionary<int, (int parentId, string name, string imagePath)>();
                 foreach (var kvp in _authoritativeEntries)
                 {
                     newCache[kvp.Key] = (kvp.Value.parentId, kvp.Value.name, kvp.Value.imagePath);
                 }
 
-                // 2. Add currently running processes (only if not already in authoritative set)
+                // 3. Add currently running processes (only if not already in authoritative set)
                 foreach (var proc in processes)
                 {
                     var pid = proc.Id;
-                    livingPids.Add(pid);
 
                     if (newCache.ContainsKey(pid))
                     {
@@ -80,9 +101,7 @@ namespace WindowsSentinel.Core
                     }
                 }
 
-                // 3. Retain dead PIDs for chain tracing (60s after death)
-                var now = DateTimeOffset.UtcNow;
-
+                // 4. Retain recently-dead PIDs for chain tracing (60s after death)
                 // Mark newly dead PIDs (were in cache but not in living set)
                 foreach (var pid in currentCache.Keys)
                 {
@@ -107,22 +126,6 @@ namespace WindowsSentinel.Core
                     {
                         // Expired — remove from retention tracking
                         _deadPidRetention.TryRemove(kvp.Key, out _);
-                    }
-                }
-
-                // 4. Prune authoritative entries for PIDs dead longer than retention window
-                foreach (var pid in _authoritativeEntries.Keys.ToArray())
-                {
-                    if (!livingPids.Contains(pid) &&
-                        _deadPidRetention.TryGetValue(pid, out var deathTime) &&
-                        now - deathTime >= DeadPidRetentionDuration)
-                    {
-                        _authoritativeEntries.TryRemove(pid, out _);
-                    }
-                    else if (!livingPids.Contains(pid) && !_deadPidRetention.ContainsKey(pid))
-                    {
-                        // Dead but not tracked yet — start tracking
-                        _deadPidRetention.TryAdd(pid, now);
                     }
                 }
 

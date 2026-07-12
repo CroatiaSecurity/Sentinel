@@ -191,7 +191,7 @@ namespace WindowsSentinel.Tests
             var baseline = new BehavioralBaselineService(cache, NullLogger<BehavioralBaselineService>.Instance);
             
             // Record a process multiple times to establish it in baseline
-            for (int i = 0; i < 5; i++)
+            for (int i = 0; i < 12; i++)
             {
                 baseline.RecordProcess("goodapp.exe", @"C:\Program Files\goodapp.exe", 100, "explorer.exe");
             }
@@ -214,8 +214,8 @@ namespace WindowsSentinel.Tests
 
             var score = engine.Score(detection);
             
-            // 80 base + 10 Tier1 - 15 established - 10 parent-child = 65 threat score
-            Assert.Equal(65, score.Score);
+            // 80 base + 10 Tier1 - 10 established - 5 parent-child = 75 threat score
+            Assert.Equal(75, score.Score);
             Assert.Contains(score.Adjustments, adj => adj.Reason.Contains("established"));
             Assert.Contains(score.Adjustments, adj => adj.Reason.Contains("parent-child"));
 

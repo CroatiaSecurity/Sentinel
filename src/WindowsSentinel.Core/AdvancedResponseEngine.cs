@@ -484,26 +484,36 @@ namespace WindowsSentinel.Core
 
         private void RemoveCertificateFromStore(string thumbprint)
         {
-            try
+            var stores = new (System.Security.Cryptography.X509Certificates.StoreName Name, System.Security.Cryptography.X509Certificates.StoreLocation Location)[]
             {
-                using var store = new System.Security.Cryptography.X509Certificates.X509Store(
-                    System.Security.Cryptography.X509Certificates.StoreName.Root,
-                    System.Security.Cryptography.X509Certificates.StoreLocation.LocalMachine);
-                store.Open(System.Security.Cryptography.X509Certificates.OpenFlags.ReadWrite);
+                (System.Security.Cryptography.X509Certificates.StoreName.Root, System.Security.Cryptography.X509Certificates.StoreLocation.LocalMachine),
+                (System.Security.Cryptography.X509Certificates.StoreName.TrustedPublisher, System.Security.Cryptography.X509Certificates.StoreLocation.LocalMachine),
+                (System.Security.Cryptography.X509Certificates.StoreName.Root, System.Security.Cryptography.X509Certificates.StoreLocation.CurrentUser),
+                (System.Security.Cryptography.X509Certificates.StoreName.TrustedPublisher, System.Security.Cryptography.X509Certificates.StoreLocation.CurrentUser)
+            };
 
-                var certs = store.Certificates.Find(
-                    System.Security.Cryptography.X509Certificates.X509FindType.FindByThumbprint,
-                    thumbprint,
-                    validOnly: false);
-
-                foreach (var cert in certs)
+            foreach (var (storeName, storeLocation) in stores)
+            {
+                try
                 {
-                    store.Remove(cert);
+                    using var store = new System.Security.Cryptography.X509Certificates.X509Store(storeName, storeLocation);
+                    store.Open(System.Security.Cryptography.X509Certificates.OpenFlags.ReadWrite);
+
+                    var certs = store.Certificates.Find(
+                        System.Security.Cryptography.X509Certificates.X509FindType.FindByThumbprint,
+                        thumbprint,
+                        validOnly: false);
+
+                    foreach (var cert in certs)
+                    {
+                        store.Remove(cert);
+                        _eventLogger.LogEventAsync("debug", new { Message = $"Successfully removed cert {thumbprint} from {storeName} ({storeLocation})" }).GetAwaiter().GetResult();
+                    }
                 }
-            }
-            catch (Exception ex)
-            {
-                _eventLogger.LogEventAsync("debug", new { Message = $"Failed to remove cert {thumbprint}: {ex.Message}" }).GetAwaiter().GetResult();
+                catch (Exception ex)
+                {
+                    _eventLogger.LogEventAsync("debug", new { Message = $"Failed to open/remove cert {thumbprint} from {storeName} ({storeLocation}): {ex.Message}" }).GetAwaiter().GetResult();
+                }
             }
         }
 

@@ -1769,21 +1769,21 @@ namespace WindowsSentinel.Core
         /// </summary>
         private async Task AuditAndBaselineStoreAsync(CancellationToken ct)
         {
-            var storesToAudit = new (System.Security.Cryptography.X509Certificates.StoreName Name, string Label)[]
+            var storesToAudit = new (System.Security.Cryptography.X509Certificates.StoreName Name, System.Security.Cryptography.X509Certificates.StoreLocation Location, string Label)[]
             {
-                (System.Security.Cryptography.X509Certificates.StoreName.Root, "Root"),
-                (System.Security.Cryptography.X509Certificates.StoreName.TrustedPublisher, "TrustedPublisher")
+                (System.Security.Cryptography.X509Certificates.StoreName.Root, System.Security.Cryptography.X509Certificates.StoreLocation.LocalMachine, "Root"),
+                (System.Security.Cryptography.X509Certificates.StoreName.TrustedPublisher, System.Security.Cryptography.X509Certificates.StoreLocation.LocalMachine, "TrustedPublisher"),
+                (System.Security.Cryptography.X509Certificates.StoreName.Root, System.Security.Cryptography.X509Certificates.StoreLocation.CurrentUser, "UserRoot"),
+                (System.Security.Cryptography.X509Certificates.StoreName.TrustedPublisher, System.Security.Cryptography.X509Certificates.StoreLocation.CurrentUser, "UserTrustedPublisher")
             };
 
-            foreach (var (storeName, storeLabel) in storesToAudit)
+            foreach (var (storeName, storeLocation, storeLabel) in storesToAudit)
             {
                 if (ct.IsCancellationRequested) break;
 
                 try
                 {
-                    using var store = new System.Security.Cryptography.X509Certificates.X509Store(
-                        storeName,
-                        System.Security.Cryptography.X509Certificates.StoreLocation.LocalMachine);
+                    using var store = new System.Security.Cryptography.X509Certificates.X509Store(storeName, storeLocation);
                     store.Open(System.Security.Cryptography.X509Certificates.OpenFlags.ReadOnly);
 
                     foreach (var cert in store.Certificates)
@@ -1843,22 +1843,31 @@ namespace WindowsSentinel.Core
         {
             await PollStoreAsync(
                 System.Security.Cryptography.X509Certificates.StoreName.Root,
+                System.Security.Cryptography.X509Certificates.StoreLocation.LocalMachine,
                 "Root", ct);
             await PollStoreAsync(
                 System.Security.Cryptography.X509Certificates.StoreName.TrustedPublisher,
+                System.Security.Cryptography.X509Certificates.StoreLocation.LocalMachine,
                 "TrustedPublisher", ct);
+            await PollStoreAsync(
+                System.Security.Cryptography.X509Certificates.StoreName.Root,
+                System.Security.Cryptography.X509Certificates.StoreLocation.CurrentUser,
+                "UserRoot", ct);
+            await PollStoreAsync(
+                System.Security.Cryptography.X509Certificates.StoreName.TrustedPublisher,
+                System.Security.Cryptography.X509Certificates.StoreLocation.CurrentUser,
+                "UserTrustedPublisher", ct);
         }
 
         private async Task PollStoreAsync(
             System.Security.Cryptography.X509Certificates.StoreName storeName,
+            System.Security.Cryptography.X509Certificates.StoreLocation storeLocation,
             string storeLabel,
             CancellationToken ct)
         {
             try
             {
-                using var store = new System.Security.Cryptography.X509Certificates.X509Store(
-                    storeName,
-                    System.Security.Cryptography.X509Certificates.StoreLocation.LocalMachine);
+                using var store = new System.Security.Cryptography.X509Certificates.X509Store(storeName, storeLocation);
                 store.Open(System.Security.Cryptography.X509Certificates.OpenFlags.ReadOnly);
 
                 foreach (var cert in store.Certificates)

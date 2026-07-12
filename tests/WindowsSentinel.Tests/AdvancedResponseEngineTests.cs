@@ -137,15 +137,18 @@ namespace WindowsSentinel.Tests
                 var logger = new JsonlEventLogger(logPath);
                 var quarantine = new QuarantineManager(tempDir);
                 var cache = new SecureCacheStore(tempDir);
-                var allowlist = new AllowlistService(cache, Microsoft.Extensions.Logging.Abstractions.NullLogger<AllowlistService>.Instance);
+                var signerTrust = new SignerTrustService(Microsoft.Extensions.Logging.Abstractions.NullLogger<SignerTrustService>.Instance);
+                var allowlist = new AllowlistService(cache, Microsoft.Extensions.Logging.Abstractions.NullLogger<AllowlistService>.Instance, signerTrust);
                 
                 var engine = new AdvancedResponseEngine(config, metrics, logger, quarantine, allowlist);
 
-                // Emitted event with Tier1, but the process name is "steam" (allowlisted game)
-                // Note: allowlist requires BOTH name AND gaming path for suppression.
-                // In AdvancedResponseEngine, imagePath is resolved from the live process.
-                // Since PID 1234 won't exist in tests, we use the user-managed allowlist instead.
-                allowlist.AddToUserAllowlist("steam", @"C:\Program Files (x86)\Steam\steam.exe", "Test");
+                var explorerProc = System.Diagnostics.Process.GetProcessesByName("explorer")[0];
+                var procName = explorerProc.ProcessName;
+                var procId = explorerProc.Id;
+                var procPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe");
+
+                signerTrust.AddTestOverride(procPath, true, "Microsoft Corporation");
+                allowlist.AddToUserAllowlist(procName, procPath, "Test");
 
                 var detection = new DetectionEvent
                 {
@@ -155,8 +158,8 @@ namespace WindowsSentinel.Tests
                     Confidence = 0.90,
                     Tier = DetectionTier.Tier1Behavioral,
                     AuthorizedResponse = ResponseAction.NetworkIsolate,
-                    ProcessName = "steam",
-                    ProcessId = 1234
+                    ProcessName = procName,
+                    ProcessId = procId
                 };
 
                 await engine.HandleAsync(detection);

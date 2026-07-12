@@ -2,6 +2,15 @@
  
 All notable changes to Windows Sentinel are documented in this file.
  
+## [1.3.6] - 2026-07-12
+ 
+### Added & Hardened — Proactive CVE Shield & Security Blind Spot Remediation
+- **Proactive CVE Shield**: Added `CveShieldHardener` to fetch CVE feeds (CISA KEV), map against local system assets (installed software registry keys, active TCP/UDP ports, running processes), dynamically generate block/hardening JSON rules, and register known bad PoC file hashes with `IoCScanner`.
+- **User-Store Certificate Monitoring**: Expanded `TlsCertificateMonitor` to audit and poll both `StoreLocation.LocalMachine` and `StoreLocation.CurrentUser` root trust stores.
+- **Generic Certificate Removal**: Updated `AdvancedResponseEngine` to support certificate removal from both current user and local machine stores.
+- **Browser Extension Policy Protection**: Added registry monitoring and active response (removal) for Chrome/Edge force-installed extension policies (`ExtensionInstallForcelist`).
+- **Proxy Hijack Protection**: Added registry monitoring and auto-restoration for internet settings proxy keys (`ProxyEnable`, `ProxyServer`, `AutoConfigURL`) back to safe baselines.
+ 
 ## [1.3.5] - 2026-07-11
  
 ### Fixed & Hardened — EDR Stability, False Positives, and IPSec Policy Configuration

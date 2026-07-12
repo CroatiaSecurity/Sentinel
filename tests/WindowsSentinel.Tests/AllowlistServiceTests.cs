@@ -6,12 +6,14 @@ namespace WindowsSentinel.Tests
 {
     public class AllowlistServiceTests
     {
+        private readonly SignerTrustService _signerTrust = new(NullLogger<SignerTrustService>.Instance);
+
         private AllowlistService CreateService()
         {
             // Unique temp dir per test to avoid cross-test data leakage
             var dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "sentinel_test_" + System.Guid.NewGuid().ToString("N")[..8]);
             var cache = new SecureCacheStore(dir);
-            return new AllowlistService(cache, NullLogger<AllowlistService>.Instance);
+            return new AllowlistService(cache, NullLogger<AllowlistService>.Instance, _signerTrust);
         }
 
         // ── ShouldSuppress ──────────────────────────────────────────────────
@@ -35,8 +37,8 @@ namespace WindowsSentinel.Tests
         {
             var svc = CreateService();
             // Gaming processes get NO special treatment — only user allowlist matters
-            Assert.False(svc.ShouldSuppress("steam", @"D:\Steam\steam.exe", "UnsignedBinaryRule"));
-            Assert.False(svc.ShouldSuppress("EasyAntiCheat", @"D:\Games\EasyAntiCheat.exe", "SomeRule"));
+            Assert.False(svc.ShouldSuppress("steam", @"C:\Windows\System32\cmd.exe", "UnsignedBinaryRule"));
+            Assert.False(svc.ShouldSuppress("EasyAntiCheat", @"C:\Windows\System32\cmd.exe", "SomeRule"));
         }
 
         [Fact]
@@ -60,13 +62,16 @@ namespace WindowsSentinel.Tests
         public void GetConfidenceReduction_OnlyReducesForUserAllowlisted()
         {
             var svc = CreateService();
+            var path = @"C:\Windows\System32\cmd.exe";
+            _signerTrust.AddTestOverride(path, true, "Microsoft Corporation");
+
             // Not allowlisted — no reduction
-            double reduction = svc.GetConfidenceReduction("dotnet", null, null, "UnsignedBinaryRule");
+            double reduction = svc.GetConfidenceReduction("cmd.exe", path, "Microsoft Corporation", "UnsignedBinaryRule");
             Assert.Equal(0.0, reduction);
 
             // User-allowlisted — gets reduction
-            svc.AddToUserAllowlist("dotnet", null, "Dev tool");
-            reduction = svc.GetConfidenceReduction("dotnet", null, null, "UnsignedBinaryRule");
+            svc.AddToUserAllowlist("cmd.exe", path, "Dev tool");
+            reduction = svc.GetConfidenceReduction("cmd.exe", path, "Microsoft Corporation", "UnsignedBinaryRule");
             Assert.Equal(0.3, reduction);
         }
 
@@ -74,7 +79,7 @@ namespace WindowsSentinel.Tests
         public void GetConfidenceReduction_ReturnsZero_ForUnknown()
         {
             var svc = CreateService();
-            double reduction = svc.GetConfidenceReduction("malware.exe", @"C:\temp\malware.exe", null, "SomeRule");
+            double reduction = svc.GetConfidenceReduction("malware.exe", @"C:\Windows\System32\cmd.exe", null, "SomeRule");
             Assert.Equal(0.0, reduction);
         }
 
@@ -96,11 +101,14 @@ namespace WindowsSentinel.Tests
         public void UserAllowlist_AddAndRemove()
         {
             var svc = CreateService();
-            svc.AddToUserAllowlist("myapp.exe", @"C:\MyApp\myapp.exe", "User trusted");
-            Assert.True(svc.ShouldSuppress("myapp.exe", null, "UnsignedBinaryRule"));
+            var path = @"C:\Windows\System32\cmd.exe";
+            _signerTrust.AddTestOverride(path, true, "Microsoft Corporation");
 
-            svc.RemoveFromUserAllowlist("myapp.exe");
-            Assert.False(svc.ShouldSuppress("myapp.exe", null, "UnsignedBinaryRule"));
+            svc.AddToUserAllowlist("cmd.exe", path, "User trusted");
+            Assert.True(svc.ShouldSuppress("cmd.exe", path, "UnsignedBinaryRule"));
+
+            svc.RemoveFromUserAllowlist("cmd.exe");
+            Assert.False(svc.ShouldSuppress("cmd.exe", path, "UnsignedBinaryRule"));
         }
 
         [Fact]
@@ -125,15 +133,16 @@ namespace WindowsSentinel.Tests
         public void ShouldSuppress_BeaconingNoLongerPresidentsLaw()
         {
             var svc = CreateService();
+            var path = @"C:\Windows\System32\cmd.exe";
+            _signerTrust.AddTestOverride(path, true, "Microsoft Corporation");
+
             // Without user allowlist — not suppressed (no built-in gaming exemptions)
-            Assert.False(svc.ShouldSuppress("steam", @"D:\Steam\steam.exe", "C2 Beaconing Behavior (Statistical)"));
+            Assert.False(svc.ShouldSuppress("cmd.exe", path, "C2 Beaconing Behavior (Statistical)"));
             // With user allowlist — NOW suppressible since beaconing is no longer President's Law.
-            // The BeaconingDetector itself handles trust verification via Authenticode + multi-factor,
-            // so the allowlist suppression is an additional user-controlled safety valve.
-            svc.AddToUserAllowlist("steam", @"D:\Steam\steam.exe", "Game launcher");
-            Assert.True(svc.ShouldSuppress("steam", @"D:\Steam\steam.exe", "C2 Beaconing Behavior (Statistical)"));
+            svc.AddToUserAllowlist("cmd.exe", path, "Game launcher");
+            Assert.True(svc.ShouldSuppress("cmd.exe", path, "C2 Beaconing Behavior (Statistical)"));
             // User allowlist CAN suppress non-President's-Law rules
-            Assert.True(svc.ShouldSuppress("steam", @"D:\Steam\steam.exe", "UnsignedBinaryRule"));
+            Assert.True(svc.ShouldSuppress("cmd.exe", path, "UnsignedBinaryRule"));
         }
     }
 }

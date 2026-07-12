@@ -40,6 +40,14 @@ namespace WindowsSentinel.Core
         PhantomKeystroke
     }
 
+    public class CveShieldConfig
+    {
+        public bool Enabled { get; set; } = true;
+        public string FeedUrl { get; set; } = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json";
+        public int PollIntervalHours { get; set; } = 4;
+        public string? CustomFeedPath { get; set; } // Local fallback JSON for offline testing
+    }
+
     public class SentinelConfig
     {
         public bool ActiveResponse { get; set; } = true;
@@ -58,6 +66,8 @@ namespace WindowsSentinel.Core
         public int RawDiskScanIntervalSeconds { get; set; } = 20;
         public int AntiTamperTimingTickMs { get; set; } = 2000;
         public int AntiTamperIntegrityTickMs { get; set; } = 10000;
+
+        public CveShieldConfig CveShield { get; set; } = new();
     }
 
     public class ThreatReportingConfig

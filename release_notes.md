@@ -1,21 +1,15 @@
-# v1.3.5 — EDR Stability, Hardening, and Self-Contained IPSec Policy
+# v1.3.6 — Proactive CVE Shield & Security Blind Spot Remediation
 
-This release resolves critical EDR false positives, stabilizes system-level process terminations (preventing unexpected reboots and BSODs), addresses download file locking contentions, hardens directory path checks, and packages the legacy IPSec policy builder as a fully self-contained C# feature.
+This release introduces the **Proactive CVE Shield** (anti-PoC engine), which matches local system assets with active vulnerability feeds to deploy defense rules and IoC hashes. It also closes three critical security blind spots: User-Store CA hijacking, browser extension force-installation, and registry-based proxy server redirects.
 
 ## What's New
 
-### EDR Stability & BSOD Prevention
-- **Process Ancestry Lookup Fix**: Corrected a bug in parent name resolution cache walk that returned shifted child process names. Legitimate system processes like `services.exe` are now correctly identified and protected from tree-kills.
-- **Robust Image Path Querying**: Replaced buggy `MainModule.FileName` queries in `RawDiskAccessMonitor` and `NetworkReinfectionDetector` (which throw "Access Denied" for elevated system binaries, leading to untrusted process classification) with robust low-privilege `GetProcessImagePath` API calls.
-- **Disk Access Allowlist**: Added `services.exe`, `svchost.exe`, `taskhostw.exe`, and `System` to the raw disk access allowlist, preventing unintended Service Control Manager terminations that triggered Windows reboots and BSODs.
+### 🛡️ Proactive CVE Shield (Anti-PoC Engine)
+- **Asset Matcher & Hardening**: Periodically crawls active vulnerability catalogs (e.g., CISA KEV), maps them against local registry uninstalls, active TCP/UDP ports, and running process names, and generates dynamic JSON block rules or blocklists known PoC file hashes with `IoCScanner`.
+- **Background Worker**: Integrated as a native Windows service background worker (`CveShieldHardener`) managed via the Orchestrator.
 
-### File Contention & Download Fixes
-- **UUP Dump Offline Downloads**: Added directory exclusion checks for `\uups\` and `uup` folders to bypass Restart Manager handle locks and reputation checks. This resolves "file in use by another process" sharing violations in `aria2c` downloader scripts.
-
-### False Positive Mitigation
-- **Signed Updaters Protection**: `NetworkReinfectionDetector` now integrates `SignerTrustService` to check Authenticode signatures, skipping immediate alerts/kills on signed browser updaters (GoogleUpdate, BraveUpdate) launching right after network-up events.
-- **Cast Device Guard Relaxation**: Changed the default action of unauthorized local Cast connections from `KillProcessTree` to `LogOnly`. Because connections are already blocked via the Windows Firewall, this keeps browsers (Chrome/Brave) alive while maintaining security.
-
-### Security Hardening
-- **Directory Path Hijack Prevention**: Hardened all Windows directory validation checks (`.StartsWith(winDir)`) to enforce a trailing backslash (`\`) suffix. This blocks path-traversal / namespace spoofing bypasses where malware runs from folders like `C:\WindowsTemp\`.
-- **Self-Contained IPSec Policy**: Ported the entire `IPSecPolicy.ps1` script (port tables, rules, filters) directly into native C# within the `HardeningModule`. The policy is applied dynamically on the first boot (creating a `.ipsec_applied` common flag to skip on subsequent boots), eliminating any external script or registry dependencies.
+### 🔒 Security Blind Spot Remediation
+- **User-Store Certificate Monitoring**: Expanded `TlsCertificateMonitor` to audit and monitor both `StoreLocation.LocalMachine` and `StoreLocation.CurrentUser` root trust stores. This stops non-elevated user-space malware from planting a rogue root CA without UAC alerts.
+- **Generic Certificate Removal**: Updated `AdvancedResponseEngine` active response to support removing rogue certificates from all current user and local machine stores.
+- **Browser Extension Policy Protection**: Added registry monitoring and active response (automatic deletion) for Chrome/Edge force-installed extension policies under `ExtensionInstallForcelist`.
+- **Proxy Hijack Protection**: Added registry monitoring and automatic restoration of internet settings proxy keys (`ProxyEnable`, `ProxyServer`, `AutoConfigURL`) back to safe baselines.

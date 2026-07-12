@@ -27,11 +27,13 @@ namespace WindowsSentinel.Tests
             var reputationService = new HashReputationService(cache, new ThreatReportingConfig(), NullLogger<HashReputationService>.Instance);
             var correlationEngine = new BehavioralCorrelationEngine();
             var scoringEngine = new ScoringEngine(allowlist, new SafeProcessExemptionRegistry(), NullLogger<ScoringEngine>.Instance);
+            var signerTrust = new SignerTrustService(NullLogger<SignerTrustService>.Instance);
+            var fileReputationEngine = new FileReputationEngine(reputationService, signerTrust, cache, NullLogger<FileReputationEngine>.Instance);
 
             var rules = new List<IDetectionRule>();
             var engine = new DetectionEngine(
                 rules, metrics, logger, responseEngine,
-                iocScanner, reputationService, correlationEngine, scoringEngine,
+                iocScanner, reputationService, fileReputationEngine, correlationEngine, scoringEngine,
                 NullLogger<DetectionEngine>.Instance
             );
 

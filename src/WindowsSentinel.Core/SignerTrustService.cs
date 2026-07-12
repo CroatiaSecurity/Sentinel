@@ -224,6 +224,13 @@ namespace WindowsSentinel.Core
             }
         }
 
+        public void AddTestOverride(string filePath, bool isSigned, string signer)
+        {
+            DateTime writeTime = DateTime.MinValue;
+            try { writeTime = File.GetLastWriteTimeUtc(filePath); } catch { }
+            _cache[filePath] = (isSigned, signer, writeTime);
+        }
+
         /// <summary>
         /// Prune cache entries for files that no longer exist (called periodically).
         /// </summary>
