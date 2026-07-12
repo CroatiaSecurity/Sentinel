@@ -53,6 +53,11 @@ namespace WindowsSentinel.Core
             "vds", "vdsldr", "diskmgmt", "diskpart", "defrag",
             "chkdsk", "sfc", "dism", "wbengine", "vssvc",
             "msiexec", "trustedinstaller", "tiworker",
+            // v1.3.10: DISM host worker and NTLite open raw volume handles during WIM mount/unmount
+            // and offline image servicing — these are legitimate OS-image operations.
+            "dismhost", "ntlite",
+            // Arsenal Image Mounter and similar WIM/ISO mounting tools open virtual disk handles
+            "imagemounter", "arsenalimager", "aimdevice", "aim_ll",
             // Windows monitoring tools that legitimately enumerate disk handles
             "Taskmgr", "resmon", "perfmon", "mmc", "SystemInformer",
             // Hypervisor/VM tools

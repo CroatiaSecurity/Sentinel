@@ -41,7 +41,6 @@ namespace WindowsSentinel.Core
         // Pipeline backpressure monitoring
         private readonly System.Threading.Timer _backpressureTimer;
         private long _detectionsProcessed;
-        private long _detectionsDroppedBackpressure;
         private DateTimeOffset _lastBackpressureAlert = DateTimeOffset.MinValue;
         private static readonly TimeSpan BackpressureCheckInterval = TimeSpan.FromSeconds(10);
         private static readonly TimeSpan BackpressureAlertCooldown = TimeSpan.FromMinutes(2);
@@ -203,7 +202,7 @@ namespace WindowsSentinel.Core
                 UnhealthyMonitors = _monitorRegistry.GetUnhealthyMonitors(),
                 ResponseLocksHeld = respStats.ActiveLocks,
                 DetectionsProcessed = Interlocked.Read(ref _detectionsProcessed),
-                DetectionsDropped = Interlocked.Read(ref _detectionsDroppedBackpressure)
+                DetectionsDropped = busStats.TotalDropped
             };
         }
 

@@ -265,7 +265,15 @@ namespace WindowsSentinel.Core
                    string.Equals(name, "dwm", StringComparison.OrdinalIgnoreCase) ||
                    string.Equals(name, "explorer", StringComparison.OrdinalIgnoreCase) ||
                    string.Equals(name, "System", StringComparison.OrdinalIgnoreCase) ||
-                   string.Equals(name, "cmd", StringComparison.OrdinalIgnoreCase);
+                   string.Equals(name, "cmd", StringComparison.OrdinalIgnoreCase) ||
+                   // v1.4.0: svchost hosts hundreds of critical Windows services — killing it can
+                   // BSOD or leave the system in an unrecoverable state. Protect all instances
+                   // that reside in System32 (the path check below verifies legitimacy).
+                   string.Equals(name, "svchost", StringComparison.OrdinalIgnoreCase) ||
+                   // v1.4.0: powershell and pwsh are user shells — killing them destroys the
+                   // user's interactive session and any running scripts without warning.
+                   string.Equals(name, "powershell", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(name, "pwsh", StringComparison.OrdinalIgnoreCase);
         }
 
         private static bool IsInSystemDirectory(string imagePath)

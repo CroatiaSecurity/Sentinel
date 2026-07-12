@@ -1,15 +1,28 @@
-# v1.3.8 — Missing Core Rules and Monitors Activation
+# v1.4.0 — NTLite/DISM Compatibility + Critical False Positive Fix
 
-This release integrates and activates several critical rules and background monitors that were previously implemented but remained unregistered in the dependency injection container.
+## Critical Fix: svchost and powershell Killed/Quarantined
 
-## What's New
+`HardeningModule.IsCriticalProcessName` — the final kill gate used by every response path — was missing `svchost` and `powershell`/`pwsh`. Both existed in ChainTracer's internal exclusion lists, but anything that called `SafeKillProcessTree` directly (composite detections, implant hunters, etc.) bypassed those lists entirely.
 
-### 🛡️ Browser Session Protection (CDP Debug Port Block)
-- **ChromeRemoteDebuggingRule**: Registered system-wide (service + agent) to immediately detect and block browser instances (Chrome, Edge, Brave, etc.) spawned with the `--remote-debugging-port` parameter by non-browser parent processes. This closes the gap where attackers steal active session cookies and credentials via the Chrome DevTools Protocol.
+**Added to `IsCriticalProcessName`**: `svchost`, `powershell`, `pwsh`
 
-### 🔌 Missing Background Monitors Registered
-- **DeviceInstallMonitor**: Actively monitors the installation of new drivers and system devices to identify and block Bring Your Own Vulnerable Driver (BYOVD) attack patterns.
-- **GatewayFingerprintMonitor**: Actively tracks default gateway addresses to detect and trigger responses on rogue network changes and routing redirects.
+The path-verification guard still applies — a binary named `svchost.exe` running from `C:\Temp\` is **not** protected and will still be killed. Only processes verified to reside under `C:\Windows\` are shielded.
 
-### 🔒 Proactive Memory Unloading (v1.3.7)
-- System-wide periodic auditing of loaded DLLs and active memory unloads of sideloaded system modules.
+This release fixes two distinct issues that caused Sentinel to interfere with NTLite and DISM offline image servicing operations.
+
+## What's Fixed
+
+### 🔧 File Locking Inside Mounted WIM Images (Unmount Blocked)
+NTLite mounts Windows images as a drive letter. Sentinel was extending `FileActivityMonitor` to those drives, causing Restart Manager handle scans on every file event inside the image — competing with NTLite's write locks and preventing unmount.
+
+- **`VolumeMountMonitor`**: Skips `AddWatchPath` for CDRom-type drives (how Windows exposes mounted WIM images) and when any known servicing process (`dism`, `dismhost`, `ntlite`, `tiworker`, `trustedinstaller`) is running.
+- **`FileVerdictScanner`**: No longer opens files inside WinSxS, Windows Servicing, CBS logs, or DISM temp directories for hash reputation checks when a servicing process is active.
+- **`RawDiskAccessMonitor`**: Added `dismhost`, `ntlite`, `imagemounter`, `arsenalimager`, `aimdevice`, `aim_ll` to the allowed-processes list — these open virtual disk/volume handles during WIM mount/unmount.
+
+### 🔧 Feature-Disable Stalling (Minutes-Long Hangs)
+NTLite's feature-disable operation writes hundreds of manifests, deltas, and catalogs into WinSxS and DISM scratch directories. Each write was triggering a Restart Manager scan, creating a handle-contention storm that stalled operations for several minutes.
+
+- **`FileActivityMonitor`**: CBS/component-store paths (`\windows\winsxs\`, `\windows\servicing\`, DISM temp/log dirs) now skip the Restart Manager call entirely.
+- **`FileActivityMonitor`**: `ntlite` added to `IsTrustedSystemWriter()` — NTLite committing signed binaries into an offline image's System32 no longer triggers the System Integrity detection rule.
+
+**Security**: All excluded paths remain covered by process-level monitoring (WMI/ETW) and `RawDiskAccessMonitor`. Only the per-file Restart Manager handle scan is skipped for OS-servicing tool paths.

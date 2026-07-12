@@ -2,6 +2,38 @@
  
 All notable changes to Windows Sentinel are documented in this file.
  
+## [1.4.0] - 2026-07-12
+
+### Fixed — svchost and powershell Quarantined (Critical False Positive)
+
+`HardeningModule.IsCriticalProcessName` — the final kill gate called by every response path — was missing `svchost` and `powershell`/`pwsh`. Both were present in `ChainTracer.CriticalSystemProcesses` and `SystemBinaries` respectively, but those lists only protect within ChainTracer's own walk logic. Anything that called `SafeKillProcessTree` directly (composite detections, `BehavioralCorrelationEngine` escalations, `VolumeMountMonitor`'s implant hunter, etc.) bypassed those lists entirely and went straight to `SafeKillProcessTree` — which had no protection for either process.
+
+**Root cause:** `IsCriticalProcessName` protected `csrss`, `wininit`, `services`, `smss`, `lsass`, `winlogon`, `dwm`, `explorer`, `System`, and `cmd` — but not `svchost` (hosts hundreds of critical Windows services; killing any instance can BSOD or leave the system unrecoverable) or `powershell`/`pwsh` (user shells; killing them destroys the interactive session).
+
+The existing path-verification guard (`IsInSystemDirectory`) still applies — a process named `svchost.exe` or `powershell.exe` running from `C:\Temp\` is **not** protected and will still be killed. Only binaries verified to reside under `C:\Windows\` are shielded.
+
+- **`HardeningModule.IsCriticalProcessName`**: Added `svchost`, `powershell`, and `pwsh`.
+
+### Fixed — NTLite/DISM Compatibility: File Locking and Feature-Disable Stalling
+
+Two distinct issues caused Sentinel to interfere with NTLite and DISM offline servicing:
+
+**Issue 1 — File locking inside mounted WIM images (unmount blocked)**
+
+NTLite mounts Windows images as a drive letter. `VolumeMountMonitor` detected the new volume and extended `FileActivityMonitor` to it via `AddWatchPath()`. Every file event inside the mounted image then triggered a Restart Manager (`RmStartSession` / `RmRegisterResources`) call that opened a competing handle — preventing NTLite from unmounting the image.
+
+- **`VolumeMountMonitor`**: `AddWatchPath` is now skipped for CDRom-type drives (how Windows exposes mounted WIM images) and any volume appearing while a known servicing process (`dism`, `dismhost`, `ntlite`, `tiworker`, `trustedinstaller`) is running. New `IsWimMountDrive()` helper implements both checks.
+- **`FileVerdictScanner`**: Added `\\windows\\winsxs\\`, `\\windows\\servicing\\`, `\\windows\\temp\\cab`, `\\windows\\temp\\dism`, `\\windows\\logs\\cbs\\`, `\\windows\\logs\\dism\\` to `ExcludedPaths`. New `ServicingProcesses` set + `IsWrittenByServicingProcess()` helper — `ScanNewFileAsync` returns immediately when a servicing process is active, avoiding `FileStream` opens that compete with exclusive write locks.
+- **`RawDiskAccessMonitor`**: Added `dismhost`, `ntlite`, `imagemounter`, `arsenalimager`, `aimdevice`, `aim_ll` to `AllowedProcesses` — these open virtual disk/volume handles during WIM mount/unmount and offline image servicing.
+
+**Issue 2 — Feature-disable stalling (minutes-long hangs)**
+
+NTLite's feature-disable operation writes hundreds of manifests, deltas, and catalogs into `WinSxS\`, `\Windows\servicing\`, and DISM scratch directories. Each write fired `FileActivityMonitor`'s Restart Manager scan, causing a handle-contention storm that stalled the feature operation for several minutes.
+
+- **`FileActivityMonitor`**: `IsUserToolWorkingPath()` extended with CBS/component-store paths (`\\windows\\winsxs\\`, `\\windows\\servicing\\`, `\\windows\\temp\\cab`, `\\windows\\temp\\dism`, `\\windows\\logs\\cbs\\`, `\\windows\\logs\\dism\\`). Events on these paths now skip the Restart Manager call entirely. `IsTrustedSystemWriter()` extended with `ntlite` so NTLite committing signed binaries into an offline image's System32 doesn't trigger the System Integrity detection rule.
+
+**Security note**: All excluded paths are still covered by process-level monitoring (WMI/ETW process starts) and `RawDiskAccessMonitor`. The only thing skipped is the per-file Restart Manager handle scan and hash-reputation lookup for files written exclusively by OS-servicing tools.
+
 ## [1.3.9] - 2026-07-12
  
 ### Fixed — Agent Process Dying (No Recovery Mechanism)

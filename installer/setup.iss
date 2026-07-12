@@ -1,6 +1,6 @@
 [Setup]
 AppName=Windows Sentinel
-AppVersion=1.3.9
+AppVersion=1.4.0
 AppPublisher=Gorstak
 AppPublisherURL=https://gorstak.eu
 SourceDir=.
@@ -11,7 +11,7 @@ UninstallDisplayIcon={app}\Sentinel.ico
 Compression=lzma2
 SolidCompression=yes
 OutputDir=.
-OutputBaseFilename=WindowsSentinelSetup-1.3.9
+OutputBaseFilename=WindowsSentinelSetup-1.4.0
 PrivilegesRequired=admin
 ; Allow upgrading over existing install
 UsePreviousAppDir=yes
@@ -50,14 +50,14 @@ Filename: "{app}\WindowsSentinel.Agent.exe"; Flags: nowait postinstall runasorig
 
 [UninstallRun]
 ; Stop and delete the service
-Filename: "{sys}\sc.exe"; Parameters: "stop ""Windows Sentinel"""; Flags: runhidden
-Filename: "{sys}\sc.exe"; Parameters: "delete ""Windows Sentinel"""; Flags: runhidden
+Filename: "{sys}\sc.exe"; Parameters: "stop ""Windows Sentinel"""; Flags: runhidden; RunOnceId: "StopService"
+Filename: "{sys}\sc.exe"; Parameters: "delete ""Windows Sentinel"""; Flags: runhidden; RunOnceId: "DeleteService"
 
 [UninstallDelete]
 ; Remove application directory (but NOT ProgramData logs)
 Type: filesandordirs; Name: "{app}"
 ; Remove Program Files (x86) leftovers if previous install was there
-Type: filesandordirs; Name: "{pf32}\WindowsSentinel"
+Type: filesandordirs; Name: "{commonpf32}\WindowsSentinel"
 
 [Code]
 // Pascal Script for upgrade/uninstall logic

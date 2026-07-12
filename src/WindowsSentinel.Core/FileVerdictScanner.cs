@@ -29,13 +29,28 @@ namespace WindowsSentinel.Core
         // Previously excluded "downloads" too (removed in 1.2.9). Now only skip paths that are
         // genuinely never attack vectors: build tool intermediates, auto-updater working dirs,
         // and user OS-image tools that perform bulk extraction of legitimate Windows binaries.
+        // v1.3.10: Added WinSxS/CBS/DISM paths — NTLite feature-disable writes hundreds of signed
+        // MS binaries there per operation; hashing + ADS writes on those files causes file lock
+        // contention that stalls NTLite for minutes. Hash reputation is unnecessary for files
+        // written exclusively by TrustedInstaller/DISM/NTLite inside the component store.
         private static readonly HashSet<string> ExcludedPaths = new(StringComparer.OrdinalIgnoreCase)
         {
             // OS image/servicing tools — extract hundreds of signed Microsoft binaries
             "uupdump", "uup", "uups", "ntlite", "mount", "extracted", "msmg", "offlineimage",
             "winpe", "\\wim\\", "\\scratch\\",
+            // Windows component store / CBS servicing — written only by TrustedInstaller/DISM/NTLite
+            "\\windows\\winsxs\\", "\\windows\\servicing\\", "\\windows\\logs\\cbs\\",
+            "\\windows\\logs\\dism\\", "\\windows\\temp\\cab", "\\windows\\temp\\dism",
             // Browser auto-updaters (self-signed, ephemeral)
             "opera autoupdate", "google\\update", "edge\\update"
+        };
+
+        // Processes that perform legitimate bulk OS-image servicing.
+        // Files written by these processes inside Windows directories are always signed
+        // Microsoft binaries — hash reputation lookups waste API quota and create file locks.
+        private static readonly HashSet<string> ServicingProcesses = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "dism", "dismhost", "tiworker", "trustedinstaller", "poqexec", "ntlite"
         };
 
         // Throttle: max concurrent API lookups to avoid hammering CIRCL/MalwareBazaar
@@ -137,6 +152,36 @@ namespace WindowsSentinel.Core
         }
 
         /// <summary>
+        /// Returns true when the process that last touched this file is a known OS-servicing
+        /// tool (DISM, TrustedInstaller, NTLite, etc.).  We skip reputation scanning for those
+        /// files: they are always signed Microsoft binaries, the API lookup wastes quota, and
+        /// — most importantly — the FileStream open for hashing competes with the exclusive
+        /// write lock held by the servicing tool, stalling NTLite feature-disable for minutes.
+        /// </summary>
+        private static bool IsWrittenByServicingProcess(string filePath)
+        {
+            try
+            {
+                // Quick name-based check first (avoids the WMI/RM call overhead on the hot path)
+                foreach (var proc in System.Diagnostics.Process.GetProcesses())
+                {
+                    try
+                    {
+                        if (ServicingProcesses.Contains(proc.ProcessName))
+                        {
+                            proc.Dispose();
+                            return true; // A servicing process is active — be conservative
+                        }
+                        proc.Dispose();
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+            return false;
+        }
+
+        /// <summary>
         /// Fast-path for new/renamed files. Minimal delay, no lazy throttle.
         /// Goal: tag known-malicious files BEFORE they can execute for the first time.
         /// </summary>
@@ -146,6 +191,12 @@ namespace WindowsSentinel.Core
 
             var pathLower = filePath.ToLowerInvariant();
             if (ExcludedPaths.Any(excluded => pathLower.Contains(excluded))) return;
+
+            // v1.3.10: Skip files written by OS-servicing tools (DISM, TrustedInstaller, NTLite).
+            // These are always signed Microsoft binaries — reputation lookups are wasted API calls
+            // and the FileStream open competes with the servicing tool's exclusive write lock,
+            // stalling NTLite feature-disable operations for minutes.
+            if (IsWrittenByServicingProcess(filePath)) return;
 
             // Brief stabilization wait — just enough for the write to finish
             await Task.Delay(500);

@@ -468,33 +468,58 @@ namespace WindowsSentinel.Core
         /// Identifies paths belonging to legitimate user tools that perform bulk file operations.
         /// These tools (NTLite, UUP dump, DISM offline) extract/modify hundreds of files per second.
         /// The Restart Manager handle scan on every event causes severe contention that stalls them.
-        /// 
+        ///
+        /// v1.3.10: Added CBS component-store paths and DISM offline servicing paths.
+        /// NTLite's feature-disable operation modifies WinSxS, CBS package manifests, and
+        /// DISM scratch directories — all of which generate hundreds of events/second that
+        /// previously caused the RM scan to stall the feature-disable operation for minutes.
+        ///
         /// SECURITY: These paths are still protected by:
         ///   - FileVerdictScanner (hashes every new .exe/.dll against reputation DBs)
         ///   - Process-level monitoring (WMI/ETW detects suspicious process launches)
         ///   - RawDiskAccessMonitor (detects bypass of filesystem layer)
         /// We only skip the per-file Restart Manager scan and telemetry submission here.
-        /// 
+        ///
         /// HARDENING: Only skip if the path is NOT inside a Windows system directory.
         /// An attacker cannot abuse this by placing files in these named folders inside System32
         /// because the system directory check fires first and is separate.
         /// </summary>
         private static bool IsUserToolWorkingPath(string pathLower)
         {
-            // Never skip system directories regardless of path keywords
-            if (IsProtectedOsDirectory(pathLower)) return false;
+            // Never skip live System32/SysWOW64 — those stay fully monitored.
+            // NOTE: WinSxS and CBS are excluded below because they are only ever written
+            // by TrustedInstaller/DISM/NTLite during OS servicing — not by malware at runtime.
+            // The IsTrustedSystemWriter check on System32/SysWOW64 already gates those paths.
+            if (pathLower.Contains(@"\windows\system32\") ||
+                pathLower.Contains(@"\windows\syswow64\"))
+                return false;
 
-            return pathLower.Contains(@"\ntlite\") ||
-                   pathLower.Contains(@"\uupdump\") ||
-                   pathLower.Contains(@"\uup\") ||
-                   pathLower.Contains(@"\uups\") ||
-                   pathLower.Contains(@"\msmg\") ||
-                   pathLower.Contains(@"\mount\") ||
-                   pathLower.Contains(@"\extracted\") ||
-                   pathLower.Contains(@"\winpe\") ||
-                   pathLower.Contains(@"\wim\") ||
-                   pathLower.Contains(@"\scratch\") ||
-                   pathLower.Contains(@"\offlineimage\");
+            // User OS-image / debloat tool working directories
+            if (pathLower.Contains(@"\ntlite\") ||
+                pathLower.Contains(@"\uupdump\") ||
+                pathLower.Contains(@"\uup\") ||
+                pathLower.Contains(@"\uups\") ||
+                pathLower.Contains(@"\msmg\") ||
+                pathLower.Contains(@"\mount\") ||
+                pathLower.Contains(@"\extracted\") ||
+                pathLower.Contains(@"\winpe\") ||
+                pathLower.Contains(@"\wim\") ||
+                pathLower.Contains(@"\scratch\") ||
+                pathLower.Contains(@"\offlineimage\"))
+                return true;
+
+            // CBS / Windows component store — written en-masse by DISM and NTLite during
+            // feature enable/disable. Generates thousands of manifest/delta/catalog writes
+            // per feature operation; RM calls on every event cause minutes-long stalls.
+            if (pathLower.Contains(@"\windows\winsxs\") ||
+                pathLower.Contains(@"\windows\servicing\") ||
+                pathLower.Contains(@"\windows\temp\cab") ||
+                pathLower.Contains(@"\windows\temp\dism") ||
+                pathLower.Contains(@"\windows\logs\cbs\") ||
+                pathLower.Contains(@"\windows\logs\dism\"))
+                return true;
+
+            return false;
         }
 
         /// <summary>
@@ -542,11 +567,14 @@ namespace WindowsSentinel.Core
 
         internal bool IsTrustedSystemWriter(int pid, string processName, string filePath)
         {
-            // TrustedInstaller (Windows Modules Installer), Windows Update, Defender, DISM
+            // TrustedInstaller (Windows Modules Installer), Windows Update, Defender, DISM, NTLite
             var trustedNames = new[] { "trustedinstaller", "tiworker", "msiexec",
                 "wuauclt", "usoclient", "musnotification",
                 "msmpeng", "nissrv", "securityhealthservice",
                 "dism", "dismhost", "sfc", "poqexec",
+                // NTLite performs offline OS servicing (feature removal, component cleanup)
+                // and commits changes to mounted WIM images — writes signed MS binaries to System32
+                "ntlite",
                 // Critical system processes that legitimately modify System32
                 "csrss", "smss", "wininit", "services", "lsass", "svchost",
                 "lsaiso", "cng key isolation", "credential guard",

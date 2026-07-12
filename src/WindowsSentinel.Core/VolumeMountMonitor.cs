@@ -281,13 +281,27 @@ namespace WindowsSentinel.Core
 
                         await EmitVolumeDetection(vol, classification);
 
-                        // Dynamically extend FileActivityMonitor coverage to new volume
-                        if (!string.IsNullOrEmpty(vol.DriveLetter))
+                        // Dynamically extend FileActivityMonitor coverage to new volume.
+                        // v1.3.10: Skip CDRom/ISO-type drives — these are DISM/NTLite WIM mounts.
+                        // Adding a FileSystemWatcher on a mounted WIM drive causes Restart Manager
+                        // calls on every file event inside the image, which compete with the
+                        // servicing tool's write locks and stall operations for minutes.
+                        // FileVerdictScanner already excludes CDRom drives (DriveType check) and
+                        // the servicing-process guard covers any stragglers.
+                        if (!string.IsNullOrEmpty(vol.DriveLetter) &&
+                            !string.Equals(classification, "ISO", StringComparison.OrdinalIgnoreCase) &&
+                            !IsWimMountDrive(vol.DriveLetter))
                         {
                             _fileActivityMonitor.AddWatchPath(vol.DriveLetter);
                             _logger.LogInformation(
                                 "[VolumeMountMonitor] Extended FileActivityMonitor to new volume: {Drive}",
                                 vol.DriveLetter);
+                        }
+                        else if (!string.IsNullOrEmpty(vol.DriveLetter))
+                        {
+                            _logger.LogDebug(
+                                "[VolumeMountMonitor] Skipped FileActivityMonitor extension for WIM/ISO volume: {Drive} ({Class})",
+                                vol.DriveLetter, classification);
                         }
                     }
 
@@ -1535,6 +1549,50 @@ namespace WindowsSentinel.Core
             public IntPtr hThread;
             public int dwProcessId;
             public int dwThreadId;
+        }
+
+        /// <summary>
+        /// Returns true when a drive letter looks like a DISM/NTLite WIM mount:
+        ///   - DriveType is CDRom (how Windows exposes a mounted WIM image)
+        ///   - OR a known servicing process (dism, dismhost, ntlite, tiworker) is currently
+        ///     running — the mount may have just appeared before DriveType updates.
+        ///
+        /// v1.3.10: We skip extending FileActivityMonitor to these drives because every file
+        /// event inside the mounted image triggers a Restart Manager handle scan that competes
+        /// with DISM/NTLite's exclusive write locks, stalling feature-disable operations.
+        /// </summary>
+        private static bool IsWimMountDrive(string driveLetter)
+        {
+            try
+            {
+                var di = new DriveInfo(driveLetter.TrimEnd('\\'));
+                if (di.DriveType == DriveType.CDRom)
+                    return true;
+            }
+            catch { }
+
+            // Also guard the race window: servicing process running but DriveType not yet CDRom
+            try
+            {
+                foreach (var proc in System.Diagnostics.Process.GetProcesses())
+                {
+                    try
+                    {
+                        var n = proc.ProcessName;
+                        proc.Dispose();
+                        if (n.Equals("dism",             StringComparison.OrdinalIgnoreCase) ||
+                            n.Equals("dismhost",         StringComparison.OrdinalIgnoreCase) ||
+                            n.Equals("ntlite",           StringComparison.OrdinalIgnoreCase) ||
+                            n.Equals("tiworker",         StringComparison.OrdinalIgnoreCase) ||
+                            n.Equals("trustedinstaller", StringComparison.OrdinalIgnoreCase))
+                            return true;
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+
+            return false;
         }
 
         /// <summary>
