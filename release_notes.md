@@ -1,15 +1,15 @@
-# v1.3.7 — Proactive DLL Sideloading Remediation & Memory Unloading
+# v1.3.8 — Missing Core Rules and Monitors Activation
 
-This release activates proactive system-wide DLL sideloading validation and memory unloading, ensuring that rogue modules are terminated and quarantined in real time. It builds upon the version 1.3.6 protections (CVE Shield, User-Store CAs, browser extensions, and proxies).
+This release integrates and activates several critical rules and background monitors that were previously implemented but remained unregistered in the dependency injection container.
 
 ## What's New
 
-### 🛡️ Proactive DLL Sideload Scanning & Memory Unloading
-- **Proactive Module Validation**: Integrated the `DllUnloadEngine` into the periodic background scan loop in `MemoryBehaviorAnalyzer`. All running processes' loaded modules are now audited system-wide every 90 seconds.
-- **Active Memory Remediation**: Sideloaded DLLs detected during periodic scans are immediately unloaded in memory (via `QueueUserAPC` + `FreeLibrary`), with the host process terminated, the DLL quarantined, and read-only lock files placed to prevent re-exploitation.
+### 🛡️ Browser Session Protection (CDP Debug Port Block)
+- **ChromeRemoteDebuggingRule**: Registered system-wide (service + agent) to immediately detect and block browser instances (Chrome, Edge, Brave, etc.) spawned with the `--remote-debugging-port` parameter by non-browser parent processes. This closes the gap where attackers steal active session cookies and credentials via the Chrome DevTools Protocol.
 
-### 🔒 Security & Blind Spot Remediation (v1.3.6)
-- **Proactive CVE Shield**: Fetches CVE catalogs and maps against local assets to drop hardening rules.
-- **User-Store Certificate Monitoring**: Audits and monitors both `StoreLocation.LocalMachine` and `StoreLocation.CurrentUser` root trust stores.
-- **Browser Extension Policy Protection**: Automated deletion of unauthorized Chrome/Edge force-installed extension policies.
-- **Proxy Hijack Protection**: Automatic restoration of proxy settings back to safe baselines.
+### 🔌 Missing Background Monitors Registered
+- **DeviceInstallMonitor**: Actively monitors the installation of new drivers and system devices to identify and block Bring Your Own Vulnerable Driver (BYOVD) attack patterns.
+- **GatewayFingerprintMonitor**: Actively tracks default gateway addresses to detect and trigger responses on rogue network changes and routing redirects.
+
+### 🔒 Proactive Memory Unloading (v1.3.7)
+- System-wide periodic auditing of loaded DLLs and active memory unloads of sideloaded system modules.

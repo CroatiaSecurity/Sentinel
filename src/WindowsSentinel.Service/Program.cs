@@ -105,6 +105,7 @@ namespace WindowsSentinel.Service
                     services.AddTransient<IDetectionRule, VerdictGateRule>();
                     services.AddTransient<IDetectionRule, ClickFixDetectionRule>();
                     services.AddTransient<IDetectionRule, DllSideloadingDetectionRule>();
+                    services.AddTransient<IDetectionRule, ChromeRemoteDebuggingRule>();
                     services.AddSingleton<IDetectionRule, DynamicRulesEvaluator>();
 
                     // Detection Engine
@@ -175,6 +176,8 @@ namespace WindowsSentinel.Service
                     services.AddHostedService<BeaconingDetector>(sp => sp.GetRequiredService<BeaconingDetector>());
                     services.AddHostedService<ModuleValidationMonitor>();
                     services.AddHostedService<DiskWideDllScanner>();
+                    services.AddHostedService<DeviceInstallMonitor>();
+                    services.AddHostedService<GatewayFingerprintMonitor>();
                     services.AddSingleton<BehavioralBaselineService>();
                     services.AddHostedService<BehavioralBaselineService>(sp => sp.GetRequiredService<BehavioralBaselineService>());
                     services.AddSingleton<PhantomDeviceMonitor>();

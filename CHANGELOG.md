@@ -2,6 +2,12 @@
  
 All notable changes to Windows Sentinel are documented in this file.
  
+## [1.3.8] - 2026-07-12
+ 
+### Fixed & Hardened — Missing Core Rules and Monitors Integration
+- **Registered Missing Rules**: Registered `ChromeRemoteDebuggingRule` to inspect and block browsers spawned with `--remote-debugging-port` to steal cookie/session tokens.
+- **Registered Missing Background Services**: Activated `DeviceInstallMonitor` (detects new drivers/devices, blocking BYOVD) and `GatewayFingerprintMonitor` (detects Default Gateway changes and redirects).
+ 
 ## [1.3.7] - 2026-07-12
  
 ### Added & Hardened — Proactive DLL Sideload Scanning & Memory Unloading

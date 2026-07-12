@@ -82,6 +82,7 @@ namespace WindowsSentinel.Agent
                     services.AddTransient<IDetectionRule, VerdictGateRule>();
                     services.AddTransient<IDetectionRule, ClickFixDetectionRule>();
                     services.AddTransient<IDetectionRule, DllSideloadingDetectionRule>();
+                    services.AddTransient<IDetectionRule, ChromeRemoteDebuggingRule>();
                     services.AddSingleton<IDetectionRule, DynamicRulesEvaluator>();
 
                     // Tray Icon
