@@ -25,6 +25,7 @@ namespace WindowsSentinel.Core
         private readonly TelemetryFusionEngine _fusionEngine;
         private readonly DetectionEngine _detectionEngine;
         private readonly SignerTrustService _signerTrust;
+        private readonly DllUnloadEngine _dllUnloadEngine;
         private readonly ILogger<MemoryBehaviorAnalyzer> _logger;
         private readonly System.Threading.Timer _timer;
 
@@ -57,11 +58,13 @@ namespace WindowsSentinel.Core
             TelemetryFusionEngine fusionEngine,
             DetectionEngine detectionEngine,
             SignerTrustService signerTrust,
+            DllUnloadEngine dllUnloadEngine,
             ILogger<MemoryBehaviorAnalyzer> logger)
         {
             _fusionEngine = fusionEngine;
             _detectionEngine = detectionEngine;
             _signerTrust = signerTrust;
+            _dllUnloadEngine = dllUnloadEngine;
             _logger = logger;
             _timer = new System.Threading.Timer(ScanMemory, null, ScanInterval, ScanInterval);
         }
@@ -99,6 +102,13 @@ namespace WindowsSentinel.Core
 
                         // Bypass memory scanner entirely for trusted processes signed by reputable publishers
                         if (_signerTrust.IsSignedProcess(proc.Id))
+                        {
+                            continue;
+                        }
+
+                        // === Check: Active DLL Sideloading Detection & Unloading ===
+                        var unloadResult = _dllUnloadEngine.CheckAndUnloadAsync(proc.Id, name).GetAwaiter().GetResult();
+                        if (unloadResult.Success)
                         {
                             continue;
                         }

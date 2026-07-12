@@ -1,15 +1,15 @@
-# v1.3.6 — Proactive CVE Shield & Security Blind Spot Remediation
+# v1.3.7 — Proactive DLL Sideloading Remediation & Memory Unloading
 
-This release introduces the **Proactive CVE Shield** (anti-PoC engine), which matches local system assets with active vulnerability feeds to deploy defense rules and IoC hashes. It also closes three critical security blind spots: User-Store CA hijacking, browser extension force-installation, and registry-based proxy server redirects.
+This release activates proactive system-wide DLL sideloading validation and memory unloading, ensuring that rogue modules are terminated and quarantined in real time. It builds upon the version 1.3.6 protections (CVE Shield, User-Store CAs, browser extensions, and proxies).
 
 ## What's New
 
-### 🛡️ Proactive CVE Shield (Anti-PoC Engine)
-- **Asset Matcher & Hardening**: Periodically crawls active vulnerability catalogs (e.g., CISA KEV), maps them against local registry uninstalls, active TCP/UDP ports, and running process names, and generates dynamic JSON block rules or blocklists known PoC file hashes with `IoCScanner`.
-- **Background Worker**: Integrated as a native Windows service background worker (`CveShieldHardener`) managed via the Orchestrator.
+### 🛡️ Proactive DLL Sideload Scanning & Memory Unloading
+- **Proactive Module Validation**: Integrated the `DllUnloadEngine` into the periodic background scan loop in `MemoryBehaviorAnalyzer`. All running processes' loaded modules are now audited system-wide every 90 seconds.
+- **Active Memory Remediation**: Sideloaded DLLs detected during periodic scans are immediately unloaded in memory (via `QueueUserAPC` + `FreeLibrary`), with the host process terminated, the DLL quarantined, and read-only lock files placed to prevent re-exploitation.
 
-### 🔒 Security Blind Spot Remediation
-- **User-Store Certificate Monitoring**: Expanded `TlsCertificateMonitor` to audit and monitor both `StoreLocation.LocalMachine` and `StoreLocation.CurrentUser` root trust stores. This stops non-elevated user-space malware from planting a rogue root CA without UAC alerts.
-- **Generic Certificate Removal**: Updated `AdvancedResponseEngine` active response to support removing rogue certificates from all current user and local machine stores.
-- **Browser Extension Policy Protection**: Added registry monitoring and active response (automatic deletion) for Chrome/Edge force-installed extension policies under `ExtensionInstallForcelist`.
-- **Proxy Hijack Protection**: Added registry monitoring and automatic restoration of internet settings proxy keys (`ProxyEnable`, `ProxyServer`, `AutoConfigURL`) back to safe baselines.
+### 🔒 Security & Blind Spot Remediation (v1.3.6)
+- **Proactive CVE Shield**: Fetches CVE catalogs and maps against local assets to drop hardening rules.
+- **User-Store Certificate Monitoring**: Audits and monitors both `StoreLocation.LocalMachine` and `StoreLocation.CurrentUser` root trust stores.
+- **Browser Extension Policy Protection**: Automated deletion of unauthorized Chrome/Edge force-installed extension policies.
+- **Proxy Hijack Protection**: Automatic restoration of proxy settings back to safe baselines.

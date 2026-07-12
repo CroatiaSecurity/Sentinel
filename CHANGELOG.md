@@ -2,6 +2,12 @@
  
 All notable changes to Windows Sentinel are documented in this file.
  
+## [1.3.7] - 2026-07-12
+ 
+### Added & Hardened — Proactive DLL Sideload Scanning & Memory Unloading
+- **Proactive Module Validation**: Injected `DllUnloadEngine` into `MemoryBehaviorAnalyzer` to run proactive, system-wide scans of all running processes' loaded modules every 90 seconds.
+- **Active Memory Remediation**: Sideloaded DLLs detected during periodic scans are immediately unloaded in memory (via `QueueUserAPC` + `FreeLibrary`), with the process terminated, the DLL quarantined, and read-only lock files placed to prevent re-exploitation.
+ 
 ## [1.3.6] - 2026-07-12
  
 ### Added & Hardened — Proactive CVE Shield & Security Blind Spot Remediation
