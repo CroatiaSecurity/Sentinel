@@ -228,6 +228,13 @@ namespace WindowsSentinel.Service
                     // v1.4.2: Password rotation + UAC enforcement
                     services.AddHostedService<PasswordRotationGuard>();
 
+                    // v1.4.3: Anti-TAO hardware/network monitors
+                    services.AddHostedService<HardwareSecurityGuard>();
+                    services.AddHostedService<DnsCrossValidator>();
+                    services.AddHostedService<UsbHidWhitelist>();
+                    services.AddHostedService<TrafficVolumeBaseline>();
+                    services.AddHostedService<OutboundConnectionWhitelist>();
+
                     // v1.3.9: Agent watchdog — relaunches WindowsSentinel.Agent.exe in the
                     // user session if it dies, and fires an anti-tamper alert on repeated kills
                     services.AddHostedService<AgentWatchdog>();

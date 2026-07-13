@@ -2,6 +2,20 @@
  
 All notable changes to Windows Sentinel are documented in this file.
  
+## [1.4.3] - 2026-07-13
+
+### Security — Anti-TAO Hardware & Network Integrity Monitors
+
+5 new BackgroundService monitors targeting firmware-level implants, router-level DNS poisoning, BadUSB attacks, and covert exfiltration channels.
+
+### Added
+
+- **`HardwareSecurityGuard`**: Checks IOMMU/VT-d (VBS registry + bcdedit hypervisorlaunchtype), Secure Boot state, and BitLocker encryption on C: every 60 seconds. Alerts if hardware security features are disabled, leaving the system vulnerable to DMA and firmware attacks.
+- **`DnsCrossValidator`**: Resolves a test domain via the system resolver AND via a direct raw UDP DNS query to Cloudflare 1.1.1.1, comparing /16 subnets. Detects router-level DNS poisoning that redirects traffic to attacker infrastructure while bypassing hosts-file protections.
+- **`UsbHidWhitelist`**: Baselines connected HID devices at startup, checks every 15 seconds for new devices. If a new HID device is not in the trusted whitelist (VID:PID) and was not present at baseline, emits Tier1 alert and disables the device via registry ConfigFlags to prevent BadUSB/Rubber Ducky keystroke injection.
+- **`TrafficVolumeBaseline`**: Monitors raw NetworkInterface BytesSent statistics every 30 seconds. Baselines upload rate over the first 5 minutes, then alerts if upload volume exceeds 3x baseline — catching NIC-level implants and firmware exfiltration invisible to process-level monitoring.
+- **`OutboundConnectionWhitelist`**: Monitors (or enforces) outbound connections against a whitelist of allowed IP subnets. In monitor mode, scans netstat output and alerts on non-whitelisted connections. In enforcement mode, creates Windows Firewall rules blocking all outbound traffic except whitelisted subnets + localhost + LAN — the nuclear option that prevents all implant exfiltration regardless of protocol.
+
 ## [1.4.2] - 2026-07-12
 
 ### Security — OS Attack Surface Reduction (Red Team Probe Results)
