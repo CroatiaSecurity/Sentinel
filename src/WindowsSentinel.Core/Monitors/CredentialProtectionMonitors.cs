@@ -890,6 +890,7 @@ namespace WindowsSentinel.Core
         /// <summary>
         /// Disables the screen lock timeout to prevent lockout when no PIN is configured.
         /// The user can still manually lock (Win+L) but won't be auto-locked by timeout.
+        /// Also enforces NoLockScreen policy and removes InactivityTimeoutSecs.
         /// </summary>
         private void DisableScreenLockTimeout()
         {
@@ -904,6 +905,30 @@ namespace WindowsSentinel.Core
                     desktop.SetValue("ScreenSaverIsSecure", "0", RegistryValueKind.String);
                 }
 
+                // Remove InactivityTimeoutSecs — prevents policy-driven session lock
+                using var systemPolicy = Registry.LocalMachine.OpenSubKey(
+                    @"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System", writable: true);
+                if (systemPolicy != null)
+                {
+                    systemPolicy.SetValue("InactivityTimeoutSecs", 0, RegistryValueKind.DWord);
+                }
+
+                // Enforce NoLockScreen via Personalization policy
+                using var personalization = Registry.LocalMachine.CreateSubKey(
+                    @"SOFTWARE\Policies\Microsoft\Windows\Personalization");
+                if (personalization != null)
+                {
+                    personalization.SetValue("NoLockScreen", 1, RegistryValueKind.DWord);
+                }
+
+                // Disable lock workstation (Win+L) — prevents manual lock that requires password
+                using var explorerPolicy = Registry.CurrentUser.CreateSubKey(
+                    @"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System");
+                if (explorerPolicy != null)
+                {
+                    explorerPolicy.SetValue("DisableLockWorkstation", 1, RegistryValueKind.DWord);
+                }
+
                 // Disable console lock display off timeout via power policy
                 // (this is a best-effort — power settings are complex)
                 using var powerKey = Registry.LocalMachine.OpenSubKey(
@@ -914,7 +939,7 @@ namespace WindowsSentinel.Core
                     powerKey.SetValue("Attributes", 2, RegistryValueKind.DWord); // Make visible, user can adjust
                 }
 
-                _logger.LogInformation("[PasswordRotationGuard] Disabled screen lock timeout (no Windows Hello PIN configured)");
+                _logger.LogInformation("[PasswordRotationGuard] Disabled screen lock timeout + lock screen (no Windows Hello PIN configured)");
             }
             catch (Exception ex)
             {
