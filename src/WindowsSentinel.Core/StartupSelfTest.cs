@@ -63,9 +63,15 @@ namespace WindowsSentinel.Core
             // 3. DPAPI / SecureCacheStore functional
             try
             {
-                _cacheStore.Save("selftest", "_check", "ok");
-                var val = _cacheStore.Load("selftest", "_check");
-                if (val == "ok") passed++; else { failed++; _logger.LogWarning("[StartupSelfTest] DPAPI cache read-back mismatch"); }
+                // SECURITY v1.4.4: Use a random key for the self-test cache entry.
+                // Previously used a fixed key "_check" with fixed value "ok" — known plaintext
+                // that could theoretically aid cryptanalysis of the HMAC key when observed
+                // before/after boot in the DPAPI-encrypted file. Random key eliminates this.
+                var testKey = $"_selftest_{Guid.NewGuid():N}";
+                var testVal = Guid.NewGuid().ToString("N");
+                _cacheStore.Save("selftest", testKey, testVal);
+                var val = _cacheStore.Load("selftest", testKey);
+                if (val == testVal) passed++; else { failed++; _logger.LogWarning("[StartupSelfTest] DPAPI cache read-back mismatch"); }
             }
             catch (Exception ex) { failed++; _logger.LogWarning(ex, "[StartupSelfTest] DPAPI cache check FAILED"); }
 

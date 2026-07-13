@@ -85,23 +85,30 @@ namespace WindowsSentinel.Core
                 try
                 {
                     var detectedImagePath = SecurityValidation.GetProcessImagePath(detection.ProcessId);
-                    var selfDir = AppContext.BaseDirectory.TrimEnd('\\');
-                    if (detectedImagePath != null &&
-                        detectedImagePath.StartsWith(selfDir, StringComparison.OrdinalIgnoreCase))
+                    // SECURITY v1.4.4: Normalize both paths with Path.GetFullPath() to resolve
+                    // symlinks, junctions, and relative segments (../) before comparison.
+                    // Also use trailing separator to prevent prefix collision attacks
+                    // (e.g., C:\Program Files\WindowsSentinel2\evil.exe matching our dir).
+                    var selfDir = Path.GetFullPath(AppContext.BaseDirectory).TrimEnd('\\') + '\\';
+                    if (detectedImagePath != null)
                     {
-                        reason = "LogOnly (Self-exclusion: verified WindowsSentinel install path)";
-                        stopwatch.Stop();
-                        _metrics.RecordResponse(stopwatch.ElapsedMilliseconds);
-                        var selfLog = new ResponseEvent
+                        var normalizedTarget = Path.GetFullPath(detectedImagePath);
+                        if (normalizedTarget.StartsWith(selfDir, StringComparison.OrdinalIgnoreCase))
                         {
-                            ProcessId = detection.ProcessId,
-                            ProcessName = detection.ProcessName,
-                            ActionTaken = "LOG",
-                            Reason = reason,
-                            ExecutionTimeMs = stopwatch.ElapsedMilliseconds
-                        };
-                        await _eventLogger.LogEventAsync("response", selfLog);
-                        return;
+                            reason = "LogOnly (Self-exclusion: verified WindowsSentinel install path)";
+                            stopwatch.Stop();
+                            _metrics.RecordResponse(stopwatch.ElapsedMilliseconds);
+                            var selfLog = new ResponseEvent
+                            {
+                                ProcessId = detection.ProcessId,
+                                ProcessName = detection.ProcessName,
+                                ActionTaken = "LOG",
+                                Reason = reason,
+                                ExecutionTimeMs = stopwatch.ElapsedMilliseconds
+                            };
+                            await _eventLogger.LogEventAsync("response", selfLog);
+                            return;
+                        }
                     }
                 }
                 catch { /* process may have exited — continue with normal handling */ }

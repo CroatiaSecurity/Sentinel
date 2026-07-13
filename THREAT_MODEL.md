@@ -1,6 +1,6 @@
 # Windows Sentinel — Threat Model
 
-**Version: 1.0.3**
+**Version: 1.4.4**
 
 This document assumes the attacker has read the source code.
 
@@ -348,3 +348,167 @@ The attacker could theoretically:
 **Residual risk:** LOW. Actions are automatically reverted, modifying processes are trace-killed and quarantined, and remote attacker IPs are blocked in Windows Firewall.
 
 
+
+## Bypass Scenarios Closed in v1.4.4 (Red Team Audit)
+
+Internal red team audit identified 15 vulnerabilities (3 Critical, 4 High, 4 Medium, 4 Low). All fixed.
+
+### B20: User-level ActiveResponse disable (FIXED in v1.4.4)
+
+**Attack:** Malware running as standard user sends WM_COMMAND to the Agent's tray icon hidden window, automating the "Stop Protection" confirmation dialog to disable all Agent-side response actions without elevation.
+
+**Mitigation (v1.4.4):**
+- Removed the "Stop Protection" menu item entirely from `TrayIconService`
+- The Service (SYSTEM) is now the sole authority on response mode
+- No user-session mechanism exists to toggle protection
+
+**Residual risk:** NONE for this vector. Users must use an elevated `sc stop` to disable protection.
+
+---
+
+### B21: Hash reputation trust inversion (FIXED in v1.4.4)
+
+**Attack:** Deploy a custom-compiled implant. It's absent from CIRCL and MalwareBazaar. The reputation service marks it `Safe`, which gets cached permanently and feeds +2 trust score to BeaconingDetector, potentially demoting a kill response to LogOnly.
+
+**Mitigation (v1.4.4):**
+- `hash_not_found` from MalwareBazaar now returns `Unknown` (not `Safe`)
+- Only CIRCL trust score > 60 can positively confirm Safe
+- `Unknown` is not cached to disk — file will be re-checked on next scan cycle
+- BeaconingDetector only gets trust bonus for positively-confirmed `Safe` hashes
+
+**Residual risk:** LOW. Novel files score as Unknown (neutral), not Safe. They cannot accumulate trust through absence.
+
+---
+
+### B22: Command injection via crafted ISO/VM names (FIXED in v1.4.4)
+
+**Attack:** Create a malicious ISO file or Hyper-V VM with a crafted name containing PowerShell escape sequences. When Sentinel's IsolationResponseEngine dismounts the ISO or stops the VM, the name is interpolated into a `-Command` string, achieving arbitrary code execution as SYSTEM.
+
+**Mitigation (v1.4.4):**
+- Both ISO dismount and Hyper-V Stop-VM now use `-EncodedCommand` (Base64-encoded Unicode)
+- Eliminates the command parsing surface entirely — PowerShell doesn't evaluate the script string
+- Added single-quote escaping (`'` → `''`) as defense-in-depth
+- Docker imageId from `docker inspect` output validated with `IsValidDockerIdentifier()` before use
+
+**Residual risk:** NONE. No user-controlled string is ever interpolated into a shell command.
+
+---
+
+### B23: Overprivileged DLL unload handle as injection primitive (FIXED in v1.4.4)
+
+**Attack:** Trigger a false DLL sideloading detection against a target process. `DllUnloadEngine.TryUnloadDll` opens the target with `PROCESS_ALL_ACCESS` — if the handle is leaked or the processId is attacker-influenced, this becomes a powerful injection primitive.
+
+**Mitigation (v1.4.4):**
+- Process handle reduced to `PROCESS_QUERY_INFORMATION` (0x0400)
+- Thread handles already opened individually with minimum-necessary `THREAD_SET_CONTEXT`
+- The process-level handle is only needed for GetProcessById thread enumeration
+
+**Residual risk:** LOW. Even if processId is influenced, the handle grants query-only access — insufficient for injection.
+
+---
+
+### B24: MITM/replay of threat intelligence reports (FIXED in v1.4.4)
+
+**Attack:** Compromise DNS or MITM the TLS connection to the Cloudflare Worker proxy. Observe which hashes/IPs/URLs Sentinel reports (intelligence leak). Or replay/inject fake reports to poison threat intel feeds.
+
+**Mitigation (v1.4.4):**
+- All requests HMAC-SHA256 signed using installation-specific entropy key
+- Signature covers `timestamp + path + body` — prevents replay (stale timestamp) and tampering
+- Headers: `X-Sentinel-Timestamp`, `X-Sentinel-Signature`
+- Key derived from `.install_entropy` (SYSTEM-ACL-protected, unique per machine)
+
+**Residual risk:** LOW. MITM can still see the encrypted TLS payload (hashes/IPs), but cannot forge valid signatures or replay old requests. Full elimination would require mutual TLS or certificate pinning.
+
+---
+
+### B25: Config destruction via installer upgrade (FIXED in v1.4.4)
+
+**Attack:** Not a direct attacker vector, but a reliability/availability issue: every upgrade silently overwrites `appsettings.json`, destroying custom TrustedCastDevices, ProtectedApps, LogPath, and CveShield settings. An attacker who knows this can trigger an auto-update to reset security-critical configuration to defaults.
+
+**Mitigation (v1.4.4):**
+- Changed installer flag from `ignoreversion` (always overwrite) to `onlyifdoesntexist`
+- New installs get the default config; upgrades preserve existing user customizations
+- Future config schema migrations handled by the Service at startup (forward-compatible)
+
+**Residual risk:** NONE. User config survives upgrades. New config keys added in future versions will use compile-time defaults when absent from the file.
+
+---
+
+### B26: Self-exclusion bypass via directory junction/symlink (FIXED in v1.4.4)
+
+**Attack:** Create a directory junction or symlink pointing into the Sentinel install directory. Place a malicious binary at a path that, when resolved, appears to start with Sentinel's `AppContext.BaseDirectory`. The self-exclusion check uses `StartsWith` without path normalization — a junction or `..` traversal could cause a false match, making the malicious process immune to kill responses.
+
+**Mitigation (v1.4.4):**
+- All 3 self-exclusion checks (`AdvancedResponseEngine`, `HardeningModule.SafeKillProcessTree`, `DetectionEngine`) now normalize both paths with `Path.GetFullPath()` before comparison
+- Added trailing directory separator (`\`) to prevent prefix collision (e.g., `WindowsSentinel2\evil.exe` matching `WindowsSentinel`)
+- `QueryFullProcessImageName` already returns canonical paths, but `Path.GetFullPath()` on both sides provides defense-in-depth against edge cases
+
+**Residual risk:** LOW. `Path.GetFullPath()` resolves all known normalization tricks. The only remaining vector would be a kernel-level path translation bug in NTFS.
+
+---
+
+### B27: SecureCacheStore HMAC key derived from predictable inputs (FIXED in v1.4.4)
+
+**Attack:** The HMAC key for SecureCacheStore was derived from 4 components: boot time (publicly readable from PID 4), Machine GUID (readable from registry by standard users), installation entropy (SYSTEM-ACL-protected), and process ID (visible in task manager). An attacker with standard user access could observe 2 of 4 components; with admin access, all 4 were reconstructable — enabling cache entry forgery.
+
+**Mitigation (v1.4.4):**
+- Removed boot time ticks and process ID from key derivation entirely
+- Key now derives from: Machine GUID + SYSTEM-ACL-protected installation entropy + domain-specific label
+- Stable across reboots (no more boot-nonce cache invalidation)
+- Requires SYSTEM or Administrator access to reconstruct the key
+
+**Residual risk:** LOW. The installation entropy is the primary secret (32 random bytes in a SYSTEM-only directory). An attacker who has SYSTEM access can already do far more damage than forging cache entries.
+
+---
+
+### B28: Memory exhaustion via large file import scanning (FIXED in v1.4.4)
+
+**Attack:** Drop many files of ~10MB in directories that trigger reputation scanning. Each concurrent evaluation allocates a single 10MB byte[] for import name scanning. With N concurrent process starts, memory pressure spikes to N×10MB, potentially causing Sentinel to crash or degrade on low-memory systems.
+
+**Mitigation (v1.4.4):**
+- `CountSuspiciousImports` now uses 64KB streaming chunks with 64-byte overlap for cross-boundary detection
+- Memory usage per evaluation: O(64KB) regardless of file size (was O(10MB))
+- Early exit when all known suspicious imports are found (no need to scan remainder)
+- 10MB file size cap retained for defense-in-depth
+
+**Residual risk:** NONE for this specific vector. 64KB × N evaluations is negligible even under heavy load.
+
+---
+
+### B29: Installer upgrade race condition (FIXED in v1.4.4)
+
+**Attack:** During upgrade, the installer uses a fixed `Sleep(3000)` after `sc stop` before proceeding with file replacement. On a loaded system where the service takes >3s to stop gracefully, the subsequent kill/ACL-reset sequence races with `AntiTamperGuard`'s self-healing (service re-registration, QoS policy restoration). This can leave the install directory in an inconsistent state.
+
+**Mitigation (v1.4.4):**
+- Replaced `Sleep(3000)` with a PowerShell polling loop: `sc queryex` checked every 500ms for up to 10 seconds
+- Proceeds only when service STATE matches STOPPED (or 10s timeout expires)
+- Eliminates the timing dependency — works on any system speed
+
+**Residual risk:** LOW. 10s timeout is generous. If the service hasn't stopped by then, the subsequent force-kill handles it.
+
+---
+
+### B30: Socket exhaustion via per-request HttpClient (FIXED in v1.4.4)
+
+**Attack:** Under sustained reputation lookup load (many concurrent process starts), `HashReputationService` and `FileReputationEngine` created a new `HttpClient` instance per API call. Each disposed client leaves its TCP connection in TIME_WAIT for 4 minutes. At high scan rates, this exhausts the ephemeral port range (16,384 ports ÷ 4min = ~68 concurrent sustained lookups to saturate).
+
+**Mitigation (v1.4.4):**
+- Replaced per-request instantiation with shared static `HttpClient` instances (one per API endpoint)
+- Connections are reused via HTTP/1.1 keep-alive
+- MalwareBazaar Auth-Key header passed per-request via `HttpRequestMessage` (not on shared `DefaultRequestHeaders`)
+
+**Residual risk:** NONE. Static HttpClient is the recommended pattern and eliminates socket accumulation entirely.
+
+---
+
+### B31: VirusTotal query always fails — dead code inflates scoring (FIXED in v1.4.4)
+
+**Attack:** Not directly exploitable, but the VT v3 API requires an `x-apikey` header for all requests. Without it, every query returns 401 Unauthorized → `VerdictStatus.Error`. The consensus scoring treated Error/NotFound as `+5` points, adding a permanent 5-point malicious bias to every file's reputation score (since VT was called for every evaluation but never returned meaningful data).
+
+**Mitigation (v1.4.4):**
+- Replaced VT query with a stub returning `NotFound` (documented as disabled)
+- Removed dead VT rate limiter and timing infrastructure
+- Rebalanced consensus scoring: CIRCL weight 20→30, MalwareBazaar 40→50, VT contributes 0 (neutral)
+- VT code path preserved structurally for future re-enablement via proxy
+
+**Residual risk:** NONE. Scoring is now accurate for the 2-source model actually in use.

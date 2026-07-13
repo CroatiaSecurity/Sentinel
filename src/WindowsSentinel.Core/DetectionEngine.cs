@@ -118,11 +118,12 @@ namespace WindowsSentinel.Core
                                             // This generated false detections, fed the correlation engine with
                                             // SuspiciousProcess signals, and created bogus incidents against ourselves.
                                             //
-                                            // SECURITY: Path-verified, not name-based. An attacker naming their binary
-                                            // "WindowsSentinel.Agent.exe" in a different directory is NOT excluded.
-                                            // We verify the binary actually resides in our own installation directory.
-                                            var selfDir = AppContext.BaseDirectory.TrimEnd('\\');
-                                            if (imagePath.StartsWith(selfDir, StringComparison.OrdinalIgnoreCase))
+                                            // SECURITY v1.4.4: Path-verified with normalization.
+                                            // Path.GetFullPath resolves junctions/symlinks/relative segments.
+                                            // Trailing separator prevents prefix collision attacks.
+                                            var selfDir = Path.GetFullPath(AppContext.BaseDirectory).TrimEnd('\\') + '\\';
+                                            var normalizedImagePath = Path.GetFullPath(imagePath);
+                                            if (normalizedImagePath.StartsWith(selfDir, StringComparison.OrdinalIgnoreCase))
                                                 return;
 
                                             // v1.3.1: Use multi-signal FileReputationEngine for on-execute verdicts

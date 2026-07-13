@@ -20,6 +20,19 @@ namespace WindowsSentinel.Core
         private readonly ThreatReportingConfig _config;
         private readonly ILogger<HashReputationService> _logger;
 
+        // SECURITY v1.4.4: Shared HttpClient instances to prevent socket exhaustion (TIME_WAIT).
+        // Previously created new HttpClient() per API call — under sustained load this exhausted
+        // ephemeral ports. Static instances are thread-safe and reuse connections via HTTP/1.1 keep-alive.
+        private static readonly System.Net.Http.HttpClient _circlClient = new()
+        {
+            Timeout = TimeSpan.FromSeconds(4),
+            DefaultRequestHeaders = { Accept = { new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json") } }
+        };
+        private static readonly System.Net.Http.HttpClient _malwareBazaarClient = new()
+        {
+            Timeout = TimeSpan.FromSeconds(3)
+        };
+
         public HashReputationService(
             SecureCacheStore cacheStore,
             ThreatReportingConfig config,
@@ -82,12 +95,7 @@ namespace WindowsSentinel.Core
             // Tier 1: CIRCL Hashlookup — fast-path for known-good files
             try
             {
-                using var circlClient = new System.Net.Http.HttpClient();
-                circlClient.Timeout = TimeSpan.FromSeconds(4);
-                circlClient.DefaultRequestHeaders.Accept.Add(
-                    new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
-
-                var circlResponse = await circlClient.GetAsync(
+                var circlResponse = await _circlClient.GetAsync(
                     $"https://hashlookup.circl.lu/lookup/sha256/{sha256}", cancellationToken);
 
                 if (circlResponse.IsSuccessStatusCode)
@@ -111,12 +119,9 @@ namespace WindowsSentinel.Core
             // Tier 2: MalwareBazaar — known-malicious check
             try
             {
-                using var client = new System.Net.Http.HttpClient();
-                client.Timeout = TimeSpan.FromSeconds(3);
-
                 if (!string.IsNullOrWhiteSpace(_config.MalwareBazaarApiKey))
                 {
-                    client.DefaultRequestHeaders.Add("Auth-Key", _config.MalwareBazaarApiKey);
+                    // Add API key per-request via message handler (can't set on shared client)
                 }
 
                 var values = new System.Collections.Generic.Dictionary<string, string>
@@ -126,7 +131,15 @@ namespace WindowsSentinel.Core
                 };
 
                 var content = new System.Net.Http.FormUrlEncodedContent(values);
-                var response = await client.PostAsync("https://mb-api.abuse.ch/api/v1/", content, cancellationToken);
+
+                using var request = new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Post, "https://mb-api.abuse.ch/api/v1/");
+                request.Content = content;
+                if (!string.IsNullOrWhiteSpace(_config.MalwareBazaarApiKey))
+                {
+                    request.Headers.Add("Auth-Key", _config.MalwareBazaarApiKey);
+                }
+
+                var response = await _malwareBazaarClient.SendAsync(request, cancellationToken);
 
                 if (response.IsSuccessStatusCode)
                 {

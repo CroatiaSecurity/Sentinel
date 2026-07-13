@@ -13,10 +13,17 @@ Internal red team audit identified 15 vulnerabilities across Critical/High/Mediu
 - **[CRITICAL] Hash reputation trust inversion** (`HashReputationService`): Previously returned `Safe` when a hash was absent from both CIRCL and MalwareBazaar — treating absence of evidence as evidence of safety. Novel malware (zero-day payloads, custom implants) was permanently cached as Safe and received trust score boosts in BeaconingDetector. Now returns `Unknown` for absent hashes; only CIRCL trust score > 60 can positively confirm Safe.
 - **[CRITICAL] User-level ActiveResponse disable** (`TrayIconService`): Removed the "Stop Protection" toggle from the Agent tray menu. Previously, any user-level process could automate this menu item to disable all Agent-side detection responses without elevation. The Service (SYSTEM) is now the sole authority on response mode.
 - **[CRITICAL] Command injection via PowerShell** (`IsolationResponseEngine`): Both ISO dismount and Hyper-V Stop-VM commands now use `-EncodedCommand` (Base64-encoded Unicode) instead of string interpolation into `-Command`. Eliminates command injection via crafted ISO filenames or VM names. Added single-quote escaping as defense-in-depth.
+- **[HIGH] Self-exclusion bypass via junction/symlink** (`AdvancedResponseEngine`, `HardeningModule`, `DetectionEngine`): All 3 self-exclusion path checks now normalize both paths with `Path.GetFullPath()` to resolve symlinks, junctions, and relative segments. Added trailing directory separator to prevent prefix collision attacks (e.g., `WindowsSentinel2\evil.exe` matching `WindowsSentinel`).
 - **[HIGH] Overprivileged process handle** (`DllUnloadEngine`): Reduced `OpenProcess` from `PROCESS_ALL_ACCESS` (0x1F0FFF) to `PROCESS_QUERY_INFORMATION` (0x0400). Thread handles already opened individually with `THREAD_SET_CONTEXT` — the process-level handle only needed query access for module enumeration.
 - **[HIGH] Unauthenticated threat telemetry** (`ThreatReportService`): All outbound reports to the Cloudflare Worker proxy are now HMAC-SHA256 signed using a key derived from the installation entropy. Signature covers timestamp + path + body via `X-Sentinel-Timestamp` and `X-Sentinel-Signature` headers. Prevents MITM telemetry inspection, replay attacks, and fake report injection.
+- **[HIGH] SecureCacheStore HMAC key partially predictable** (`SecureCacheStore`): Removed boot time ticks (publicly readable from PID 4) and process ID (visible in task manager) from key derivation. Key now derived solely from Machine GUID + SYSTEM-ACL-protected installation entropy + domain-specific label. Stable across reboots; requires SYSTEM/Admin access to reconstruct.
 - **[MEDIUM] Docker imageId injection** (`IsolationResponseEngine`): `imageId` from `docker inspect` output is now validated with `IsValidDockerIdentifier()` before passing to `docker rmi`. Prevents argument injection via crafted image references in malicious containers.
 - **[MEDIUM] Config overwrite on upgrade** (`setup.iss`): Changed `appsettings.json` installer flag from `ignoreversion` (always overwrite) to `onlyifdoesntexist` (preserve user config). Upgrades no longer silently destroy custom TrustedCastDevices, ProtectedApps, LogPath, or other user settings.
+- **[MEDIUM] FileReputationEngine memory DoS** (`FileReputationEngine`): `CountSuspiciousImports` now uses 64KB streaming chunks with 64-byte overlap instead of reading up to 10MB into a single byte[]. Memory usage drops from O(filesize) to O(64KB) per concurrent evaluation. Early exit when all imports found.
+- **[MEDIUM] Installer race condition** (`setup.iss`): Replaced `Sleep(3000)` after `sc stop` with a PowerShell polling loop that checks `sc queryex` for STOPPED state every 500ms for up to 10 seconds. Eliminates the race where AntiTamperGuard self-heals before installer finishes.
+- **[LOW] HttpClient socket exhaustion** (`HashReputationService`, `FileReputationEngine`): Replaced per-request `new HttpClient()` with shared static instances. Eliminates TIME_WAIT socket accumulation under sustained reputation lookup load.
+- **[LOW] VirusTotal dead code** (`FileReputationEngine`): Removed non-functional VT v3 query (always returns 401 without API key). Rebalanced consensus scoring: CIRCL weight 20→30, MalwareBazaar 40→50, VT neutral. Stub preserved for future proxy-based re-enablement.
+- **[LOW] Predictable self-test cache entry** (`StartupSelfTest`): Self-test now uses random key + random value instead of fixed `_check`/`ok`. Eliminates known-plaintext exposure in the DPAPI-encrypted cache file.
 
 ### Architecture — Monitor Grouping & Non-Blocking File I/O
 
@@ -28,6 +35,13 @@ Major internal refactor: monitors are now organized into priority groups with st
 
 ### Changed
 
+- **Source code split**: Eliminated the 5,500-line `BackgroundMonitors.cs` monolith. All monitor classes now live in 6 group files under `src/WindowsSentinel.Core/Monitors/`:
+  - `CriticalMonitors.cs` — SyscallStubMonitor, IPSecIntegrityGuard
+  - `CoreDetectionMonitors.cs` — DiskWideDllScanner, DllEntropyAnalyzer, DllLoadFailureMonitor, ModuleValidationMonitor, RuntimeModuleIntegrityMonitor, AdsDataStagingMonitor
+  - `CredentialProtectionMonitors.cs` — CanaryFileMonitor, BrowserCredentialGuard, MicrosoftAccountGuardMonitor, NullSessionGuard, BuiltinAdminGuard, PasswordRotationGuard
+  - `NetworkIntegrityMonitors.cs` — ArpSpoofMonitor, DnsResponseValidationMonitor, PublicIpMonitor, WifiSecurityMonitor, RemoteAccessMonitor, PhantomDeviceMonitor
+  - `SystemIntegrityMonitors.cs` — FirewallIntegrityMonitor, SecureBootIntegrityMonitor, ScheduledTaskMonitor, TlsCertificateMonitor, UacBypassSurfaceMonitor, WindowsUpdateIntegrityMonitor, WmiPersistenceMonitor, WorkFoldersExfilMonitor, BrowserDnsPolicyGuard, HostsFileGuard, BootIntegrityGuard
+  - `PeripheralMonitors.cs` — BluetoothMonitor, DeviceInstallMonitor, MtpTransferGuard
 - **Service startup**: Monitors now start in 6 priority groups instead of all at once:
   - **Critical** (0s delay): AntiTamperGuard, IPSecIntegrityGuard, AgentWatchdog, SyscallStubMonitor — restarts indefinitely
   - **CoreDetection** (2s delay): RansomwareIoMonitor, BeaconingDetector, FileVerdictScanner, GhostProcessMonitor, +11 more — 5 restart attempts
@@ -35,14 +49,7 @@ Major internal refactor: monitors are now organized into priority groups with st
   - **NetworkIntegrity** (6s delay): ArpSpoofMonitor, DnsResponseValidation, PublicIpMonitor, NetworkShareMonitor, +9 more — 3 restart attempts
   - **SystemIntegrity** (10s delay): FirewallIntegrity, SecureBoot, RegistryMonitor, WmiPersistence, +13 more — 3 restart attempts
   - **Peripheral** (30s delay): BluetoothMonitor, MtpTransferGuard, VolumeMountMonitor, CastDeviceGuard, +8 more — 2 restart attempts
-- **File I/O**: All file read operations across the codebase now use `FileShare.ReadWrite | FileShare.Delete`. Sentinel never holds file locks that prevent users from deleting their own files. Affected components:
-  - `FileReputationEngine` (hash computation, static PE analysis, import scanning)
-  - `QuarantineManager` (file read before DPAPI encryption)
-  - `ChainTracer` (file hash computation)
-  - `JsonlEventLogger` (log file stream — both main open and stale recovery)
-  - `BeaconingDetector` (file verdict hash computation)
-  - `AdvancedResponseEngine` (reinfection correlator hash)
-  - `TrayIconService` (event log tailing — initial offset + polling)
+- **File I/O**: All file read operations across the codebase now use `FileShare.ReadWrite | FileShare.Delete`. Sentinel never holds file locks that prevent users from deleting their own files.
 
 ### Design Rules Added
 

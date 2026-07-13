@@ -494,6 +494,7 @@ Composite detections are emitted as Tier1 `DetectionEvent`s directly into the de
 | Monitor Group: SystemIntegrity | FirewallIntegrity, SecureBoot, WindowsUpdate, ScheduledTask, CriticalServiceGuard, RegistryMonitor, WmiPersistence, +10 more. 10s start delay, 3 restart attempts. |
 | Monitor Group: Peripheral | BluetoothMonitor, PhantomDeviceMonitor, MtpTransferGuard, VolumeMountMonitor, CastDeviceGuard, WslMonitor, +6 more. 30s start delay, 2 restart attempts. |
 | `FileShare.Delete` policy | All file I/O operations across the codebase now open files with `FileShare.ReadWrite | FileShare.Delete`. Sentinel never blocks users from deleting files, even during active scanning, hashing, quarantine reads, or log tailing. |
+| Source file layout | `BackgroundMonitors.cs` monolith (5,500 lines) eliminated. Monitor classes split into 6 group files under `Monitors/`: `CriticalMonitors.cs`, `CoreDetectionMonitors.cs`, `CredentialProtectionMonitors.cs`, `NetworkIntegrityMonitors.cs`, `SystemIntegrityMonitors.cs`, `PeripheralMonitors.cs`. |
 
 ---
 
@@ -503,3 +504,23 @@ Composite detections are emitted as Tier1 `DetectionEvent`s directly into the de
 |------|-----------|
 | All file reads use `FileShare.ReadWrite \| FileShare.Delete` | Sentinel observes, never obstructs. Users must always be able to delete their own files regardless of Sentinel's scanning state. The only exception is intentional response actions (DLL lock files placed by `DllUnloadEngine` after confirmed sideloading). |
 | Monitors are grouped by function and priority | Prevents startup thundering herd, enables independent restart on failure, and allows priority-based resource allocation. Critical self-protection monitors start first and restart indefinitely; peripheral monitors start last with limited restart budget. |
+| Monitor source files match group structure | Each MonitorGroup has a corresponding source file under `Monitors/`. No monolith files — new monitors go into the group file they belong to. |
+
+## Security Remediation (v1.4.4) — Red Team Audit Findings
+
+| Finding | Severity | Component | Fix |
+|---------|----------|-----------|-----|
+| Hash reputation trust inversion | Critical | `HashReputationService` | `hash_not_found` from MalwareBazaar now returns `Unknown` (not `Safe`). Only CIRCL trust > 60 positively confirms Safe. Novel malware no longer permanently cached as trusted. |
+| User-level ActiveResponse disable | Critical | `TrayIconService` | Removed "Stop Protection" menu item entirely. Agent can no longer toggle response mode — the Service (SYSTEM) is sole authority. |
+| Command injection via PowerShell | Critical | `IsolationResponseEngine` | ISO dismount and Hyper-V Stop-VM now use `-EncodedCommand` (Base64-encoded Unicode) instead of string interpolation into `-Command`. Single-quote escaping as defense-in-depth. |
+| Self-exclusion bypass via junction/symlink | High | `AdvancedResponseEngine`, `HardeningModule`, `DetectionEngine` | All 3 self-exclusion path checks now use `Path.GetFullPath()` normalization + trailing separator to prevent junction/symlink bypass and prefix collision. |
+| Overprivileged process handle | High | `DllUnloadEngine` | `OpenProcess` reduced from `PROCESS_ALL_ACCESS` to `PROCESS_QUERY_INFORMATION`. Thread handles already opened with minimum-necessary `THREAD_SET_CONTEXT`. |
+| Unauthenticated threat telemetry | High | `ThreatReportService` | All proxy requests HMAC-SHA256 signed using installation entropy key. Headers: `X-Sentinel-Timestamp`, `X-Sentinel-Signature`. Prevents MITM, replay, and fake injection. |
+| SecureCacheStore HMAC key predictable | High | `SecureCacheStore` | Removed boot time ticks and process ID from key derivation. Key now from Machine GUID + SYSTEM-ACL-protected entropy + domain label only. |
+| Docker imageId injection | Medium | `IsolationResponseEngine` | `imageId` from `docker inspect` output validated with `IsValidDockerIdentifier()` before use in `docker rmi`. |
+| Config overwrite on upgrade | Medium | `setup.iss` | `appsettings.json` flag changed from `ignoreversion` to `onlyifdoesntexist`. Upgrades preserve user customizations. |
+| FileReputationEngine memory DoS | Medium | `FileReputationEngine` | `CountSuspiciousImports` now uses 64KB streaming chunks with overlap instead of full-file byte[] allocation. Memory usage O(64KB) per evaluation. |
+| Installer race condition | Medium | `setup.iss` | Replaced `Sleep(3000)` with PowerShell polling loop (`sc queryex` for STOPPED state, 500ms interval, 10s timeout). |
+| HttpClient socket exhaustion | Low | `HashReputationService`, `FileReputationEngine` | Replaced per-request `new HttpClient()` with shared static instances. Eliminates TIME_WAIT accumulation. |
+| VirusTotal dead code | Low | `FileReputationEngine` | Removed non-functional VT v3 query (requires API key). Rebalanced consensus: CIRCL 30pts, MalwareBazaar 50pts. Stub preserved for future re-enablement. |
+| Predictable self-test cache entry | Low | `StartupSelfTest` | Random key + random value instead of fixed `_check`/`ok`. Eliminates known-plaintext in encrypted cache. |

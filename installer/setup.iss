@@ -81,7 +81,13 @@ begin
 
   // Stop the service via SCM
   Exec(ExpandConstant('{sysnative}\sc.exe'), 'stop "Windows Sentinel"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Sleep(3000);
+
+  // SECURITY v1.4.4: Poll for service stop instead of fixed Sleep(3000).
+  // Previously a 3s heuristic sleep meant the service could still be running
+  // on loaded systems, causing the subsequent kill and ACL reset to race with
+  // AntiTamperGuard's self-healing. Now we poll sc queryex every 500ms for up
+  // to 10 seconds, proceeding only when STATE is STOPPED (or timeout expires).
+  Exec(PsPath, '-ExecutionPolicy Bypass -Command "for ($i = 0; $i -lt 20; $i++) { $out = & sc.exe queryex ''Windows Sentinel'' 2>&1; if ($out -match ''STOPPED'') { break }; Start-Sleep -Milliseconds 500 }"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
   // Kill any remaining processes via 64-bit PowerShell with retry loop
   Exec(PsPath, '-ExecutionPolicy Bypass -Command "foreach ($i in 1..5) { $procs = Get-Process -Name ''WindowsSentinel.Service'',''WindowsSentinel.Agent'' -ErrorAction SilentlyContinue; if (-not $procs) { break }; $procs | Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 500 }"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);

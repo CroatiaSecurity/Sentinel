@@ -39,6 +39,11 @@ namespace WindowsSentinel.Core
         private readonly ILogger<FileReputationEngine> _logger;
         private readonly ContextBus? _contextBus;
 
+        // SECURITY v1.4.4: Shared static HttpClient instances to prevent socket exhaustion.
+        // Each has appropriate timeout for its target API. Thread-safe, reuses connections.
+        private static readonly HttpClient _circlHttpClient = new() { Timeout = TimeSpan.FromSeconds(4) };
+        private static readonly HttpClient _mbHttpClient = new() { Timeout = TimeSpan.FromSeconds(3) };
+
         // Composite score cache: SHA256 → (score, timestamp)
         private readonly ConcurrentDictionary<string, (FileReputationResult Result, DateTimeOffset CachedAt)> _resultCache = new();
 
@@ -48,9 +53,6 @@ namespace WindowsSentinel.Core
         // Rate limiters per API source
         private readonly SemaphoreSlim _circlThrottle = new(4, 4);      // 4 concurrent
         private readonly SemaphoreSlim _malwareBazaarThrottle = new(2, 2); // 2 concurrent
-        private readonly SemaphoreSlim _vtThrottle = new(1, 1);          // 1 at a time (4/min)
-        private DateTimeOffset _lastVtCall = DateTimeOffset.MinValue;
-        private static readonly TimeSpan VtMinInterval = TimeSpan.FromSeconds(15); // 4 per minute
 
         // Deduplication: track in-flight lookups to avoid duplicate API calls
         private readonly ConcurrentDictionary<string, Task<FileReputationResult>> _inFlight = new();
@@ -240,11 +242,7 @@ namespace WindowsSentinel.Core
             await _circlThrottle.WaitAsync(ct);
             try
             {
-                using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(4) };
-                client.DefaultRequestHeaders.Accept.Add(
-                    new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
-
-                var response = await client.GetAsync(
+                var response = await _circlHttpClient.GetAsync(
                     $"https://hashlookup.circl.lu/lookup/sha256/{hash}", ct);
 
                 if (response.IsSuccessStatusCode)
@@ -275,10 +273,10 @@ namespace WindowsSentinel.Core
             await _malwareBazaarThrottle.WaitAsync(ct);
             try
             {
-                using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
+                using var client = _mbHttpClient;
                 var values = new Dictionary<string, string> { { "query", "get_info" }, { "hash", hash } };
                 var content = new FormUrlEncodedContent(values);
-                var response = await client.PostAsync("https://mb-api.abuse.ch/api/v1/", content, ct);
+                var response = await _mbHttpClient.PostAsync("https://mb-api.abuse.ch/api/v1/", content, ct);
 
                 if (response.IsSuccessStatusCode)
                 {
@@ -297,62 +295,13 @@ namespace WindowsSentinel.Core
             finally { _malwareBazaarThrottle.Release(); }
         }
 
-        private async Task<ApiVerdict> QueryVirusTotalAsync(string hash, CancellationToken ct)
+        // SECURITY v1.4.4: VirusTotal v3 API requires an x-apikey header for ALL requests.
+        // Without a key, the endpoint always returns 401 Unauthorized — this query was dead code.
+        // Removed the non-functional query. If VT support is needed in the future, route through
+        // the Cloudflare Worker proxy (which can hold the API key server-side).
+        private Task<ApiVerdict> QueryVirusTotalAsync(string hash, CancellationToken ct)
         {
-            // Rate limit: max 4 requests per minute (public/no-key endpoint)
-            await _vtThrottle.WaitAsync(ct);
-            try
-            {
-                var sinceLastCall = DateTimeOffset.UtcNow - _lastVtCall;
-                if (sinceLastCall < VtMinInterval)
-                {
-                    await Task.Delay(VtMinInterval - sinceLastCall, ct);
-                }
-                _lastVtCall = DateTimeOffset.UtcNow;
-
-                using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
-                // VT public API v3 hash lookup (no API key required for hash-only lookups on public files)
-                // Falls back to v2 community endpoint if v3 fails
-                var response = await client.GetAsync(
-                    $"https://www.virustotal.com/api/v3/files/{hash}", ct);
-
-                if (response.IsSuccessStatusCode)
-                {
-                    var json = await response.Content.ReadAsStringAsync(ct);
-                    // Extract detection stats: "malicious": N, "undetected": M
-                    var maliciousMatch = System.Text.RegularExpressions.Regex.Match(
-                        json, @"""malicious""\s*:\s*(\d+)");
-                    var undetectedMatch = System.Text.RegularExpressions.Regex.Match(
-                        json, @"""undetected""\s*:\s*(\d+)");
-
-                    int malicious = maliciousMatch.Success ? int.Parse(maliciousMatch.Groups[1].Value) : 0;
-                    int undetected = undetectedMatch.Success ? int.Parse(undetectedMatch.Groups[1].Value) : 0;
-                    int total = malicious + undetected;
-
-                    double detectionRate = total > 0 ? (double)malicious / total : 0;
-                    return new ApiVerdict
-                    {
-                        Source = "VirusTotal",
-                        Status = malicious > 5 ? VerdictStatus.Malicious :
-                                 malicious > 0 ? VerdictStatus.Suspicious :
-                                 VerdictStatus.Safe,
-                        DetectionCount = malicious,
-                        EngineCount = total,
-                        DetectionRate = detectionRate
-                    };
-                }
-                if ((int)response.StatusCode == 404)
-                    return new ApiVerdict { Source = "VirusTotal", Status = VerdictStatus.NotFound };
-                if ((int)response.StatusCode == 429)
-                    return new ApiVerdict { Source = "VirusTotal", Status = VerdictStatus.RateLimited };
-
-                return new ApiVerdict { Source = "VirusTotal", Status = VerdictStatus.Error };
-            }
-            catch
-            {
-                return new ApiVerdict { Source = "VirusTotal", Status = VerdictStatus.Error };
-            }
-            finally { _vtThrottle.Release(); }
+            return Task.FromResult(new ApiVerdict { Source = "VirusTotal", Status = VerdictStatus.NotFound });
         }
 
         // ═══════════════════════════════════════════════════════════════
@@ -465,21 +414,56 @@ namespace WindowsSentinel.Core
         {
             try
             {
-                // Quick scan: read file bytes and look for ASCII strings matching suspicious APIs.
-                // Uses FileShare.Delete so Sentinel never blocks user file operations.
+                // SECURITY v1.4.4: Streaming chunk scan instead of full-file read.
+                // Previously read up to 10MB into a single byte[] — on a busy system with
+                // N concurrent evaluations this caused N×10MB memory spikes.
+                // Now reads in 64KB chunks and scans each chunk for API name substrings.
+                // Handles API names that span chunk boundaries by keeping a 64-byte overlap.
                 using var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read,
                     FileShare.ReadWrite | FileShare.Delete);
                 if (fs.Length > 10_000_000) return 0; // Skip huge files
-                var bytes = new byte[fs.Length];
-                fs.ReadExactly(bytes);
-                var text = System.Text.Encoding.ASCII.GetString(bytes);
-                int count = 0;
-                foreach (var import in SuspiciousImports)
+
+                const int ChunkSize = 65536;
+                const int OverlapSize = 64; // Longest API name is ~30 chars; 64 covers any span
+                var buffer = new byte[ChunkSize + OverlapSize];
+                var found = new HashSet<string>(StringComparer.Ordinal);
+                int overlapCarry = 0;
+
+                while (true)
                 {
-                    if (text.Contains(import, StringComparison.Ordinal))
-                        count++;
+                    // Copy overlap from previous chunk's tail into buffer start
+                    int bytesRead = fs.Read(buffer, overlapCarry, ChunkSize);
+                    if (bytesRead == 0) break;
+
+                    int totalBytes = overlapCarry + bytesRead;
+                    var text = System.Text.Encoding.ASCII.GetString(buffer, 0, totalBytes);
+
+                    foreach (var import in SuspiciousImports)
+                    {
+                        if (!found.Contains(import) && text.Contains(import, StringComparison.Ordinal))
+                        {
+                            found.Add(import);
+                        }
+                    }
+
+                    // Early exit if we've found enough to max the score
+                    if (found.Count >= SuspiciousImports.Count) break;
+
+                    // Prepare overlap for next iteration
+                    if (bytesRead >= OverlapSize)
+                    {
+                        Buffer.BlockCopy(buffer, overlapCarry + bytesRead - OverlapSize, buffer, 0, OverlapSize);
+                        overlapCarry = OverlapSize;
+                    }
+                    else
+                    {
+                        overlapCarry = 0;
+                    }
+
+                    if (bytesRead < ChunkSize) break; // EOF
                 }
-                return count;
+
+                return found.Count;
             }
             catch { return 0; }
         }
@@ -538,21 +522,24 @@ namespace WindowsSentinel.Core
         private static int CalculateHashConsensus(HashReputationResult hr)
         {
             // Returns 0-100 where 0=safe, 100=malicious
+            // SECURITY v1.4.4: Rebalanced for 2-source model (VT disabled — requires API key).
+            // CIRCL provides known-good signal; MalwareBazaar provides known-bad signal.
+            // Without VT, the scoring is more conservative (neutral when both miss).
             int score = 50; // Start neutral
 
-            // CIRCL (weight: 20 points)
-            if (hr.CirclVerdict.Status == VerdictStatus.Safe) score -= 20;
+            // CIRCL (weight: 30 points — known-good database)
+            if (hr.CirclVerdict.Status == VerdictStatus.Safe) score -= 30;
             else if (hr.CirclVerdict.Status == VerdictStatus.NotFound) score += 5;
 
-            // MalwareBazaar (weight: 40 points — strong malicious signal)
-            if (hr.MalwareBazaarVerdict.Status == VerdictStatus.Malicious) score += 40;
+            // MalwareBazaar (weight: 50 points — strong malicious signal)
+            if (hr.MalwareBazaarVerdict.Status == VerdictStatus.Malicious) score += 50;
             else if (hr.MalwareBazaarVerdict.Status == VerdictStatus.NotFound) score -= 10;
 
-            // VirusTotal (weight: 30 points — granular)
+            // VirusTotal (disabled — always NotFound, contributes +5 neutral bias)
             if (hr.VirusTotalVerdict.Status == VerdictStatus.Malicious) score += 30;
             else if (hr.VirusTotalVerdict.Status == VerdictStatus.Suspicious) score += 15;
             else if (hr.VirusTotalVerdict.Status == VerdictStatus.Safe) score -= 20;
-            else if (hr.VirusTotalVerdict.Status == VerdictStatus.NotFound) score += 5;
+            else if (hr.VirusTotalVerdict.Status == VerdictStatus.NotFound) score += 0; // Neutral when disabled
 
             return Math.Clamp(score, 0, 100);
         }

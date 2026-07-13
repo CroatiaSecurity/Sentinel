@@ -89,23 +89,20 @@ namespace WindowsSentinel.Core
 
         private static byte[] GenerateBootBoundKey()
         {
+            // SECURITY v1.4.4: Removed predictable components (boot time from PID 4, process ID).
+            // Boot time is publicly readable by any standard user. Process ID is visible in task
+            // manager. Previously these were 2 of 4 key derivation inputs — an attacker with
+            // standard user access could observe both, reducing the key strength to the 2
+            // protected components. Now the key derives from ONLY protected/unpredictable sources:
+            //   1. Machine GUID (readable by standard users via registry, but unique per machine)
+            //   2. Installation entropy (32 random bytes, ACL-locked to SYSTEM + Admins)
+            // The combination requires SYSTEM/Admin access to fully reconstruct.
+
             using var ms = new MemoryStream();
 
-            // 1. Boot time (publicly readable, but adds temporal binding)
-            long bootTimeTicks;
-            try
-            {
-                using var systemProc = Process.GetProcessById(4);
-                bootTimeTicks = systemProc.StartTime.Ticks;
-            }
-            catch
-            {
-                bootTimeTicks = DateTime.UtcNow.Date.Ticks; // Fallback
-            }
-            ms.Write(BitConverter.GetBytes(bootTimeTicks));
-
-            // 2. HARDENING: Machine GUID (requires registry access — standard users can read,
-            // but combined with other entropy provides defense in depth)
+            // 1. Machine GUID — unique per Windows installation, survives reboots.
+            // Readable by standard users but combined with entropy below provides
+            // machine-binding (key is invalid on a different machine).
             try
             {
                 using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(
@@ -118,10 +115,9 @@ namespace WindowsSentinel.Core
             }
             catch { }
 
-            // 3. HARDENING: Installation-specific random entropy stored in our ACL-locked directory.
-            // An attacker would need SYSTEM/Admin access to read this file, and if they have that,
-            // they already have broader access. This raises the bar for baseline poisoning from
-            // "read System process start time" to "read a SYSTEM-ACL-protected file."
+            // 2. Installation-specific random entropy (32 bytes, SYSTEM-ACL-protected).
+            // This is the primary secret — without it, the key cannot be reconstructed.
+            // Generated on first run and persisted in the ACL-locked Secure directory.
             try
             {
                 var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
@@ -151,8 +147,9 @@ namespace WindowsSentinel.Core
             }
             catch { }
 
-            // 4. HARDENING: Process ID of Sentinel itself (changes per boot, not predictable)
-            ms.Write(BitConverter.GetBytes(Environment.ProcessId));
+            // 3. Domain-specific label to derive a unique key for cache HMAC
+            // (prevents reuse of this key material for other purposes)
+            ms.Write(Encoding.UTF8.GetBytes("sentinel-secure-cache-hmac-v2"));
 
             return SHA256.HashData(ms.ToArray());
         }

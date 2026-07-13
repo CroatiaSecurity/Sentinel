@@ -332,12 +332,17 @@ namespace WindowsSentinel.Core
             try
             {
                 var targetImagePath = SecurityValidation.GetProcessImagePath(processId);
-                var selfDir = AppContext.BaseDirectory.TrimEnd('\\');
-                if (targetImagePath != null &&
-                    targetImagePath.StartsWith(selfDir, StringComparison.OrdinalIgnoreCase))
+                // SECURITY v1.4.4: Normalize with Path.GetFullPath() to resolve junctions/symlinks.
+                // Trailing separator prevents prefix collision (e.g., WindowsSentinel2\evil.exe).
+                var selfDir = Path.GetFullPath(AppContext.BaseDirectory).TrimEnd('\\') + '\\';
+                if (targetImagePath != null)
                 {
-                    Debug.WriteLine($"SafeKillProcessTree: REFUSED to kill sibling Sentinel process PID {processId} at verified install path '{targetImagePath}'");
-                    return;
+                    var normalizedTarget = Path.GetFullPath(targetImagePath);
+                    if (normalizedTarget.StartsWith(selfDir, StringComparison.OrdinalIgnoreCase))
+                    {
+                        Debug.WriteLine($"SafeKillProcessTree: REFUSED to kill sibling Sentinel process PID {processId} at verified install path '{targetImagePath}'");
+                        return;
+                    }
                 }
             }
             catch { /* process may have already exited — continue with kill attempt */ }
