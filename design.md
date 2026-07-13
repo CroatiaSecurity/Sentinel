@@ -1,6 +1,6 @@
 # Windows Sentinel — Design Document
 
-**Version: 1.4.2**
+**Version: 1.4.4**
 
 ---
 
@@ -481,3 +481,25 @@ Composite detections are emitted as Tier1 `DetectionEvent`s directly into the de
 | Agent self-restart | `Agent/Program.cs` wraps `host.Run()` in try/finally — `TryImmediateRestart()` relaunches the process on any exit (2s cooldown, max 5 self-restarts via `WS_AGENT_RESTART_COUNT` env var). `ScheduleDelayedRelaunch()` via detached `cmd.exe` covers fatal `IsTerminating` crashes where finally may not run. |
 | Orchestrator wiring (Agent) | `detectionEngine.SetOrchestrator(orchestrator)` now called in `Agent/Program.cs` post-`Build()`. Agent-side monitor detections (`ShellWatchdog`, `ClipboardSanitizer`, `ScreenCaptureMonitor`, etc.) now flow through incident grouping, response deduplication, and `ContextBus`. Previously bypassed the orchestrator entirely, falling back to bare `AdvancedResponseEngine`. |
 | appsettings path fix (Agent) | `ConfigureAppConfiguration` sets `BasePath` to `AppContext.BaseDirectory`. Fixes `appsettings.json` not found when agent is launched by `AgentWatchdog` with `System32` as CWD. |
+
+## Added in 1.4.4
+
+| Component | Purpose |
+|-----------|---------|
+| `MonitorGroup` | New infrastructure class that groups related background monitors into managed units with staggered startup, independent failure restart, priority-based ordering, and health monitoring. Replaces 60+ flat `AddHostedService` registrations with 6 logical groups. |
+| Monitor Group: Critical | AntiTamperGuard, IPSecIntegrityGuard, AgentWatchdog, SyscallStubMonitor. Starts immediately, restarts indefinitely, 15s health checks. |
+| Monitor Group: CoreDetection | RansomwareIoMonitor, BeaconingDetector, BehavioralBaselineService, FileVerdictScanner, GhostProcessMonitor, EphemeralProcessMonitor, DllEntropyAnalyzer, DiskWideDllScanner, +7 more. 2s start delay, 5 restart attempts. |
+| Monitor Group: CredentialProtection | CanaryFileMonitor, BrowserCredentialGuard, MicrosoftAccountGuardMonitor, NullSessionGuard, BuiltinAdminGuard, PasswordRotationGuard. 4s start delay, 3 restart attempts. |
+| Monitor Group: NetworkIntegrity | ArpSpoofMonitor, DnsResponseValidationMonitor, PublicIpMonitor, WifiSecurityMonitor, NetworkInterfaceGuard, NetworkShareMonitor, +6 more. 6s start delay, 3 restart attempts. |
+| Monitor Group: SystemIntegrity | FirewallIntegrity, SecureBoot, WindowsUpdate, ScheduledTask, CriticalServiceGuard, RegistryMonitor, WmiPersistence, +10 more. 10s start delay, 3 restart attempts. |
+| Monitor Group: Peripheral | BluetoothMonitor, PhantomDeviceMonitor, MtpTransferGuard, VolumeMountMonitor, CastDeviceGuard, WslMonitor, +6 more. 30s start delay, 2 restart attempts. |
+| `FileShare.Delete` policy | All file I/O operations across the codebase now open files with `FileShare.ReadWrite | FileShare.Delete`. Sentinel never blocks users from deleting files, even during active scanning, hashing, quarantine reads, or log tailing. |
+
+---
+
+## Design Rule Addition (v1.4.4)
+
+| Rule | Rationale |
+|------|-----------|
+| All file reads use `FileShare.ReadWrite \| FileShare.Delete` | Sentinel observes, never obstructs. Users must always be able to delete their own files regardless of Sentinel's scanning state. The only exception is intentional response actions (DLL lock files placed by `DllUnloadEngine` after confirmed sideloading). |
+| Monitors are grouped by function and priority | Prevents startup thundering herd, enables independent restart on failure, and allows priority-based resource allocation. Critical self-protection monitors start first and restart indefinitely; peripheral monitors start last with limited restart budget. |

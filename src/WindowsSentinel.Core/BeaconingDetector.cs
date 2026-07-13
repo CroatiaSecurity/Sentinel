@@ -446,7 +446,8 @@ namespace WindowsSentinel.Core
 
                 string hash;
                 using (var sha = SHA256.Create())
-                using (var fs = new FileStream(imagePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                using (var fs = new FileStream(imagePath, FileMode.Open, FileAccess.Read,
+                    FileShare.ReadWrite | FileShare.Delete))
                 {
                     var hashBytes = sha.ComputeHash(fs);
                     hash = Convert.ToHexString(hashBytes).ToLowerInvariant();

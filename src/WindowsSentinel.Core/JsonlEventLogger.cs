@@ -84,7 +84,8 @@ namespace WindowsSentinel.Core
                     _fileStream = null;
                 }
 
-                _fileStream = new FileStream(_logFilePath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
+                _fileStream = new FileStream(_logFilePath, FileMode.Append, FileAccess.Write,
+                    FileShare.ReadWrite | FileShare.Delete);
                 _writer = new StreamWriter(_fileStream) { AutoFlush = true };
                 _isDegraded = false;
             }
@@ -98,7 +99,8 @@ namespace WindowsSentinel.Core
                     {
                         File.Move(_logFilePath, stalePath);
                     }
-                    _fileStream = new FileStream(_logFilePath, FileMode.Create, FileAccess.Write, FileShare.ReadWrite);
+                    _fileStream = new FileStream(_logFilePath, FileMode.Create, FileAccess.Write,
+                        FileShare.ReadWrite | FileShare.Delete);
                     _writer = new StreamWriter(_fileStream) { AutoFlush = true };
                     _isDegraded = false;
                 }

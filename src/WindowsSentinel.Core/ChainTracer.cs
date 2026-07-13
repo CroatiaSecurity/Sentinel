@@ -270,7 +270,8 @@ namespace WindowsSentinel.Core
             try
             {
                 using var sha256 = SHA256.Create();
-                await using var stream = File.OpenRead(filePath);
+                await using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read,
+                    FileShare.ReadWrite | FileShare.Delete);
                 var hash = await sha256.ComputeHashAsync(stream, ct);
                 return Convert.ToHexString(hash);
             }

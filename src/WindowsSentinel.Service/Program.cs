@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -126,7 +127,7 @@ namespace WindowsSentinel.Service
                     services.AddSingleton<IMonitor, EtwProcessMonitor>();
                     services.AddSingleton<IMonitor, EtwThreatIntelMonitor>();
 
-                    // Monitors injected into SentinelService
+                    // Monitors injected into SentinelService (singleton for cross-service access)
                     services.AddSingleton<WmiProcessMonitor>();
                     services.AddSingleton<FileActivityMonitor>();
                     services.AddSingleton<NetworkMonitor>();
@@ -138,106 +139,285 @@ namespace WindowsSentinel.Service
                     services.AddSingleton<LocalServerMonitor>();
                     services.AddSingleton<AppNetworkPolicyMonitor>();
 
-                    // Startup & Health
+                    // Startup & Health (always start immediately, outside groups)
                     services.AddHostedService<StartupSelfTest>();
                     services.AddHostedService<SentinelHealthCheck>();
 
-                    // BackgroundService monitors
+                    // Core SentinelService (manages IMonitor lifecycle + ProcessAncestryCache)
                     services.AddHostedService<SentinelService>();
-                    services.AddHostedService<AntiTamperGuard>();
-                    services.AddHostedService<CveShieldHardener>();
-                    services.AddSingleton<RansomwareIoMonitor>();
-                    services.AddHostedService<RansomwareIoMonitor>(sp => sp.GetRequiredService<RansomwareIoMonitor>());
-                    services.AddHostedService<ArpSpoofMonitor>();
-                    services.AddHostedService<BluetoothMonitor>();
-                    services.AddHostedService<CanaryFileMonitor>();
-                    services.AddHostedService<BrowserCredentialGuard>();
-                    services.AddHostedService<DataExfiltrationMonitor>();
-                    services.AddHostedService<DllEntropyAnalyzer>();
-                    services.AddHostedService<DllLoadFailureMonitor>();
-                    services.AddHostedService<DnsResponseValidationMonitor>();
-                    services.AddHostedService<FirewallIntegrityMonitor>();
-                    services.AddHostedService<MicrosoftAccountGuardMonitor>();
-                    services.AddHostedService<PublicIpMonitor>();
-                    services.AddHostedService<RemoteAccessMonitor>();
-                    services.AddHostedService<RuntimeModuleIntegrityMonitor>();
-                    services.AddHostedService<ScheduledTaskMonitor>();
-                    services.AddHostedService<SecureBootIntegrityMonitor>();
-                    services.AddHostedService<SyscallStubMonitor>();
-                    services.AddHostedService<TlsCertificateMonitor>();
-                    services.AddHostedService<UacBypassSurfaceMonitor>();
-                    services.AddHostedService<WifiSecurityMonitor>();
-                    services.AddHostedService<NetworkInterfaceGuard>();
-                    services.AddHostedService<WindowsUpdateIntegrityMonitor>();
-                    services.AddHostedService<WmiPersistenceMonitor>();
-                    services.AddHostedService<WorkFoldersExfilMonitor>();
-                    services.AddHostedService<AdsDataStagingMonitor>();
+
+                    // ─────────────────────────────────────────────────────────────────
+                    // v1.4.4: Monitor Groups — replaces flat AddHostedService registrations.
+                    // Groups provide staggered startup, independent failure restart, and
+                    // priority-based ordering. Critical monitors start first with unlimited
+                    // restart; peripheral monitors start last with limited restart.
+                    // ─────────────────────────────────────────────────────────────────
+
+                    // Singletons that need to be accessible via DI (referenced by other components)
                     services.AddSingleton<BeaconingDetector>();
-                    services.AddHostedService<BeaconingDetector>(sp => sp.GetRequiredService<BeaconingDetector>());
-                    services.AddHostedService<ModuleValidationMonitor>();
-                    services.AddHostedService<DiskWideDllScanner>();
-                    services.AddHostedService<DeviceInstallMonitor>();
+                    services.AddSingleton<RansomwareIoMonitor>();
                     services.AddSingleton<BehavioralBaselineService>();
-                    services.AddHostedService<BehavioralBaselineService>(sp => sp.GetRequiredService<BehavioralBaselineService>());
                     services.AddSingleton<PhantomDeviceMonitor>();
-                    services.AddHostedService<PhantomDeviceMonitor>(sp => sp.GetRequiredService<PhantomDeviceMonitor>());
-                    services.AddHostedService<FileVerdictScanner>();
-                    services.AddHostedService<ConsultantSignalIngestor>();
-                    services.AddHostedService<RegistryMonitor>();
-                    services.AddHostedService<GhostProcessMonitor>();
-                    services.AddHostedService<CriticalServiceGuard>();
-                    services.AddHostedService<NullSessionGuard>();
-                    services.AddHostedService<HostsFileGuard>();
-                    services.AddHostedService<BrowserDnsPolicyGuard>();
-                    services.AddHostedService<MtpTransferGuard>();
-                    services.AddHostedService<BootIntegrityGuard>();
                     services.AddSingleton<PersistentConnectionMonitor>();
-                    services.AddHostedService<PersistentConnectionMonitor>(sp => sp.GetRequiredService<PersistentConnectionMonitor>());
                     services.AddSingleton<ReinfectionCorrelator>();
-                    services.AddHostedService<ReinfectionCorrelator>(sp => sp.GetRequiredService<ReinfectionCorrelator>());
-                    services.AddHostedService<NetworkReinfectionDetector>();
-                    services.AddHostedService<AcousticThreatMonitor>();
+                    services.AddSingleton<PseudoSandbox>();
                     services.AddSingleton<IsolationResponseEngine>();
 
-                    // v1.0.1: Blind spot monitors
-                    services.AddHostedService<VolumeMountMonitor>();
-                    services.AddHostedService<WslMonitor>();
-                    services.AddHostedService<RawDiskAccessMonitor>();
-                    services.AddHostedService<NetworkShareMonitor>();
-                    services.AddHostedService<EphemeralProcessMonitor>();
-                    services.AddHostedService<PrintSpoolerMonitor>();
-                    services.AddHostedService<SandboxEscapeMonitor>();
-                    services.AddHostedService<AppDnsExfilMonitor>();
+                    // ── Group 1: Critical (Self-Protection) ──────────────────────────
+                    // Starts immediately, restarts indefinitely. These monitors protect
+                    // Sentinel itself and must never stay down.
+                    services.AddHostedService(sp =>
+                    {
+                        var monitors = new List<IHostedService>
+                        {
+                            sp.GetRequiredService<AntiTamperGuard>(),
+                            sp.GetRequiredService<IPSecIntegrityGuard>(),
+                            sp.GetRequiredService<AgentWatchdog>(),
+                            sp.GetRequiredService<SyscallStubMonitor>(),
+                        };
+                        return new MonitorGroup(
+                            new MonitorGroupConfig
+                            {
+                                Name = "Critical",
+                                StartDelay = TimeSpan.Zero,
+                                StaggerDelay = TimeSpan.FromMilliseconds(100),
+                                RestartIndefinitely = true,
+                                RestartCooldown = TimeSpan.FromSeconds(5),
+                                HealthCheckInterval = TimeSpan.FromSeconds(15),
+                            },
+                            monitors,
+                            sp.GetRequiredService<ILogger<MonitorGroup>>());
+                    });
+                    services.AddSingleton<AntiTamperGuard>();
+                    services.AddSingleton<IPSecIntegrityGuard>();
+                    services.AddSingleton<AgentWatchdog>();
+                    services.AddSingleton<SyscallStubMonitor>();
 
-                    // v1.0.2: Cast device guard
-                    services.AddHostedService<CastDeviceGuard>();
+                    // ── Group 2: Core Detection ──────────────────────────────────────
+                    // Starts after self-test (2s delay). Primary behavioral detection.
+                    // Restart up to 5 times before degrading.
+                    services.AddHostedService(sp =>
+                    {
+                        var monitors = new List<IHostedService>
+                        {
+                            sp.GetRequiredService<RansomwareIoMonitor>(),
+                            sp.GetRequiredService<BeaconingDetector>(),
+                            sp.GetRequiredService<BehavioralBaselineService>(),
+                            sp.GetRequiredService<FileVerdictScanner>(),
+                            sp.GetRequiredService<ConsultantSignalIngestor>(),
+                            sp.GetRequiredService<GhostProcessMonitor>(),
+                            sp.GetRequiredService<EphemeralProcessMonitor>(),
+                            sp.GetRequiredService<ModuleValidationMonitor>(),
+                            sp.GetRequiredService<RuntimeModuleIntegrityMonitor>(),
+                            sp.GetRequiredService<DllEntropyAnalyzer>(),
+                            sp.GetRequiredService<DllLoadFailureMonitor>(),
+                            sp.GetRequiredService<DiskWideDllScanner>(),
+                            sp.GetRequiredService<PersistentConnectionMonitor>(),
+                            sp.GetRequiredService<DataExfiltrationMonitor>(),
+                            sp.GetRequiredService<AdsDataStagingMonitor>(),
+                        };
+                        return new MonitorGroup(
+                            new MonitorGroupConfig
+                            {
+                                Name = "CoreDetection",
+                                StartDelay = TimeSpan.FromSeconds(2),
+                                StaggerDelay = TimeSpan.FromMilliseconds(200),
+                                MaxRestartAttempts = 5,
+                                RestartCooldown = TimeSpan.FromSeconds(10),
+                                HealthCheckInterval = TimeSpan.FromSeconds(30),
+                            },
+                            monitors,
+                            sp.GetRequiredService<ILogger<MonitorGroup>>());
+                    });
+                    services.AddSingleton<FileVerdictScanner>();
+                    services.AddSingleton<ConsultantSignalIngestor>();
+                    services.AddSingleton<GhostProcessMonitor>();
+                    services.AddSingleton<EphemeralProcessMonitor>();
+                    services.AddSingleton<ModuleValidationMonitor>();
+                    services.AddSingleton<RuntimeModuleIntegrityMonitor>();
+                    services.AddSingleton<DllEntropyAnalyzer>();
+                    services.AddSingleton<DllLoadFailureMonitor>();
+                    services.AddSingleton<DiskWideDllScanner>();
+                    services.AddSingleton<DataExfiltrationMonitor>();
+                    services.AddSingleton<AdsDataStagingMonitor>();
 
-                    // v1.1.0: Defensive isolation containment
-                    services.AddSingleton<PseudoSandbox>();
-                    services.AddHostedService<PseudoSandbox>(sp => sp.GetRequiredService<PseudoSandbox>());
+                    // ── Group 3: Credential Protection ────────────────────────────────
+                    // Starts after core detection (4s). Protects credentials and sessions.
+                    services.AddHostedService(sp =>
+                    {
+                        var monitors = new List<IHostedService>
+                        {
+                            sp.GetRequiredService<CanaryFileMonitor>(),
+                            sp.GetRequiredService<BrowserCredentialGuard>(),
+                            sp.GetRequiredService<MicrosoftAccountGuardMonitor>(),
+                            sp.GetRequiredService<NullSessionGuard>(),
+                            sp.GetRequiredService<BuiltinAdminGuard>(),
+                            sp.GetRequiredService<PasswordRotationGuard>(),
+                        };
+                        return new MonitorGroup(
+                            new MonitorGroupConfig
+                            {
+                                Name = "CredentialProtection",
+                                StartDelay = TimeSpan.FromSeconds(4),
+                                StaggerDelay = TimeSpan.FromMilliseconds(200),
+                                MaxRestartAttempts = 3,
+                                RestartCooldown = TimeSpan.FromSeconds(10),
+                                HealthCheckInterval = TimeSpan.FromSeconds(30),
+                            },
+                            monitors,
+                            sp.GetRequiredService<ILogger<MonitorGroup>>());
+                    });
+                    services.AddSingleton<CanaryFileMonitor>();
+                    services.AddSingleton<BrowserCredentialGuard>();
+                    services.AddSingleton<MicrosoftAccountGuardMonitor>();
+                    services.AddSingleton<NullSessionGuard>();
+                    services.AddSingleton<BuiltinAdminGuard>();
+                    services.AddSingleton<PasswordRotationGuard>();
 
-                    // v1.2.5: Application Integrity (Cuckoo Egg Detection)
-                    services.AddHostedService<ApplicationIntegrityMonitor>();
+                    // ── Group 4: Network Integrity ────────────────────────────────────
+                    // Starts after credential group (6s). Monitors network-layer attacks.
+                    services.AddHostedService(sp =>
+                    {
+                        var monitors = new List<IHostedService>
+                        {
+                            sp.GetRequiredService<ArpSpoofMonitor>(),
+                            sp.GetRequiredService<DnsResponseValidationMonitor>(),
+                            sp.GetRequiredService<PublicIpMonitor>(),
+                            sp.GetRequiredService<WifiSecurityMonitor>(),
+                            sp.GetRequiredService<NetworkInterfaceGuard>(),
+                            sp.GetRequiredService<AppDnsExfilMonitor>(),
+                            sp.GetRequiredService<NetworkShareMonitor>(),
+                            sp.GetRequiredService<NetworkReinfectionDetector>(),
+                            sp.GetRequiredService<ReinfectionCorrelator>(),
+                            sp.GetRequiredService<DnsCrossValidator>(),
+                            sp.GetRequiredService<TrafficVolumeBaseline>(),
+                            sp.GetRequiredService<OutboundConnectionWhitelist>(),
+                            sp.GetRequiredService<RemoteAccessMonitor>(),
+                        };
+                        return new MonitorGroup(
+                            new MonitorGroupConfig
+                            {
+                                Name = "NetworkIntegrity",
+                                StartDelay = TimeSpan.FromSeconds(6),
+                                StaggerDelay = TimeSpan.FromMilliseconds(200),
+                                MaxRestartAttempts = 3,
+                                RestartCooldown = TimeSpan.FromSeconds(10),
+                                HealthCheckInterval = TimeSpan.FromSeconds(30),
+                            },
+                            monitors,
+                            sp.GetRequiredService<ILogger<MonitorGroup>>());
+                    });
+                    services.AddSingleton<ArpSpoofMonitor>();
+                    services.AddSingleton<DnsResponseValidationMonitor>();
+                    services.AddSingleton<PublicIpMonitor>();
+                    services.AddSingleton<WifiSecurityMonitor>();
+                    services.AddSingleton<NetworkInterfaceGuard>();
+                    services.AddSingleton<AppDnsExfilMonitor>();
+                    services.AddSingleton<NetworkShareMonitor>();
+                    services.AddSingleton<NetworkReinfectionDetector>();
+                    services.AddSingleton<DnsCrossValidator>();
+                    services.AddSingleton<TrafficVolumeBaseline>();
+                    services.AddSingleton<OutboundConnectionWhitelist>();
+                    services.AddSingleton<RemoteAccessMonitor>();
 
-                    // v1.4.1: IPSec self-healing guard
-                    services.AddHostedService<IPSecIntegrityGuard>();
+                    // ── Group 5: System Integrity ─────────────────────────────────────
+                    // Starts delayed (10s). Monitors OS-level configuration drift.
+                    services.AddHostedService(sp =>
+                    {
+                        var monitors = new List<IHostedService>
+                        {
+                            sp.GetRequiredService<FirewallIntegrityMonitor>(),
+                            sp.GetRequiredService<SecureBootIntegrityMonitor>(),
+                            sp.GetRequiredService<WindowsUpdateIntegrityMonitor>(),
+                            sp.GetRequiredService<ScheduledTaskMonitor>(),
+                            sp.GetRequiredService<CriticalServiceGuard>(),
+                            sp.GetRequiredService<RegistryMonitor>(),
+                            sp.GetRequiredService<WmiPersistenceMonitor>(),
+                            sp.GetRequiredService<WorkFoldersExfilMonitor>(),
+                            sp.GetRequiredService<TlsCertificateMonitor>(),
+                            sp.GetRequiredService<UacBypassSurfaceMonitor>(),
+                            sp.GetRequiredService<HostsFileGuard>(),
+                            sp.GetRequiredService<BrowserDnsPolicyGuard>(),
+                            sp.GetRequiredService<BootIntegrityGuard>(),
+                            sp.GetRequiredService<CveShieldHardener>(),
+                            sp.GetRequiredService<ApplicationIntegrityMonitor>(),
+                            sp.GetRequiredService<PseudoSandbox>(),
+                            sp.GetRequiredService<AcousticThreatMonitor>(),
+                        };
+                        return new MonitorGroup(
+                            new MonitorGroupConfig
+                            {
+                                Name = "SystemIntegrity",
+                                StartDelay = TimeSpan.FromSeconds(10),
+                                StaggerDelay = TimeSpan.FromMilliseconds(300),
+                                MaxRestartAttempts = 3,
+                                RestartCooldown = TimeSpan.FromSeconds(15),
+                                HealthCheckInterval = TimeSpan.FromSeconds(60),
+                            },
+                            monitors,
+                            sp.GetRequiredService<ILogger<MonitorGroup>>());
+                    });
+                    services.AddSingleton<FirewallIntegrityMonitor>();
+                    services.AddSingleton<SecureBootIntegrityMonitor>();
+                    services.AddSingleton<WindowsUpdateIntegrityMonitor>();
+                    services.AddSingleton<ScheduledTaskMonitor>();
+                    services.AddSingleton<CriticalServiceGuard>();
+                    services.AddSingleton<RegistryMonitor>();
+                    services.AddSingleton<WmiPersistenceMonitor>();
+                    services.AddSingleton<WorkFoldersExfilMonitor>();
+                    services.AddSingleton<TlsCertificateMonitor>();
+                    services.AddSingleton<UacBypassSurfaceMonitor>();
+                    services.AddSingleton<HostsFileGuard>();
+                    services.AddSingleton<BrowserDnsPolicyGuard>();
+                    services.AddSingleton<BootIntegrityGuard>();
+                    services.AddSingleton<CveShieldHardener>();
+                    services.AddSingleton<ApplicationIntegrityMonitor>();
+                    services.AddSingleton<AcousticThreatMonitor>();
 
-                    // v1.4.1: Built-in Administrator account guard
-                    services.AddHostedService<BuiltinAdminGuard>();
-
-                    // v1.4.2: Password rotation + UAC enforcement
-                    services.AddHostedService<PasswordRotationGuard>();
-
-                    // v1.4.3: Anti-TAO hardware/network monitors
-                    services.AddHostedService<HardwareSecurityGuard>();
-                    services.AddHostedService<DnsCrossValidator>();
-                    services.AddHostedService<UsbHidWhitelist>();
-                    services.AddHostedService<TrafficVolumeBaseline>();
-                    services.AddHostedService<OutboundConnectionWhitelist>();
-
-                    // v1.3.9: Agent watchdog — relaunches WindowsSentinel.Agent.exe in the
-                    // user session if it dies, and fires an anti-tamper alert on repeated kills
-                    services.AddHostedService<AgentWatchdog>();
+                    // ── Group 6: Peripheral & Environmental ───────────────────────────
+                    // Starts late (30s). Monitors hardware peripherals and external media.
+                    // Lower priority — log and continue on failure.
+                    services.AddHostedService(sp =>
+                    {
+                        var monitors = new List<IHostedService>
+                        {
+                            sp.GetRequiredService<BluetoothMonitor>(),
+                            sp.GetRequiredService<PhantomDeviceMonitor>(),
+                            sp.GetRequiredService<DeviceInstallMonitor>(),
+                            sp.GetRequiredService<MtpTransferGuard>(),
+                            sp.GetRequiredService<VolumeMountMonitor>(),
+                            sp.GetRequiredService<CastDeviceGuard>(),
+                            sp.GetRequiredService<WslMonitor>(),
+                            sp.GetRequiredService<RawDiskAccessMonitor>(),
+                            sp.GetRequiredService<PrintSpoolerMonitor>(),
+                            sp.GetRequiredService<SandboxEscapeMonitor>(),
+                            sp.GetRequiredService<HardwareSecurityGuard>(),
+                            sp.GetRequiredService<UsbHidWhitelist>(),
+                        };
+                        return new MonitorGroup(
+                            new MonitorGroupConfig
+                            {
+                                Name = "Peripheral",
+                                StartDelay = TimeSpan.FromSeconds(30),
+                                StaggerDelay = TimeSpan.FromMilliseconds(500),
+                                MaxRestartAttempts = 2,
+                                RestartCooldown = TimeSpan.FromSeconds(30),
+                                HealthCheckInterval = TimeSpan.FromSeconds(60),
+                            },
+                            monitors,
+                            sp.GetRequiredService<ILogger<MonitorGroup>>());
+                    });
+                    services.AddSingleton<BluetoothMonitor>();
+                    services.AddSingleton<DeviceInstallMonitor>();
+                    services.AddSingleton<MtpTransferGuard>();
+                    services.AddSingleton<VolumeMountMonitor>();
+                    services.AddSingleton<CastDeviceGuard>();
+                    services.AddSingleton<WslMonitor>();
+                    services.AddSingleton<RawDiskAccessMonitor>();
+                    services.AddSingleton<PrintSpoolerMonitor>();
+                    services.AddSingleton<SandboxEscapeMonitor>();
+                    services.AddSingleton<HardwareSecurityGuard>();
+                    services.AddSingleton<UsbHidWhitelist>();
                 });
     }
 }

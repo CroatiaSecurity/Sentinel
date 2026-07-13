@@ -46,7 +46,14 @@ namespace WindowsSentinel.Core
                 throw new FileNotFoundException("File not found for quarantine", filePath);
             }
 
-            var fileBytes = await File.ReadAllBytesAsync(filePath);
+            // Read with FileShare.Delete — never block user from deleting files
+            byte[] fileBytes;
+            using (var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete))
+            {
+                fileBytes = new byte[fs.Length];
+                await fs.ReadExactlyAsync(fileBytes);
+            }
             
             // Encrypt using DPAPI (machine-scoped) for quarantine isolation
             fileBytes = ProtectedData.Protect(fileBytes, null, DataProtectionScope.LocalMachine);

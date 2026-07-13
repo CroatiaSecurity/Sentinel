@@ -2,6 +2,39 @@
  
 All notable changes to Windows Sentinel are documented in this file.
  
+## [1.4.4] - 2026-07-13
+
+### Architecture — Monitor Grouping & Non-Blocking File I/O
+
+Major internal refactor: monitors are now organized into priority groups with staggered startup and independent failure restart. All file operations updated to never block user file deletion.
+
+### Added
+
+- **`MonitorGroup`**: New infrastructure class (`MonitorGroup.cs`) that groups related `BackgroundService` monitors into managed units. Each group has configurable start delay, stagger between monitor starts, restart policy (max attempts or indefinite), health check interval, and graceful shutdown ordering. Replaces 60+ flat `AddHostedService` calls with 6 logical groups.
+
+### Changed
+
+- **Service startup**: Monitors now start in 6 priority groups instead of all at once:
+  - **Critical** (0s delay): AntiTamperGuard, IPSecIntegrityGuard, AgentWatchdog, SyscallStubMonitor — restarts indefinitely
+  - **CoreDetection** (2s delay): RansomwareIoMonitor, BeaconingDetector, FileVerdictScanner, GhostProcessMonitor, +11 more — 5 restart attempts
+  - **CredentialProtection** (4s delay): BrowserCredentialGuard, CanaryFileMonitor, NullSessionGuard, +3 more — 3 restart attempts
+  - **NetworkIntegrity** (6s delay): ArpSpoofMonitor, DnsResponseValidation, PublicIpMonitor, NetworkShareMonitor, +9 more — 3 restart attempts
+  - **SystemIntegrity** (10s delay): FirewallIntegrity, SecureBoot, RegistryMonitor, WmiPersistence, +13 more — 3 restart attempts
+  - **Peripheral** (30s delay): BluetoothMonitor, MtpTransferGuard, VolumeMountMonitor, CastDeviceGuard, +8 more — 2 restart attempts
+- **File I/O**: All file read operations across the codebase now use `FileShare.ReadWrite | FileShare.Delete`. Sentinel never holds file locks that prevent users from deleting their own files. Affected components:
+  - `FileReputationEngine` (hash computation, static PE analysis, import scanning)
+  - `QuarantineManager` (file read before DPAPI encryption)
+  - `ChainTracer` (file hash computation)
+  - `JsonlEventLogger` (log file stream — both main open and stale recovery)
+  - `BeaconingDetector` (file verdict hash computation)
+  - `AdvancedResponseEngine` (reinfection correlator hash)
+  - `TrayIconService` (event log tailing — initial offset + polling)
+
+### Design Rules Added
+
+- All file reads MUST use `FileShare.ReadWrite | FileShare.Delete` — Sentinel observes, never obstructs
+- Monitors MUST be registered in groups by function and priority — no flat `AddHostedService` for monitors
+
 ## [1.4.3] - 2026-07-13
 
 ### Security — Anti-TAO Hardware & Network Integrity Monitors

@@ -98,13 +98,14 @@ namespace WindowsSentinel.Core
             if (string.IsNullOrEmpty(filePath) || !File.Exists(filePath))
                 return FileReputationResult.Unknown(filePath);
 
-            // Compute SHA-256
+            // Compute SHA-256 — FileShare.Delete ensures we never block user file operations
             string hash;
             long fileSize;
             try
             {
                 using var sha = SHA256.Create();
-                await using var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                await using var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read,
+                    FileShare.ReadWrite | FileShare.Delete);
                 fileSize = fs.Length;
                 var hashBytes = await sha.ComputeHashAsync(fs, ct);
                 hash = Convert.ToHexString(hashBytes).ToLowerInvariant();
@@ -364,7 +365,8 @@ namespace WindowsSentinel.Core
 
             try
             {
-                using var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                using var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read,
+                    FileShare.ReadWrite | FileShare.Delete);
                 using var reader = new BinaryReader(fs);
 
                 // Check MZ header
@@ -463,10 +465,13 @@ namespace WindowsSentinel.Core
         {
             try
             {
-                // Quick scan: read file bytes and look for ASCII strings matching suspicious APIs
-                // This is a heuristic — a proper PE parser would walk the IAT, but this is fast
-                var bytes = File.ReadAllBytes(filePath);
-                if (bytes.Length > 10_000_000) return 0; // Skip huge files
+                // Quick scan: read file bytes and look for ASCII strings matching suspicious APIs.
+                // Uses FileShare.Delete so Sentinel never blocks user file operations.
+                using var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read,
+                    FileShare.ReadWrite | FileShare.Delete);
+                if (fs.Length > 10_000_000) return 0; // Skip huge files
+                var bytes = new byte[fs.Length];
+                fs.ReadExactly(bytes);
                 var text = System.Text.Encoding.ASCII.GetString(bytes);
                 int count = 0;
                 foreach (var import in SuspiciousImports)

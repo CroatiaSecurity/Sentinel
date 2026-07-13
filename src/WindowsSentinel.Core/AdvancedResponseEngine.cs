@@ -502,7 +502,8 @@ namespace WindowsSentinel.Core
                         var path = proc.MainModule?.FileName;
                         if (!string.IsNullOrEmpty(path) && File.Exists(path))
                         {
-                            using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                            using var fs = new FileStream(path, FileMode.Open, FileAccess.Read,
+                                FileShare.ReadWrite | FileShare.Delete);
                             hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(fs)).ToLowerInvariant();
                         }
                     }

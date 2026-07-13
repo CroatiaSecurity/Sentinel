@@ -206,7 +206,8 @@ namespace WindowsSentinel.Agent
             {
                 if (File.Exists(logFile))
                 {
-                    using var fs = new FileStream(logFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                    using var fs = new FileStream(logFile, FileMode.Open, FileAccess.Read,
+                        FileShare.ReadWrite | FileShare.Delete);
                     lastOffset = fs.Length;
                 }
             }
@@ -236,7 +237,8 @@ namespace WindowsSentinel.Agent
 
                     if (File.Exists(logFile))
                     {
-                        using var fs = new FileStream(logFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                        using var fs = new FileStream(logFile, FileMode.Open, FileAccess.Read,
+                            FileShare.ReadWrite | FileShare.Delete);
                         if (fs.Length < lastOffset)
                         {
                             lastOffset = 0;
