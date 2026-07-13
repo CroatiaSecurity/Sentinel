@@ -393,6 +393,7 @@ namespace WindowsSentinel.Service
                             sp.GetRequiredService<SandboxEscapeMonitor>(),
                             sp.GetRequiredService<HardwareSecurityGuard>(),
                             sp.GetRequiredService<UsbHidWhitelist>(),
+                            sp.GetRequiredService<PhysicalAccessMonitor>(),
                         };
                         return new MonitorGroup(
                             new MonitorGroupConfig
@@ -418,6 +419,7 @@ namespace WindowsSentinel.Service
                     services.AddSingleton<SandboxEscapeMonitor>();
                     services.AddSingleton<HardwareSecurityGuard>();
                     services.AddSingleton<UsbHidWhitelist>();
+                    services.AddSingleton<PhysicalAccessMonitor>();
                 });
     }
 }
