@@ -68,7 +68,11 @@ namespace WindowsSentinel.Agent
             _contextMenu.Items.Add("Open Quarantine Folder", null, OnOpenQuarantine);
             _contextMenu.Items.Add("Open Event Log", null, OnOpenEventLog);
             _contextMenu.Items.Add(new ToolStripSeparator());
-            _contextMenu.Items.Add("Stop Protection", null, OnToggleProtection);
+            // SECURITY v1.4.4: Removed "Stop Protection" toggle. Previously, any user-level
+            // process could automate this menu item to disable ActiveResponse — blinding all
+            // Agent-side detection responses without elevation. The Service (running as SYSTEM)
+            // is now the sole authority on response mode. Users who need to disable protection
+            // must stop the Windows Sentinel service via an elevated command prompt.
             _contextMenu.Items.Add("Exit Agent", null, OnExit);
 
             System.Drawing.Icon? appIcon = null;
@@ -161,21 +165,6 @@ namespace WindowsSentinel.Agent
             {
                 MessageBox.Show($"Failed to open event log: {ex.Message}");
             }
-        }
-
-        private void OnToggleProtection(object? sender, EventArgs e)
-        {
-            var result = MessageBox.Show(
-                "Are you sure you want to " + (_config.ActiveResponse ? "disable" : "enable") + " active response?",
-                "Windows Sentinel",
-                MessageBoxButtons.YesNo,
-                MessageBoxIcon.Warning);
-            if (result != DialogResult.Yes) return;
-
-            _config.ActiveResponse = !_config.ActiveResponse;
-            var status = _config.ActiveResponse ? "Active" : "Disabled";
-            _notifyIcon!.Text = $"Windows Sentinel v{_version} — Protection {status}";
-            _notifyIcon.ShowBalloonTip(2000, "Windows Sentinel", $"Protection mode set to {status}.", ToolTipIcon.Warning);
         }
 
         private void OnExit(object? sender, EventArgs e)

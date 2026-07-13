@@ -137,9 +137,16 @@ namespace WindowsSentinel.Core
                     }
                     if (responseString.Contains("\"query_status\": \"hash_not_found\"") || responseString.Contains("\"query_status\":\"hash_not_found\""))
                     {
-                        // Hash genuinely not found in either database — file is unknown but not confirmed malicious.
-                        // This is the ONLY path that returns Safe when hash is absent from both DBs.
-                        return HashVerdict.Safe;
+                        // SECURITY v1.4.4: Return Unknown, NOT Safe.
+                        // Previously returned Safe here — treating absence of evidence as evidence of safety.
+                        // Novel malware (zero-day payloads, custom implants) will ALWAYS be absent from
+                        // both CIRCL and MalwareBazaar. Marking them Safe caused permanent caching of a
+                        // false-safe verdict, fed trust scores to BeaconingDetector (+2 for Safe hash),
+                        // and made custom implants effectively invisible to reputation-based detection.
+                        //
+                        // Now: only CIRCL trust score > 60 can positively confirm a file as Safe.
+                        // Absent from both DBs = Unknown = will be re-checked on next scan cycle.
+                        return HashVerdict.Unknown;
                     }
                 }
                 else

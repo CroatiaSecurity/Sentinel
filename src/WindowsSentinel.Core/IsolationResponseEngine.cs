@@ -59,9 +59,14 @@ namespace WindowsSentinel.Core
             }
 
             // 2. Dismount the ISO via PowerShell Dismount-DiskImage
+            // SECURITY v1.4.4: Use -EncodedCommand to prevent command injection via crafted ISO filenames.
+            // Previously interpolated isoPath directly into a PowerShell -Command string — a filename
+            // containing embedded single quotes could break out and execute arbitrary commands as SYSTEM.
             try
             {
-                var dismountArgs = $"-NoProfile -NonInteractive -Command \"Dismount-DiskImage -ImagePath '{isoPath}' -ErrorAction Stop\"";
+                var script = $"Dismount-DiskImage -ImagePath '{isoPath.Replace("'", "''")}' -ErrorAction Stop";
+                var encodedScript = Convert.ToBase64String(System.Text.Encoding.Unicode.GetBytes(script));
+                var dismountArgs = $"-NoProfile -NonInteractive -EncodedCommand {encodedScript}";
                 using var dismount = new Process();
                 dismount.StartInfo = new ProcessStartInfo
                 {
@@ -176,7 +181,10 @@ namespace WindowsSentinel.Core
             }
 
             // 3. Remove the image
-            if (!string.IsNullOrWhiteSpace(imageId))
+            // SECURITY v1.4.4: Validate imageId from docker inspect output before use.
+            // imageId comes from external process output, not our own validation — a malicious
+            // container could craft its image reference to include shell metacharacters.
+            if (!string.IsNullOrWhiteSpace(imageId) && IsValidDockerIdentifier(imageId))
             {
                 try
                 {
@@ -276,9 +284,13 @@ namespace WindowsSentinel.Core
         {
             try
             {
-                // Use PowerShell Stop-VM as the managed WMI interface for Msvm_ComputerSystem
-                // This invokes the RequestStateChange method on the Msvm_ComputerSystem WMI object
-                var args = $"-NoProfile -NonInteractive -Command \"Stop-VM -Name '{vmName}' -TurnOff -Force -ErrorAction Stop\"";
+                // SECURITY v1.4.4: Use -EncodedCommand to prevent command injection via crafted VM names.
+                // Previously interpolated vmName directly into a PowerShell -Command string.
+                // While IsValidVmName() validates characters, -EncodedCommand eliminates the attack
+                // surface entirely — no parsing of the command string by PowerShell's evaluator.
+                var script = $"Stop-VM -Name '{vmName.Replace("'", "''")}' -TurnOff -Force -ErrorAction Stop";
+                var encodedScript = Convert.ToBase64String(System.Text.Encoding.Unicode.GetBytes(script));
+                var args = $"-NoProfile -NonInteractive -EncodedCommand {encodedScript}";
                 using var ps = new Process();
                 ps.StartInfo = new ProcessStartInfo
                 {

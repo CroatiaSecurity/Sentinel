@@ -23,7 +23,7 @@ RestartApplications=no
 Source: "assets\Sentinel.ico"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\publish\service\WindowsSentinel.Service.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\publish\agent\WindowsSentinel.Agent.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\publish\service\appsettings.json"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\publish\service\appsettings.json"; DestDir: "{app}"; Flags: onlyifdoesntexist
 Source: "..\publish\service\version.txt"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]

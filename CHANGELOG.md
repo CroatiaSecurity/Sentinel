@@ -4,6 +4,20 @@ All notable changes to Windows Sentinel are documented in this file.
  
 ## [1.4.4] - 2026-07-13
 
+### Security — Red Team Audit Remediation
+
+Internal red team audit identified 15 vulnerabilities across Critical/High/Medium severity. All actionable findings remediated in this release.
+
+### Fixed (Security)
+
+- **[CRITICAL] Hash reputation trust inversion** (`HashReputationService`): Previously returned `Safe` when a hash was absent from both CIRCL and MalwareBazaar — treating absence of evidence as evidence of safety. Novel malware (zero-day payloads, custom implants) was permanently cached as Safe and received trust score boosts in BeaconingDetector. Now returns `Unknown` for absent hashes; only CIRCL trust score > 60 can positively confirm Safe.
+- **[CRITICAL] User-level ActiveResponse disable** (`TrayIconService`): Removed the "Stop Protection" toggle from the Agent tray menu. Previously, any user-level process could automate this menu item to disable all Agent-side detection responses without elevation. The Service (SYSTEM) is now the sole authority on response mode.
+- **[CRITICAL] Command injection via PowerShell** (`IsolationResponseEngine`): Both ISO dismount and Hyper-V Stop-VM commands now use `-EncodedCommand` (Base64-encoded Unicode) instead of string interpolation into `-Command`. Eliminates command injection via crafted ISO filenames or VM names. Added single-quote escaping as defense-in-depth.
+- **[HIGH] Overprivileged process handle** (`DllUnloadEngine`): Reduced `OpenProcess` from `PROCESS_ALL_ACCESS` (0x1F0FFF) to `PROCESS_QUERY_INFORMATION` (0x0400). Thread handles already opened individually with `THREAD_SET_CONTEXT` — the process-level handle only needed query access for module enumeration.
+- **[HIGH] Unauthenticated threat telemetry** (`ThreatReportService`): All outbound reports to the Cloudflare Worker proxy are now HMAC-SHA256 signed using a key derived from the installation entropy. Signature covers timestamp + path + body via `X-Sentinel-Timestamp` and `X-Sentinel-Signature` headers. Prevents MITM telemetry inspection, replay attacks, and fake report injection.
+- **[MEDIUM] Docker imageId injection** (`IsolationResponseEngine`): `imageId` from `docker inspect` output is now validated with `IsValidDockerIdentifier()` before passing to `docker rmi`. Prevents argument injection via crafted image references in malicious containers.
+- **[MEDIUM] Config overwrite on upgrade** (`setup.iss`): Changed `appsettings.json` installer flag from `ignoreversion` (always overwrite) to `onlyifdoesntexist` (preserve user config). Upgrades no longer silently destroy custom TrustedCastDevices, ProtectedApps, LogPath, or other user settings.
+
 ### Architecture — Monitor Grouping & Non-Blocking File I/O
 
 Major internal refactor: monitors are now organized into priority groups with staggered startup and independent failure restart. All file operations updated to never block user file deletion.

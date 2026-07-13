@@ -295,7 +295,13 @@ namespace WindowsSentinel.Core
             IntPtr hProcess = IntPtr.Zero;
             try
             {
-                hProcess = OpenProcess(0x1F0FFF, false, processId); // PROCESS_ALL_ACCESS
+                // SECURITY v1.4.4: Reduced from PROCESS_ALL_ACCESS (0x1F0FFF) to minimum required.
+                // We only need to enumerate threads (PROCESS_QUERY_INFORMATION) and read module list.
+                // Thread handles are opened separately with THREAD_SET_CONTEXT for QueueUserAPC.
+                // PROCESS_ALL_ACCESS was overprivileged — provided a window for handle duplication
+                // and made this code a powerful injection primitive if processId were attacker-influenced.
+                const uint PROCESS_QUERY_INFORMATION = 0x0400;
+                hProcess = OpenProcess(PROCESS_QUERY_INFORMATION, false, processId);
                 if (hProcess == IntPtr.Zero) return false;
 
                 var kernel32 = GetModuleHandleA("kernel32.dll");
