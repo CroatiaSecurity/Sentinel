@@ -151,9 +151,12 @@ namespace WindowsSentinel.Core
 
         private void OnRulesChanged(object sender, FileSystemEventArgs e)
         {
-            // Simple debounce to let file writes complete
-            System.Threading.Thread.Sleep(100);
-            LoadRules();
+            // Simple debounce to let file writes complete without blocking the FS watcher thread
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(100);
+                LoadRules();
+            });
         }
 
         private void LoadRules()

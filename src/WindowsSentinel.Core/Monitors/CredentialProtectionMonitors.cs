@@ -981,12 +981,16 @@ namespace WindowsSentinel.Core
                         var username = child.Name;
 
                         // Check if account is disabled
-                        var flags = (int)child.Properties["UserFlags"].Value;
+                        var flagsVal = child.Properties["UserFlags"].Value;
+                        if (flagsVal == null) { child.Dispose(); continue; }
+                        var flags = (int)flagsVal;
                         bool isDisabled = (flags & 0x0002) != 0;
                         if (isDisabled) { child.Dispose(); continue; }
 
                         // Get SID
-                        var sidBytes = (byte[])child.Properties["objectSid"].Value;
+                        var sidVal = child.Properties["objectSid"].Value;
+                        if (sidVal == null) { child.Dispose(); continue; }
+                        var sidBytes = (byte[])sidVal;
                         var sid = new System.Security.Principal.SecurityIdentifier(sidBytes, 0);
                         var sidString = sid.Value;
 

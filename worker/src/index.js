@@ -26,7 +26,7 @@ export default {
     const corsHeaders = {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
+      'Access-Control-Allow-Headers': 'Content-Type, X-Sentinel-Auth, X-Sentinel-Signature, X-Sentinel-Timestamp, X-Sentinel-Key',
     };
 
     if (request.method === 'OPTIONS') {
@@ -50,8 +50,52 @@ export default {
       });
     }
 
+    // Check shared secret authentication if configured on worker
+    if (env.SENTINEL_SHARED_SECRET) {
+      const authHeader = request.headers.get('X-Sentinel-Auth');
+      if (!authHeader || authHeader !== env.SENTINEL_SHARED_SECRET) {
+        return new Response(JSON.stringify({ error: 'Unauthorized: Invalid or missing X-Sentinel-Auth header' }), {
+          status: 401,
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+      }
+    }
+
+    // Check signature and timestamp (required for all proxy requests to prevent replay and MITM)
+    const signature = request.headers.get('X-Sentinel-Signature');
+    const timestamp = request.headers.get('X-Sentinel-Timestamp');
+    const clientKey = request.headers.get('X-Sentinel-Key');
+
+    if (!signature || !timestamp || !clientKey) {
+      return new Response(JSON.stringify({ error: 'Bad Request: Missing required X-Sentinel security headers' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json', ...corsHeaders }
+      });
+    }
+
+    // Verify timestamp within 5 minutes (300 seconds) of worker time
+    const timestampVal = parseInt(timestamp, 10);
+    const nowSec = Math.floor(Date.now() / 1000);
+    if (isNaN(timestampVal) || Math.abs(nowSec - timestampVal) > 300) {
+      return new Response(JSON.stringify({ error: 'Bad Request: Stale or invalid timestamp' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json', ...corsHeaders }
+      });
+    }
+
     try {
-      const body = await request.json();
+      const rawBody = await request.text();
+      
+      // Verify signature over the exact raw body payload
+      const signatureValid = await verifySignature(signature, clientKey, timestamp, url.pathname, rawBody);
+      if (!signatureValid) {
+        return new Response(JSON.stringify({ error: 'Unauthorized: HMAC signature verification failed' }), {
+          status: 401,
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+      }
+
+      const body = JSON.parse(rawBody);
 
       // Basic validation — require at minimum a type and value
       if (!body.type || !body.value) {
@@ -60,9 +104,6 @@ export default {
           headers: { 'Content-Type': 'application/json', ...corsHeaders }
         });
       }
-
-      // Rate limiting: simple per-IP throttle via CF headers
-      // (Cloudflare's free plan includes basic rate limiting)
 
       let result;
 
@@ -176,4 +217,46 @@ async function reportIp(body, env) {
 
   const text = await response.text();
   return { success: response.ok, upstream: text.substring(0, 500) };
+}
+
+/**
+ * Helper to convert hex string to Uint8Array
+ */
+function hexToBytes(hex) {
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < bytes.length; i++) {
+    bytes[i] = parseInt(hex.substring(i * 2, i * 2 + 2), 16);
+  }
+  return bytes;
+}
+
+/**
+ * Cryptographically verify the HMAC-SHA256 signature
+ */
+async function verifySignature(signatureHex, keyHex, timestamp, path, bodyJson) {
+  try {
+    const keyBytes = hexToBytes(keyHex);
+    const sigBytes = hexToBytes(signatureHex);
+    
+    const cryptoKey = await crypto.subtle.importKey(
+      "raw",
+      keyBytes,
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["verify"]
+    );
+    
+    const payloadStr = `${timestamp}.${path}.${bodyJson}`;
+    const encoder = new TextEncoder();
+    const payloadBytes = encoder.encode(payloadStr);
+    
+    return await crypto.subtle.verify(
+      "HMAC",
+      cryptoKey,
+      sigBytes,
+      payloadBytes
+    );
+  } catch (err) {
+    return false;
+  }
 }

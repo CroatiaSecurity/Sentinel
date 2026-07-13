@@ -839,28 +839,42 @@ namespace WindowsSentinel.Core
                         return $"{network}/{prefix}";
                     }));
 
-                // Strategy: Create a BLOCK ALL outbound rule, then an ALLOW rule for whitelisted
-                // Windows Firewall processes rules in order: Allow rules take precedence over Block
+                // Use Windows Firewall COM API (INetFwPolicy2) instead of shelling out to netsh
+                var fwPolicyType = Type.GetTypeFromProgID("HNetCfg.FwPolicy2");
+                if (fwPolicyType == null) throw new InvalidOperationException("Failed to get HNetCfg.FwPolicy2 type");
+                dynamic? fwPolicy = Activator.CreateInstance(fwPolicyType);
+                if (fwPolicy == null) throw new InvalidOperationException("Failed to create FwPolicy2 instance");
+
+                var ruleType = Type.GetTypeFromProgID("HNetCfg.FWRule");
+                if (ruleType == null) throw new InvalidOperationException("Failed to get HNetCfg.FWRule type");
 
                 // First: Allow rule for whitelisted subnets
-                var allowPsi = new ProcessStartInfo("netsh.exe",
-                    $"advfirewall firewall add rule name=\"Sentinel-OutboundWhitelist-Allow\" " +
-                    $"dir=out action=allow remoteip=\"{allowedAddresses}\"")
+                dynamic? allowRule = Activator.CreateInstance(ruleType);
+                if (allowRule != null)
                 {
-                    CreateNoWindow = true, UseShellExecute = false
-                };
-                using (var p = Process.Start(allowPsi))
-                    p?.WaitForExit(5000);
+                    allowRule.Name = "Sentinel-OutboundWhitelist-Allow";
+                    allowRule.Description = "Sentinel: Allow outbound to whitelisted subnets";
+                    allowRule.Direction = 2; // NET_FW_RULE_DIR_OUT
+                    allowRule.Action = 1;    // NET_FW_ACTION_ALLOW
+                    allowRule.RemoteAddresses = allowedAddresses;
+                    allowRule.Enabled = true;
+                    allowRule.Profiles = 0x7FFFFFFF;
+                    fwPolicy.Rules.Add(allowRule);
+                }
 
                 // Then: Block everything else
-                var blockPsi = new ProcessStartInfo("netsh.exe",
-                    $"advfirewall firewall add rule name=\"{FirewallRuleName}\" " +
-                    "dir=out action=block remoteip=any")
+                dynamic? blockRule = Activator.CreateInstance(ruleType);
+                if (blockRule != null)
                 {
-                    CreateNoWindow = true, UseShellExecute = false
-                };
-                using (var p = Process.Start(blockPsi))
-                    p?.WaitForExit(5000);
+                    blockRule.Name = FirewallRuleName;
+                    blockRule.Description = "Sentinel: Block all non-whitelisted outbound traffic";
+                    blockRule.Direction = 2; // NET_FW_RULE_DIR_OUT
+                    blockRule.Action = 0;    // NET_FW_ACTION_BLOCK
+                    blockRule.RemoteAddresses = "*";
+                    blockRule.Enabled = true;
+                    blockRule.Profiles = 0x7FFFFFFF;
+                    fwPolicy.Rules.Add(blockRule);
+                }
 
                 _firewallRuleCreated = true;
                 _logger.LogWarning("[OutboundConnectionWhitelist] Firewall enforcement rules created");

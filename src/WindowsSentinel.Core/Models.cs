@@ -85,6 +85,11 @@ namespace WindowsSentinel.Core
         /// This allows open-source distribution without leaking API keys.
         /// </summary>
         public string? ProxyEndpoint { get; set; }
+
+        /// <summary>
+        /// Shared secret key for verifying signature against Cloudflare Worker proxy.
+        /// </summary>
+        public string? ProxySharedSecret { get; set; }
     }
 
     public class TelemetryEvent
