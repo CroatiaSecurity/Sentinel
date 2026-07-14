@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.ServiceProcess;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Hosting;
@@ -37,6 +38,9 @@ namespace WindowsSentinel.Core
         {
             _logger.LogInformation("[StartupSelfTest] Running pre-flight checks...");
             int passed = 0, failed = 0;
+
+            // 0. Ensure critical network services are running (NlaSvc depends on stopped LanmanWorkstation)
+            EnsureCriticalNetworkServices();
 
             // 1. Log file writable
             try
@@ -103,5 +107,34 @@ namespace WindowsSentinel.Core
         }
 
         public Task StopAsync(CancellationToken ct) => Task.CompletedTask;
+
+        /// <summary>
+        /// Ensures NlaSvc and its dependencies are running.
+        /// NlaSvc (Network Location Awareness) controls the network tray icon.
+        /// GSecurity disables LanmanWorkstation which NlaSvc depends on for some functions,
+        /// causing NlaSvc to stay stopped and the tray to show "No Internet" even when connected.
+        /// </summary>
+        private void EnsureCriticalNetworkServices()
+        {
+            var servicesToStart = new[] { "NlaSvc", "netprofm" };
+            foreach (var svcName in servicesToStart)
+            {
+                try
+                {
+                    using var sc = new System.ServiceProcess.ServiceController(svcName);
+                    if (sc.Status != System.ServiceProcess.ServiceControllerStatus.Running)
+                    {
+                        _logger.LogWarning("[StartupSelfTest] Service '{Svc}' is {Status} — starting it", svcName, sc.Status);
+                        sc.Start();
+                        sc.WaitForStatus(System.ServiceProcess.ServiceControllerStatus.Running, TimeSpan.FromSeconds(15));
+                        _logger.LogInformation("[StartupSelfTest] Service '{Svc}' started successfully", svcName);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "[StartupSelfTest] Failed to start service '{Svc}'", svcName);
+                }
+            }
+        }
     }
 }
