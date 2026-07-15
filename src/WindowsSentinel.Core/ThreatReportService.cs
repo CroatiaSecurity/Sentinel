@@ -147,11 +147,6 @@ namespace WindowsSentinel.Core
                 request.Content = content;
                 request.Headers.Add("X-Sentinel-Timestamp", timestamp);
                 request.Headers.Add("X-Sentinel-Signature", signature);
-                request.Headers.Add("X-Sentinel-Key", Convert.ToHexString(_hmacKey).ToLowerInvariant());
-                if (!string.IsNullOrEmpty(_config.ProxySharedSecret))
-                {
-                    request.Headers.Add("X-Sentinel-Auth", _config.ProxySharedSecret);
-                }
 
                 var response = await _httpClient.SendAsync(request);
 

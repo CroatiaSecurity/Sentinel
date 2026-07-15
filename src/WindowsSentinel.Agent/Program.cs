@@ -274,13 +274,8 @@ namespace WindowsSentinel.Agent
                     services.AddHostedService<PhantomKeystrokeGuard>();
                     services.AddHostedService<ClickjackingGuard>();
                     services.AddHostedService<WebcamHijackMonitor>();
-                    services.AddHostedService<ConsultantSignalIngestor>();
                     services.AddHostedService<ShellWatchdog>();
                     services.AddSingleton<IsolationResponseEngine>();
-
-                    // v1.1.0: Defensive isolation containment
-                    services.AddSingleton<PseudoSandbox>();
-                    services.AddHostedService<PseudoSandbox>(sp => sp.GetRequiredService<PseudoSandbox>());
                 });
     }
 }

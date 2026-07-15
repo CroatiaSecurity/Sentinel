@@ -1,6 +1,6 @@
 # Windows Sentinel — Threat Model
 
-**Version: 1.4.4**
+**Version: 1.4.5**
 
 This document assumes the attacker has read the source code.
 
@@ -9,33 +9,117 @@ This document assumes the attacker has read the source code.
 ## Trust Boundaries
 
 ```
-â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
-â”‚ KERNEL (ring 0)                                         â”‚
-â”‚   - Sentinel has NO visibility here                     â”‚
-â”‚   - Attacker with driver = game over                    â”‚
-â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
-                          â”‚
-â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
-â”‚ SYSTEM (ring 3, highest userland privilege)              â”‚
-â”‚   - Sentinel service runs here                          â”‚
-â”‚   - ETW providers, full process access                  â”‚
-â”‚   - SecureCacheStore, quarantine, firewall rules        â”‚
-â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
-                          â”‚
-â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
-â”‚ ADMINISTRATOR (ring 3, elevated)                        â”‚
-â”‚   - Can stop/delete services via SCM                    â”‚
-â”‚   - Can take ownership of SYSTEM files                  â”‚
-â”‚   - Can load drivers (BYOVD)                            â”‚
-â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
-                          â”‚
-â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
-â”‚ STANDARD USER (ring 3)                                  â”‚
-â”‚   - Cannot touch Sentinel service or files              â”‚
-â”‚   - Sentinel agent (watchdog) runs here                 â”‚
-â”‚   - Limited telemetry (WMI fallback, no ThreatIntel)    â”‚
-â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
+┌─────────────────────────────────────────────────────────┐
+│ KERNEL (ring 0)                                         │
+│   - Sentinel has NO visibility here                     │
+│   - Attacker with driver = game over                    │
+└─────────────────────────────────────────────────────────┘
+                          │
+┌─────────────────────────────────────────────────────────┐
+│ SYSTEM (ring 3, highest userland privilege)              │
+│   - Sentinel service runs here                          │
+│   - ETW providers, full process access                  │
+│   - SecureCacheStore, quarantine, firewall rules        │
+└─────────────────────────────────────────────────────────┘
+                          │
+┌─────────────────────────────────────────────────────────┐
+│ ADMINISTRATOR (ring 3, elevated)                        │
+│   - Can stop/delete services via SCM                    │
+│   - Can take ownership of SYSTEM files                  │
+│   - Can load drivers (BYOVD)                            │
+└─────────────────────────────────────────────────────────┘
+                          │
+┌─────────────────────────────────────────────────────────┐
+│ STANDARD USER (ring 3)                                  │
+│   - Cannot touch Sentinel service or files              │
+│   - Sentinel agent (watchdog) runs here                 │
+│   - Limited telemetry (WMI fallback, no ThreatIntel)    │
+└─────────────────────────────────────────────────────────┘
 ```
+
+---
+
+## Monitor Coverage Summary (v1.4.5)
+
+### Group 1: Critical (Self-Protection)
+| Monitor | Purpose |
+|---------|---------|
+| SyscallStubMonitor | Detects ntdll unhooking/tampering |
+| IPSecIntegrityGuard | Detects IPSec policy tampering |
+
+### Group 2: Core Detection
+| Monitor | Purpose |
+|---------|---------|
+| DiskWideDllScanner | Finds DLLs planted outside trusted directories |
+| DllEntropyAnalyzer | Detects packed/encrypted DLLs |
+| DllLoadFailureMonitor | Watches event log for suspicious load failures |
+| ModuleValidationMonitor | Checks loaded DLL integrity via hash |
+| RuntimeModuleIntegrityMonitor | Verifies loaded module paths |
+| ScriptExecutionMonitor | PowerShell/WMI/MSHTA/LOLBin detection |
+
+### Group 3: Network Integrity
+| Monitor | Purpose |
+|---------|---------|
+| ArpSpoofMonitor | Detects ARP cache poisoning |
+| DnsResponseValidationMonitor | Detects DNS poisoning via TTL anomalies |
+| PublicIpMonitor | Detects VPN/proxy changes |
+| WifiSecurityMonitor | Detects open/WEP networks |
+| RemoteAccessMonitor | Detects RAT indicators (RDP, VNC, etc.) |
+| PhantomDeviceMonitor | Detects unauthorized network devices |
+
+### Group 4: System Integrity
+| Monitor | Purpose |
+|---------|---------|
+| FirewallIntegrityMonitor | Detects firewall rule tampering |
+| SecureBootIntegrityMonitor | Checks Secure Boot state |
+| ScheduledTaskMonitor | Detects new/modified scheduled tasks |
+| TlsCertificateMonitor | Detects unauthorized root CA installations |
+| UacBypassSurfaceMonitor | Detects autoelevate binary abuse |
+
+### Group 5: Credential Protection
+| Monitor | Purpose |
+|---------|---------|
+| CanaryFileMonitor | Honeypot files in sensitive directories |
+| BrowserCredentialGuard | Chrome/Edge/Firefox credential theft detection |
+| MicrosoftAccountGuardMonitor | Watches for MS account token access |
+| NullSessionGuard | Detects null session enumeration |
+| BuiltinAdminGuard | Detects enabled/exploited built-in Administrator |
+| PasswordRotationGuard | Monitors password age and blank passwords |
+
+### Group 6: Peripheral & Environmental
+| Monitor | Purpose |
+|---------|---------|
+| BluetoothMonitor | Detects new unknown Bluetooth devices |
+| PhantomDeviceMonitor | Detects unauthorized network peripherals |
+| DeviceInstallMonitor | New device driver installations |
+| MtpTransferGuard | Blocks non-media writes to portable devices |
+| VolumeMountMonitor | RAM disks, SUBST, VHD, VeraCrypt mounts |
+| CastDeviceGuard | Blocks unauthorized Cast/screen-share devices |
+| WslMonitor | WSL execution evasion detection |
+| RawDiskAccessMonitor | Direct disk I/O bypass detection |
+| PrintSpoolerMonitor | Print spooler exfiltration detection |
+| SandboxEscapeMonitor | Container/sandbox escape detection |
+| HardwareSecurityGuard | TPM, Secure Boot, BitLocker, Credential Guard |
+| UsbHidWhitelist | BadUSB/Rubber Ducky defense |
+| PhysicalAccessMonitor | Post-idle hardware change correlation |
+
+### Standalone Monitors (not grouped)
+| Monitor | Purpose |
+|---------|---------|
+| FileActivityMonitor | Real-time file system change tracking |
+| EtwProcessMonitor | Process creation/termination via ETW |
+| EtwThreatIntelMonitor | Kernel-level API observation |
+| GhostProcessMonitor | Detects orphan/invisible processes |
+| NetworkMonitor | TCP connection tracking and C2 detection |
+| RegistryMonitor | Registry change monitoring |
+| BeaconingDetector | Statistical C2 beacon detection |
+| RansomwareIoMonitor | Shadow copy + bulk encryption detection |
+| TokenIntegrityMonitor | Privilege escalation detection |
+| MemoryBehaviorAnalyzer | RWX/shellcode pattern detection |
+| DataExfiltrationMonitor | Large outbound data transfer detection |
+| NetworkInterfaceGuard | Bridge/adapter tampering detection |
+| AcousticThreatMonitor | Microphone access monitoring |
+| WebcamHijackMonitor | Camera access monitoring |
 
 ---
 
@@ -62,7 +146,7 @@ This document assumes the attacker has read the source code.
 
 **Mitigation:**
 - BYOVD detection rule (known vulnerable driver hashes)
-- Memory Integrity (HVCI) monitoring â€” alerts if disabled
+- Memory Integrity (HVCI) monitoring — alerts if disabled
 
 **Residual risk:** HIGH. If HVCI is off and attacker has admin, they can load any signed driver. Sentinel cannot prevent kernel-level attacks.
 
@@ -85,13 +169,13 @@ This document assumes the attacker has read the source code.
 
 **Attack (pre-1.1.0):** Attacker running as SYSTEM writes a "safe" verdict for their payload into the SecureCacheStore.
 
-**Mitigation (v1.1.0):**
-- HMAC key now incorporates boot-time nonce â€” caches from previous boots are rejected
-- DPAPI machine-scope encryption â€” file is unreadable on another machine
+**Mitigation (v1.1.0+):**
+- HMAC key incorporates installation entropy — requires SYSTEM access to forge
+- DPAPI machine-scope encryption — file is unreadable on another machine
 - ACL restricts to SYSTEM + Administrators only
-- Boot-nonce means attacker must poison DURING current session (narrower window)
+- Unknown verdicts are not cached (re-checked next scan cycle)
 
-**Residual risk:** MEDIUM. An attacker already running as SYSTEM in the current boot session CAN still write to the cache. The mitigation narrows the window but doesn't eliminate it. True elimination requires an out-of-band trust anchor (TPM, remote attestation, or kernel-protected memory).
+**Residual risk:** LOW. An attacker with SYSTEM access can do far more damage than forging cache entries.
 
 ---
 
@@ -99,13 +183,12 @@ This document assumes the attacker has read the source code.
 
 **Attack:** Rename malware to match allowlisted process names.
 
-**Mitigation (v1.1.0):**
-- Detection rules no longer use process names as primary signals
-- LsassAccessRule: behavioral-only (command-line patterns)
-- ProcessInjectionRule: behavioral-only (API patterns in cmdline)
-- Tool-name lists retained only for metadata enrichment, not detection decisions
+**Mitigation:**
+- Detection rules use behavioral signals, not process names
+- Allowlist uses full path verification (binary must reside under legitimate directory)
+- Self-exclusion checks normalize paths with `Path.GetFullPath()`
 
-**Residual risk:** LOW for detection rules. The allowlist service still uses process paths for FP reduction, but President's Law kills NEVER respect allowlists.
+**Residual risk:** LOW. Path-based verification prevents simple rename attacks.
 
 ---
 
@@ -118,20 +201,21 @@ This document assumes the attacker has read the source code.
 - Multi-signal correlation (cmdline + network + memory = composite)
 - ETW ThreatIntel provides kernel-level API observation regardless of cmdline
 
-**Residual risk:** MEDIUM. Sophisticated tooling (Cobalt Strike, custom loaders) can avoid command-line exposure entirely. The MemoryBehaviorAnalyzer and ETW ThreatIntel monitor cover this gap for in-memory attacks.
+**Residual risk:** MEDIUM. Sophisticated tooling can avoid command-line exposure entirely. MemoryBehaviorAnalyzer and ETW ThreatIntel cover this gap.
 
 ---
 
 ### B7: DLL sideloading into Sentinel process
 
-**Attack:** Place a malicious DLL in Sentinel's search path to get loaded into the service.
+**Attack:** Place a malicious DLL in Sentinel's search path.
 
 **Mitigation:**
-- ProcessHardening.ApplyOrFail() at startup: sets DLL search order, removes CWD
+- ProcessHardening.ApplyOrFail() at startup: restricts DLL search to System32 only
+- NTFS ACL lockdown on installation directory
+- Directory watcher deletes unauthorized files and kills writing processes
 - CIG audit mode prevents unsigned DLL loads
-- Self-integrity hash check detects binary modification
 
-**Residual risk:** LOW if CIG is enforced. MEDIUM if CIG is audit-only (current default).
+**Residual risk:** LOW if CIG is enforced. MEDIUM if CIG is audit-only.
 
 ---
 
@@ -141,374 +225,86 @@ This document assumes the attacker has read the source code.
 
 **Mitigation:**
 - Hash checks happen at process-start time (ETW event)
-- File is already loaded into memory by the time we hash it
-- For quarantine: file is read, encrypted, then original deleted atomically
+- File is already mapped into memory by the time we hash it
+- Quarantine reads, encrypts, then deletes atomically
 
-**Residual risk:** LOW for process-start detection. The race window is milliseconds.
+**Residual risk:** LOW. Race window is milliseconds.
 
 ---
 
 ## What Sentinel CANNOT Protect Against
 
-These are fundamental limitations, not bugs:
+Fundamental limitations, not bugs:
 
-1. **Kernel-level attacks** â€” No visibility below ring 3
-2. **Hardware implants** â€” No visibility into firmware/UEFI (but detects Secure Boot disabled)
-3. **Pre-boot attacks** â€” Sentinel starts after Windows boots (but detects boot config tampering)
-4. **Attacker with physical access** â€” Can boot from USB, modify disk offline
-5. **Attacker who already has SYSTEM** â€” Can kill Sentinel (watchdog adds delay only)
-6. **Nation-state tooling** â€” Custom kernel implants, 0-days, hardware backdoors
-7. **Encrypted C2 over legitimate ports** â€” Looks like normal HTTPS traffic (but TLS cert monitor detects unauthorized root CA installations that could enable MITM)
-8. **Direct syscalls from custom code** â€” Bypasses ntdll hooks (but SyscallStubMonitor detects unhooking attempts)
-9. **Upstream BGP hijacking** â€” Detectable via public IP shift but not preventable
-10. **Physical-layer Wi-Fi attacks** â€” Cannot see deauth frames directly (detects the symptom: rapid disconnects)
-
-11. **GPU memory-resident malware** u{2014} Code staged entirely in GPU VRAM/compute shaders has no CPU-side memory to scan
+1. **Kernel-level attacks** — No visibility below ring 3
+2. **Hardware implants** — No firmware/UEFI visibility (but detects Secure Boot disabled)
+3. **Pre-boot attacks** — Sentinel starts after Windows boots (detects boot config tampering)
+4. **Attacker with physical access + offline disk** — Can boot from USB, modify disk (but detects post-idle hardware changes)
+5. **Attacker already running as SYSTEM** — Can kill Sentinel (watchdog adds delay only)
+6. **Nation-state tooling** — Custom kernel implants, 0-days, hardware backdoors
+7. **Encrypted C2 over legitimate ports** — Looks like normal HTTPS (but TLS cert monitor detects rogue CA installations)
+8. **Direct syscalls from custom code** — Bypasses ntdll hooks (SyscallStubMonitor detects unhooking attempts)
+9. **GPU memory-resident malware** — Code in GPU VRAM/compute shaders has no CPU-side memory to scan
+10. **Physical-layer Wi-Fi attacks** — Cannot see deauth frames directly (detects rapid disconnects)
 
 ---
-
-## Blind Spots Closed in v1.0.1
-
-Previously exploitable attack surfaces that are now monitored:
-
-| Blind Spot | Closed By | Detection Method |
-|------------|-----------|-----------------|
-| RAM disk staging (ImDisk, OSFMount, etc.) | `VolumeMountMonitor` | DriveInfo/QueryDosDevice polling + dynamic FileActivityMonitor extension |
-| Persistent memory (PMEM/DAX) | `VolumeMountMonitor` | PMEM driver detection + volume classification |
-| Encrypted containers (VeraCrypt) | `VolumeMountMonitor` | Driver/device path matching + auto-watch |
-| Volume mount/dismount events | `VolumeMountMonitor` | Baseline comparison every 5s |
-| WSL execution evasion | `WslMonitor` | Process tracking + command analysis + distro installs |
-| WMI process telemetry latency (1-2s) | `EphemeralProcessMonitor` | Prefetch monitoring + Security Event 4688 |
-| Raw disk I/O bypass | `RawDiskAccessMonitor` | NtQuerySystemInformation handle scan |
-| Network shares / SMB lateral movement | `NetworkShareMonitor` | NetFileEnum + NetSessionEnum + drive mapping |
-| Container/sandbox escape | `SandboxEscapeMonitor` | Docker inspect + .wsb analysis + ancestry check |
-| Application-level DoH bypass | `AppDnsExfilMonitor` | TCP connection scan for DoH resolver IPs |
-| Print spooler exfiltration | `PrintSpoolerMonitor` | Spool directory watch + burst detection |
-| FileSystemWatcher path limitation | `VolumeMountMonitor` | Dynamic `AddWatchPath()` on new volumes |
-| Rogue Cast device / LAN relay | `CastDeviceGuard` | Kill all Cast connections to port 8008/8009 on LAN unless target IP is in TrustedCastDevices allowlist |
 
 ## What Sentinel CAN Detect Even Against Skilled Attackers
 
-These detections are hard to bypass without kernel access. All are **Tier2 corroborating signals** (except SyscallStubMonitor which is self-protection). They feed the correlation engine â€” multiple signals on the same PID within 120s produce a composite kill:
+Hard-to-bypass detections (require kernel access to evade):
 
-1. **Parent PID spoofing** (Tier2) â€” ETW reports kernel truth; can't be faked from userland
-2. **Credential harvesting** (Tier2) â€” Canary credential is a zero-FP tripwire
-3. **Ransomware** (Tier1) â€” Shadow copy deletion + bulk encryption is behaviorally unavoidable
-4. **ntdll unhooking** (Tier1 self-protection) â€” Stub integrity check detects the modification itself
-5. **Privilege escalation** (Tier2) â€” Token integrity transitions are observable regardless of method
-6. **dbghelp.dll abuse** (Tier2) â€” Module load is visible even if the tool is custom-built
-7. **DNS-based C2** (Tier2) â€” ETW DNS-Client fires on all resolutions regardless of method
-8. **Process injection (kernel ETW)** (Tier1) â€” API calls observed at kernel level
-
----
-
-## Detection Confidence Levels (Honest Assessment)
-
-| Detection | Confidence Against Commodity Malware | Confidence Against Targeted Attacker |
-|-----------|--------------------------------------|--------------------------------------|
-| Ransomware (shadow copy + bulk rename) | HIGH | HIGH (behavioral, hard to avoid) |
-| Credential canary (honeypot credential) | HIGH | HIGH (zero-FP tripwire, can't avoid without knowing it exists) |
-| LSASS dump (dbghelp.dll load) | HIGH | MEDIUM (attacker can bring own dbghelp or use direct syscalls) |
-| LSASS dump (cmdline patterns) | HIGH | LOW (attacker uses direct syscalls) |
-| Parent PID spoofing detection | HIGH | HIGH (kernel truth vs userland â€” can't fake ETW) |
-| Syscall stub integrity | HIGH | MEDIUM (attacker must patch before Sentinel starts, or use kernel) |
-| Token integrity escalation | HIGH | MEDIUM (detects the result, not the method) |
-| Process injection (ETW ThreatIntel) | HIGH | MEDIUM (kernel-level, but can be blinded with driver) |
-| Process injection (cmdline API names) | MEDIUM | LOW (attacker won't put API names in cmdline) |
-| DNS DGA detection | MEDIUM | MEDIUM (attacker can use low-entropy domains or legitimate DNS) |
-| DNS tunneling | MEDIUM | LOW (attacker can stay under 30 queries/min threshold) |
-| C2 beaconing (statistical) | MEDIUM | LOW (attacker uses jitter/legitimate ports) |
-| Memory behavior (RWX/shellcode) | MEDIUM | MEDIUM (hard to avoid RWX entirely) |
-| Phantom keystrokes (SendInput) | HIGH | HIGH (blocked globally at ring 3 via WH_KEYBOARD_LL) |
-| File entropy | LOW | LOW (trivially bypassed with padding) |
-| Campaign IOCs | MEDIUM | LOW (attacker uses fresh infrastructure) |
-| Campaign IOCs | MEDIUM | LOW (attacker uses fresh infrastructure) |
+1. **Parent PID spoofing** — ETW reports kernel truth; can't be faked from userland
+2. **Credential harvesting** — Canary credential is a zero-FP tripwire
+3. **Ransomware** — Shadow copy deletion + bulk encryption is behaviorally unavoidable
+4. **ntdll unhooking** — Stub integrity check detects the modification itself
+5. **Privilege escalation** — Token integrity transitions are observable regardless of method
+6. **Process injection (kernel ETW)** — API calls observed at kernel level
+7. **Phantom keystrokes (SendInput)** — Blocked globally via WH_KEYBOARD_LL
+8. **Credential Guard disablement** — LsaIso.exe absence + registry state change
+9. **Hardware security downgrade** — TPM/SecureBoot/BitLocker state monitored every 5 minutes
 
 ---
 
-## Design Principles (v1.7.0)
+## Detection Confidence Levels
 
-1. **Behavioral over static** â€” Detect what processes DO, not what they ARE
-2. **No security theater** â€” If a feature doesn't work against a competent attacker, remove it or honestly document its limitations
-3. **Fewer solid detections > many fragile ones** â€” Each rule must justify its existence
-4. **Assume the attacker reads the code** â€” No security-by-obscurity
-5. **Layered defense** â€” Sentinel is ONE layer alongside Defender, not a replacement
-6. **Honest documentation** â€” State what works and what doesn't
-7. **Kill only on corroboration** â€” New monitors are Tier2 (corroborating signals). Only the President's Law closed list authorizes kills. Multiple Tier2 signals correlating on the same PID produce composite kills via the BehavioralCorrelationEngine. Single signals never kill independently (except self-protection).
-8. **Make kills hurt** (v1.7.0) â€” Every authorized kill should cost the attacker time, data integrity, and operational security. Deception tactics execute pre-kill to maximize damage to attacker operations.
-
----
-
-## Deception Threat Analysis (v1.7.0)
-
-### What deception CAN achieve against skilled attackers
-
-| Tactic | Effectiveness vs Commodity | Effectiveness vs Targeted | Notes |
-|--------|---------------------------|--------------------------|-------|
-| Memory Flooding | HIGH | MEDIUM | Commodity tools rarely handle polluted dumps; targeted attackers may detect allocation patterns |
-| DLL Stomping | HIGH | MEDIUM | Persistence-based implants will crash; targeted attackers may verify integrity before restart |
-| Stack Corruption | HIGH | MEDIUM | C2 crash reports polluted; targeted attackers may not rely on crash telemetry |
-| Beacon Flooding | MEDIUM | LOW | Floods create noise but sophisticated C2 frameworks may fingerprint legitimate vs fake beacons |
-| Protocol Confusion | MEDIUM | LOW | Triggers parser bugs in many frameworks; hardened C2 servers may handle gracefully |
-| Clipboard Poisoning | HIGH | MEDIUM | Infostealers blindly exfil; targeted attackers may validate stolen data before use |
-| Sparse File Bombs | HIGH | LOW | Automated tools choke; targeted attackers check file sizes vs disk usage |
-| Symlink Loops | HIGH | LOW | Recursive tools crash; targeted attackers limit recursion depth |
-| Polyglot Files | HIGH | MEDIUM | Automated parsers crash on entity expansion/XXE; targeted attackers may sandbox analysis |
-| Corrupted Archives | HIGH | LOW | Passes initial checks but fails extraction; targeted attackers verify checksums |
-| Environment Poisoning | MEDIUM | MEDIUM | Breaks reconnection for most frameworks; targeted attackers may restore from backup config |
-| Honeypot Weaponization | HIGH | MEDIUM | Infostealers exfil everything; targeted attackers may recognize honeypot patterns |
-| Network Honeypots | HIGH | MEDIUM | Lateral movement tools find fake services; targeted attackers may fingerprint honeypot responses |
-
-### Deception bypass scenarios
-
-**B9: Attacker detects deception and adapts**
-
-The attacker reads this source code and knows deception tactics will execute pre-kill. They may:
-- Implement anti-deception checks (detect VirtualAllocEx from Sentinel's PID)
-- Use direct syscalls to avoid memory flooding detection
-- Validate exfiltrated data before sending to C2
-
-**Residual risk:** LOW. By the time deception executes, the kill is already authorized. Even if the attacker detects deception, they have <2 seconds before termination. The deception is a bonus, not a dependency.
-
-**B10: Attacker uses deception artifacts against the user**
-
-The attacker could theoretically:
-- Use the poisoned proxy settings to deny the user internet access
-- Use the fake credentials to frame the user
-
-**Mitigation:** All deception actions are logged with full detail. Proxy/TLS poisoning is HKCU-scoped and easily reversed. Fake credential files are clearly named (.bak, backup) and placed in non-standard locations.
-
-**Residual risk:** LOW. The user's legitimate applications are unaffected (they don't read .bak files or backup SSH keys). Proxy poisoning may briefly affect the user's browser until reverted â€” acceptable tradeoff for breaking C2 reconnection.
+| Detection | vs Commodity Malware | vs Targeted Attacker |
+|-----------|---------------------|---------------------|
+| Ransomware (shadow copy + bulk rename) | HIGH | HIGH |
+| Credential canary (honeypot) | HIGH | HIGH |
+| Parent PID spoofing | HIGH | HIGH |
+| Phantom keystrokes (SendInput) | HIGH | HIGH |
+| LSASS dump (dbghelp.dll load) | HIGH | MEDIUM |
+| Syscall stub integrity | HIGH | MEDIUM |
+| Token integrity escalation | HIGH | MEDIUM |
+| Process injection (ETW ThreatIntel) | HIGH | MEDIUM |
+| Credential Guard disablement | HIGH | MEDIUM |
+| Hardware security downgrade | HIGH | MEDIUM |
+| Memory behavior (RWX/shellcode) | MEDIUM | MEDIUM |
+| DNS DGA detection | MEDIUM | MEDIUM |
+| BadUSB/unauthorized HID | HIGH | MEDIUM |
+| C2 beaconing (statistical) | MEDIUM | LOW |
+| DNS tunneling | MEDIUM | LOW |
+| File entropy | LOW | LOW |
+| Campaign IOCs | MEDIUM | LOW |
 
 ---
 
-## Deception Threat Analysis (v2.8.0 Updates)
+## Design Principles
 
-### B11: Deception time budget delays critical ransomware containment
-**Attack:** Ransomware encrypts files at a high rate. If the EDR delays termination by executing a 2-second pre-kill deception window, more files will be encrypted.
-**Mitigation:** The EDR implements a Ransomware Response Fast-Path. Detections matching "ransomware" in their rule name or reasoning bypass the `DeceptionEngine` completely and proceed immediately to process termination, achieving near-zero latency.
-**Residual risk:** LOW. Bypassing deception is the safest approach for high-speed destructive threats like ransomware.
-
-### B12: Querying thread context causes target process crash or EDR instability
-**Attack:** If thread contexts are queried on x64 without proper structure alignment and thread suspension, it triggers native access violations or stack corruption, potentially causing the EDR process or target system components to crash.
-**Mitigation:** Replaced the unaligned byte-array CONTEXT layout with a fully aligned, 16-byte packed native struct representation of x64 CONTEXT. Target threads are explicitly suspended via `SuspendThread` before context retrieval and resumed via `ResumeThread` immediately after, ensuring safe, stable stack corruption.
-**Residual risk:** LOW. Safe thread state manipulation prevents process corruption.
-
-### B13: Off-host or network deception delays process termination
-**Attack:** Network-based deception tactics (e.g., BeaconFlooder, NetworkHoneypotDeployer) wait on sockets or remote connections, which easily exhausts the 2-second pre-kill budget and delays target process termination.
-**Mitigation:** All network-based and lateral movement deception tactics are executed asynchronously in the background. They run as fire-and-forget background tasks (`Task.Run`), allowing the pre-kill pipeline to immediately proceed with process termination without blocking.
-**Residual risk:** LOW. Network latency cannot affect containment times.
-
-## Threat Analysis Updates (v2.8.1 Hardening & Bug Fixes)
-
-### B14: Quarantine filename parsing vulnerability
-**Attack:** An attacker could craft a file path containing multiple dashes or special characters, causing the four-part split parsing schema in `QuarantineManager` to crash or map metadata incorrectly, potentially leading to directory traversal or signature bypasses.
-**Mitigation:** Refactored the parsing routine in `QuarantineManager.cs` to leverage regex-like split boundaries, verifying array length matches expectations, and falling back gracefully without throwing exceptions.
-**Residual risk:** LOW. Files are safely encrypted prior to parsing.
-
-### B15: File handle leak in process and hook monitoring
-**Attack:** Querying active processes inside a high-frequency polling loop can exhaust system handle limits if process handles are not closed, resulting in service denial of service or instability.
-**Mitigation:** Wrapped process queries in `using` statements, and ensured that all obtained native process handles are closed/disposed properly in `HardeningModule.cs`.
-**Residual risk:** LOW. Memory and handle usage remain flat.
-
-### B16: NTP time-drift or clock manipulation bypasses cache validity
-**Attack:** An attacker who poisons the reputation cache might trigger NTP synchronization or local clock manipulation to trick `SecureCacheStore` into accepting older caches or validating compromised reputation lists.
-**Mitigation:** Replaced the subtractive boot time extraction (using TickCount64) with direct querying of the System process (PID 4) start time via `Process.GetProcessById(4).StartTime`, establishing a tamper-resistant boot session anchor.
-**Residual risk:** LOW. Safe fallback to local clock remains in place.
+1. **Behavioral over static** — Detect what processes DO, not what they ARE
+2. **No security theater** — If it doesn't work against a competent attacker, document limitations
+3. **Assume the attacker reads the code** — No security-by-obscurity
+4. **Layered defense** — Sentinel is ONE layer alongside Defender, not a replacement
+5. **Kill only on corroboration** — Multiple Tier2 signals correlating produce composite kills. Single signals never kill independently (except self-protection)
+6. **Honest documentation** — State what works and what doesn't
 
 ---
 
-### B17: DLL sideloading/hijacking of Sentinel itself
-**Attack:** Attacker drops a malicious DLL into Sentinel's installation directory to hijack the Service or Agent when launched.
-**Mitigation (v5.5.0):**
-- **DLL Search Hardening:** Call `HardeningModule.ApplyOrFail()` at the absolute start of both the Service and Agent processes to restrict dynamic DLL loading solely to `%SystemRoot%\System32`.
-- **NTFS ACL Lockdown:** Enforces strict NTFS permissions on Sentinel's installation folder to deny modify access to standard users and restrict write access to `SYSTEM` and `Administrators`.
-- **Sentinel Directory Watcher:** Recurse-watches the Sentinel folder. If any unauthorized process attempts to write or drop files, Sentinel immediately deletes the file, flags a Tier 1 event, and terminates the writer.
-**Residual risk:** LOW. Standard users cannot write to the folder, and any attempt by other processes to tamper with it is immediately contained.
+## Closed Vulnerabilities
 
----
+See CHANGELOG.md for full history. Key fixes:
 
-### B18: Evading EDR via dbghelp.dll sideloading / crashing target application
-**Attack:** Attacker drops a malicious `dbghelp.dll` in the target application's directory to hijack execution or dump LSASS memory, causing target application crashes when the EDR terminates it.
-**Mitigation (v5.5.0):**
-- **Pre-emptive DLL Deletion:** Intercepts writes of critical system DLLs (`dbghelp.dll`/`dbgcore.dll`) in non-system paths.
-- **Trusted Writer Verification:** If the writing process is untrusted, Sentinel immediately deletes the file and terminates the writer process.
-- **Containment without Crashing:** Since the malicious DLL is deleted before the target application is executed, the target application runs cleanly by falling back to the system's DLL in `System32` (no crash or hijack).
-**Residual risk:** LOW. Untrusted droppers are blocked, and target applications remain uncompromised and operational.
-
----
-
-### B19: Network Egress Hijacking, Adapter Disabling, and Bridging
-**Attack (v0.8.4):** Attacker creates a network bridge to pivot into secure networks, disables active physical adapters to boot the user offline/evade monitoring, poisons local gateway ARP mappings, or overrides NameServer configuration registry keys to hijack DNS.
-**Mitigation:** 
-- **SetupAPI Bridge Removal:** `NetworkInterfaceGuard` detects virtual network bridges and uninstalls the MAC Bridge virtual device via SetupAPI (`DIF_REMOVE`), restoring normal physical interface routing.
-- **WMI Adapter Recovery:** Physical adapters are baselined at startup. If disabled, WMI `MSFT_NetAdapter.Enable` is invoked to bring them back online.
-- **Static ARP Cache Lock:** Locks the baseline gateway IP/MAC mapping as static (`CreateIpNetEntry`), preventing ARP spoofing.
-- **DNS Lock & DoH Enforcement:** Registry `NameServer` keys are locked to secure default baselines and global DNS-over-HTTPS is enforced.
-**Residual risk:** LOW. Actions are automatically reverted, modifying processes are trace-killed and quarantined, and remote attacker IPs are blocked in Windows Firewall.
-
-
-
-## Bypass Scenarios Closed in v1.4.4 (Red Team Audit)
-
-Internal red team audit identified 15 vulnerabilities (3 Critical, 4 High, 4 Medium, 4 Low). All fixed.
-
-### B20: User-level ActiveResponse disable (FIXED in v1.4.4)
-
-**Attack:** Malware running as standard user sends WM_COMMAND to the Agent's tray icon hidden window, automating the "Stop Protection" confirmation dialog to disable all Agent-side response actions without elevation.
-
-**Mitigation (v1.4.4):**
-- Removed the "Stop Protection" menu item entirely from `TrayIconService`
-- The Service (SYSTEM) is now the sole authority on response mode
-- No user-session mechanism exists to toggle protection
-
-**Residual risk:** NONE for this vector. Users must use an elevated `sc stop` to disable protection.
-
----
-
-### B21: Hash reputation trust inversion (FIXED in v1.4.4)
-
-**Attack:** Deploy a custom-compiled implant. It's absent from CIRCL and MalwareBazaar. The reputation service marks it `Safe`, which gets cached permanently and feeds +2 trust score to BeaconingDetector, potentially demoting a kill response to LogOnly.
-
-**Mitigation (v1.4.4):**
-- `hash_not_found` from MalwareBazaar now returns `Unknown` (not `Safe`)
-- Only CIRCL trust score > 60 can positively confirm Safe
-- `Unknown` is not cached to disk — file will be re-checked on next scan cycle
-- BeaconingDetector only gets trust bonus for positively-confirmed `Safe` hashes
-
-**Residual risk:** LOW. Novel files score as Unknown (neutral), not Safe. They cannot accumulate trust through absence.
-
----
-
-### B22: Command injection via crafted ISO/VM names (FIXED in v1.4.4)
-
-**Attack:** Create a malicious ISO file or Hyper-V VM with a crafted name containing PowerShell escape sequences. When Sentinel's IsolationResponseEngine dismounts the ISO or stops the VM, the name is interpolated into a `-Command` string, achieving arbitrary code execution as SYSTEM.
-
-**Mitigation (v1.4.4):**
-- Both ISO dismount and Hyper-V Stop-VM now use `-EncodedCommand` (Base64-encoded Unicode)
-- Eliminates the command parsing surface entirely — PowerShell doesn't evaluate the script string
-- Added single-quote escaping (`'` → `''`) as defense-in-depth
-- Docker imageId from `docker inspect` output validated with `IsValidDockerIdentifier()` before use
-
-**Residual risk:** NONE. No user-controlled string is ever interpolated into a shell command.
-
----
-
-### B23: Overprivileged DLL unload handle as injection primitive (FIXED in v1.4.4)
-
-**Attack:** Trigger a false DLL sideloading detection against a target process. `DllUnloadEngine.TryUnloadDll` opens the target with `PROCESS_ALL_ACCESS` — if the handle is leaked or the processId is attacker-influenced, this becomes a powerful injection primitive.
-
-**Mitigation (v1.4.4):**
-- Process handle reduced to `PROCESS_QUERY_INFORMATION` (0x0400)
-- Thread handles already opened individually with minimum-necessary `THREAD_SET_CONTEXT`
-- The process-level handle is only needed for GetProcessById thread enumeration
-
-**Residual risk:** LOW. Even if processId is influenced, the handle grants query-only access — insufficient for injection.
-
----
-
-### B24: MITM/replay of threat intelligence reports (FIXED in v1.4.4)
-
-**Attack:** Compromise DNS or MITM the TLS connection to the Cloudflare Worker proxy. Observe which hashes/IPs/URLs Sentinel reports (intelligence leak). Or replay/inject fake reports to poison threat intel feeds.
-
-**Mitigation (v1.4.4):**
-- All requests HMAC-SHA256 signed using installation-specific entropy key
-- Signature covers `timestamp + path + body` — prevents replay (stale timestamp) and tampering
-- Headers: `X-Sentinel-Timestamp`, `X-Sentinel-Signature`
-- Key derived from `.install_entropy` (SYSTEM-ACL-protected, unique per machine)
-
-**Residual risk:** LOW. MITM can still see the encrypted TLS payload (hashes/IPs), but cannot forge valid signatures or replay old requests. Full elimination would require mutual TLS or certificate pinning.
-
----
-
-### B25: Config destruction via installer upgrade (FIXED in v1.4.4)
-
-**Attack:** Not a direct attacker vector, but a reliability/availability issue: every upgrade silently overwrites `appsettings.json`, destroying custom TrustedCastDevices, ProtectedApps, LogPath, and CveShield settings. An attacker who knows this can trigger an auto-update to reset security-critical configuration to defaults.
-
-**Mitigation (v1.4.4):**
-- Changed installer flag from `ignoreversion` (always overwrite) to `onlyifdoesntexist`
-- New installs get the default config; upgrades preserve existing user customizations
-- Future config schema migrations handled by the Service at startup (forward-compatible)
-
-**Residual risk:** NONE. User config survives upgrades. New config keys added in future versions will use compile-time defaults when absent from the file.
-
----
-
-### B26: Self-exclusion bypass via directory junction/symlink (FIXED in v1.4.4)
-
-**Attack:** Create a directory junction or symlink pointing into the Sentinel install directory. Place a malicious binary at a path that, when resolved, appears to start with Sentinel's `AppContext.BaseDirectory`. The self-exclusion check uses `StartsWith` without path normalization — a junction or `..` traversal could cause a false match, making the malicious process immune to kill responses.
-
-**Mitigation (v1.4.4):**
-- All 3 self-exclusion checks (`AdvancedResponseEngine`, `HardeningModule.SafeKillProcessTree`, `DetectionEngine`) now normalize both paths with `Path.GetFullPath()` before comparison
-- Added trailing directory separator (`\`) to prevent prefix collision (e.g., `WindowsSentinel2\evil.exe` matching `WindowsSentinel`)
-- `QueryFullProcessImageName` already returns canonical paths, but `Path.GetFullPath()` on both sides provides defense-in-depth against edge cases
-
-**Residual risk:** LOW. `Path.GetFullPath()` resolves all known normalization tricks. The only remaining vector would be a kernel-level path translation bug in NTFS.
-
----
-
-### B27: SecureCacheStore HMAC key derived from predictable inputs (FIXED in v1.4.4)
-
-**Attack:** The HMAC key for SecureCacheStore was derived from 4 components: boot time (publicly readable from PID 4), Machine GUID (readable from registry by standard users), installation entropy (SYSTEM-ACL-protected), and process ID (visible in task manager). An attacker with standard user access could observe 2 of 4 components; with admin access, all 4 were reconstructable — enabling cache entry forgery.
-
-**Mitigation (v1.4.4):**
-- Removed boot time ticks and process ID from key derivation entirely
-- Key now derives from: Machine GUID + SYSTEM-ACL-protected installation entropy + domain-specific label
-- Stable across reboots (no more boot-nonce cache invalidation)
-- Requires SYSTEM or Administrator access to reconstruct the key
-
-**Residual risk:** LOW. The installation entropy is the primary secret (32 random bytes in a SYSTEM-only directory). An attacker who has SYSTEM access can already do far more damage than forging cache entries.
-
----
-
-### B28: Memory exhaustion via large file import scanning (FIXED in v1.4.4)
-
-**Attack:** Drop many files of ~10MB in directories that trigger reputation scanning. Each concurrent evaluation allocates a single 10MB byte[] for import name scanning. With N concurrent process starts, memory pressure spikes to N×10MB, potentially causing Sentinel to crash or degrade on low-memory systems.
-
-**Mitigation (v1.4.4):**
-- `CountSuspiciousImports` now uses 64KB streaming chunks with 64-byte overlap for cross-boundary detection
-- Memory usage per evaluation: O(64KB) regardless of file size (was O(10MB))
-- Early exit when all known suspicious imports are found (no need to scan remainder)
-- 10MB file size cap retained for defense-in-depth
-
-**Residual risk:** NONE for this specific vector. 64KB × N evaluations is negligible even under heavy load.
-
----
-
-### B29: Installer upgrade race condition (FIXED in v1.4.4)
-
-**Attack:** During upgrade, the installer uses a fixed `Sleep(3000)` after `sc stop` before proceeding with file replacement. On a loaded system where the service takes >3s to stop gracefully, the subsequent kill/ACL-reset sequence races with `AntiTamperGuard`'s self-healing (service re-registration, QoS policy restoration). This can leave the install directory in an inconsistent state.
-
-**Mitigation (v1.4.4):**
-- Replaced `Sleep(3000)` with a PowerShell polling loop: `sc queryex` checked every 500ms for up to 10 seconds
-- Proceeds only when service STATE matches STOPPED (or 10s timeout expires)
-- Eliminates the timing dependency — works on any system speed
-
-**Residual risk:** LOW. 10s timeout is generous. If the service hasn't stopped by then, the subsequent force-kill handles it.
-
----
-
-### B30: Socket exhaustion via per-request HttpClient (FIXED in v1.4.4)
-
-**Attack:** Under sustained reputation lookup load (many concurrent process starts), `HashReputationService` and `FileReputationEngine` created a new `HttpClient` instance per API call. Each disposed client leaves its TCP connection in TIME_WAIT for 4 minutes. At high scan rates, this exhausts the ephemeral port range (16,384 ports ÷ 4min = ~68 concurrent sustained lookups to saturate).
-
-**Mitigation (v1.4.4):**
-- Replaced per-request instantiation with shared static `HttpClient` instances (one per API endpoint)
-- Connections are reused via HTTP/1.1 keep-alive
-- MalwareBazaar Auth-Key header passed per-request via `HttpRequestMessage` (not on shared `DefaultRequestHeaders`)
-
-**Residual risk:** NONE. Static HttpClient is the recommended pattern and eliminates socket accumulation entirely.
-
----
-
-### B31: VirusTotal query always fails — dead code inflates scoring (FIXED in v1.4.4)
-
-**Attack:** Not directly exploitable, but the VT v3 API requires an `x-apikey` header for all requests. Without it, every query returns 401 Unauthorized → `VerdictStatus.Error`. The consensus scoring treated Error/NotFound as `+5` points, adding a permanent 5-point malicious bias to every file's reputation score (since VT was called for every evaluation but never returned meaningful data).
-
-**Mitigation (v1.4.4):**
-- Replaced VT query with a stub returning `NotFound` (documented as disabled)
-- Removed dead VT rate limiter and timing infrastructure
-- Rebalanced consensus scoring: CIRCL weight 20→30, MalwareBazaar 40→50, VT contributes 0 (neutral)
-- VT code path preserved structurally for future re-enablement via proxy
-
-**Residual risk:** NONE. Scoring is now accurate for the 2-source model actually in use.
+- **v1.4.4:** 15 red-team findings fixed (command injection, handle leaks, HMAC weakness, socket exhaustion, installer race conditions)
+- **v1.4.5:** Credential Guard monitoring, LSA secret protection, ScriptExecutionMonitor gaps closed
+- **v1.1.0:** Cache poisoning, process name spoofing, self-exclusion bypass
+- **v1.0.1:** RAM disk staging, WSL evasion, raw disk bypass, print spooler exfil, sandbox escape

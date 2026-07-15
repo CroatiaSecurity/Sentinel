@@ -748,8 +748,6 @@ namespace WindowsSentinel.Core
         // UAC: 5 = Prompt for credentials on the secure desktop (maximum security)
         private const int UacPromptForCredentials = 5;
 
-        private string? _currentPassword;
-
         public PasswordRotationGuard(DetectionEngine de, ILogger<PasswordRotationGuard> l)
         {
             _detectionEngine = de;
@@ -795,7 +793,6 @@ namespace WindowsSentinel.Core
 
                     if (success)
                     {
-                        _currentPassword = newPassword;
                         _logger.LogInformation("[PasswordRotationGuard] Rotated password for '{User}'", username);
 
                         // Configure auto-logon so boot/restart doesn't require password entry
@@ -814,10 +811,9 @@ namespace WindowsSentinel.Core
         }
 
         /// <summary>
-        /// Configures Windows auto-logon so the user doesn't need to type the password
-        /// at boot, restart, or hibernate resume. The password is stored as an LSA secret
-        /// (not in plaintext in the registry) when DefaultPassword is set via the
-        /// Winlogon method — Windows encrypts it internally.
+        /// Configures Windows auto-logon securely. The password is stored as an LSA secret
+        /// (DefaultPassword) rather than plaintext in the Winlogon registry key.
+        /// Windows reads the LSA secret at boot to perform auto-logon.
         ///
         /// Lock screen: User should use Windows Hello PIN (independent of account password).
         /// If no PIN credential is enrolled, we disable the lock timeout to prevent lockout.
@@ -831,12 +827,18 @@ namespace WindowsSentinel.Core
                 if (winlogon == null) return;
 
                 winlogon.SetValue("AutoAdminLogon", "1", RegistryValueKind.String);
+                winlogon.SetValue("ForceAutoLogon", "1", RegistryValueKind.DWord);
                 winlogon.SetValue("DefaultUserName", username, RegistryValueKind.String);
-                winlogon.SetValue("DefaultPassword", password, RegistryValueKind.String);
-                // Don't set DefaultDomainName for local accounts — leave empty or set to machine name
                 winlogon.SetValue("DefaultDomainName", Environment.MachineName, RegistryValueKind.String);
 
-                _logger.LogDebug("[PasswordRotationGuard] Auto-logon configured for '{User}'", username);
+                // SECURITY FIX (v1.4.5): Store password as LSA secret instead of plaintext registry value.
+                // Remove any plaintext DefaultPassword that may exist from prior versions.
+                winlogon.DeleteValue("DefaultPassword", throwOnMissingValue: false);
+
+                // Store via LSA secret — only SYSTEM can read it, Windows uses it for auto-logon
+                StoreAutoLogonPasswordAsLsaSecret(password);
+
+                _logger.LogDebug("[PasswordRotationGuard] Auto-logon configured for '{User}' (LSA secret)", username);
             }
             catch (Exception ex)
             {
@@ -850,6 +852,105 @@ namespace WindowsSentinel.Core
                 DisableScreenLockTimeout();
             }
         }
+
+        #region LSA Secret Storage
+
+        [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+        private struct LSA_UNICODE_STRING
+        {
+            public ushort Length;
+            public ushort MaximumLength;
+            public IntPtr Buffer;
+        }
+
+        [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+        private struct LSA_OBJECT_ATTRIBUTES
+        {
+            public uint Length;
+            public IntPtr RootDirectory;
+            public IntPtr ObjectName;
+            public uint Attributes;
+            public IntPtr SecurityDescriptor;
+            public IntPtr SecurityQualityOfService;
+        }
+
+        [System.Runtime.InteropServices.DllImport("advapi32.dll", SetLastError = true, PreserveSig = true)]
+        private static extern uint LsaOpenPolicy(
+            ref LSA_UNICODE_STRING SystemName,
+            ref LSA_OBJECT_ATTRIBUTES ObjectAttributes,
+            uint DesiredAccess,
+            out IntPtr PolicyHandle);
+
+        [System.Runtime.InteropServices.DllImport("advapi32.dll", SetLastError = true, PreserveSig = true)]
+        private static extern uint LsaStorePrivateData(
+            IntPtr PolicyHandle,
+            ref LSA_UNICODE_STRING KeyName,
+            ref LSA_UNICODE_STRING PrivateData);
+
+        [System.Runtime.InteropServices.DllImport("advapi32.dll", SetLastError = true, PreserveSig = true)]
+        private static extern uint LsaClose(IntPtr PolicyHandle);
+
+        private const uint POLICY_CREATE_SECRET = 0x00000020;
+
+        /// <summary>
+        /// Stores the auto-logon password as an LSA secret named "DefaultPassword".
+        /// This is the same mechanism Windows uses internally — the password is encrypted
+        /// and only accessible to SYSTEM.
+        /// </summary>
+        private void StoreAutoLogonPasswordAsLsaSecret(string password)
+        {
+            var objectAttributes = new LSA_OBJECT_ATTRIBUTES { Length = (uint)System.Runtime.InteropServices.Marshal.SizeOf<LSA_OBJECT_ATTRIBUTES>() };
+            var systemName = new LSA_UNICODE_STRING();
+
+            uint status = LsaOpenPolicy(ref systemName, ref objectAttributes, POLICY_CREATE_SECRET, out IntPtr policyHandle);
+            if (status != 0)
+            {
+                _logger.LogDebug("[PasswordRotationGuard] LsaOpenPolicy failed: 0x{Status:X8}", status);
+                return;
+            }
+
+            try
+            {
+                var keyName = CreateLsaString("DefaultPassword");
+                var privateData = CreateLsaString(password);
+
+                try
+                {
+                    status = LsaStorePrivateData(policyHandle, ref keyName, ref privateData);
+                    if (status != 0)
+                    {
+                        _logger.LogDebug("[PasswordRotationGuard] LsaStorePrivateData failed: 0x{Status:X8}", status);
+                    }
+                }
+                finally
+                {
+                    // Zero out the password buffer
+                    if (privateData.Buffer != IntPtr.Zero)
+                    {
+                        var zeros = new byte[privateData.MaximumLength];
+                        System.Runtime.InteropServices.Marshal.Copy(zeros, 0, privateData.Buffer, zeros.Length);
+                        System.Runtime.InteropServices.Marshal.FreeHGlobal(privateData.Buffer);
+                    }
+                    if (keyName.Buffer != IntPtr.Zero)
+                        System.Runtime.InteropServices.Marshal.FreeHGlobal(keyName.Buffer);
+                }
+            }
+            finally
+            {
+                LsaClose(policyHandle);
+            }
+        }
+
+        private static LSA_UNICODE_STRING CreateLsaString(string value)
+        {
+            var lsaStr = new LSA_UNICODE_STRING();
+            lsaStr.Length = (ushort)(value.Length * 2);
+            lsaStr.MaximumLength = (ushort)((value.Length + 1) * 2);
+            lsaStr.Buffer = System.Runtime.InteropServices.Marshal.StringToHGlobalUni(value);
+            return lsaStr;
+        }
+
+        #endregion
 
         /// <summary>
         /// Checks if Windows Hello PIN is configured for the current user.
@@ -890,7 +991,6 @@ namespace WindowsSentinel.Core
         /// <summary>
         /// Disables the screen lock timeout to prevent lockout when no PIN is configured.
         /// The user can still manually lock (Win+L) but won't be auto-locked by timeout.
-        /// Also enforces NoLockScreen policy and removes InactivityTimeoutSecs.
         /// </summary>
         private void DisableScreenLockTimeout()
         {
@@ -905,30 +1005,6 @@ namespace WindowsSentinel.Core
                     desktop.SetValue("ScreenSaverIsSecure", "0", RegistryValueKind.String);
                 }
 
-                // Remove InactivityTimeoutSecs — prevents policy-driven session lock
-                using var systemPolicy = Registry.LocalMachine.OpenSubKey(
-                    @"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System", writable: true);
-                if (systemPolicy != null)
-                {
-                    systemPolicy.SetValue("InactivityTimeoutSecs", 0, RegistryValueKind.DWord);
-                }
-
-                // Enforce NoLockScreen via Personalization policy
-                using var personalization = Registry.LocalMachine.CreateSubKey(
-                    @"SOFTWARE\Policies\Microsoft\Windows\Personalization");
-                if (personalization != null)
-                {
-                    personalization.SetValue("NoLockScreen", 1, RegistryValueKind.DWord);
-                }
-
-                // Disable lock workstation (Win+L) — prevents manual lock that requires password
-                using var explorerPolicy = Registry.CurrentUser.CreateSubKey(
-                    @"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System");
-                if (explorerPolicy != null)
-                {
-                    explorerPolicy.SetValue("DisableLockWorkstation", 1, RegistryValueKind.DWord);
-                }
-
                 // Disable console lock display off timeout via power policy
                 // (this is a best-effort — power settings are complex)
                 using var powerKey = Registry.LocalMachine.OpenSubKey(
@@ -939,7 +1015,7 @@ namespace WindowsSentinel.Core
                     powerKey.SetValue("Attributes", 2, RegistryValueKind.DWord); // Make visible, user can adjust
                 }
 
-                _logger.LogInformation("[PasswordRotationGuard] Disabled screen lock timeout + lock screen (no Windows Hello PIN configured)");
+                _logger.LogInformation("[PasswordRotationGuard] Disabled screen lock timeout (no Windows Hello PIN configured)");
             }
             catch (Exception ex)
             {
@@ -1006,16 +1082,12 @@ namespace WindowsSentinel.Core
                         var username = child.Name;
 
                         // Check if account is disabled
-                        var flagsVal = child.Properties["UserFlags"].Value;
-                        if (flagsVal == null) { child.Dispose(); continue; }
-                        var flags = (int)flagsVal;
+                        var flags = (int)child.Properties["UserFlags"].Value;
                         bool isDisabled = (flags & 0x0002) != 0;
                         if (isDisabled) { child.Dispose(); continue; }
 
                         // Get SID
-                        var sidVal = child.Properties["objectSid"].Value;
-                        if (sidVal == null) { child.Dispose(); continue; }
-                        var sidBytes = (byte[])sidVal;
+                        var sidBytes = (byte[])child.Properties["objectSid"].Value;
                         var sid = new System.Security.Principal.SecurityIdentifier(sidBytes, 0);
                         var sidString = sid.Value;
 

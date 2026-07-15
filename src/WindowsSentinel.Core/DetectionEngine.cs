@@ -294,7 +294,7 @@ namespace WindowsSentinel.Core
             await HandleDetectionEventAsync(detection);
 
             // Feed to correlation engine for composite evaluations
-            if (detection.Tier == DetectionTier.Tier2Indicator)
+            if (detection.Tier == DetectionTier.Tier1Behavioral || detection.Tier == DetectionTier.Tier2Indicator)
             {
                 await _correlationEngine.RegisterSignalAsync(detection);
             }

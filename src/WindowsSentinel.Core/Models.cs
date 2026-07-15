@@ -87,7 +87,8 @@ namespace WindowsSentinel.Core
         public string? ProxyEndpoint { get; set; }
 
         /// <summary>
-        /// Shared secret key for verifying signature against Cloudflare Worker proxy.
+        /// HMAC shared secret for signing requests to the proxy.
+        /// Configured in appsettings.json under Sentinel:ThreatReporting:ProxySharedSecret.
         /// </summary>
         public string? ProxySharedSecret { get; set; }
     }

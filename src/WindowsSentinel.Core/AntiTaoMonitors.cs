@@ -43,6 +43,7 @@ namespace WindowsSentinel.Core
                     await CheckIommuAsync(ct);
                     await CheckSecureBootAsync();
                     await CheckBitLockerAsync(ct);
+                    await CheckCredentialGuardAsync();
                 }
                 catch (OperationCanceledException) { break; }
                 catch (Exception ex) { _logger.LogDebug(ex, "[HardwareSecurityGuard] Error"); }
@@ -183,6 +184,49 @@ namespace WindowsSentinel.Core
                 }
             }
             catch (Exception ex) { _logger.LogDebug(ex, "[HardwareSecurityGuard] BitLocker check error"); }
+        }
+
+        private async Task CheckCredentialGuardAsync()
+        {
+            try
+            {
+                bool credGuardActive = false;
+
+                // Check if LsaIso.exe is running (Credential Guard's isolated LSA process)
+                var lsaIso = Process.GetProcessesByName("LsaIso");
+                credGuardActive = lsaIso.Length > 0;
+                foreach (var p in lsaIso) p.Dispose();
+
+                if (!credGuardActive)
+                {
+                    // Check registry for VBS Credential Guard configuration
+                    try
+                    {
+                        using var key = Registry.LocalMachine.OpenSubKey(
+                            @"SYSTEM\CurrentControlSet\Control\Lsa");
+                        var val = key?.GetValue("LsaCfgFlags");
+                        if (val is int flags && flags > 0) credGuardActive = true;
+                    }
+                    catch { }
+                }
+
+                if (!credGuardActive)
+                {
+                    await _detectionEngine.EmitAsync(new DetectionEvent
+                    {
+                        RuleName = "Hardware Security: Credential Guard Not Active",
+                        Evidence = "LsaIso.exe not running and LsaCfgFlags not set. " +
+                                   "Credential Guard (VBS-based LSA isolation) is not protecting credentials.",
+                        Reasoning = "Without Credential Guard, NTLM hashes, Kerberos tickets, and domain credentials " +
+                                    "reside in standard LSASS memory and can be extracted by tools like Mimikatz. " +
+                                    "Enabling Credential Guard isolates them in a VBS secure enclave.",
+                        Confidence = 0.45, Tier = DetectionTier.Tier2Indicator,
+                        AuthorizedResponse = ResponseAction.LogOnly,
+                        ProcessName = "SYSTEM", ProcessId = 0
+                    });
+                }
+            }
+            catch (Exception ex) { _logger.LogDebug(ex, "[HardwareSecurityGuard] CredentialGuard check error"); }
         }
     }
 
@@ -839,42 +883,28 @@ namespace WindowsSentinel.Core
                         return $"{network}/{prefix}";
                     }));
 
-                // Use Windows Firewall COM API (INetFwPolicy2) instead of shelling out to netsh
-                var fwPolicyType = Type.GetTypeFromProgID("HNetCfg.FwPolicy2");
-                if (fwPolicyType == null) throw new InvalidOperationException("Failed to get HNetCfg.FwPolicy2 type");
-                dynamic? fwPolicy = Activator.CreateInstance(fwPolicyType);
-                if (fwPolicy == null) throw new InvalidOperationException("Failed to create FwPolicy2 instance");
-
-                var ruleType = Type.GetTypeFromProgID("HNetCfg.FWRule");
-                if (ruleType == null) throw new InvalidOperationException("Failed to get HNetCfg.FWRule type");
+                // Strategy: Create a BLOCK ALL outbound rule, then an ALLOW rule for whitelisted
+                // Windows Firewall processes rules in order: Allow rules take precedence over Block
 
                 // First: Allow rule for whitelisted subnets
-                dynamic? allowRule = Activator.CreateInstance(ruleType);
-                if (allowRule != null)
+                var allowPsi = new ProcessStartInfo("netsh.exe",
+                    $"advfirewall firewall add rule name=\"Sentinel-OutboundWhitelist-Allow\" " +
+                    $"dir=out action=allow remoteip=\"{allowedAddresses}\"")
                 {
-                    allowRule.Name = "Sentinel-OutboundWhitelist-Allow";
-                    allowRule.Description = "Sentinel: Allow outbound to whitelisted subnets";
-                    allowRule.Direction = 2; // NET_FW_RULE_DIR_OUT
-                    allowRule.Action = 1;    // NET_FW_ACTION_ALLOW
-                    allowRule.RemoteAddresses = allowedAddresses;
-                    allowRule.Enabled = true;
-                    allowRule.Profiles = 0x7FFFFFFF;
-                    fwPolicy.Rules.Add(allowRule);
-                }
+                    CreateNoWindow = true, UseShellExecute = false
+                };
+                using (var p = Process.Start(allowPsi))
+                    p?.WaitForExit(5000);
 
                 // Then: Block everything else
-                dynamic? blockRule = Activator.CreateInstance(ruleType);
-                if (blockRule != null)
+                var blockPsi = new ProcessStartInfo("netsh.exe",
+                    $"advfirewall firewall add rule name=\"{FirewallRuleName}\" " +
+                    "dir=out action=block remoteip=any")
                 {
-                    blockRule.Name = FirewallRuleName;
-                    blockRule.Description = "Sentinel: Block all non-whitelisted outbound traffic";
-                    blockRule.Direction = 2; // NET_FW_RULE_DIR_OUT
-                    blockRule.Action = 0;    // NET_FW_ACTION_BLOCK
-                    blockRule.RemoteAddresses = "*";
-                    blockRule.Enabled = true;
-                    blockRule.Profiles = 0x7FFFFFFF;
-                    fwPolicy.Rules.Add(blockRule);
-                }
+                    CreateNoWindow = true, UseShellExecute = false
+                };
+                using (var p = Process.Start(blockPsi))
+                    p?.WaitForExit(5000);
 
                 _firewallRuleCreated = true;
                 _logger.LogWarning("[OutboundConnectionWhitelist] Firewall enforcement rules created");
