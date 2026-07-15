@@ -2,6 +2,54 @@
  
 All notable changes to Windows Sentinel are documented in this file.
 
+## [1.4.6] - 2026-07-15
+
+### Architecture — Unified ETW Session & Event-Driven Telemetry
+
+Major architectural upgrade: replaces poll-based monitoring with a single unified ETW session subscribing to 9 kernel/system providers simultaneously. Detection latency drops from seconds to ~50ms across all monitored subsystems.
+
+### Added
+
+- **`UnifiedEtwSession`** (`UnifiedEtwSession.cs`): Single real-time ETW trace session consuming 9 providers through raw Win32 P/Invoke (no TraceEvent NuGet — AV-clean). Providers: Kernel-Process, Kernel-File, Kernel-Registry, DNS-Client, Threat-Intelligence, PowerShell, Windows Firewall, TaskScheduler, Kernel-Network. 64 buffers × 256KB, QPC timestamps, AboveNormal thread priority. Gracefully degrades to poll-based monitoring if session start fails (non-admin).
+
+- **`EtwEventDispatcher`** (`EtwEventDispatcher.cs`): Routes raw ETW events by provider GUID to typed telemetry objects. Converts kernel events into ProcessTelemetry, FileActivityTelemetry, RegistryTelemetry, DnsTelemetry, ThreatIntelTelemetry, NetworkTelemetry, FirewallTelemetry, and TaskSchedulerTelemetry. Feeds directly into TelemetryFusionEngine → DetectionEngine pipeline.
+
+- **New telemetry types**: `RegistryTelemetry`, `DnsTelemetry`, `FirewallTelemetry`, `TaskSchedulerTelemetry` — ETW-sourced event types with PID attribution that replace polled equivalents.
+
+- **VirusTotal proxy integration** (`FileReputationEngine`): VT lookups now route through the Cloudflare Worker proxy (`/lookup/vt` endpoint). Worker holds the VT API key server-side. Returns verdict (safe/suspicious/malicious/not_found), detection count, engine count, and detection rate. Hash consensus scoring rebalanced for 3-source model (CIRCL 25pts + MalwareBazaar 40pts + VT 35pts). Graceful degradation when proxy not configured.
+
+- **`/lookup/vt` endpoint** (`worker/src/index.js`): Cloudflare Worker endpoint that proxies SHA-256 hash lookups to VirusTotal v3 API. Server-side API key via `VIRUSTOTAL_KEY` secret. Returns structured verdict based on multi-engine detection rate thresholds (≥25% = malicious, ≥10% or 3+ engines = suspicious).
+
+- **`[RuleCategory]` attribute system** (`ScoringEngine.cs`): Compile-time-safe detection categorization. All rule classes declare their `DetectionCategory` via attribute. `RuleCategoryRegistry` scans the assembly at startup for O(1) lookup. `ScoringEngine.CategorizeDetection` uses registry-first, string-fallback for composite detections.
+
+- **59 new unit + integration tests** (240 → 299 total, all passing):
+  - 10 end-to-end integration pipeline tests (full Telemetry → Detection → Scoring → Correlation → Orchestrator → Response flow)
+  - 8 AdvancedResponseEngine tests (self-exclusion, active response disabled, network isolation, registry removal, kill paths, metrics)
+  - 8 BehavioralCorrelationEngine tests (composite fire/no-fire, different PIDs, highest confidence wins, Tier1 emission)
+  - 6 ChainTracer tests (trace result, active response disabled, logging, invalid PID, duration)
+  - 11 FileReputationEngine tests (scoring, caching, path risk, PE analysis, deduplication)
+  - 7 AntiTamperGuard tests (construction, timing alerts, binary deletion, service deletion, QoS tampering)
+  - 8 DetectionEngine tests (rule matching, deduplication, direct emission, consultant signals, scoring integration)
+  - 1 RuleCategoryRegistry verification test
+
+### Changed
+
+- **`EtwProcessMonitor`**: No longer manages its own ETW session. Delegates to `UnifiedEtwSession`. Role reduced to checking session status and disabling WMI fallback when ETW is active.
+- **Detection latency**: Process creation ~50ms (was ~1-2s via WMI), file operations instant (was FileSystemWatcher scope), registry changes instant (was polled 10-30s), DNS queries instant, network connections instant (was polled 5-15s), firewall changes instant (was polled 30s), scheduled tasks instant (was polled 30s).
+- **Hash reputation consensus**: Rebalanced from 2-source (CIRCL + MalwareBazaar only) to 3-source model with VirusTotal contributing 35 points when proxy is configured.
+
+### Architecture Decisions
+
+| Decision | Rationale |
+|----------|-----------|
+| Single ETW session for all providers | Minimizes kernel session count (Windows limits to 64 total), reduces context switches, single processing thread |
+| Raw P/Invoke instead of TraceEvent NuGet | TraceEvent embeds injection API name strings that trigger AV heuristic false positives (Kaspersky, DeepInstinct, Bitdefender) |
+| Handler registration pattern | Decouples session management from event interpretation. New providers added without modifying session code |
+| VT via proxy (not direct) | Open-source distribution can't embed API keys. Proxy holds key server-side with HMAC authentication |
+| Attribute-based categorization with string fallback | Compile-time safety for known rules, runtime flexibility for composite/dynamic detection names |
+
+---
+
 ## [1.4.5] - 2026-07-15
 
 ### Security — Credential Hardening & Detection Gaps

@@ -93,6 +93,11 @@ namespace WindowsSentinel.Service
                     services.AddSingleton<DllUnloadEngine>();
                     services.AddSingleton<IncidentResponseService>();
 
+                    // Unified ETW Session — single session subscribing to 9 system providers
+                    // Provides event-driven telemetry at ~50ms latency for all monitors
+                    services.AddSingleton<UnifiedEtwSession>();
+                    services.AddSingleton<EtwEventDispatcher>();
+
                     // Rules
                     services.AddTransient<IDetectionRule, LsassAccessRule>();
                     services.AddTransient<IDetectionRule, RansomwareDetectionRule>();

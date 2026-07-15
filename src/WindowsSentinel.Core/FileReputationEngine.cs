@@ -38,11 +38,13 @@ namespace WindowsSentinel.Core
         private readonly SecureCacheStore _cacheStore;
         private readonly ILogger<FileReputationEngine> _logger;
         private readonly ContextBus? _contextBus;
+        private readonly ThreatReportingConfig? _reportingConfig;
 
         // SECURITY v1.4.4: Shared static HttpClient instances to prevent socket exhaustion.
         // Each has appropriate timeout for its target API. Thread-safe, reuses connections.
         private static readonly HttpClient _circlHttpClient = new() { Timeout = TimeSpan.FromSeconds(4) };
         private static readonly HttpClient _mbHttpClient = new() { Timeout = TimeSpan.FromSeconds(3) };
+        private static readonly HttpClient _vtProxyHttpClient = new() { Timeout = TimeSpan.FromSeconds(5) };
 
         // Composite score cache: SHA256 → (score, timestamp)
         private readonly ConcurrentDictionary<string, (FileReputationResult Result, DateTimeOffset CachedAt)> _resultCache = new();
@@ -82,13 +84,15 @@ namespace WindowsSentinel.Core
             SignerTrustService signerTrust,
             SecureCacheStore cacheStore,
             ILogger<FileReputationEngine> logger,
-            ContextBus? contextBus = null)
+            ContextBus? contextBus = null,
+            ThreatReportingConfig? reportingConfig = null)
         {
             _hashRepService = hashRepService;
             _signerTrust = signerTrust;
             _cacheStore = cacheStore;
             _logger = logger;
             _contextBus = contextBus;
+            _reportingConfig = reportingConfig;
         }
 
         /// <summary>
@@ -295,13 +299,83 @@ namespace WindowsSentinel.Core
             finally { _malwareBazaarThrottle.Release(); }
         }
 
-        // SECURITY v1.4.4: VirusTotal v3 API requires an x-apikey header for ALL requests.
-        // Without a key, the endpoint always returns 401 Unauthorized — this query was dead code.
-        // Removed the non-functional query. If VT support is needed in the future, route through
-        // the Cloudflare Worker proxy (which can hold the API key server-side).
-        private Task<ApiVerdict> QueryVirusTotalAsync(string hash, CancellationToken ct)
+        // v1.4.5: VirusTotal lookups routed through Cloudflare Worker proxy.
+        // The Worker holds the VT API key server-side — Sentinel agents never see it.
+        // If ProxyEndpoint is not configured, returns NotFound (graceful degradation).
+        // Rate limiting is handled server-side by the Worker (Cloudflare rate limits apply).
+        private async Task<ApiVerdict> QueryVirusTotalAsync(string hash, CancellationToken ct)
         {
-            return Task.FromResult(new ApiVerdict { Source = "VirusTotal", Status = VerdictStatus.NotFound });
+            // If no proxy endpoint configured, skip VT (same as before)
+            if (_reportingConfig == null || string.IsNullOrWhiteSpace(_reportingConfig.ProxyEndpoint))
+            {
+                return new ApiVerdict { Source = "VirusTotal", Status = VerdictStatus.NotFound };
+            }
+
+            try
+            {
+                var proxyUrl = _reportingConfig.ProxyEndpoint.TrimEnd('/') + "/lookup/vt";
+                var payload = System.Text.Json.JsonSerializer.Serialize(new { type = "hash", value = hash });
+                var content = new StringContent(payload, System.Text.Encoding.UTF8, "application/json");
+
+                // Add HMAC authentication headers if shared secret is configured
+                if (!string.IsNullOrWhiteSpace(_reportingConfig.ProxySharedSecret))
+                {
+                    var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString();
+                    content.Headers.Add("X-Sentinel-Timestamp", timestamp);
+                    content.Headers.Add("X-Sentinel-Auth", _reportingConfig.ProxySharedSecret);
+                }
+
+                var response = await _vtProxyHttpClient.PostAsync(proxyUrl, content, ct);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogDebug("[FileReputationEngine] VT proxy returned {Status}", response.StatusCode);
+                    return new ApiVerdict { Source = "VirusTotal", Status = VerdictStatus.Error };
+                }
+
+                var json = await response.Content.ReadAsStringAsync(ct);
+
+                // Parse proxy response: { success, verdict, detections, engines, detectionRate }
+                using var doc = System.Text.Json.JsonDocument.Parse(json);
+                var root = doc.RootElement;
+
+                if (!root.TryGetProperty("success", out var successProp) || !successProp.GetBoolean())
+                {
+                    return new ApiVerdict { Source = "VirusTotal", Status = VerdictStatus.Error };
+                }
+
+                var verdictStr = root.TryGetProperty("verdict", out var vProp) ? vProp.GetString() : "not_found";
+                int detections = root.TryGetProperty("detections", out var dProp) ? dProp.GetInt32() : 0;
+                int engines = root.TryGetProperty("engines", out var eProp) ? eProp.GetInt32() : 0;
+                double detectionRate = root.TryGetProperty("detectionRate", out var drProp) ? drProp.GetDouble() : 0;
+
+                var status = verdictStr switch
+                {
+                    "malicious" => VerdictStatus.Malicious,
+                    "suspicious" => VerdictStatus.Suspicious,
+                    "safe" => VerdictStatus.Safe,
+                    "not_found" => VerdictStatus.NotFound,
+                    _ => VerdictStatus.Unknown
+                };
+
+                return new ApiVerdict
+                {
+                    Source = "VirusTotal",
+                    Status = status,
+                    DetectionCount = detections,
+                    EngineCount = engines,
+                    DetectionRate = detectionRate
+                };
+            }
+            catch (OperationCanceledException)
+            {
+                return new ApiVerdict { Source = "VirusTotal", Status = VerdictStatus.Error };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "[FileReputationEngine] VT proxy lookup failed for {Hash}", hash[..12]);
+                return new ApiVerdict { Source = "VirusTotal", Status = VerdictStatus.Error };
+            }
         }
 
         // ═══════════════════════════════════════════════════════════════
@@ -522,24 +596,24 @@ namespace WindowsSentinel.Core
         private static int CalculateHashConsensus(HashReputationResult hr)
         {
             // Returns 0-100 where 0=safe, 100=malicious
-            // SECURITY v1.4.4: Rebalanced for 2-source model (VT disabled — requires API key).
-            // CIRCL provides known-good signal; MalwareBazaar provides known-bad signal.
-            // Without VT, the scoring is more conservative (neutral when both miss).
+            // v1.4.5: Rebalanced for 3-source model when VT is available via proxy.
+            // CIRCL provides known-good signal; MalwareBazaar provides known-bad signal;
+            // VirusTotal provides multi-engine consensus (strongest signal when available).
             int score = 50; // Start neutral
 
-            // CIRCL (weight: 30 points — known-good database)
-            if (hr.CirclVerdict.Status == VerdictStatus.Safe) score -= 30;
+            // CIRCL (weight: 25 points — known-good database)
+            if (hr.CirclVerdict.Status == VerdictStatus.Safe) score -= 25;
             else if (hr.CirclVerdict.Status == VerdictStatus.NotFound) score += 5;
 
-            // MalwareBazaar (weight: 50 points — strong malicious signal)
-            if (hr.MalwareBazaarVerdict.Status == VerdictStatus.Malicious) score += 50;
+            // MalwareBazaar (weight: 40 points — strong malicious signal)
+            if (hr.MalwareBazaarVerdict.Status == VerdictStatus.Malicious) score += 40;
             else if (hr.MalwareBazaarVerdict.Status == VerdictStatus.NotFound) score -= 10;
 
-            // VirusTotal (disabled — always NotFound, contributes +5 neutral bias)
-            if (hr.VirusTotalVerdict.Status == VerdictStatus.Malicious) score += 30;
-            else if (hr.VirusTotalVerdict.Status == VerdictStatus.Suspicious) score += 15;
-            else if (hr.VirusTotalVerdict.Status == VerdictStatus.Safe) score -= 20;
-            else if (hr.VirusTotalVerdict.Status == VerdictStatus.NotFound) score += 0; // Neutral when disabled
+            // VirusTotal (weight: 35 points — multi-engine consensus, strongest when active)
+            if (hr.VirusTotalVerdict.Status == VerdictStatus.Malicious) score += 35;
+            else if (hr.VirusTotalVerdict.Status == VerdictStatus.Suspicious) score += 20;
+            else if (hr.VirusTotalVerdict.Status == VerdictStatus.Safe) score -= 25;
+            else if (hr.VirusTotalVerdict.Status == VerdictStatus.NotFound) score += 0; // Neutral
 
             return Math.Clamp(score, 0, 100);
         }

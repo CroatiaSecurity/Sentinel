@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using Microsoft.Extensions.Logging;
 
 namespace WindowsSentinel.Core
@@ -9,7 +10,6 @@ namespace WindowsSentinel.Core
     /// <summary>
     /// Categorical classification of detection events.
     /// Used by ScoringEngine for corroboration, boosting, and verdict determination.
-    /// Replaces fragile string-matching with compile-time safe categories.
     /// </summary>
     public enum DetectionCategory
     {
@@ -32,6 +32,89 @@ namespace WindowsSentinel.Core
         DnsAnomaly,
         FilelessAttack,
         LateralMovement
+    }
+
+    /// <summary>
+    /// Compile-time attribute that declares the primary detection category for a rule.
+    /// This replaces fragile string-matching in ScoringEngine.CategorizeDetection with
+    /// a type-safe, statically-verified approach. If a rule is renamed, the category
+    /// stays correct. If a new rule forgets to add this attribute, the fallback string
+    /// matcher still works — but the preferred path is always the attribute.
+    /// </summary>
+    [AttributeUsage(AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
+    public sealed class RuleCategoryAttribute : Attribute
+    {
+        public DetectionCategory Category { get; }
+        public RuleCategoryAttribute(DetectionCategory category) => Category = category;
+    }
+
+    /// <summary>
+    /// Static registry that maps rule names to their declared DetectionCategory.
+    /// Built once at startup by scanning all IDetectionRule implementations for
+    /// [RuleCategory] attributes. Provides O(1) lookup by rule name, eliminating
+    /// the string-Contains pattern matching that was previously required.
+    /// </summary>
+    public static class RuleCategoryRegistry
+    {
+        private static readonly Dictionary<string, DetectionCategory> _registry;
+
+        static RuleCategoryRegistry()
+        {
+            _registry = new Dictionary<string, DetectionCategory>(StringComparer.OrdinalIgnoreCase);
+
+            // Scan all types in the Core assembly that implement IDetectionRule
+            var coreAssembly = typeof(IDetectionRule).Assembly;
+            foreach (var type in coreAssembly.GetTypes())
+            {
+                if (!typeof(IDetectionRule).IsAssignableFrom(type) || type.IsInterface || type.IsAbstract)
+                    continue;
+
+                var attr = type.GetCustomAttribute<RuleCategoryAttribute>();
+                if (attr == null) continue;
+
+                // Instantiate temporarily to get the Name property, or use naming convention
+                // Convention: rule name = class name (which is how all rules are written)
+                // We use the class name as a fallback key and also try to get the Name property
+                try
+                {
+                    // Try to read the Name from a static or instance property via reflection
+                    var nameProp = type.GetProperty("Name", BindingFlags.Public | BindingFlags.Instance);
+                    if (nameProp != null && nameProp.PropertyType == typeof(string))
+                    {
+                        // Create a minimal instance to read the Name value
+                        // Most rules have parameterless constructors or we use the class name
+                        try
+                        {
+                            var instance = Activator.CreateInstance(type, nonPublic: true);
+                            if (instance != null)
+                            {
+                                var name = (string?)nameProp.GetValue(instance);
+                                if (!string.IsNullOrEmpty(name))
+                                    _registry[name] = attr.Category;
+                            }
+                        }
+                        catch
+                        {
+                            // Constructor requires parameters — fall through to class name
+                        }
+                    }
+
+                    // Always register the class name as well (handles rules with DI constructors)
+                    _registry[type.Name] = attr.Category;
+                }
+                catch { }
+            }
+        }
+
+        /// <summary>
+        /// Attempts to resolve a rule name to its declared category.
+        /// Returns null if no attribute-based mapping exists (falls back to string matching).
+        /// </summary>
+        public static DetectionCategory? Resolve(string? ruleName)
+        {
+            if (string.IsNullOrEmpty(ruleName)) return null;
+            return _registry.TryGetValue(ruleName, out var category) ? category : null;
+        }
     }
 
     /// <summary>
@@ -249,9 +332,22 @@ namespace WindowsSentinel.Core
             return null;
         }
 
+        /// <summary>
+        /// Categorizes a detection by rule name. Uses the compile-time-safe RuleCategoryRegistry
+        /// first (populated from [RuleCategory] attributes on rule classes), then falls back to
+        /// string-pattern matching for composite detections and dynamically-generated rule names
+        /// that don't have a corresponding class.
+        /// </summary>
         public static DetectionCategory CategorizeDetection(string? ruleName)
         {
             if (string.IsNullOrEmpty(ruleName)) return DetectionCategory.Unknown;
+
+            // Preferred path: attribute-based lookup (O(1), compile-time safe)
+            var resolved = RuleCategoryRegistry.Resolve(ruleName);
+            if (resolved.HasValue) return resolved.Value;
+
+            // Fallback: string-pattern matching for composite detections, dynamic rules,
+            // and monitor-emitted events that don't map to a rule class.
             var r = ruleName.ToLowerInvariant();
             if (r.Contains("beacon")) return DetectionCategory.C2Beaconing;
             if (r.Contains("lsass") || r.Contains("credential") || r.Contains("credtool") || r.Contains("canary")) return DetectionCategory.CredentialDump;

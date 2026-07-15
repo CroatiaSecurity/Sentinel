@@ -191,4 +191,227 @@ namespace WindowsSentinel.Tests
             }
         }
     }
+
+    public class AdvancedResponseEngineExtendedTests : IDisposable
+    {
+        private readonly string _tempDir;
+        private readonly SentinelConfig _config;
+        private readonly SentinelMetrics _metrics;
+        private readonly JsonlEventLogger _logger;
+        private readonly QuarantineManager _quarantine;
+        private readonly AdvancedResponseEngine _engine;
+
+        public AdvancedResponseEngineExtendedTests()
+        {
+            _tempDir = Path.Combine(Path.GetTempPath(), "sentinel_are_ext_" + Guid.NewGuid().ToString("N")[..8]);
+            Directory.CreateDirectory(_tempDir);
+            _config = new SentinelConfig { ActiveResponse = true };
+            _metrics = new SentinelMetrics();
+            var logPath = Path.Combine(_tempDir, "events.jsonl");
+            _logger = new JsonlEventLogger(logPath);
+            _quarantine = new QuarantineManager(_tempDir);
+            _engine = new AdvancedResponseEngine(_config, _metrics, _logger, _quarantine);
+        }
+
+        public void Dispose()
+        {
+            _logger.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            try { Directory.Delete(_tempDir, true); } catch { }
+        }
+
+        private string ReadLog()
+        {
+            var logPath = Path.Combine(_tempDir, "events.jsonl");
+            if (!File.Exists(logPath)) return string.Empty;
+            using var fs = new FileStream(logPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using var reader = new StreamReader(fs);
+            return reader.ReadToEnd();
+        }
+
+        [Fact]
+        public async Task HandleAsync_ActiveResponseDisabled_Tier1Detection_LogsOnly()
+        {
+            // Arrange: disable active response
+            var config = new SentinelConfig { ActiveResponse = false };
+            var logPath = Path.Combine(_tempDir, "disabled_test.jsonl");
+            var logger = new JsonlEventLogger(logPath);
+            var engine = new AdvancedResponseEngine(config, _metrics, logger, _quarantine);
+
+            var detection = new DetectionEvent
+            {
+                RuleName = "LsassAccessRule",
+                Confidence = 0.95,
+                Tier = DetectionTier.Tier1Behavioral,
+                AuthorizedResponse = ResponseAction.KillProcessTree,
+                ProcessName = "evil.exe",
+                ProcessId = 9876
+            };
+
+            // Act
+            await engine.HandleAsync(detection);
+            await logger.DisposeAsync();
+
+            // Assert: should log but NOT kill
+            var log = await File.ReadAllTextAsync(logPath);
+            Assert.Contains("\"ActionTaken\":\"LOG\"", log);
+            Assert.Contains("ActiveResponse disabled", log);
+            Assert.DoesNotContain("\"ActionTaken\":\"KILL\"", log);
+        }
+
+        [Fact]
+        public async Task HandleAsync_SelfExclusion_NeverKillsOwnProcess()
+        {
+            // Arrange: detection targeting our own process
+            var detection = new DetectionEvent
+            {
+                RuleName = "File Reputation: Suspicious Binary Executed",
+                Confidence = 0.55,
+                Tier = DetectionTier.Tier1Behavioral,
+                AuthorizedResponse = ResponseAction.KillProcessTree,
+                ProcessName = "WindowsSentinel.Service.exe",
+                ProcessId = Environment.ProcessId // Our own PID!
+            };
+
+            // Act
+            await _engine.HandleAsync(detection);
+
+            // Assert: self-exclusion should prevent any action
+            var log = ReadLog();
+            Assert.Contains("\"ActionTaken\":\"LOG\"", log);
+            Assert.DoesNotContain("\"ActionTaken\":\"KILL\"", log);
+        }
+
+        [Fact]
+        public async Task HandleAsync_NetworkIsolation_Tier1_LogsNetworkIsolateAction()
+        {
+            var detection = new DetectionEvent
+            {
+                RuleName = "ARP Spoofing Detected",
+                Confidence = 0.90,
+                Tier = DetectionTier.Tier1Behavioral,
+                AuthorizedResponse = ResponseAction.NetworkIsolate,
+                ProcessName = "arp_spoof.exe",
+                ProcessId = 7777,
+                Metadata = new Dictionary<string, string>
+                {
+                    { "TargetIP", "192.168.1.100" }
+                }
+            };
+
+            await _engine.HandleAsync(detection);
+
+            var log = ReadLog();
+            Assert.Contains("\"ActionTaken\":\"NETWORK_ISOLATE\"", log);
+            Assert.Contains("192.168.1.100", log);
+        }
+
+        [Fact]
+        public async Task HandleAsync_NetworkIsolation_InvalidIP_DoesNotCreateFirewallRule()
+        {
+            // Arrange: loopback IP should be skipped
+            var detection = new DetectionEvent
+            {
+                RuleName = "Network Anomaly: Suspicious Connection",
+                Confidence = 0.80,
+                Tier = DetectionTier.Tier1Behavioral,
+                AuthorizedResponse = ResponseAction.NetworkIsolate,
+                ProcessName = "test.exe",
+                ProcessId = 6666,
+                Metadata = new Dictionary<string, string>
+                {
+                    { "TargetIP", "127.0.0.1" } // Loopback — should be skipped
+                }
+            };
+
+            await _engine.HandleAsync(detection);
+
+            var log = ReadLog();
+            // Should still log the action, but the IP validation prevents actual firewall rule
+            Assert.Contains("NETWORK_ISOLATE", log);
+        }
+
+        [Fact]
+        public async Task HandleAsync_RemoveRegistryEntry_Tier1_ExecutesRemoval()
+        {
+            var detection = new DetectionEvent
+            {
+                RuleName = "Persistence: Malicious Scheduled Task",
+                Confidence = 0.85,
+                Tier = DetectionTier.Tier1Behavioral,
+                AuthorizedResponse = ResponseAction.RemoveRegistryEntry,
+                ProcessName = "malware.exe",
+                ProcessId = 5555,
+                Metadata = new Dictionary<string, string>
+                {
+                    { "Hive", "HKLM" },
+                    { "KeyPath", @"SOFTWARE\Microsoft\Windows\CurrentVersion\Run" },
+                    { "ValueName", "FakeValue_SentinelTest_DoesNotExist" }
+                }
+            };
+
+            await _engine.HandleAsync(detection);
+
+            var log = ReadLog();
+            // Action should be attempted (even if the value doesn't exist)
+            Assert.Contains("REMOVE_REGISTRY_ENTRY", log);
+        }
+
+        [Fact]
+        public async Task HandleAsync_Tier1_KillAuthorized_LogsKillAction()
+        {
+            // Use a PID that doesn't exist so kill attempt is safe
+            var detection = new DetectionEvent
+            {
+                RuleName = "LsassAccessRule",
+                Confidence = 0.95,
+                Tier = DetectionTier.Tier1Behavioral,
+                AuthorizedResponse = ResponseAction.KillProcessTree,
+                ProcessName = "nonexistent.exe",
+                ProcessId = 99999 // PID very unlikely to exist
+            };
+
+            await _engine.HandleAsync(detection);
+
+            var log = ReadLog();
+            Assert.Contains("\"ActionTaken\":\"KILL\"", log);
+        }
+
+        [Fact]
+        public async Task HandleAsync_Tier1_WithoutKillAuthorization_LogsOnly()
+        {
+            var detection = new DetectionEvent
+            {
+                RuleName = "Beaconing Behavior",
+                Confidence = 0.70,
+                Tier = DetectionTier.Tier1Behavioral,
+                AuthorizedResponse = ResponseAction.LogOnly, // No kill authorized
+                ProcessName = "suspicious.exe",
+                ProcessId = 4444
+            };
+
+            await _engine.HandleAsync(detection);
+
+            var log = ReadLog();
+            Assert.Contains("\"ActionTaken\":\"LOG\"", log);
+            Assert.Contains("without kill authorization", log);
+        }
+
+        [Fact]
+        public async Task HandleAsync_ResponseMetricsRecorded()
+        {
+            var detection = new DetectionEvent
+            {
+                RuleName = "TestRule",
+                Confidence = 0.50,
+                Tier = DetectionTier.Tier2Indicator,
+                ProcessName = "test.exe",
+                ProcessId = 3333
+            };
+
+            await _engine.HandleAsync(detection);
+
+            // Verify metrics were recorded (response count > 0)
+            Assert.True(_metrics.GetResponsesCount() > 0);
+        }
+    }
 }

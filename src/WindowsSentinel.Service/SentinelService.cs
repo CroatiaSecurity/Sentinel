@@ -18,6 +18,10 @@ namespace WindowsSentinel.Service
         private readonly ProcessAncestryCache _ancestryCache;
         private readonly IEnumerable<IMonitor> _monitors;
 
+        // Unified ETW session — started before monitors for event-driven telemetry
+        private readonly UnifiedEtwSession _unifiedEtwSession;
+        private readonly EtwEventDispatcher _etwEventDispatcher;
+
         // Constructor-injected singletons that self-start
         private readonly UsbDeviceFingerprinter _usbDeviceFingerprinter;
         private readonly AppNetworkPolicyMonitor _networkPolicyMonitor;
@@ -41,6 +45,8 @@ namespace WindowsSentinel.Service
             DetectionEngine detectionEngine,
             ProcessAncestryCache ancestryCache,
             IEnumerable<IMonitor> monitors,
+            UnifiedEtwSession unifiedEtwSession,
+            EtwEventDispatcher etwEventDispatcher,
             UsbDeviceFingerprinter usbDeviceFingerprinter,
             AppNetworkPolicyMonitor networkPolicyMonitor,
             WmiProcessMonitor wmiProcessMonitor,
@@ -73,6 +79,8 @@ namespace WindowsSentinel.Service
             _detectionEngine = detectionEngine;
             _ancestryCache = ancestryCache;
             _monitors = monitors;
+            _unifiedEtwSession = unifiedEtwSession;
+            _etwEventDispatcher = etwEventDispatcher;
             _usbDeviceFingerprinter = usbDeviceFingerprinter;
             _networkPolicyMonitor = networkPolicyMonitor;
             _wmiProcessMonitor = wmiProcessMonitor;
@@ -112,6 +120,10 @@ namespace WindowsSentinel.Service
                 _logger.LogCritical("Windows Sentinel startup self-test FAILED. Stopping service.");
                 return;
             }
+
+            // Start Unified ETW Session (before monitors — provides event-driven telemetry)
+            _etwEventDispatcher.RegisterHandlers(_unifiedEtwSession);
+            await _unifiedEtwSession.StartAsync(stoppingToken);
 
             // Start all IMonitor implementations (ETW sessions, DNS monitor, etc.)
             foreach (var monitor in _monitors)
@@ -199,6 +211,7 @@ namespace WindowsSentinel.Service
 
                 _ancestryCache.Stop();
                 _detectionEngine.Stop();
+                await _unifiedEtwSession.StopAsync();
             }
         }
 

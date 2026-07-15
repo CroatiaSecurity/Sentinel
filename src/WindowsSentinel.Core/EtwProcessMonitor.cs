@@ -6,48 +6,55 @@ using Microsoft.Extensions.Logging;
 namespace WindowsSentinel.Core
 {
     /// <summary>
-    /// Process monitoring via ETW (Microsoft-Windows-Kernel-Process).
+    /// Process monitoring via ETW — now delegates to the UnifiedEtwSession.
     /// 
-    /// NOTE: The TraceEvent NuGet package was removed because it embeds injection API
-    /// name strings (VirtualAllocEx, ReadProcessMemory, NtQuerySystemInformation, etc.)
-    /// that cause AV heuristic false positives (Kaspersky, DeepInstinct).
+    /// ARCHITECTURE (v1.4.5):
+    /// This monitor no longer manages its own ETW session. Instead, UnifiedEtwSession
+    /// provides a single trace session subscribing to 9 providers simultaneously.
+    /// EtwEventDispatcher handles event routing and telemetry conversion.
     /// 
-    /// This monitor now delegates entirely to WmiProcessMonitor as the process telemetry
-    /// source. WMI provides the same ProcessStart events with PID, image path, command line,
-    /// and parent PID — just with slightly higher latency (~1-2s vs ETW's ~50ms).
+    /// This monitor's role is now limited to:
+    ///   1. Checking if UnifiedEtwSession is active
+    ///   2. If active: disabling WmiProcessMonitor (prevent duplicate events)
+    ///   3. If inactive: ensuring WmiProcessMonitor provides fallback coverage
+    /// 
+    /// LATENCY: ~50ms via ETW (when active) vs ~1-2s via WMI fallback.
     /// </summary>
     public sealed class EtwProcessMonitor : IMonitor
     {
         public string Name => "EtwProcessMonitor";
 
-        private readonly DetectionEngine _detectionEngine;
-        private readonly TelemetryFusionEngine _fusionEngine;
-        private readonly ProcessAncestryCache _ancestryCache;
-        private readonly BehavioralBaselineService? _behavioralBaseline;
+        private readonly UnifiedEtwSession _unifiedSession;
         private readonly WmiProcessMonitor? _wmiProcessMonitor;
         private readonly ILogger<EtwProcessMonitor> _logger;
 
         public EtwProcessMonitor(
-            DetectionEngine detectionEngine,
-            TelemetryFusionEngine fusionEngine,
-            ProcessAncestryCache ancestryCache,
+            UnifiedEtwSession unifiedSession,
             ILogger<EtwProcessMonitor> logger,
-            BehavioralBaselineService? behavioralBaseline = null,
             WmiProcessMonitor? wmiProcessMonitor = null)
         {
-            _detectionEngine = detectionEngine;
-            _fusionEngine = fusionEngine;
-            _ancestryCache = ancestryCache;
-            _behavioralBaseline = behavioralBaseline;
+            _unifiedSession = unifiedSession;
             _wmiProcessMonitor = wmiProcessMonitor;
             _logger = logger;
         }
 
         public Task StartAsync(CancellationToken ct)
         {
-            // ETW via TraceEvent removed for AV compatibility.
-            // WmiProcessMonitor provides equivalent process telemetry.
-            _logger.LogInformation("[{Monitor}] ETW disabled (AV-clean mode). WmiProcessMonitor provides process telemetry.", Name);
+            if (_unifiedSession.IsActive)
+            {
+                // ETW session is providing events — disable WMI to prevent duplication
+                _wmiProcessMonitor?.Disable();
+                _logger.LogInformation(
+                    "[{Monitor}] UnifiedEtwSession is active. WMI fallback disabled. " +
+                    "Process events at ~50ms latency via Kernel-Process ETW provider.", Name);
+            }
+            else
+            {
+                _logger.LogWarning(
+                    "[{Monitor}] UnifiedEtwSession is NOT active. " +
+                    "WmiProcessMonitor provides fallback process telemetry (~1-2s latency).", Name);
+            }
+
             return Task.CompletedTask;
         }
 

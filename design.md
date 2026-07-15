@@ -1,6 +1,6 @@
 # Windows Sentinel — Design Document
 
-**Version: 1.4.4**
+**Version: 1.4.6**
 
 ---
 
@@ -524,3 +524,100 @@ Composite detections are emitted as Tier1 `DetectionEvent`s directly into the de
 | HttpClient socket exhaustion | Low | `HashReputationService`, `FileReputationEngine` | Replaced per-request `new HttpClient()` with shared static instances. Eliminates TIME_WAIT accumulation. |
 | VirusTotal dead code | Low | `FileReputationEngine` | Removed non-functional VT v3 query (requires API key). Rebalanced consensus: CIRCL 30pts, MalwareBazaar 50pts. Stub preserved for future re-enablement. |
 | Predictable self-test cache entry | Low | `StartupSelfTest` | Random key + random value instead of fixed `_check`/`ok`. Eliminates known-plaintext in encrypted cache. |
+
+
+---
+
+## v1.4.6 — Unified ETW Session Architecture
+
+### Overview
+
+The `UnifiedEtwSession` is the single most important architectural change since v1.0.0. It replaces per-monitor polling with a unified real-time ETW trace session subscribing to 9 kernel/system providers simultaneously.
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    UnifiedEtwSession                                  │
+│   Single real-time trace session (SentinelUnifiedTrace)              │
+│   64 buffers x 256KB, QPC timestamps, AboveNormal priority          │
+│                                                                      │
+│   PROVIDERS:                                                         │
+│   1. Microsoft-Windows-Kernel-Process     -> ProcessTelemetry        │
+│   2. Microsoft-Windows-Kernel-File        -> FileActivityTelemetry   │
+│   3. Microsoft-Windows-Kernel-Registry    -> RegistryTelemetry       │
+│   4. Microsoft-Windows-DNS-Client         -> DnsTelemetry            │
+│   5. Microsoft-Windows-Threat-Intelligence-> ThreatIntelTelemetry    │
+│   6. Microsoft-Windows-PowerShell         -> ProcessTelemetry (4104) │
+│   7. Microsoft-Windows-Firewall           -> FirewallTelemetry       │
+│   8. Microsoft-Windows-TaskScheduler      -> TaskSchedulerTelemetry  │
+│   9. Microsoft-Windows-Kernel-Network     -> NetworkTelemetry        │
+└─────────────────────────────────────────────────────────────────────┘
+                              |
+                              v
+┌─────────────────────────────────────────────────────────────────────┐
+│                    EtwEventDispatcher                                 │
+│   Routes by ProviderId -> typed telemetry -> TelemetryFusionEngine   │
+│                                                                      │
+│   ProcessTelemetry --------+                                         │
+│   FileActivityTelemetry ---+                                         │
+│   RegistryTelemetry -------+--> FusionEngine --> DetectionEngine     │
+│   DnsTelemetry ------------+                                         │
+│   NetworkTelemetry --------+                                         │
+│   ThreatIntelTelemetry ----+                                         │
+│   FirewallTelemetry -------+                                         │
+│   TaskSchedulerTelemetry --+                                         │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Detection Latency (Before vs After)
+
+| Subsystem | Before (polling) | After (ETW) |
+|-----------|-----------------|-------------|
+| Process creation | ~1-2s (WMI) | ~50ms |
+| File I/O | FileSystemWatcher (scoped) | All volumes, all operations |
+| Registry changes | 10-30s polling | Instant with PID attribution |
+| DNS queries | Polled or separate session | Instant, same session |
+| Network connections | 5-15s polling | Instant on connect/accept |
+| Firewall rule changes | 30s polling | Instant on change |
+| Scheduled task creation | 30s polling | Instant on create |
+
+### Implementation Details
+
+- **P/Invoke only**: Uses raw Win32 ETW APIs (StartTraceW, EnableTraceEx2, OpenTraceW, ProcessTrace) via P/Invoke. No TraceEvent NuGet — that package embeds injection API name strings that trigger AV heuristic false positives.
+- **Single thread**: ProcessTrace blocks on a dedicated background thread. Event callbacks dispatch to registered handlers by provider GUID.
+- **Handler registration**: `EtwEventDispatcher.RegisterHandlers(session)` wires all 9 providers before session start. New providers can be added without modifying session code.
+- **Graceful degradation**: If ETW session fails (non-admin, session limit), `IsActive` is false and all monitors continue with their existing poll-based implementations. No functionality lost — only latency.
+- **WMI deduplication**: When ETW is active, `WmiProcessMonitor.Disable()` is called to prevent duplicate process events.
+
+### New Telemetry Types (v1.4.6)
+
+| Type | Source Provider | Key Fields |
+|------|----------------|------------|
+| `RegistryTelemetry` | Kernel-Registry | PID, OperationType, KeyPath, ValueName |
+| `DnsTelemetry` | DNS-Client | PID, QueryName, EventType (QUERY/RESPONSE) |
+| `FirewallTelemetry` | Firewall | PID, Action (RULE_ADDED/MODIFIED/DELETED), RuleName |
+| `TaskSchedulerTelemetry` | TaskScheduler | PID, Action (CREATED/UPDATED/DELETED), TaskName |
+
+### VirusTotal Integration via Proxy (v1.4.6)
+
+```
+FileReputationEngine --> POST /lookup/vt --> Cloudflare Worker --> VT v3 API
+                                                    |
+                                         VIRUSTOTAL_KEY (secret)
+                                                    |
+                                         Returns: verdict, detections, engines
+```
+
+- Worker validates HMAC signature before forwarding
+- Consensus scoring rebalanced: CIRCL 25pts + MalwareBazaar 40pts + VT 35pts
+- When proxy not configured, VT returns NotFound (neutral impact on scoring)
+
+### Rule Category Registry (v1.4.6)
+
+Detection rules declare their category at compile time via `[RuleCategory(DetectionCategory.X)]` attribute. `RuleCategoryRegistry` scans the assembly at startup and provides O(1) lookup by rule name. Falls back to string-pattern matching for composite detections and dynamically-generated rule names.
+
+### Test Coverage (v1.4.6)
+
+- 299 automated tests (xUnit + Moq)
+- 10 end-to-end integration tests exercising the full pipeline
+- Critical paths tested: ResponseEngine, CorrelationEngine, ChainTracer, FileReputationEngine, AntiTamperGuard, DetectionEngine, ScoringEngine
+- All tests run in < 5 seconds

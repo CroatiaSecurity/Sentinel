@@ -2,7 +2,7 @@
 
 Real-time endpoint detection and response for Windows. Runs as a background service, monitors system behavior, and kills threats automatically when multiple signals correlate.
 
-**Current version: 1.4.5**
+**Current version: 1.4.6**
 
 ---
 
@@ -54,13 +54,26 @@ Full transparency in [THREAT_MODEL.md](THREAT_MODEL.md).
 
 ## How it works
 
-1. **Monitors** — 50+ background monitors observe process creation, network connections, file changes, registry modifications, hardware state, and credentials via ETW, WMI, and native APIs.
+1. **Unified ETW Session** — A single real-time kernel trace session subscribes to 9 Windows providers (Kernel-Process, Kernel-File, Kernel-Registry, DNS-Client, Threat-Intelligence, PowerShell, Firewall, TaskScheduler, Kernel-Network). Detection latency is ~50ms — fast enough to catch droppers that execute and exit in under a second.
 
-2. **Detection engine** — Events are scored and classified into tiers. Tier 1 (behavioral) signals are high-confidence. Tier 2 (indicator) signals are corroborating evidence.
+2. **Monitors** — 50+ background monitors consume ETW telemetry and perform additional analysis (behavioral baselines, statistical beaconing detection, memory scanning, hardware state checks). Monitors that previously polled every 5-30 seconds now react instantly via ETW events.
 
-3. **Correlation** — Multiple signals on the same process within 120 seconds produce a composite detection. Single signals rarely kill on their own.
+3. **Detection engine** — Events are scored by the multi-factor ScoringEngine and classified into tiers. Tier 1 (behavioral) signals are high-confidence. Tier 2 (indicator) signals are corroborating evidence. Rules declare their detection category at compile time via attributes.
 
-4. **Response** — Authorized responses range from log-only to process termination, quarantine, and network isolation. Only corroborated threats get killed.
+4. **Correlation** — The BehavioralCorrelationEngine evaluates multi-signal composites on the same process within 60 seconds. 10 composite patterns (Injected C2 Beacon, Active Ransomware Chain, Credential Dump + Exfiltration, etc.) produce kill-authorized detections with 0.90-0.99 confidence.
+
+5. **Response** — Authorized responses range from log-only to process termination, quarantine, network isolation, certificate removal, and persistence cleanup. The ChainTracer walks the parent process tree, quarantines attack-root binaries, and removes persistence (Run keys, scheduled tasks). Only corroborated threats get killed.
+
+6. **Reputation** — The FileReputationEngine queries 3 sources (CIRCL, MalwareBazaar, VirusTotal via Cloudflare Worker proxy) and combines hash reputation with static PE analysis, signer trust, and contextual risk into a composite 0-100 score.
+
+---
+
+## Test Suite
+
+299 automated tests (xUnit), all passing in < 5 seconds:
+- End-to-end integration tests (full pipeline: telemetry → detection → scoring → correlation → response)
+- Unit tests for all critical engines (Response, Correlation, ChainTracer, FileReputation, AntiTamper, Detection)
+- Run with `dotnet test`
 
 ---
 
@@ -82,6 +95,7 @@ Requirements:
 |----------|-------------|
 | [CHANGELOG.md](CHANGELOG.md) | Full version history and security fixes |
 | [THREAT_MODEL.md](THREAT_MODEL.md) | What Sentinel can and cannot detect, bypass scenarios, confidence levels |
+| [SECURITY.md](SECURITY.md) | Vulnerability reporting and responsible disclosure |
 | [design.md](design.md) | Architecture and technical design |
 | [architecture-council.md](architecture-council.md) | Detailed architecture specification |
 | [constraints.md](constraints.md) | Hard rules and design constraints |

@@ -10,12 +10,14 @@
  *   POST /report/hash    — Report a malicious hash to MalwareBazaar
  *   POST /report/url     — Report a malicious URL to URLhaus
  *   POST /report/ip      — Report a malicious IP to AbuseIPDB
+ *   POST /lookup/vt      — Lookup a SHA-256 hash on VirusTotal (proxied)
  *   GET  /health         — Health check
  * 
  * Deploy: wrangler deploy
  * Secrets: wrangler secret put MALWAREBAZAAR_KEY
  *          wrangler secret put URLHAUS_TOKEN
  *          wrangler secret put ABUSEIPDB_KEY
+ *          wrangler secret put VIRUSTOTAL_KEY
  */
 
 export default {
@@ -117,6 +119,9 @@ export default {
         case '/report/ip':
           result = await reportIp(body, env);
           break;
+        case '/lookup/vt':
+          result = await lookupVirusTotal(body, env);
+          break;
         default:
           return new Response(JSON.stringify({ error: 'Unknown endpoint' }), {
             status: 404,
@@ -217,6 +222,69 @@ async function reportIp(body, env) {
 
   const text = await response.text();
   return { success: response.ok, upstream: text.substring(0, 500) };
+}
+
+/**
+ * Lookup a SHA-256 hash on VirusTotal v3 API (proxied — API key held server-side).
+ * Body: { type: "hash", value: "sha256hex" }
+ * Returns: { success: true, verdict: "safe"|"suspicious"|"malicious"|"not_found", detections: N, engines: N }
+ */
+async function lookupVirusTotal(body, env) {
+  if (!env.VIRUSTOTAL_KEY) {
+    return { success: false, error: 'VirusTotal API key not configured' };
+  }
+
+  const hash = body.value;
+  if (!hash || hash.length !== 64 || !/^[a-fA-F0-9]+$/.test(hash)) {
+    return { success: false, error: 'Invalid SHA-256 hash' };
+  }
+
+  try {
+    const response = await fetch(`https://www.virustotal.com/api/v3/files/${hash}`, {
+      method: 'GET',
+      headers: {
+        'x-apikey': env.VIRUSTOTAL_KEY,
+        'Accept': 'application/json'
+      }
+    });
+
+    if (response.status === 404) {
+      return { success: true, verdict: 'not_found', detections: 0, engines: 0 };
+    }
+
+    if (!response.ok) {
+      return { success: false, error: `VT API returned ${response.status}` };
+    }
+
+    const data = await response.json();
+    const stats = data?.data?.attributes?.last_analysis_stats;
+    if (!stats) {
+      return { success: true, verdict: 'not_found', detections: 0, engines: 0 };
+    }
+
+    const malicious = stats.malicious || 0;
+    const suspicious = stats.suspicious || 0;
+    const undetected = stats.undetected || 0;
+    const harmless = stats.harmless || 0;
+    const totalEngines = malicious + suspicious + undetected + harmless;
+    const detectionCount = malicious + suspicious;
+    const detectionRate = totalEngines > 0 ? detectionCount / totalEngines : 0;
+
+    let verdict = 'safe';
+    if (detectionRate >= 0.25) verdict = 'malicious';
+    else if (detectionRate >= 0.10) verdict = 'suspicious';
+    else if (detectionCount >= 3) verdict = 'suspicious';
+
+    return {
+      success: true,
+      verdict,
+      detections: detectionCount,
+      engines: totalEngines,
+      detectionRate: Math.round(detectionRate * 100) / 100
+    };
+  } catch (err) {
+    return { success: false, error: `VT lookup failed: ${err.message}` };
+  }
 }
 
 /**

@@ -5,6 +5,7 @@ using System.Linq;
 
 namespace WindowsSentinel.Core
 {
+    [RuleCategory(DetectionCategory.CredentialDump)]
     public class LsassAccessRule : IDetectionRule
     {
         public string Name => "LsassAccessRule";
@@ -37,6 +38,7 @@ namespace WindowsSentinel.Core
         }
     }
 
+    [RuleCategory(DetectionCategory.Ransomware)]
     public class RansomwareDetectionRule : IDetectionRule
     {
         public string Name => "RansomwareDetectionRule";
@@ -92,6 +94,7 @@ namespace WindowsSentinel.Core
         }
     }
 
+    [RuleCategory(DetectionCategory.ReverseShell)]
     public class ReverseShellRule : IDetectionRule
     {
         public string Name => "ReverseShellRule";
@@ -154,6 +157,7 @@ namespace WindowsSentinel.Core
         }
     }
 
+    [RuleCategory(DetectionCategory.ProcessInjection)]
     public class ThreatIntelInjectionRule : IDetectionRule
     {
         public string Name => "ThreatIntelInjectionRule";
@@ -213,6 +217,7 @@ namespace WindowsSentinel.Core
         }
     }
 
+    [RuleCategory(DetectionCategory.PrivilegeEscalation)]
     public class PrivilegeEscalationRule : IDetectionRule
     {
         public string Name => "PrivilegeEscalationRule";
@@ -289,6 +294,7 @@ namespace WindowsSentinel.Core
         }
     }
 
+    [RuleCategory(DetectionCategory.SecurityEvasion)]
     public class AttackToolsRule : IDetectionRule
     {
         public string Name => "AttackToolsRule";
@@ -476,6 +482,7 @@ namespace WindowsSentinel.Core
         }
     }
 
+    [RuleCategory(DetectionCategory.CampaignIoC)]
     public class CampaignIocRule : IDetectionRule
     {
         public string Name => "CampaignIocRule";
@@ -546,6 +553,7 @@ namespace WindowsSentinel.Core
         }
     }
 
+    [RuleCategory(DetectionCategory.UnsignedBinary)]
     public class UnsignedBinaryRule : IDetectionRule
     {
         public string Name => "UnsignedBinaryRule";
@@ -619,6 +627,7 @@ namespace WindowsSentinel.Core
         }
     }
 
+    [RuleCategory(DetectionCategory.AntiTamper)]
     public class VerdictGateRule : IDetectionRule
     {
         public string Name => "VerdictGateRule";
@@ -685,6 +694,7 @@ namespace WindowsSentinel.Core
         }
     }
 
+    [RuleCategory(DetectionCategory.ReverseShell)]
     public class ClickFixDetectionRule : IDetectionRule
     {
         public string Name => "ClickFixDetectionRule";
@@ -740,6 +750,7 @@ namespace WindowsSentinel.Core
         }
     }
 
+    [RuleCategory(DetectionCategory.CredentialDump)]
     public class ChromeRemoteDebuggingRule : IDetectionRule
     {
         public string Name => "ChromeRemoteDebuggingRule";
@@ -789,6 +800,7 @@ namespace WindowsSentinel.Core
         }
     }
 
+    [RuleCategory(DetectionCategory.ProcessInjection)]
     public class DllSideloadingDetectionRule : IDetectionRule
     {
         public string Name => "DllSideloadingDetectionRule";
