@@ -55,7 +55,7 @@ This document assumes the attacker has read the source code.
 | DllLoadFailureMonitor | Watches event log for suspicious load failures |
 | ModuleValidationMonitor | Checks loaded DLL integrity via hash |
 | RuntimeModuleIntegrityMonitor | Verifies loaded module paths |
-| ScriptExecutionMonitor | PowerShell/WMI/MSHTA/LOLBin detection |
+| ScriptExecutionMonitor | PowerShell/WMI/AMSI bypass/SAM extraction/script drops |
 
 ### Group 3: Network Integrity
 | Monitor | Purpose |
@@ -273,15 +273,20 @@ Hard-to-bypass detections (require kernel access to evade):
 | Credential canary (honeypot) | HIGH | HIGH |
 | Parent PID spoofing | HIGH | HIGH |
 | Phantom keystrokes (SendInput) | HIGH | HIGH |
+| Parent-child anomaly (Office→shell) | HIGH | HIGH |
+| SAM hive extraction (reg save) | HIGH | HIGH |
 | LSASS dump (dbghelp.dll load) | HIGH | MEDIUM |
 | Syscall stub integrity | HIGH | MEDIUM |
 | Token integrity escalation | HIGH | MEDIUM |
 | Process injection (ETW ThreatIntel) | HIGH | MEDIUM |
 | Credential Guard disablement | HIGH | MEDIUM |
 | Hardware security downgrade | HIGH | MEDIUM |
+| AMSI bypass (amsi.dll unloaded) | HIGH | MEDIUM |
+| PowerShell Script Block patterns | HIGH | MEDIUM |
 | Memory behavior (RWX/shellcode) | MEDIUM | MEDIUM |
 | DNS DGA detection | MEDIUM | MEDIUM |
 | BadUSB/unauthorized HID | HIGH | MEDIUM |
+| Suspicious script file drops | MEDIUM | LOW |
 | C2 beaconing (statistical) | MEDIUM | LOW |
 | DNS tunneling | MEDIUM | LOW |
 | File entropy | LOW | LOW |
@@ -304,7 +309,7 @@ Hard-to-bypass detections (require kernel access to evade):
 
 See CHANGELOG.md for full history. Key fixes:
 
+- **v1.4.5:** LSA secret storage for auto-logon, Credential Guard monitoring, ScriptExecutionMonitor (PowerShell/AMSI/SAM/script drops), Tier1+Tier2 correlation fix, Agent code placement cleanup
 - **v1.4.4:** 15 red-team findings fixed (command injection, handle leaks, HMAC weakness, socket exhaustion, installer race conditions)
-- **v1.4.5:** Credential Guard monitoring, LSA secret protection, ScriptExecutionMonitor gaps closed
 - **v1.1.0:** Cache poisoning, process name spoofing, self-exclusion bypass
 - **v1.0.1:** RAM disk staging, WSL evasion, raw disk bypass, print spooler exfil, sandbox escape

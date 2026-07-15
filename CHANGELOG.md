@@ -10,23 +10,28 @@ Critical fixes for credential exposure and new detection coverage for script-bas
 
 ### Fixed (Security)
 
-- **[CRITICAL] Auto-logon password stored in plaintext** (`PasswordRotationGuard`): Previously wrote the rotated password as `DefaultPassword` in `HKLM\...\Winlogon` — readable by any admin process via `reg query`. Now uses `LsaStorePrivateData` API to store as an LSA secret (encrypted with system boot key, only readable by SYSTEM). Plaintext `DefaultPassword` registry value is explicitly deleted.
-- **[HIGH] Auto-logon requiring "press Enter"** (`PasswordRotationGuard`): Added `ForceAutoLogon=1`, `DisableCAD=1`, removed `AutoLogonCount` and `LegalNoticeCaption`/`LegalNoticeText` values that blocked seamless login on Windows 10/11 builds.
-- **[HIGH] Behavioral correlation only receiving Tier2 signals** (`DetectionEngine`): Previously only `Tier2Indicator` detections were fed to `BehavioralCorrelationEngine`. Tier1 detections (kills) never entered correlation, meaning composite patterns like "Injected C2 Beacon" (injection + C2 on same PID) could never fire. Now ALL detections feed into correlation regardless of tier.
+- **[CRITICAL] Auto-logon password stored in plaintext** (`PasswordRotationGuard`): Previously wrote the rotated password as `DefaultPassword` in `HKLM\...\Winlogon` — readable by any admin process via `reg query`. Now uses `LsaStorePrivateData` API to store as an LSA secret (encrypted with system boot key, only readable by SYSTEM). Plaintext `DefaultPassword` registry value is explicitly deleted on every rotation.
+- **[HIGH] Auto-logon requiring user interaction** (`PasswordRotationGuard`): Added `ForceAutoLogon=1`, `DisableCAD=1` (disables Ctrl+Alt+Del), and removes `AutoLogonCount`, `LegalNoticeCaption`, and `LegalNoticeText` values that blocked seamless login on Windows 10/11 builds. Boot/restart now logs in automatically without any user input.
+- **[HIGH] Behavioral correlation only receiving Tier2 signals** (`DetectionEngine`): Previously only `Tier2Indicator` detections were fed to `BehavioralCorrelationEngine`. Tier1 behavioral detections never entered correlation, meaning composite patterns like "Injected C2 Beacon" (injection + C2 on same PID) could never fire. Now both Tier1 and Tier2 detections feed into correlation.
+- **[MEDIUM] Agent running SYSTEM-only components** (`Agent/Program.cs`): Removed `ConsultantSignalIngestor` (duplicate of Service-side registration, caused double event processing) and `PseudoSandbox` (requires SYSTEM privileges for Job Objects, cannot function in user session) from the Agent. These now run exclusively in the Service.
 
 ### Added
 
-- **`ScriptExecutionMonitor`** (`Monitors/ScriptExecutionMonitor.cs`): New comprehensive monitor covering 5 previously undetected attack vectors:
-  1. **PowerShell Script Block Logging (Event ID 4104)** — catches obfuscated/deobfuscated script content even when command-line looks benign. Confidence scales with pattern count (1 pattern = 0.55, 5+ = 0.95). Tier1 kill on AMSI bypass, credential, or Sentinel-targeting patterns.
-  2. **Parent-child process anomaly detection** — Office→shells, wmiprvse/wmiadap→shells, svchost→suspicious interpreters, taskeng/taskhostw→LOLBins, services→shells, explorer→LOLBins. All fire Tier1 + KillProcessTree.
-  3. **AMSI bypass detection** — monitors amsi.dll on-disk hash integrity AND checks if PowerShell processes have amsi.dll unloaded (FreeLibrary bypass). Tier1 kill on module absence.
+- **`ScriptExecutionMonitor`** (`ScriptExecutionMonitor.cs`): New comprehensive monitor covering 5 previously undetected attack vectors:
+  1. **PowerShell Script Block Logging (Event ID 4104)** — catches deobfuscated script content even when command-line looks benign. Confidence scales with pattern count (1 pattern = 0.55, 5+ = 0.95). Tier1 kill on AMSI bypass, credential theft, or Sentinel-targeting patterns.
+  2. **Parent-child process anomaly detection** — Office→shells, wmiprvse/wmiadap→shells, taskeng/taskhostw→LOLBins, services→shells, explorer→LOLBins. All fire Tier1 + KillProcessTree.
+  3. **AMSI bypass detection** — checks if PowerShell processes have amsi.dll unloaded (FreeLibrary bypass). Tier1 kill on module absence.
   4. **SAM hive extraction** — detects `reg.exe save HKLM\SAM/SECURITY/SYSTEM` commands. Tier1 kill.
-  5. **Suspicious script file drops** — monitors user-writable directories for .ps1/.vbs/.bat/.cmd/.hta/.js creation. Content-analyzed for malicious patterns. Tier1 quarantine if content matches.
+  5. **Suspicious script file drops** — monitors user-writable directories (Temp, Downloads, AppData) for .ps1/.vbs/.bat/.cmd/.hta/.js creation. Content-analyzed for malicious patterns. Tier1 quarantine if 3+ patterns match.
+
+- **`PhysicalAccessMonitor`** (`PhysicalAccessMonitor.cs`): Detects physical tampering by correlating idle periods with hardware changes. Monitors user idle time via `GetLastInputInfo`, and when the user returns from 2+ minutes idle, checks for new USB devices, new Bluetooth devices, and new logon sessions. Multiple anomalies raise confidence from 0.55 to 0.75. Registered in Group 6 (Peripheral).
+
+- **Credential Guard monitoring** (`HardwareSecurityGuard`): Added `CheckCredentialGuardAsync()` that detects if Windows Credential Guard (VBS-based LSA isolation) is disabled. Checks LsaIso.exe process presence and `LsaCfgFlags` registry value. Alerts if Credential Guard was expected but is no longer active.
+
+- **`ProxySharedSecret`** property on `ThreatReportingConfig`: Allows configuring the HMAC shared secret for proxy authentication via `appsettings.json` under `Sentinel:ThreatReporting:ProxySharedSecret`.
 
 ### Changed
 
-- **Monitor file organization**: Consolidated all remaining standalone monitor files into grouped files. Agent-only monitors (ClickjackingGuard, WebcamHijackMonitor, ClipboardSanitizer, ShellWatchdog) merged into `Monitors/UserSessionMonitors.cs`. All `BackgroundService` monitors now live exclusively in the `Monitors/` subdirectory — no standalone monitor files remain at the Core root.
-- **`AllowUnsafeBlocks` enabled** in Core.csproj for secure memory zeroing of LSA password buffers.
 - **wmiadap.exe** added to parent-child anomaly detection alongside wmiprvse.exe (WMI Performance Adapter can also be abused for execution).
 
 ---
