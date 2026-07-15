@@ -831,6 +831,14 @@ namespace WindowsSentinel.Core
                 winlogon.SetValue("DefaultUserName", username, RegistryValueKind.String);
                 winlogon.SetValue("DefaultDomainName", Environment.MachineName, RegistryValueKind.String);
 
+                // Disable Ctrl+Alt+Del requirement — needed for seamless auto-logon
+                winlogon.SetValue("DisableCAD", 1, RegistryValueKind.DWord);
+
+                // Remove values that block seamless auto-logon
+                winlogon.DeleteValue("AutoLogonCount", throwOnMissingValue: false);
+                winlogon.DeleteValue("LegalNoticeCaption", throwOnMissingValue: false);
+                winlogon.DeleteValue("LegalNoticeText", throwOnMissingValue: false);
+
                 // SECURITY FIX (v1.4.5): Store password as LSA secret instead of plaintext registry value.
                 // Remove any plaintext DefaultPassword that may exist from prior versions.
                 winlogon.DeleteValue("DefaultPassword", throwOnMissingValue: false);

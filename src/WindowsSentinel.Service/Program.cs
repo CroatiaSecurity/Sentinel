@@ -215,6 +215,7 @@ namespace WindowsSentinel.Service
                             sp.GetRequiredService<PersistentConnectionMonitor>(),
                             sp.GetRequiredService<DataExfiltrationMonitor>(),
                             sp.GetRequiredService<AdsDataStagingMonitor>(),
+                            sp.GetRequiredService<ScriptExecutionMonitor>(),
                         };
                         return new MonitorGroup(
                             new MonitorGroupConfig
@@ -240,6 +241,7 @@ namespace WindowsSentinel.Service
                     services.AddSingleton<DiskWideDllScanner>();
                     services.AddSingleton<DataExfiltrationMonitor>();
                     services.AddSingleton<AdsDataStagingMonitor>();
+                    services.AddSingleton<ScriptExecutionMonitor>();
 
                     // ── Group 3: Credential Protection ────────────────────────────────
                     // Starts after core detection (4s). Protects credentials and sessions.
