@@ -2,6 +2,20 @@
  
 All notable changes to Windows Sentinel are documented in this file.
 
+## [1.4.8] - 2026-07-16
+
+### Security — Double-Dispose Crash Fix
+
+**[HIGH] ContextBus double-dispose crash** (`ContextBus.Dispose()`): The DI container called `ContextBus.Dispose()` after `SentinelOrchestrator.Dispose()` had already disposed it. Calling `CancellationTokenSource.Cancel()` on an already-disposed CTS threw `ObjectDisposedException` — unhandled — crashing the process. Combined with SCM failure recovery, this created a crash-loop on any service shutdown.
+
+### Fixed
+
+- **ContextBus**: Added `_disposed` guard flag to `Dispose()`. Second call is a no-op. Wrapped `_cts.Cancel()` and `_cts.Dispose()` in `try/catch (ObjectDisposedException)` as defense-in-depth.
+- **DetectionEngine**: Added `_stopped` guard flag to `Stop()`. Wrapped `_cts.Cancel()` in `try/catch (ObjectDisposedException)`. Prevents crash when DI container disposes after explicit `Stop()` call.
+- **Result**: Service now survives double-disposal from DI container + orchestrator shutdown sequence. No crash-loop on any shutdown path.
+
+---
+
 ## [1.4.7] - 2026-07-16
 
 ### Security — Service Crash-Loop Vulnerability Fix

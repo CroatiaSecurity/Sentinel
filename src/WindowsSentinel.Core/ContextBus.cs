@@ -335,11 +335,15 @@ namespace WindowsSentinel.Core
 
         public void Dispose()
         {
-            _cts.Cancel();
+            if (_disposed) return;
+            _disposed = true;
+            try { _cts.Cancel(); } catch (ObjectDisposedException) { }
             _publishChannel.Writer.TryComplete();
             try { _dispatchTask.Wait(TimeSpan.FromSeconds(2)); } catch { }
-            _cts.Dispose();
+            try { _cts.Dispose(); } catch (ObjectDisposedException) { }
         }
+
+        private volatile bool _disposed;
 
         // ═══════════════════════════════════════════════════════════════
         // Internal Types

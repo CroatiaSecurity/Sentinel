@@ -330,12 +330,16 @@ namespace WindowsSentinel.Core
 
         public void Stop()
         {
-            _cts.Cancel();
+            if (_stopped) return;
+            _stopped = true;
+            try { _cts.Cancel(); } catch (ObjectDisposedException) { }
             try
             {
                 _processingTask?.Wait(2000);
             }
             catch { }
         }
+
+        private volatile bool _stopped;
     }
 }
