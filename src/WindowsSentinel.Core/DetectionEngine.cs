@@ -105,6 +105,12 @@ namespace WindowsSentinel.Core
                             // If it is a process start, calculate process image hash and check reputations/IoCs asynchronously
                             if (context.TriggeringEvent is ProcessTelemetry pt)
                             {
+                                // SECURITY v1.4.6: Capture token into local variable to prevent
+                                // ObjectDisposedException when CTS is disposed during shutdown.
+                                // Previously, accessing _cts.Token after Stop() caused unhandled
+                                // exceptions that crashed the service — an attacker could exploit
+                                // this by triggering rapid stop/start cycles to keep Sentinel down.
+                                var ct = _cts.Token;
                                 _ = Task.Run(async () =>
                                 {
                                     try
@@ -127,7 +133,7 @@ namespace WindowsSentinel.Core
                                                 return;
 
                                             // v1.3.1: Use multi-signal FileReputationEngine for on-execute verdicts
-                                            var repoResult = await _fileReputationEngine.EvaluateFileAsync(imagePath, _cts.Token);
+                                            var repoResult = await _fileReputationEngine.EvaluateFileAsync(imagePath, ct);
 
                                             // Also check local IoC cache for immediate known-bad
                                             string hash = repoResult.Sha256;
@@ -211,11 +217,12 @@ namespace WindowsSentinel.Core
                                         }
                                     }
                                     catch (OperationCanceledException) { }
+                                    catch (ObjectDisposedException) { } // CTS disposed during shutdown — safe to ignore
                                     catch (Exception ex)
                                     {
                                         _logger.LogError(ex, "[DetectionEngine] Error checking process reputation for {ProcessName} (PID {ProcessId})", pt.ProcessName, pt.ProcessId);
                                     }
-                                }, _cts.Token);
+                                }, ct);
                             }
 
                             foreach (var rule in _rules)
@@ -248,6 +255,10 @@ namespace WindowsSentinel.Core
             catch (OperationCanceledException)
             {
                 // Normal shutdown
+            }
+            catch (ObjectDisposedException)
+            {
+                // CTS disposed during shutdown — safe to exit
             }
             catch (Exception ex)
             {

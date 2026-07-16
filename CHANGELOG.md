@@ -2,6 +2,20 @@
  
 All notable changes to Windows Sentinel are documented in this file.
 
+## [1.4.7] - 2026-07-16
+
+### Security — Service Crash-Loop Vulnerability Fix
+
+**[HIGH] CancellationTokenSource disposal race condition** (`DetectionEngine`, `ContextBus`): The service crashed with `ObjectDisposedException` when background reputation-check tasks accessed `_cts.Token` after the CancellationTokenSource was disposed during shutdown. This created a crash-loop (service dies → SCM restarts → dies again in ~20s) that left the system unprotected. An attacker triggering a service stop could exploit this to keep Sentinel offline indefinitely.
+
+### Fixed
+
+- **DetectionEngine**: Fire-and-forget reputation tasks now capture `_cts.Token` into a local variable before spawning. The local copy is a value-type snapshot that remains valid after CTS disposal. Added `catch (ObjectDisposedException)` to both the main processing loop and reputation task error handlers.
+- **ContextBus**: Added `catch (ObjectDisposedException)` to the dispatch loop to prevent cascading crash on shutdown.
+- **Result**: Service now shuts down cleanly without crash-loop. SCM restart after a legitimate stop succeeds on first attempt.
+
+---
+
 ## [1.4.6] - 2026-07-15
 
 ### Architecture — Unified ETW Session & Event-Driven Telemetry

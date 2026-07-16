@@ -290,6 +290,7 @@ namespace WindowsSentinel.Core
                 }
             }
             catch (OperationCanceledException) { }
+            catch (ObjectDisposedException) { } // CTS disposed during shutdown
             catch (Exception ex)
             {
                 _logger.LogError(ex, "[ContextBus] Critical dispatch loop failure");
