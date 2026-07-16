@@ -241,7 +241,10 @@ namespace WindowsSentinel.Core
 
             var dataOut = new DATA_BLOB();
             var entropy = new DATA_BLOB();
-            var prompt = new CRYPTPROTECT_PROMPTSTRUCT();
+            var prompt = new CRYPTPROTECT_PROMPTSTRUCT
+            {
+                cbSize = Marshal.SizeOf<CRYPTPROTECT_PROMPTSTRUCT>()
+            };
 
             try
             {
@@ -270,7 +273,10 @@ namespace WindowsSentinel.Core
 
             var dataOut = new DATA_BLOB();
             var entropy = new DATA_BLOB();
-            var prompt = new CRYPTPROTECT_PROMPTSTRUCT();
+            var prompt = new CRYPTPROTECT_PROMPTSTRUCT
+            {
+                cbSize = Marshal.SizeOf<CRYPTPROTECT_PROMPTSTRUCT>()
+            };
 
             try
             {

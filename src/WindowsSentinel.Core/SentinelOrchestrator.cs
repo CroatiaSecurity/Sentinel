@@ -251,11 +251,11 @@ namespace WindowsSentinel.Core
 
         public void Dispose()
         {
-            _backpressureTimer.Dispose();
-            _incidentManager.Dispose();
-            _monitorRegistry.Dispose();
-            _contextBus.Dispose();
-            _responseCoordinator.Dispose();
+            try { _backpressureTimer.Dispose(); } catch { }
+            try { _incidentManager.Dispose(); } catch { }
+            try { _monitorRegistry.Dispose(); } catch { }
+            try { _contextBus.Dispose(); } catch { }
+            try { _responseCoordinator.Dispose(); } catch { }
         }
     }
 

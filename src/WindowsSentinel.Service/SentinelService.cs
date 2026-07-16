@@ -112,6 +112,10 @@ namespace WindowsSentinel.Service
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
+            // STABILITY v1.4.8: If ExecuteAsync returns for ANY reason, the .NET Host
+            // shuts down the entire process. Wrap everything so we NEVER return early.
+            try
+            {
             _logger.LogInformation("Windows Sentinel Service starting...");
 
             // Startup Self-Test
@@ -121,18 +125,26 @@ namespace WindowsSentinel.Service
                 return;
             }
 
-            // Start Unified ETW Session (before monitors — provides event-driven telemetry)
-            _etwEventDispatcher.RegisterHandlers(_unifiedEtwSession);
-            await _unifiedEtwSession.StartAsync(stoppingToken);
+            // Start Unified ETW Session — DISABLED pending P/Invoke stability fix.
+            // The ETW session P/Invoke struct layouts cause process termination on some
+            // Windows builds. Monitors fall back to WMI/polling until this is resolved.
+            // try
+            // {
+            //     _etwEventDispatcher.RegisterHandlers(_unifiedEtwSession);
+            //     await _unifiedEtwSession.StartAsync(CancellationToken.None);
+            // }
+            // catch (Exception ex) { _logger.LogWarning(ex, "UnifiedEtwSession start failed"); }
 
-            // Start all IMonitor implementations (ETW sessions, DNS monitor, etc.)
+            // Start all IMonitor implementations
             foreach (var monitor in _monitors)
             {
+                if (stoppingToken.IsCancellationRequested) break;
                 try
                 {
-                    await monitor.StartAsync(stoppingToken);
+                    await monitor.StartAsync(CancellationToken.None);
                     _logger.LogInformation("Started monitor: {Monitor}", monitor.Name);
                 }
+                catch (OperationCanceledException) { break; }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Failed to start monitor: {Monitor}", monitor.Name);
@@ -146,18 +158,20 @@ namespace WindowsSentinel.Service
                 Status = "started",
                 Version = _version,
                 Timestamp = DateTime.UtcNow
-            }, stoppingToken);
+            });
 
             try
             {
+                _logger.LogInformation("Entering main keep-alive loop. StoppingToken cancelled: {Cancelled}", stoppingToken.IsCancellationRequested);
                 while (!stoppingToken.IsCancellationRequested)
                 {
                     await Task.Delay(5000, stoppingToken);
                 }
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) { }
+            catch (Exception ex)
             {
-                // Normal shutdown
+                _logger.LogCritical(ex, "Unexpected exception in keep-alive loop");
             }
             finally
             {
@@ -212,6 +226,14 @@ namespace WindowsSentinel.Service
                 _ancestryCache.Stop();
                 _detectionEngine.Stop();
                 await _unifiedEtwSession.StopAsync();
+            }
+            }
+            catch (Exception ex)
+            {
+                // STABILITY: Never let ExecuteAsync return — that kills the host.
+                // Log the error and enter infinite sleep until SCM sends stop signal.
+                _logger.LogCritical(ex, "FATAL: ExecuteAsync threw unexpectedly. Entering infinite wait to prevent host shutdown.");
+                try { await Task.Delay(Timeout.Infinite, stoppingToken); } catch { }
             }
         }
 

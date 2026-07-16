@@ -337,10 +337,15 @@ namespace WindowsSentinel.Core
         {
             if (_disposed) return;
             _disposed = true;
-            try { _cts.Cancel(); } catch (ObjectDisposedException) { }
-            _publishChannel.Writer.TryComplete();
+            try
+            {
+                if (!_cts.IsCancellationRequested)
+                    _cts.Cancel();
+            }
+            catch { }
+            try { _publishChannel.Writer.TryComplete(); } catch { }
             try { _dispatchTask.Wait(TimeSpan.FromSeconds(2)); } catch { }
-            try { _cts.Dispose(); } catch (ObjectDisposedException) { }
+            try { _cts.Dispose(); } catch { }
         }
 
         private volatile bool _disposed;

@@ -141,7 +141,10 @@ namespace WindowsSentinel.Core
         {
             if (!_config.Enabled || _config.ProtectedApps.Count == 0)
             {
-                _logger.LogInformation("[ApplicationIntegrityMonitor] Disabled or no apps configured. Exiting.");
+                _logger.LogInformation("[ApplicationIntegrityMonitor] Disabled or no apps configured. Sleeping indefinitely.");
+                // STABILITY v1.4.8: Do NOT return — a completed BackgroundService task
+                // triggers host shutdown in .NET 6+. Sleep until cancellation instead.
+                try { await Task.Delay(Timeout.Infinite, ct); } catch (OperationCanceledException) { }
                 return;
             }
 

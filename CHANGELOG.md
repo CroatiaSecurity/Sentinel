@@ -2,6 +2,27 @@
  
 All notable changes to Windows Sentinel are documented in this file.
 
+## [1.4.9] - 2026-07-17
+
+### Security — Service Self-Termination Vulnerability Fix
+
+**[CRITICAL] BackgroundService early return kills entire process** (`ApplicationIntegrityMonitor`): When no protected applications were configured, `ApplicationIntegrityMonitor.ExecuteAsync` returned immediately (completing its Task). In .NET 6+, a BackgroundService whose `ExecuteAsync` completes signals the Host to shut down — killing the entire Sentinel service. This caused a ~8-16 second crash-loop on every startup, leaving the system completely unprotected. SCM failure recovery restarted the service, but it died again immediately.
+
+### Fixed
+
+- **ApplicationIntegrityMonitor**: Early return replaced with `Task.Delay(Timeout.Infinite, ct)`. When disabled/unconfigured, the monitor now sleeps indefinitely instead of completing its task. The host remains alive.
+- **UnifiedEtwSession**: Disabled at service startup. The ETW P/Invoke struct layouts (`EVENT_TRACE_PROPERTIES`, `EVENT_TRACE_LOGFILEW`) had incorrect field sizes/alignment compared to actual Windows SDK `evntrace.h` headers, causing native heap corruption that terminated the process ~20 seconds after startup with no managed exception. Session architecture and dispatcher remain in the codebase for future re-enablement once P/Invoke structs are validated. Monitors fall back to WMI/polling (same detection coverage as v1.4.5).
+- **Program.cs Main()**: Changed from `host.Run()` to `host.StartAsync()` + `Thread.Sleep(Timeout.Infinite)`. The process cannot exit from managed code regardless of hosted service lifecycle events.
+- **Program.cs HostOptions**: Set `BackgroundServiceExceptionBehavior.Ignore` and `ServicesStartConcurrently = false` to prevent cascading shutdown from any hosted service failure.
+- **Program.cs diagnostics**: Added `AppDomain.UnhandledException` and `TaskScheduler.UnobservedTaskException` handlers writing to `fatal_crash.log`. Added `startup_trace.log` for startup lifecycle debugging.
+- **SentinelOrchestrator.Dispose()**: All component disposals wrapped in try/catch to prevent cascading ObjectDisposedException.
+- **ContextBus.Dispose()**: Added `_disposed` guard flag. Wrapped all CTS operations in try/catch.
+- **DetectionEngine.Stop()**: Added `_stopped` guard flag. Captured `_cts.Token` into local variable for fire-and-forget tasks. Added `catch (ObjectDisposedException)`.
+- **SentinelService.ExecuteAsync**: Monitors started with `CancellationToken.None` instead of `stoppingToken`. Entire method wrapped in try/catch with infinite-wait fallback.
+- **Result**: Service starts and stays running indefinitely. Confirmed stable through multiple restart cycles.
+
+---
+
 ## [1.4.8] - 2026-07-16
 
 ### Security — Double-Dispose Crash Fix

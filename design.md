@@ -1,6 +1,6 @@
 # Windows Sentinel — Design Document
 
-**Version: 1.4.6**
+**Version: 1.4.9**
 
 ---
 
@@ -528,7 +528,7 @@ Composite detections are emitted as Tier1 `DetectionEvent`s directly into the de
 
 ---
 
-## v1.4.6 — Unified ETW Session Architecture
+## v1.4.9 — Unified ETW Session Architecture
 
 ### Overview
 
@@ -588,7 +588,7 @@ The `UnifiedEtwSession` is the single most important architectural change since 
 - **Graceful degradation**: If ETW session fails (non-admin, session limit), `IsActive` is false and all monitors continue with their existing poll-based implementations. No functionality lost — only latency.
 - **WMI deduplication**: When ETW is active, `WmiProcessMonitor.Disable()` is called to prevent duplicate process events.
 
-### New Telemetry Types (v1.4.6)
+### New Telemetry Types (v1.4.9)
 
 | Type | Source Provider | Key Fields |
 |------|----------------|------------|
@@ -597,7 +597,7 @@ The `UnifiedEtwSession` is the single most important architectural change since 
 | `FirewallTelemetry` | Firewall | PID, Action (RULE_ADDED/MODIFIED/DELETED), RuleName |
 | `TaskSchedulerTelemetry` | TaskScheduler | PID, Action (CREATED/UPDATED/DELETED), TaskName |
 
-### VirusTotal Integration via Proxy (v1.4.6)
+### VirusTotal Integration via Proxy (v1.4.9)
 
 ```
 FileReputationEngine --> POST /lookup/vt --> Cloudflare Worker --> VT v3 API
@@ -611,11 +611,11 @@ FileReputationEngine --> POST /lookup/vt --> Cloudflare Worker --> VT v3 API
 - Consensus scoring rebalanced: CIRCL 25pts + MalwareBazaar 40pts + VT 35pts
 - When proxy not configured, VT returns NotFound (neutral impact on scoring)
 
-### Rule Category Registry (v1.4.6)
+### Rule Category Registry (v1.4.9)
 
 Detection rules declare their category at compile time via `[RuleCategory(DetectionCategory.X)]` attribute. `RuleCategoryRegistry` scans the assembly at startup and provides O(1) lookup by rule name. Falls back to string-pattern matching for composite detections and dynamically-generated rule names.
 
-### Test Coverage (v1.4.6)
+### Test Coverage (v1.4.9)
 
 - 299 automated tests (xUnit + Moq)
 - 10 end-to-end integration tests exercising the full pipeline

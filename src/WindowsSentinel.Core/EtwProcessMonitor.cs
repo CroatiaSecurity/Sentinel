@@ -6,19 +6,16 @@ using Microsoft.Extensions.Logging;
 namespace WindowsSentinel.Core
 {
     /// <summary>
-    /// Process monitoring via ETW — now delegates to the UnifiedEtwSession.
+    /// Process monitoring via ETW — delegates to UnifiedEtwSession when active.
     /// 
-    /// ARCHITECTURE (v1.4.5):
-    /// This monitor no longer manages its own ETW session. Instead, UnifiedEtwSession
-    /// provides a single trace session subscribing to 9 providers simultaneously.
-    /// EtwEventDispatcher handles event routing and telemetry conversion.
+    /// When UnifiedEtwSession.IsActive is true:
+    ///   - ETW provides process events at ~50ms latency
+    ///   - WmiProcessMonitor is disabled to prevent duplicate events
     /// 
-    /// This monitor's role is now limited to:
-    ///   1. Checking if UnifiedEtwSession is active
-    ///   2. If active: disabling WmiProcessMonitor (prevent duplicate events)
-    ///   3. If inactive: ensuring WmiProcessMonitor provides fallback coverage
-    /// 
-    /// LATENCY: ~50ms via ETW (when active) vs ~1-2s via WMI fallback.
+    /// When UnifiedEtwSession.IsActive is false (current state):
+    ///   - WmiProcessMonitor provides fallback telemetry (~1-2s latency)
+    ///   - All detection rules and correlation still function identically
+    ///   - Only difference is detection latency, not coverage
     /// </summary>
     public sealed class EtwProcessMonitor : IMonitor
     {
@@ -42,17 +39,14 @@ namespace WindowsSentinel.Core
         {
             if (_unifiedSession.IsActive)
             {
-                // ETW session is providing events — disable WMI to prevent duplication
                 _wmiProcessMonitor?.Disable();
                 _logger.LogInformation(
-                    "[{Monitor}] UnifiedEtwSession is active. WMI fallback disabled. " +
-                    "Process events at ~50ms latency via Kernel-Process ETW provider.", Name);
+                    "[{Monitor}] UnifiedEtwSession active — process events at ~50ms. WMI disabled.", Name);
             }
             else
             {
-                _logger.LogWarning(
-                    "[{Monitor}] UnifiedEtwSession is NOT active. " +
-                    "WmiProcessMonitor provides fallback process telemetry (~1-2s latency).", Name);
+                _logger.LogInformation(
+                    "[{Monitor}] UnifiedEtwSession inactive — WmiProcessMonitor provides fallback (~1-2s).", Name);
             }
 
             return Task.CompletedTask;

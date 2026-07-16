@@ -1,5 +1,7 @@
 using System;
+using System.Threading;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -10,8 +12,18 @@ namespace WindowsSentinel.Service
 {
     public class Program
     {
-        public static void Main(string[] args)
+        public static async Task Main(string[] args)
         {
+            // DIAGNOSTIC: Write immediately on process start, before anything else
+            try
+            {
+                System.IO.File.AppendAllText(
+                    System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                        "WindowsSentinel", "startup_trace.log"),
+                    $"[{DateTime.UtcNow:O}] Main() entered. Args: {string.Join(" ", args)}\n");
+            }
+            catch { }
+
             // Apply DLL search path hardening early
             HardeningModule.ApplyOrFail();
 
@@ -26,7 +38,64 @@ namespace WindowsSentinel.Service
             if (responseEngine != null && correlator != null)
                 responseEngine.SetReinfectionCorrelator(correlator);
 
-            host.Run();
+            // DIAGNOSTIC v1.4.8: Log unhandled exceptions that kill the host.
+            // The service was dying after ~16 seconds with no crash trace — this
+            // catches whatever unobserved Task exception is triggering host shutdown.
+            AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+            {
+                var ex = e.ExceptionObject as Exception;
+                try
+                {
+                    var msg = $"[FATAL] UnhandledException in AppDomain: {ex?.GetType().Name}: {ex?.Message}\n{ex?.StackTrace}";
+                    System.IO.File.AppendAllText(
+                        System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                            "WindowsSentinel", "fatal_crash.log"),
+                        $"[{DateTime.UtcNow:O}] {msg}\n\n");
+                }
+                catch { }
+            };
+
+            TaskScheduler.UnobservedTaskException += (_, e) =>
+            {
+                try
+                {
+                    var msg = $"[UNOBSERVED] {e.Exception?.GetType().Name}: {e.Exception?.InnerException?.Message ?? e.Exception?.Message}\n{e.Exception?.InnerException?.StackTrace ?? e.Exception?.StackTrace}";
+                    System.IO.File.AppendAllText(
+                        System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                            "WindowsSentinel", "fatal_crash.log"),
+                        $"[{DateTime.UtcNow:O}] {msg}\n\n");
+                }
+                catch { }
+                e.SetObserved(); // Prevent process crash from unobserved tasks
+            };
+
+            // STABILITY v1.4.9: Use host.StartAsync() + manual infinite wait instead of host.Run().
+            // host.Run() returns when ANY hosted service task completes, killing the process.
+            // We start the host and then block Main forever — only SCM stop signal exits.
+            try
+            {
+                System.IO.File.AppendAllText(
+                    System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                        "WindowsSentinel", "startup_trace.log"),
+                    $"[{DateTime.UtcNow:O}] Calling host.StartAsync()...\n");
+            }
+            catch { }
+
+            await host.StartAsync();
+
+            try
+            {
+                System.IO.File.AppendAllText(
+                    System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                        "WindowsSentinel", "startup_trace.log"),
+                    $"[{DateTime.UtcNow:O}] host.StartAsync() completed. Blocking Main forever (ManualResetEvent)...\n");
+            }
+            catch { }
+
+            // Block Main() forever. NOTHING can make this return except process termination.
+            // This prevents the .NET Host's "BackgroundService completed → shutdown" behavior
+            // from propagating to a process exit.
+            Thread.Sleep(Timeout.Infinite);
         }
 
         public static IHostBuilder CreateHostBuilder(string[] args) =>
@@ -34,6 +103,17 @@ namespace WindowsSentinel.Service
                 .UseWindowsService()
                 .ConfigureServices((hostContext, services) =>
                 {
+                    // STABILITY v1.4.8: Prevent host shutdown when a BackgroundService
+                    // completes or throws. Without this, if ANY MonitorGroup's ExecuteAsync
+                    // returns (e.g., monitor startup failure), the entire host shuts down.
+                    services.Configure<HostOptions>(opts =>
+                    {
+                        opts.BackgroundServiceExceptionBehavior = BackgroundServiceExceptionBehavior.Ignore;
+                        opts.ServicesStartConcurrently = false;
+                        opts.ServicesStopConcurrently = true;
+                        opts.ShutdownTimeout = TimeSpan.FromSeconds(10);
+                    });
+
                     // Configuration
                     var config = new SentinelConfig();
                     hostContext.Configuration.GetSection("Sentinel").Bind(config);
