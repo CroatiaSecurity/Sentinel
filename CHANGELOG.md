@@ -2,6 +2,12 @@
  
 All notable changes to Windows Sentinel are documented in this file.
 
+## [1.5.1] - 2026-07-17
+
+### Fixed
+
+- **[HIGH] Fix silent DI deduplication of MonitorGroups**: Replaced `services.AddHostedService` with `services.AddSingleton<IHostedService>` for all 6 MonitorGroups in `Program.cs`. The previous usage of `AddHostedService` called `TryAddEnumerable` which silently discarded all groups after the first one (Critical) because they shared the same implementation type (`MonitorGroup`). This prevented CoreDetection, CredentialProtection, NetworkIntegrity, SystemIntegrity, and Peripheral groups from starting. This fix enables all EDR monitors (including hosts-file protection and DNS-over-HTTPS disabler) to run on service boot.
+
 ## [1.5.0] - 2026-07-17
 
 ### Security — Red Team Audit v2: EDR Survival & Anti-Scripting Maturity

@@ -251,7 +251,7 @@ namespace WindowsSentinel.Service
                     // ── Group 1: Critical (Self-Protection) ──────────────────────────
                     // Starts immediately, restarts indefinitely. These monitors protect
                     // Sentinel itself and must never stay down.
-                    services.AddHostedService(sp =>
+                    services.AddSingleton<IHostedService>(sp =>
                     {
                         var monitors = new List<IHostedService>
                         {
@@ -285,7 +285,7 @@ namespace WindowsSentinel.Service
                     // ── Group 2: Core Detection ──────────────────────────────────────
                     // Starts after self-test (2s delay). Primary behavioral detection.
                     // Restart up to 5 times before degrading.
-                    services.AddHostedService(sp =>
+                    services.AddSingleton<IHostedService>(sp =>
                     {
                         var monitors = new List<IHostedService>
                         {
@@ -336,7 +336,7 @@ namespace WindowsSentinel.Service
 
                     // ── Group 3: Credential Protection ────────────────────────────────
                     // Starts after core detection (4s). Protects credentials and sessions.
-                    services.AddHostedService(sp =>
+                    services.AddSingleton<IHostedService>(sp =>
                     {
                         var monitors = new List<IHostedService>
                         {
@@ -369,7 +369,7 @@ namespace WindowsSentinel.Service
 
                     // ── Group 4: Network Integrity ────────────────────────────────────
                     // Starts after credential group (6s). Monitors network-layer attacks.
-                    services.AddHostedService(sp =>
+                    services.AddSingleton<IHostedService>(sp =>
                     {
                         var monitors = new List<IHostedService>
                         {
@@ -415,7 +415,7 @@ namespace WindowsSentinel.Service
 
                     // ── Group 5: System Integrity ─────────────────────────────────────
                     // Starts delayed (10s). Monitors OS-level configuration drift.
-                    services.AddHostedService(sp =>
+                    services.AddSingleton<IHostedService>(sp =>
                     {
                         var monitors = new List<IHostedService>
                         {
@@ -472,7 +472,7 @@ namespace WindowsSentinel.Service
                     // ── Group 6: Peripheral & Environmental ───────────────────────────
                     // Starts late (30s). Monitors hardware peripherals and external media.
                     // Lower priority — log and continue on failure.
-                    services.AddHostedService(sp =>
+                    services.AddSingleton<IHostedService>(sp =>
                     {
                         var monitors = new List<IHostedService>
                         {
