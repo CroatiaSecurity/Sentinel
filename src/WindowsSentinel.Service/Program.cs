@@ -259,6 +259,7 @@ namespace WindowsSentinel.Service
                             sp.GetRequiredService<IPSecIntegrityGuard>(),
                             sp.GetRequiredService<AgentWatchdog>(),
                             sp.GetRequiredService<SyscallStubMonitor>(),
+                            sp.GetRequiredService<ConnectivityCanaryMonitor>(),
                         };
                         return new MonitorGroup(
                             new MonitorGroupConfig
@@ -277,6 +278,9 @@ namespace WindowsSentinel.Service
                     services.AddSingleton<IPSecIntegrityGuard>();
                     services.AddSingleton<AgentWatchdog>();
                     services.AddSingleton<SyscallStubMonitor>();
+                    services.AddSingleton<ConnectivityCanaryMonitor>();
+                    services.AddSingleton<WfpIntegrityMonitor>();
+                    services.AddSingleton<DriverLoadMonitor>();
 
                     // ── Group 2: Core Detection ──────────────────────────────────────
                     // Starts after self-test (2s delay). Primary behavioral detection.
@@ -301,6 +305,7 @@ namespace WindowsSentinel.Service
                             sp.GetRequiredService<DataExfiltrationMonitor>(),
                             sp.GetRequiredService<AdsDataStagingMonitor>(),
                             sp.GetRequiredService<ScriptExecutionMonitor>(),
+                            sp.GetRequiredService<ScriptHardeningMonitor>(),
                         };
                         return new MonitorGroup(
                             new MonitorGroupConfig
@@ -327,6 +332,7 @@ namespace WindowsSentinel.Service
                     services.AddSingleton<DataExfiltrationMonitor>();
                     services.AddSingleton<AdsDataStagingMonitor>();
                     services.AddSingleton<ScriptExecutionMonitor>();
+                    services.AddSingleton<ScriptHardeningMonitor>();
 
                     // ── Group 3: Credential Protection ────────────────────────────────
                     // Starts after core detection (4s). Protects credentials and sessions.
@@ -430,6 +436,8 @@ namespace WindowsSentinel.Service
                             sp.GetRequiredService<ApplicationIntegrityMonitor>(),
                             sp.GetRequiredService<PseudoSandbox>(),
                             sp.GetRequiredService<AcousticThreatMonitor>(),
+                            sp.GetRequiredService<WfpIntegrityMonitor>(),
+                            sp.GetRequiredService<DriverLoadMonitor>(),
                         };
                         return new MonitorGroup(
                             new MonitorGroupConfig

@@ -1,6 +1,6 @@
 # Windows Sentinel — Design Document
 
-**Version: 1.4.9**
+**Version: 1.5.0**
 
 ---
 
@@ -103,6 +103,9 @@ The fusion layer is PASSIVE â€” it never blocks, kills, or modifies telemet
 | `CastDeviceGuard` | **1.0.4** Kills ALL connections to Cast ports (8008/8009) on LAN unless target IP is in explicit `TrustedCastDevices` allowlist. No baseline, no OUI trust, no heuristics. Self-healing firewall rules block rogue Cast IPs. Scans every 5s. | No |
 | `ApplicationIntegrityMonitor` | **1.2.5** Cuckoo Egg Detection — baselines protected application executables (SHA-256 + Authenticode publisher) at startup. Detects unauthorized replacement via hash change + publisher mismatch. FileSystemWatcher for real-time + periodic scan every 30s. Active response: kills offending process tree, quarantines impostor, restores original from DPAPI-encrypted backup. Generates forensic incident report suitable for law enforcement filing. Legitimate updates (same publisher, different hash) auto-re-baseline silently. | No |
 | `IPSecIntegrityGuard` | **1.4.1** Self-healing guard for the GSecurity IPSec port-block policy. Verifies policy is active via `netsh ipsec static show policy` every 30s. If missing/unassigned (attacker ran `netsh ipsec static delete policy`), re-applies the full ruleset and emits Tier1 anti-tamper alert. Ensures FTP/SSH/RDP/SMB blocks cannot be permanently removed without Sentinel detecting and restoring them. | No |
+| `ConnectivityCanaryMonitor` | **1.5.0** Verifies Sentinel can reach threat intelligence endpoints every 45s (proxy, CIRCL, MalwareBazaar, Cloudflare). Detects EDRSilencer WFP blocking, DNS poisoning, firewall rules silencing Sentinel. Falls back to raw TCP on direct IP. 3 consecutive failures → Tier1 "Network Silencing Detected" (0.90). Persistent silencing (>10min) → 0.95. | No |
+| `WfpIntegrityMonitor` | **1.5.0** Scans Windows Filtering Platform filters every 30s via `netsh wfp show filters`. Detects BLOCK rules targeting Sentinel's executable paths, bulk filter surges, and EDR-targeting patterns. Direct Sentinel targeting → Tier1/0.97/KillProcessTree. Attempts filter removal. Covers 20+ security vendor process names. | No |
+| `DriverLoadMonitor` | **1.5.0** Monitors for BYOVD attacks via Event ID 7045 (kernel service install), registry scan for new driver services, and .sys file creation in user-writable paths. Cross-references 15+ SHA-256 hashes and 40+ filenames from Microsoft Vulnerable Driver Blocklist. Known-vulnerable → Tier1/0.97/KillProcessTree + `sc stop`/`sc delete`. | Yes (Event Log access) |
 | `AgentWatchdog` | **1.3.9** Service-side liveness monitor for `WindowsSentinel.Agent.exe`. Polls every 10s; if the agent is absent, relaunches it in the active console user's session via `WTSQueryUserToken` → `CreateEnvironmentBlock` → `CreateProcessAsUser` (standard SYSTEM→user session launch). 20s startup grace to avoid double-launch race with the HKLM Run key. 15s relaunch cooldown, max 5 relaunches per 5-minute window. Fires `Anti-Tamper: Agent Process Repeatedly Killed` (Tier1/0.70–0.90) if the agent is absent 3+ times in the window. | Yes (SE_ASSIGNPRIMARYTOKEN, SE_INCREASE_QUOTA — held by LocalSystem) |
 
 ### Engine
@@ -487,11 +490,11 @@ Composite detections are emitted as Tier1 `DetectionEvent`s directly into the de
 | Component | Purpose |
 |-----------|---------|
 | `MonitorGroup` | New infrastructure class that groups related background monitors into managed units with staggered startup, independent failure restart, priority-based ordering, and health monitoring. Replaces 60+ flat `AddHostedService` registrations with 6 logical groups. |
-| Monitor Group: Critical | AntiTamperGuard, IPSecIntegrityGuard, AgentWatchdog, SyscallStubMonitor. Starts immediately, restarts indefinitely, 15s health checks. |
-| Monitor Group: CoreDetection | RansomwareIoMonitor, BeaconingDetector, BehavioralBaselineService, FileVerdictScanner, GhostProcessMonitor, EphemeralProcessMonitor, DllEntropyAnalyzer, DiskWideDllScanner, +7 more. 2s start delay, 5 restart attempts. |
+| Monitor Group: Critical | AntiTamperGuard, IPSecIntegrityGuard, AgentWatchdog, SyscallStubMonitor, ConnectivityCanaryMonitor. Starts immediately, restarts indefinitely, 15s health checks. |
+| Monitor Group: CoreDetection | RansomwareIoMonitor, BeaconingDetector, BehavioralBaselineService, FileVerdictScanner, GhostProcessMonitor, EphemeralProcessMonitor, DllEntropyAnalyzer, DiskWideDllScanner, ScriptHardeningMonitor, +7 more. 2s start delay, 5 restart attempts. |
 | Monitor Group: CredentialProtection | CanaryFileMonitor, BrowserCredentialGuard, MicrosoftAccountGuardMonitor, NullSessionGuard, BuiltinAdminGuard, PasswordRotationGuard. 4s start delay, 3 restart attempts. |
 | Monitor Group: NetworkIntegrity | ArpSpoofMonitor, DnsResponseValidationMonitor, PublicIpMonitor, WifiSecurityMonitor, NetworkInterfaceGuard, NetworkShareMonitor, +6 more. 6s start delay, 3 restart attempts. |
-| Monitor Group: SystemIntegrity | FirewallIntegrity, SecureBoot, WindowsUpdate, ScheduledTask, CriticalServiceGuard, RegistryMonitor, WmiPersistence, +10 more. 10s start delay, 3 restart attempts. |
+| Monitor Group: SystemIntegrity | FirewallIntegrity, SecureBoot, WindowsUpdate, ScheduledTask, CriticalServiceGuard, RegistryMonitor, WmiPersistence, WfpIntegrityMonitor, DriverLoadMonitor, +10 more. 10s start delay, 3 restart attempts. |
 | Monitor Group: Peripheral | BluetoothMonitor, PhantomDeviceMonitor, MtpTransferGuard, VolumeMountMonitor, CastDeviceGuard, WslMonitor, +6 more. 30s start delay, 2 restart attempts. |
 | `FileShare.Delete` policy | All file I/O operations across the codebase now open files with `FileShare.ReadWrite | FileShare.Delete`. Sentinel never blocks users from deleting files, even during active scanning, hashing, quarantine reads, or log tailing. |
 | Source file layout | `BackgroundMonitors.cs` monolith (5,500 lines) eliminated. Monitor classes split into 6 group files under `Monitors/`: `CriticalMonitors.cs`, `CoreDetectionMonitors.cs`, `CredentialProtectionMonitors.cs`, `NetworkIntegrityMonitors.cs`, `SystemIntegrityMonitors.cs`, `PeripheralMonitors.cs`. |
@@ -525,6 +528,51 @@ Composite detections are emitted as Tier1 `DetectionEvent`s directly into the de
 | VirusTotal dead code | Low | `FileReputationEngine` | Removed non-functional VT v3 query (requires API key). Rebalanced consensus: CIRCL 30pts, MalwareBazaar 50pts. Stub preserved for future re-enablement. |
 | Predictable self-test cache entry | Low | `StartupSelfTest` | Random key + random value instead of fixed `_check`/`ok`. Eliminates known-plaintext in encrypted cache. |
 
+
+---
+
+## v1.5.0 — EDR Survival & Anti-Scripting Maturity
+
+### Overview
+
+Threat-intel-driven release addressing the top attack techniques of June–July 2026. Four new monitors added to the Critical and CoreDetection groups.
+
+### New Monitors
+
+| Monitor | Group | Scan Interval | Key Detection |
+|---------|-------|---------------|---------------|
+| `ConnectivityCanaryMonitor` | Critical | 45s | EDRSilencer network silencing, WFP blocking, DNS poisoning |
+| `WfpIntegrityMonitor` | SystemIntegrity | 30s | WFP BLOCK filters targeting Sentinel/EDR processes |
+| `DriverLoadMonitor` | SystemIntegrity | 15s | BYOVD vulnerable driver loads (Event 7045 + registry + filesystem) |
+| `ScriptHardeningMonitor` | CoreDetection | 8s | PS history tampering, SBL enforcement, downgrade attacks, obfuscation, download cradles, reflection loading, profile persistence, CLM bypass |
+
+### Threat Intelligence Coverage
+
+| 2026 Campaign/Tool | Detection |
+|---|---|
+| EDRSilencer (WFP manipulation) | `ConnectivityCanaryMonitor` + `WfpIntegrityMonitor` |
+| GentleKiller (400 security processes) | `WfpIntegrityMonitor` (EDR target list) + `DriverLoadMonitor` |
+| PoisonX / GodDamn Ransomware | `DriverLoadMonitor` (BYOVD hash/name match) |
+| Qilin / Warlock (300+ EDR tools) | `DriverLoadMonitor` + `WfpIntegrityMonitor` |
+| DeepLoad (WMI + PS history destruction) | `ScriptHardeningMonitor` (history integrity) |
+| Avalon Framework (vendor-specific evasion) | `WfpIntegrityMonitor` (multi-vendor detection) |
+| Reynolds Ransomware (BYOVD) | `DriverLoadMonitor` (Truesight.sys, nbwdv.sys) |
+
+### Anti-Scripting Maturity Matrix
+
+| Capability | Before v1.5.0 | After v1.5.0 |
+|---|---|---|
+| ScriptBlock Logging analysis (4104) | Basic pattern matching | + Obfuscation scoring (0-10), download cradle regex, reflection detection |
+| AMSI bypass detection | amsi.dll unloaded check | + ScriptBlock Logging enforcement, explicit disable detection |
+| Execution Policy monitoring | Not monitored | Full bypass + evasion flag stacking detection |
+| PowerShell history integrity | Not monitored | Deletion/truncation detection (anti-forensics) |
+| PS Downgrade attack (v2.0) | Not monitored | `-version 2` detection → Tier1 kill |
+| Profile persistence (T1546.013) | Not monitored | All 8 profile paths, content analysis, SHA-256 baseline |
+| Download cradle detection | Command-line pattern only | + ScriptBlock regex (IEX+download pipeline), encoded command decode |
+| .NET reflection loading | Not monitored | Assembly.Load/LoadFile/UnsafeLoadFrom detection |
+| Obfuscation detection | Not scored | 10-point scoring: backticks, concat, char[], format, reverse |
+| CLM bypass | Not monitored | SysWOW64 32-bit PS when WDAC active |
+| Legacy script hosts (WSH) | Parent-child only | + Standalone execution alert for wscript/cscript/mshta |
 
 ---
 

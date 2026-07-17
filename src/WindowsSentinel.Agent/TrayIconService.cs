@@ -102,11 +102,15 @@ namespace WindowsSentinel.Agent
 
             _notifyIcon.DoubleClick += OnOpenConsole;
 
-            // Show initial balloon tip
-            _notifyIcon.ShowBalloonTip(3000, "Windows Sentinel", "Protection has started.", ToolTipIcon.Info);
-
-            // Start watching log file for new detections
-            _ = WatchLogFileAsync(_cts.Token);
+            // Start watching log file for new detections on a background thread.
+            // Must NOT use fire-and-forget async on the STA pump — async continuations
+            // would be posted to the WinForms sync context and starve the message loop.
+            var watchThread = new Thread(() => WatchLogFileSync(_cts.Token))
+            {
+                IsBackground = true,
+                Name = "SentinelLogWatcher"
+            };
+            watchThread.Start();
 
             Application.Run();
         }
@@ -180,14 +184,19 @@ namespace WindowsSentinel.Agent
             GC.SuppressFinalize(this);
         }
 
-        private async Task WatchLogFileAsync(CancellationToken cancellationToken)
+        /// <summary>
+        /// Synchronous log watcher running on a dedicated background thread.
+        /// Never touches the STA message pump. Uses only blocking I/O.
+        /// </summary>
+        private void WatchLogFileSync(CancellationToken cancellationToken)
         {
             var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
             var logFile = Path.Combine(programData, "WindowsSentinel", "events.jsonl");
 
+            // Wait for log file to exist
             while (!File.Exists(logFile) && !cancellationToken.IsCancellationRequested)
             {
-                try { await Task.Delay(1000, cancellationToken); } catch { break; }
+                Thread.Sleep(1000);
             }
 
             long lastOffset = 0;
@@ -209,36 +218,30 @@ namespace WindowsSentinel.Agent
             {
                 try
                 {
-                    // Clean up shownCache occasionally (entries older than 30s)
+                    // Clean up shownCache occasionally
                     var now = DateTime.UtcNow;
                     var keysToRemove = new System.Collections.Generic.List<string>();
                     foreach (var kvp in shownCache)
                     {
                         if (now - kvp.Value > TimeSpan.FromSeconds(30))
-                        {
                             keysToRemove.Add(kvp.Key);
-                        }
                     }
                     foreach (var k in keysToRemove)
-                    {
                         shownCache.Remove(k);
-                    }
 
                     if (File.Exists(logFile))
                     {
                         using var fs = new FileStream(logFile, FileMode.Open, FileAccess.Read,
                             FileShare.ReadWrite | FileShare.Delete);
                         if (fs.Length < lastOffset)
-                        {
                             lastOffset = 0;
-                        }
 
                         if (fs.Length > lastOffset)
                         {
                             fs.Seek(lastOffset, SeekOrigin.Begin);
                             using var reader = new StreamReader(fs, System.Text.Encoding.UTF8, false, 4096, true);
                             string? line;
-                            while ((line = await reader.ReadLineAsync(cancellationToken)) != null)
+                            while ((line = reader.ReadLine()) != null)
                             {
                                 if (line.Contains("\"type\":\"detection\"", StringComparison.OrdinalIgnoreCase))
                                 {
@@ -251,17 +254,12 @@ namespace WindowsSentinel.Agent
                                         var confidence = data.GetProperty("Confidence").GetDouble();
                                         var evidence = data.GetProperty("Evidence").GetString() ?? "";
 
-                                        int tierVal = 1; // default to Tier2
+                                        int tierVal = 1;
                                         if (data.TryGetProperty("Tier", out var tierProp))
-                                        {
                                             tierVal = tierProp.GetInt32();
-                                        }
 
-                                        // Store detection temporarily — only toast if followed by a KILL response
                                         if (tierVal == 0)
-                                        {
                                             _pendingDetection = (ruleName, processName, confidence, evidence);
-                                        }
                                     }
                                     catch { }
                                 }
@@ -273,14 +271,12 @@ namespace WindowsSentinel.Agent
                                         var data = doc.RootElement.GetProperty("data");
                                         var actionTaken = data.GetProperty("ActionTaken").GetString() ?? "";
 
-                                        // Only show toast when an actual KILL/QUARANTINE/NETWORK_ISOLATE happened
                                         if (_pendingDetection.HasValue &&
                                             (actionTaken == "KILL" || actionTaken == "QUARANTINE_AND_KILL" ||
                                              actionTaken == "NETWORK_ISOLATE" || actionTaken == "REMOVE_CERT_AND_KILL_ADDER"))
                                         {
                                             var (ruleName, processName, confidence, evidence) = _pendingDetection.Value;
 
-                                            // Deduplication check
                                             var cacheKey = $"{ruleName}:{processName}";
                                             if (shownCache.TryGetValue(cacheKey, out var lastShown))
                                             {
@@ -292,12 +288,8 @@ namespace WindowsSentinel.Agent
                                             }
                                             shownCache[cacheKey] = DateTime.UtcNow;
 
-                                            _notifyIcon?.ShowBalloonTip(
-                                                5000,
-                                                $"Threat Terminated: {ruleName}",
-                                                $"Process: {processName} (Terminated)\nConfidence: {confidence:P0}\n{evidence}",
-                                                ToolTipIcon.Error
-                                            );
+                                            // No-op: balloon tips removed — WpnService disabled by hardening.
+                                            // Detection is still logged in events.jsonl and visible in console.
                                         }
                                         _pendingDetection = null;
                                     }
@@ -310,7 +302,7 @@ namespace WindowsSentinel.Agent
                 }
                 catch { }
 
-                try { await Task.Delay(1000, cancellationToken); } catch { break; }
+                Thread.Sleep(1000);
             }
         }
     }

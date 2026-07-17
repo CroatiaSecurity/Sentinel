@@ -2,6 +2,74 @@
  
 All notable changes to Windows Sentinel are documented in this file.
 
+## [1.5.0] - 2026-07-17
+
+### Security — Red Team Audit v2: EDR Survival & Anti-Scripting Maturity
+
+Threat-intel-driven release based on June–July 2026 active campaigns (GentleKiller, PoisonX, EDRSilencer, DeepLoad, TrapDoor). Addresses the top findings from the v1.5.0 red team audit: EDR network silencing, BYOVD driver attacks, WFP filter manipulation, and PowerShell anti-evasion maturity.
+
+### Added
+
+- **`ConnectivityCanaryMonitor`** (Critical Group): Periodically verifies Sentinel can reach its threat intelligence endpoints (proxy, CIRCL, MalwareBazaar, Cloudflare). Detects EDRSilencer WFP blocking, DNS poisoning of proxy domain, and firewall rules silencing Sentinel. Probes every 45s with HEAD requests; falls back to raw TCP on direct IP (bypasses DNS). 3 consecutive failures → Tier1 "Anti-Tamper: Network Silencing Detected" (0.90). Persistent silencing (>10 min) escalates to 0.95 confidence. Addresses the #1 red team finding: EDRSilencer can permanently blind all cloud intelligence with zero alerts.
+
+- **`WfpIntegrityMonitor`** (SystemIntegrity Group): Scans Windows Filtering Platform filters every 30s for BLOCK rules targeting Sentinel's executable paths. Exports filters via `netsh wfp show filters`, parses XML output for application-ID-based blocks. Three detection modes: (1) Direct Sentinel targeting → Tier1/0.97/KillProcessTree, (2) Bulk filter surge (+10) → Tier1/0.75-0.90, (3) Multiple EDR processes blocked → Tier1/0.85. Attempts WFP filter removal on detection. Maintains known-EDR target list covering 20+ security vendors (CrowdStrike, SentinelOne, Sophos, ESET, Elastic, etc.). Directly counters EDRSilencer, EDRKillShifter, and GentleKiller framework WFP manipulation.
+
+- **`DriverLoadMonitor`** (SystemIntegrity Group): Monitors for BYOVD (Bring Your Own Vulnerable Driver) attacks via three detection paths: (1) System Event Log Event ID 7045 (kernel service install), (2) Registry scan for new `SYSTEM\CurrentControlSet\Services` with Type=1/2, (3) .sys file creation in user-writable paths. Cross-references against embedded blocklist of 15+ SHA-256 hashes and 40+ filenames from the Microsoft Vulnerable Driver Blocklist and LOLDrivers project. Known-vulnerable hash match → Tier1/0.97/KillProcessTree + attempt `sc stop`/`sc delete`. Covers RTCore64, DBUtil, gdrv, WinRing0, ProcExp152, Truesight, iqvw64e, Capcom, KProcessHacker, nbwdv (Medusa), and more. Baselines existing drivers at startup to avoid FP on boot.
+
+- **`ScriptHardeningMonitor`** (CoreDetection Group): Comprehensive PowerShell/scripting anti-evasion maturity monitor covering 9 detection capabilities not addressed by existing `ScriptExecutionMonitor`:
+  1. **PowerShell History File Integrity** — Detects deletion/truncation of `ConsoleHost_history.txt` (anti-forensics). DeepLoad malware explicitly destroys PS history.
+  2. **ScriptBlock Logging Policy Enforcement** — Alerts if Event 4104 logging is disabled or explicitly set to 0 via registry. Checks Module Logging and Transcription status.
+  3. **PowerShell Downgrade Attack** — Detects `-version 2` invocation which disables AMSI, ScriptBlock Logging, and CLM entirely (T1059.001).
+  4. **Execution Policy Bypass + Evasion Flag Stacking** — Detects `-ep bypass` combined with 2+ evasion flags (hidden window, no profile, non-interactive, encoded command, download). Single `-ep bypass` is normal admin; stacking is malware signature.
+  5. **Profile Persistence Detection** — Monitors all 8 PowerShell profile paths for malicious content (download cradles, reverse shells, AMSI bypass, reflection loading). SHA-256 baseline + content analysis (T1546.013).
+  6. **Legacy Script Host Detection** — Alerts on wscript.exe/cscript.exe/mshta.exe execution (WSH bypasses all PS security controls: no AMSI, no CLM, no SBL).
+  7. **Encoded Command Analysis** — Decodes base64 `-EncodedCommand` payloads and runs obfuscation scoring + pattern matching (download cradles, reflection, CLM bypass).
+  8. **Constrained Language Mode Bypass** — Detects 32-bit PowerShell (SysWOW64) invocation when WDAC/AppLocker is configured (common CLM escape).
+  9. **Advanced Script Block Patterns** — Real-time Event 4104 analysis for download cradles (IEX+download pipeline), .NET Assembly.Load reflection, and obfuscation scoring (backticks, concat, char arrays, format strings, reverse indexing — scored 0-10, kill at ≥8).
+
+### Changed
+
+- **Critical Monitor Group**: Expanded from 4 to 5 monitors. Added ConnectivityCanaryMonitor — lightweight (no I/O at startup, 30s grace period). Restarts indefinitely on failure.
+- **SystemIntegrity Monitor Group**: Added WfpIntegrityMonitor and DriverLoadMonitor (moved from Critical — both perform heavy I/O at startup: full Services registry enumeration and `netsh` subprocess spawn, which delayed service heartbeat and caused Agent tray freeze).
+- **CoreDetection Monitor Group**: Added ScriptHardeningMonitor alongside existing ScriptExecutionMonitor. Together they provide enterprise-grade anti-scripting coverage.
+- **`TrayIconService`** (Agent): Removed all `ShowBalloonTip` calls — the Windows Push Notification Service (`WpnService`) is removed by Sentinel's own hardening scripts, causing `ShowBalloonTip` to silently deadlock the STA message pump. Replaced `WatchLogFileAsync` (async/await on STA sync context) with `WatchLogFileSync` running on a dedicated background `Thread`. The STA pump now runs clean with zero async continuations or Win32 notification API calls competing for the message loop.
+
+### Fixed
+
+- **[HIGH] Agent tray freeze on hardened systems** (`TrayIconService`): `ShowBalloonTip` silently deadlocks the WinForms STA message pump when `WpnService` (Windows Push Notification Service) is removed by hardening scripts. The call doesn't throw — it hangs internally waiting for the notification subsystem. Additionally, `WatchLogFileAsync` used `async/await` which posted continuations to the STA `SynchronizationContext`, starving the message loop during file I/O. Both issues caused the tray icon to appear frozen (no context menu response, no tooltip). Fix: removed all `ShowBalloonTip` calls; replaced async log watcher with a synchronous `Thread`-based implementation that never touches the STA pump.
+- **[MEDIUM] Service startup delay from Critical group I/O** (`Program.cs`): `DriverLoadMonitor.BaselineExistingDrivers()` enumerates the entire `HKLM\SYSTEM\CurrentControlSet\Services` registry hive synchronously, and `WfpIntegrityMonitor` spawns `netsh wfp show filters` (heavy disk I/O). Both in the Critical group (0ms start delay) delayed the service heartbeat, causing the Agent to stall waiting for the service to become responsive. Fix: moved both to SystemIntegrity group (10s start delay) where heavy-I/O monitors belong.
+
+### President's Law Additions
+
+| Behavior | Detector | Justification |
+|---|---|---|
+| WFP filter blocking Sentinel network traffic | `WfpIntegrityMonitor` | Self-protection tampering — falls under existing "Sentinel self-protection tampering" |
+| Known-vulnerable driver loaded (BYOVD) | `DriverLoadMonitor` | Precursor to EDR kill — extends "Sentinel self-protection tampering" |
+| Download cradle execution (IEX+Download pipeline) | `ScriptHardeningMonitor` | Falls under "Reverse shell / C2 callback" |
+| .NET Assembly reflection loading from PowerShell | `ScriptHardeningMonitor` | Falls under "Process injection / hollowing" (in-memory execution) |
+| PowerShell v2.0 downgrade attack | `ScriptHardeningMonitor` | Falls under "ETW / AMSI tampering" (disables all PS security) |
+
+### Architecture
+
+- New monitor files: `Monitors/ConnectivityCanaryMonitor.cs`, `Monitors/WfpIntegrityMonitor.cs`, `Monitors/DriverLoadMonitor.cs`, `Monitors/ScriptHardeningMonitor.cs`
+- All follow `BackgroundService` + DI pattern with `CancellationToken` threading
+- All file I/O uses `FileShare.ReadWrite | FileShare.Delete` per constraints
+- No kernel drivers, no direct syscalls — all detection is userland-compatible
+- WFP filter scanning uses `netsh` subprocess (validated output before use per constraints)
+- Driver hash blocklist embedded in binary (same approach as `CveShieldHardener` CVE feed)
+- `WfpIntegrityMonitor` and `DriverLoadMonitor` placed in SystemIntegrity group (10s delay) — not Critical — because they perform heavy I/O at startup (registry enumeration, subprocess spawn)
+- `TrayIconService` rewritten: log watcher is now a synchronous dedicated `Thread` (was async on STA context). All `ShowBalloonTip` calls removed (deadlocks without `WpnService`). STA pump is guaranteed clean.
+
+### Design Rules Added
+
+| Rule | Rationale |
+|------|-----------|
+| No async/await on Agent STA thread | Async continuations post to WinForms SynchronizationContext, starving the message pump. All background work on dedicated threads. |
+| No Win32 notification API calls | `WpnService` removed by hardening. `ShowBalloonTip` deadlocks silently without throwing. |
+| Critical group: no heavy I/O at startup | Monitors with registry enumeration or subprocess spawns delay service heartbeat, causing Agent tray freeze. Use SystemIntegrity (10s) or later. |
+
+---
+
 ## [1.4.9] - 2026-07-17
 
 ### Security — Service Self-Termination Vulnerability Fix

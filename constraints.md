@@ -1,6 +1,6 @@
 # Windows Sentinel — Constraints
 
-**Version: 1.4.4**
+**Version: 1.5.0**
 
 ---
 
@@ -22,6 +22,9 @@
 | Monitors registered in groups | All background monitors must be registered via `MonitorGroup` with appropriate priority, start delay, and restart policy — no flat `AddHostedService` for monitors. |
 | Monitor source files match groups | Each monitor class lives in the group file it belongs to under `Monitors/` (CriticalMonitors.cs, CoreDetectionMonitors.cs, etc.). No monolith files — new monitors go into their group file. |
 | No user-session response mode toggle | The Agent MUST NOT expose any mechanism (menu item, API, named pipe, etc.) to disable ActiveResponse from user-level context. Only the Service (SYSTEM) controls response mode. |
+| No async/await on STA thread | The Agent's WinForms STA message pump MUST NOT have async continuations posted to its SynchronizationContext. All background work (log tailing, file I/O, network) MUST run on dedicated `Thread` instances or `Task.Run` with `ConfigureAwait(false)`. Violations freeze the tray icon. |
+| No Win32 notification API calls | `ShowBalloonTip` and toast notification APIs MUST NOT be called — `WpnService` is removed by hardening. These calls silently deadlock the STA pump without throwing. |
+| Critical group: no heavy I/O at startup | Monitors in the Critical group (0ms start delay) MUST NOT perform registry enumeration, subprocess spawning, or disk-wide scanning in their constructor or early `ExecuteAsync`. Heavy-I/O monitors belong in SystemIntegrity (10s delay) or later groups. |
 | Absence ≠ safety in reputation | Hash reputation services MUST return `Unknown` (not `Safe`) when a hash is absent from all databases. Only a positive trust signal (e.g., CIRCL trust > 60) can confirm Safe. |
 | No string interpolation into shell commands | All PowerShell/cmd invocations MUST use `-EncodedCommand` or `ArgumentList` — never string-interpolate untrusted data into `-Command` strings. |
 | Minimum-privilege process handles | `OpenProcess` calls MUST request only the access rights actually used. Never open with `PROCESS_ALL_ACCESS` unless every right is exercised. |

@@ -70,6 +70,9 @@ Nothing else kills.
 | Honeypot decoy access | `HoneypotMonitor` |
 | ADS verdict = `unsafe` from 3-API consensus | `VerdictGateRule` (E1) |
 | Sentinel self-protection tampering | `SelfProtection` |
+| WFP filter blocking Sentinel's network traffic | `WfpIntegrityMonitor` |
+| BYOVD vulnerable driver loaded (hash/name match) | `DriverLoadMonitor` |
+| Network silencing of Sentinel (EDRSilencer) | `ConnectivityCanaryMonitor` |
 
 **Adding to this list requires explicit user sign-off and a doc update.** This
 is the most dangerous edit possible to Sentinel.
