@@ -1,0 +1,4 @@
+Windows Registry Editor Version 5.00
+
+[HKEY_LOCAL_MACHINE\Software\Microsoft\Windows NT\CurrentVersion\UAC\COMAutoApprovalList]
+"{ca8c87c1-929d-45ba-94db-ef8e6cb346ad}"=dword:00000000

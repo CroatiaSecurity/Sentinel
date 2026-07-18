@@ -452,13 +452,39 @@ namespace Behavedr.Core
 
         private static void ApplyUserSetupScriptsHardening()
         {
+            string scriptsDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), @"Behavedr\HardeningTemp");
             try
             {
-                string scriptsDir = @"D:\Gorstak\GSecurity\Iso\sources\$OEM$\$$\Setup\Scripts";
-                if (!Directory.Exists(scriptsDir)) return;
+                // Create target directory
+                if (!Directory.Exists(scriptsDir))
+                {
+                    Directory.CreateDirectory(scriptsDir);
+                }
+
+                // Extract all embedded resources from "Behavedr.Core.HardeningResources."
+                var assembly = typeof(HardeningModule).Assembly;
+                string resourcePrefix = "Behavedr.Core.HardeningResources.";
+                foreach (string resourceName in assembly.GetManifestResourceNames())
+                {
+                    if (resourceName.StartsWith(resourcePrefix, StringComparison.OrdinalIgnoreCase))
+                    {
+                        string fileName = resourceName.Substring(resourcePrefix.Length);
+                        string destPath = Path.Combine(scriptsDir, fileName);
+                        try
+                        {
+                            using var stream = assembly.GetManifestResourceStream(resourceName);
+                            if (stream != null)
+                            {
+                                using var fileStream = new FileStream(destPath, FileMode.Create, FileAccess.Write);
+                                stream.CopyTo(fileStream);
+                            }
+                        }
+                        catch { }
+                    }
+                }
 
                 // 1. Run lgpo.exe if present
-                string lgpoPath = Path.Combine(scriptsDir, "lgpo.exe");
+                string lgpoPath = Path.Combine(scriptsDir, "LGPO.exe");
                 string infPath = Path.Combine(scriptsDir, "GSecurity.inf");
                 if (File.Exists(lgpoPath) && File.Exists(infPath))
                 {
