@@ -1,6 +1,6 @@
 [Setup]
 AppName=Behavedr
-AppVersion=1.5.2
+AppVersion=1.5.3
 AppPublisher=Gorstak
 AppPublisherURL=https://gorstak.eu
 SourceDir=.
@@ -11,7 +11,7 @@ UninstallDisplayIcon={app}\Behavedr.ico
 Compression=lzma2
 SolidCompression=yes
 OutputDir=.
-OutputBaseFilename=BehavedrSetup-1.5.2
+OutputBaseFilename=BehavedrSetup-1.5.3
 PrivilegesRequired=admin
 ; Allow upgrading over existing install
 UsePreviousAppDir=yes

@@ -443,6 +443,45 @@ namespace Behavedr.Core
                     System.Security.AccessControl.AccessControlType.Deny));
 
                 dirInfo.SetAccessControl(security);
+
+                // Exclude uninstaller files from the Deny rule by disabling inheritance and removing the Deny rule on them
+                foreach (var file in Directory.GetFiles(exeDir, "unins*"))
+                {
+                    ExcludeUninstallerFromDeny(file);
+                }
+            }
+            catch
+            {
+                // Non-fatal
+            }
+        }
+
+        private static void ExcludeUninstallerFromDeny(string filePath)
+        {
+            try
+            {
+                if (!File.Exists(filePath)) return;
+                var fileInfo = new FileInfo(filePath);
+                var security = fileInfo.GetAccessControl();
+
+                // Disable inheritance and copy existing rules
+                security.SetAccessRuleProtection(isProtected: true, preserveInheritance: true);
+
+                // Find and remove any Deny rules for BUILTIN\Users
+                var usersSid = new System.Security.Principal.SecurityIdentifier(
+                    System.Security.Principal.WellKnownSidType.BuiltinUsersSid, null);
+
+                var rules = security.GetAccessRules(includeExplicit: true, includeInherited: true, typeof(System.Security.Principal.SecurityIdentifier));
+                foreach (System.Security.AccessControl.FileSystemAccessRule rule in rules)
+                {
+                    if (rule.AccessControlType == System.Security.AccessControl.AccessControlType.Deny &&
+                        rule.IdentityReference == usersSid)
+                    {
+                        security.RemoveAccessRule(rule);
+                    }
+                }
+
+                fileInfo.SetAccessControl(security);
             }
             catch
             {
