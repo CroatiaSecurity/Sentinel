@@ -1,4 +1,4 @@
-# Windows Sentinel — Threat Model
+# Behavedr — Threat Model
 
 **Version: 1.4.9**
 
@@ -11,13 +11,13 @@ This document assumes the attacker has read the source code.
 ```
 ┌─────────────────────────────────────────────────────────┐
 │ KERNEL (ring 0)                                         │
-│   - Sentinel has NO visibility here                     │
+│   - Behavedr has NO visibility here                     │
 │   - Attacker with driver = game over                    │
 └─────────────────────────────────────────────────────────┘
                           │
 ┌─────────────────────────────────────────────────────────┐
 │ SYSTEM (ring 3, highest userland privilege)              │
-│   - Sentinel service runs here                          │
+│   - Behavedr service runs here                          │
 │   - ETW providers, full process access                  │
 │   - SecureCacheStore, quarantine, firewall rules        │
 └─────────────────────────────────────────────────────────┘
@@ -31,8 +31,8 @@ This document assumes the attacker has read the source code.
                           │
 ┌─────────────────────────────────────────────────────────┐
 │ STANDARD USER (ring 3)                                  │
-│   - Cannot touch Sentinel service or files              │
-│   - Sentinel agent (watchdog) runs here                 │
+│   - Cannot touch Behavedr service or files              │
+│   - Behavedr agent (watchdog) runs here                 │
 │   - Limited telemetry (WMI fallback, no ThreatIntel)    │
 └─────────────────────────────────────────────────────────┘
 ```
@@ -127,7 +127,7 @@ This document assumes the attacker has read the source code.
 
 ### B1: Attacker has local admin
 
-**Attack:** `sc stop "Windows Sentinel"` or `taskkill /f /im SentinelService.exe`
+**Attack:** `sc stop "Behavedr"` or `taskkill /f /im BehavedrService.exe`
 
 **Mitigation:**
 - Agent watchdog detects stale heartbeat and attempts restart
@@ -136,32 +136,32 @@ This document assumes the attacker has read the source code.
 
 **Residual risk:** HIGH. Local admin can always win against userland. This is a fundamental Windows limitation without PPL or kernel driver.
 
-**Honest assessment:** If the attacker has admin and knows Sentinel is running, they can kill it. The watchdog adds seconds of delay, not real protection.
+**Honest assessment:** If the attacker has admin and knows Behavedr is running, they can kill it. The watchdog adds seconds of delay, not real protection.
 
 ---
 
 ### B2: BYOVD (Bring Your Own Vulnerable Driver)
 
-**Attack:** Load a signed vulnerable driver, use it to kill Sentinel from kernel.
+**Attack:** Load a signed vulnerable driver, use it to kill Behavedr from kernel.
 
 **Mitigation:**
 - BYOVD detection rule (known vulnerable driver hashes)
 - Memory Integrity (HVCI) monitoring — alerts if disabled
 
-**Residual risk:** HIGH. If HVCI is off and attacker has admin, they can load any signed driver. Sentinel cannot prevent kernel-level attacks.
+**Residual risk:** HIGH. If HVCI is off and attacker has admin, they can load any signed driver. Behavedr cannot prevent kernel-level attacks.
 
 ---
 
 ### B3: ETW blinding
 
-**Attack:** Patch `ntdll!EtwEventWrite` or `ntdll!NtTraceEvent` in Sentinel's process to suppress telemetry.
+**Attack:** Patch `ntdll!EtwEventWrite` or `ntdll!NtTraceEvent` in Behavedr's process to suppress telemetry.
 
 **Mitigation:**
 - EtwTamperingRule detects known patching patterns
 - Self-protection monitors for DLL injection into own process
 - CIG (Code Integrity Guard) audit prevents unsigned DLL load
 
-**Residual risk:** MEDIUM. Direct syscall patching bypasses userland hooks. Sentinel detects the ATTEMPT but cannot prevent it if attacker is already in-process.
+**Residual risk:** MEDIUM. Direct syscall patching bypasses userland hooks. Behavedr detects the ATTEMPT but cannot prevent it if attacker is already in-process.
 
 ---
 
@@ -205,9 +205,9 @@ This document assumes the attacker has read the source code.
 
 ---
 
-### B7: DLL sideloading into Sentinel process
+### B7: DLL sideloading into Behavedr process
 
-**Attack:** Place a malicious DLL in Sentinel's search path.
+**Attack:** Place a malicious DLL in Behavedr's search path.
 
 **Mitigation:**
 - ProcessHardening.ApplyOrFail() at startup: restricts DLL search to System32 only
@@ -221,7 +221,7 @@ This document assumes the attacker has read the source code.
 
 ### B8: Time-of-check-to-time-of-use (TOCTOU) on file hashes
 
-**Attack:** Swap a file between when Sentinel hashes it and when it executes.
+**Attack:** Swap a file between when Behavedr hashes it and when it executes.
 
 **Mitigation:**
 - Hash checks happen at process-start time (ETW event)
@@ -232,15 +232,15 @@ This document assumes the attacker has read the source code.
 
 ---
 
-## What Sentinel CANNOT Protect Against
+## What Behavedr CANNOT Protect Against
 
 Fundamental limitations, not bugs:
 
 1. **Kernel-level attacks** — No visibility below ring 3
 2. **Hardware implants** — No firmware/UEFI visibility (but detects Secure Boot disabled)
-3. **Pre-boot attacks** — Sentinel starts after Windows boots (detects boot config tampering)
+3. **Pre-boot attacks** — Behavedr starts after Windows boots (detects boot config tampering)
 4. **Attacker with physical access + offline disk** — Can boot from USB, modify disk (but detects post-idle hardware changes)
-5. **Attacker already running as SYSTEM** — Can kill Sentinel (watchdog adds delay only)
+5. **Attacker already running as SYSTEM** — Can kill Behavedr (watchdog adds delay only)
 6. **Nation-state tooling** — Custom kernel implants, 0-days, hardware backdoors
 7. **Encrypted C2 over legitimate ports** — Looks like normal HTTPS (but TLS cert monitor detects rogue CA installations)
 8. **Direct syscalls from custom code** — Bypasses ntdll hooks (SyscallStubMonitor detects unhooking attempts)
@@ -249,7 +249,7 @@ Fundamental limitations, not bugs:
 
 ---
 
-## What Sentinel CAN Detect Even Against Skilled Attackers
+## What Behavedr CAN Detect Even Against Skilled Attackers
 
 Hard-to-bypass detections (require kernel access to evade):
 
@@ -299,7 +299,7 @@ Hard-to-bypass detections (require kernel access to evade):
 1. **Behavioral over static** — Detect what processes DO, not what they ARE
 2. **No security theater** — If it doesn't work against a competent attacker, document limitations
 3. **Assume the attacker reads the code** — No security-by-obscurity
-4. **Layered defense** — Sentinel is ONE layer alongside Defender, not a replacement
+4. **Layered defense** — Behavedr is ONE layer alongside Defender, not a replacement
 5. **Kill only on corroboration** — Multiple Tier2 signals correlating produce composite kills. Single signals never kill independently (except self-protection)
 6. **Honest documentation** — State what works and what doesn't
 

@@ -1,7 +1,7 @@
 /**
- * Windows Sentinel — Threat Report Proxy Worker
+ * Behavedr — Threat Report Proxy Worker
  * 
- * Receives threat reports from Sentinel agents and forwards them to
+ * Receives threat reports from Behavedr agents and forwards them to
  * abuse.ch (MalwareBazaar, URLhaus) using server-side API keys.
  * 
  * Users never see or need API keys — this Worker holds them as secrets.
@@ -28,7 +28,7 @@ export default {
     const corsHeaders = {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, X-Sentinel-Auth, X-Sentinel-Signature, X-Sentinel-Timestamp, X-Sentinel-Key',
+      'Access-Control-Allow-Headers': 'Content-Type, X-Behavedr-Auth, X-Behavedr-Signature, X-Behavedr-Timestamp, X-Behavedr-Key',
     };
 
     if (request.method === 'OPTIONS') {
@@ -39,7 +39,7 @@ export default {
     if (url.pathname === '/health') {
       return new Response(JSON.stringify({
         status: 'ok',
-        service: 'sentinel-threat-proxy',
+        service: 'behavedr-threat-proxy',
         timestamp: new Date().toISOString()
       }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
     }
@@ -53,10 +53,10 @@ export default {
     }
 
     // Check shared secret authentication if configured on worker
-    if (env.SENTINEL_SHARED_SECRET) {
-      const authHeader = request.headers.get('X-Sentinel-Auth');
-      if (!authHeader || authHeader !== env.SENTINEL_SHARED_SECRET) {
-        return new Response(JSON.stringify({ error: 'Unauthorized: Invalid or missing X-Sentinel-Auth header' }), {
+    if (env.BEHAVEDR_SHARED_SECRET) {
+      const authHeader = request.headers.get('X-Behavedr-Auth');
+      if (!authHeader || authHeader !== env.BEHAVEDR_SHARED_SECRET) {
+        return new Response(JSON.stringify({ error: 'Unauthorized: Invalid or missing X-Behavedr-Auth header' }), {
           status: 401,
           headers: { 'Content-Type': 'application/json', ...corsHeaders }
         });
@@ -64,12 +64,12 @@ export default {
     }
 
     // Check signature and timestamp (required for all proxy requests to prevent replay and MITM)
-    const signature = request.headers.get('X-Sentinel-Signature');
-    const timestamp = request.headers.get('X-Sentinel-Timestamp');
-    const clientKey = request.headers.get('X-Sentinel-Key');
+    const signature = request.headers.get('X-Behavedr-Signature');
+    const timestamp = request.headers.get('X-Behavedr-Timestamp');
+    const clientKey = request.headers.get('X-Behavedr-Key');
 
     if (!signature || !timestamp || !clientKey) {
-      return new Response(JSON.stringify({ error: 'Bad Request: Missing required X-Sentinel security headers' }), {
+      return new Response(JSON.stringify({ error: 'Bad Request: Missing required X-Behavedr security headers' }), {
         status: 400,
         headers: { 'Content-Type': 'application/json', ...corsHeaders }
       });
@@ -154,7 +154,7 @@ async function reportHash(body, env) {
   const formData = new URLSearchParams();
   formData.append('query', 'taginfo');
   formData.append('hash', body.value);
-  formData.append('comment', body.comment || 'Reported by Windows Sentinel');
+  formData.append('comment', body.comment || 'Reported by Behavedr');
   if (body.tags && body.tags.length > 0) {
     formData.append('tag', body.tags.join(','));
   }
@@ -184,7 +184,7 @@ async function reportUrl(body, env) {
   formData.append('submission', JSON.stringify([{
     url: body.value,
     threat: body.threat || 'malware_download',
-    tags: body.tags || ['sentinel']
+    tags: body.tags || ['behavedr']
   }]));
 
   const response = await fetch('https://urlhaus-api.abuse.ch/v1/urls/add/', {
@@ -215,7 +215,7 @@ async function reportIp(body, env) {
     body: JSON.stringify({
       ip: body.value,
       categories: (body.categories || [14]).join(','),
-      comment: body.comment || 'Malicious activity detected by Windows Sentinel',
+      comment: body.comment || 'Malicious activity detected by Behavedr',
       timestamp: new Date().toISOString()
     })
   });

@@ -1,4 +1,4 @@
-# Windows Sentinel — Design Document
+# Behavedr — Design Document
 
 **Version: 1.5.0**
 
@@ -14,7 +14,7 @@
 
 ## Architecture Overview
 
-Windows Sentinel follows a clean pipeline architecture with strict separation of concerns:
+Behavedr follows a clean pipeline architecture with strict separation of concerns:
 
 ```
 Monitors â†’ TelemetryFusionEngine â†’ DetectionEngine â†’ ResponseEngine â†’ JsonlEventLogger
@@ -102,18 +102,18 @@ The fusion layer is PASSIVE â€” it never blocks, kills, or modifies telemet
 | `AppDnsExfilMonitor` | **1.0.1** Detects application-level DNS-over-HTTPS bypass where non-browser processes communicate directly with known DoH resolvers (Cloudflare, Google, Quad9, etc.) on port 443, evading Windows DNS Client event log and hosts file. Scans every 10s. | No |
 | `CastDeviceGuard` | **1.0.4** Kills ALL connections to Cast ports (8008/8009) on LAN unless target IP is in explicit `TrustedCastDevices` allowlist. No baseline, no OUI trust, no heuristics. Self-healing firewall rules block rogue Cast IPs. Scans every 5s. | No |
 | `ApplicationIntegrityMonitor` | **1.2.5** Cuckoo Egg Detection — baselines protected application executables (SHA-256 + Authenticode publisher) at startup. Detects unauthorized replacement via hash change + publisher mismatch. FileSystemWatcher for real-time + periodic scan every 30s. Active response: kills offending process tree, quarantines impostor, restores original from DPAPI-encrypted backup. Generates forensic incident report suitable for law enforcement filing. Legitimate updates (same publisher, different hash) auto-re-baseline silently. | No |
-| `IPSecIntegrityGuard` | **1.4.1** Self-healing guard for the GSecurity IPSec port-block policy. Verifies policy is active via `netsh ipsec static show policy` every 30s. If missing/unassigned (attacker ran `netsh ipsec static delete policy`), re-applies the full ruleset and emits Tier1 anti-tamper alert. Ensures FTP/SSH/RDP/SMB blocks cannot be permanently removed without Sentinel detecting and restoring them. | No |
-| `ConnectivityCanaryMonitor` | **1.5.0** Verifies Sentinel can reach threat intelligence endpoints every 45s (proxy, CIRCL, MalwareBazaar, Cloudflare). Detects EDRSilencer WFP blocking, DNS poisoning, firewall rules silencing Sentinel. Falls back to raw TCP on direct IP. 3 consecutive failures → Tier1 "Network Silencing Detected" (0.90). Persistent silencing (>10min) → 0.95. | No |
-| `WfpIntegrityMonitor` | **1.5.0** Scans Windows Filtering Platform filters every 30s via `netsh wfp show filters`. Detects BLOCK rules targeting Sentinel's executable paths, bulk filter surges, and EDR-targeting patterns. Direct Sentinel targeting → Tier1/0.97/KillProcessTree. Attempts filter removal. Covers 20+ security vendor process names. | No |
+| `IPSecIntegrityGuard` | **1.4.1** Self-healing guard for the GSecurity IPSec port-block policy. Verifies policy is active via `netsh ipsec static show policy` every 30s. If missing/unassigned (attacker ran `netsh ipsec static delete policy`), re-applies the full ruleset and emits Tier1 anti-tamper alert. Ensures FTP/SSH/RDP/SMB blocks cannot be permanently removed without Behavedr detecting and restoring them. | No |
+| `ConnectivityCanaryMonitor` | **1.5.0** Verifies Behavedr can reach threat intelligence endpoints every 45s (proxy, CIRCL, MalwareBazaar, Cloudflare). Detects EDRSilencer WFP blocking, DNS poisoning, firewall rules silencing Behavedr. Falls back to raw TCP on direct IP. 3 consecutive failures → Tier1 "Network Silencing Detected" (0.90). Persistent silencing (>10min) → 0.95. | No |
+| `WfpIntegrityMonitor` | **1.5.0** Scans Windows Filtering Platform filters every 30s via `netsh wfp show filters`. Detects BLOCK rules targeting Behavedr's executable paths, bulk filter surges, and EDR-targeting patterns. Direct Behavedr targeting → Tier1/0.97/KillProcessTree. Attempts filter removal. Covers 20+ security vendor process names. | No |
 | `DriverLoadMonitor` | **1.5.0** Monitors for BYOVD attacks via Event ID 7045 (kernel service install), registry scan for new driver services, and .sys file creation in user-writable paths. Cross-references 15+ SHA-256 hashes and 40+ filenames from Microsoft Vulnerable Driver Blocklist. Known-vulnerable → Tier1/0.97/KillProcessTree + `sc stop`/`sc delete`. | Yes (Event Log access) |
-| `AgentWatchdog` | **1.3.9** Service-side liveness monitor for `WindowsSentinel.Agent.exe`. Polls every 10s; if the agent is absent, relaunches it in the active console user's session via `WTSQueryUserToken` → `CreateEnvironmentBlock` → `CreateProcessAsUser` (standard SYSTEM→user session launch). 20s startup grace to avoid double-launch race with the HKLM Run key. 15s relaunch cooldown, max 5 relaunches per 5-minute window. Fires `Anti-Tamper: Agent Process Repeatedly Killed` (Tier1/0.70–0.90) if the agent is absent 3+ times in the window. | Yes (SE_ASSIGNPRIMARYTOKEN, SE_INCREASE_QUOTA — held by LocalSystem) |
+| `AgentWatchdog` | **1.3.9** Service-side liveness monitor for `Behavedr.Agent.exe`. Polls every 10s; if the agent is absent, relaunches it in the active console user's session via `WTSQueryUserToken` → `CreateEnvironmentBlock` → `CreateProcessAsUser` (standard SYSTEM→user session launch). 20s startup grace to avoid double-launch race with the HKLM Run key. 15s relaunch cooldown, max 5 relaunches per 5-minute window. Fires `Anti-Tamper: Agent Process Repeatedly Killed` (Tier1/0.70–0.90) if the agent is absent 3+ times in the window. | Yes (SE_ASSIGNPRIMARYTOKEN, SE_INCREASE_QUOTA — held by LocalSystem) |
 
 ### Engine
 
 | Component | Role |
 |-----------|------|
-| `DetectionEngine` | Runs all `IDetectionRule` instances against incoming telemetry. Channel-based async stream. 60s deduplication window. Records metrics via `SentinelMetrics`. |
-| `AdvancedResponseEngine` | Single point of action enforcement. Tier2 is always log-only. Tier1 may kill process when `--active-response` is set. President's Law closed kill list. Records response latency and success/failure via `SentinelMetrics`. |
+| `DetectionEngine` | Runs all `IDetectionRule` instances against incoming telemetry. Channel-based async stream. 60s deduplication window. Records metrics via `BehavedrMetrics`. |
+| `AdvancedResponseEngine` | Single point of action enforcement. Tier2 is always log-only. Tier1 may kill process when `--active-response` is set. President's Law closed kill list. Records response latency and success/failure via `BehavedrMetrics`. |
 | `TelemetryFusionEngine` | **1.0.0** Correlates raw telemetry across all sources into per-process event chains. Produces `FusedTelemetryContext` with behavioral metrics. |
 | `EventGraph` | **1.0.0** In-memory graph of processes, files, and network endpoints with temporal/causal edges. Supports incident timeline queries. |
 | `MemoryBehaviorAnalyzer` | **1.0.0** Scans process memory regions every 45s for RWX, unbacked executables, and shellcode prologues. |
@@ -180,7 +180,7 @@ Composite detections are emitted as Tier1 `DetectionEvent`s directly into the de
 
 ### Logging
 
-`JsonlEventLogger` writes newline-delimited JSON to `%ProgramData%\WindowsSentinel\events.jsonl`.
+`JsonlEventLogger` writes newline-delimited JSON to `%ProgramData%\Behavedr\events.jsonl`.
 
 - Thread-safe via `SemaphoreSlim`
 - No string-built JSON â€” `System.Text.Json` only
@@ -205,7 +205,7 @@ Composite detections are emitted as Tier1 `DetectionEvent`s directly into the de
 - **Tier2 enforcement** â€” `ResponseEngine` hard-codes `LogOnly` for all `Tier2Indicator` events regardless of configuration
 - **Deduplication** â€” `DetectionEngine` suppresses identical `(RuleName, ProcessId)` pairs within 60s; `NetworkMonitor` suppresses identical `(pid, remote, port)` alerts within 5 minutes
 - **Atomic snapshot** â€” `ProcessAncestryCache` uses `volatile IReadOnlyDictionary` swap; readers never block
-- **All disposable objects disposed** â€” `IAsyncDisposable` throughout; `SentinelService.StopAsync` disposes all components in order
+- **All disposable objects disposed** â€” `IAsyncDisposable` throughout; `BehavedrService.StopAsync` disposes all components in order
 
 ---
 
@@ -301,8 +301,8 @@ Composite detections are emitted as Tier1 `DetectionEvent`s directly into the de
 | `SafeExecution` | Retry, timeout, circuit breaker, and performance measurement patterns. |
 | `ConfigurationValidation` | Startup validation framework for all configuration sections. |
 | `ConfigIntegrityMonitor` | Runtime detection of config/executable tampering (SHA-256 baseline, 5-min checks). |
-| `SentinelHealthCheck` | Structured health checks: process, memory, handles, log file, quarantine, thread pool. |
-| `SentinelMetrics` | Performance counters with histograms (P50/P90/P95/P99) for detection, response. |
+| `BehavedrHealthCheck` | Structured health checks: process, memory, handles, log file, quarantine, thread pool. |
+| `BehavedrMetrics` | Performance counters with histograms (P50/P90/P95/P99) for detection, response. |
 | `SecureHttpClientFactory` | TLS 1.2+ enforcement, domain allowlisting, certificate validation for threat intel APIs. |
 | `StructuredLoggingExtensions` | BeginScope helpers for consistent operation context in all log entries. |
 | `QuarantineFileAtomicAsync` | Atomic quarantine: encryptâ†’moveâ†’delete prevents race conditions. |
@@ -312,7 +312,7 @@ Composite detections are emitted as Tier1 `DetectionEvent`s directly into the de
 
 | Component | Purpose |
 |-----------|---------|
-| `SentinelMetrics` wiring | DetectionEngine and AdvancedResponseEngine now record metrics (detection rate, response latency, FP tracking). |
+| `BehavedrMetrics` wiring | DetectionEngine and AdvancedResponseEngine now record metrics (detection rate, response latency, FP tracking). |
 | `HashReputationService` cache | Two-tier caching (in-memory + DPAPI-encrypted disk) cuts API calls by 90%+. |
 | `NamedPipeMonitor` | Detects C2/lateral movement via named pipe pattern matching (Cobalt Strike, PsExec, Impacket, Metasploit). |
 | `WmiPersistenceMonitor` | Periodic WMI namespace scan for planted event subscription persistence (T1546.003). |
@@ -410,8 +410,8 @@ Composite detections are emitted as Tier1 `DetectionEvent`s directly into the de
 | `RansomwareIoMonitor` whitelist | Added `fm` and `fm.exe` to the process whitelist to prevent false behavioral ransomware alerts during high match simulation and save activity. |
 | `AntiTamperGuard` | **New background watchdog service.** Prevents EDR process termination (denies `PROCESS_TERMINATE` to non-SYSTEM handles), detects process suspension gaps (NtSuspendProcess), auto-heals SCM registry service entries/paths, and enforces agent login Run key persistence. |
 | `FileActivityMonitor` DLL block | **Global DLL Sideloading Block.** Intercepts writes of `dbghelp.dll`/`dbgcore.dll` in non-system paths by untrusted processes, deleting the file and killing the writer immediately to prevent successful sideload execution without causing target application crashes. |
-| Native ACL folder lockdown | Enforces NTFS folder permissions on `C:\Program Files\WindowsSentinel` natively using DirectorySecurity to allow only SYSTEM/Administrators modification access and Users read/execute access, blocking icacls LOLBin command executions. |
-| Sentinel Folder Watch | Recursively monitors Sentinel's own directory. Any unauthorized creation or modification of files is immediately blocked, the file deleted, and the responsible process terminated. |
+| Native ACL folder lockdown | Enforces NTFS folder permissions on `C:\Program Files\Behavedr` natively using DirectorySecurity to allow only SYSTEM/Administrators modification access and Users read/execute access, blocking icacls LOLBin command executions. |
+| Behavedr Folder Watch | Recursively monitors Behavedr's own directory. Any unauthorized creation or modification of files is immediately blocked, the file deleted, and the responsible process terminated. |
 | `TrayIconService` alerts | Tails `events.jsonl` in the user session to display balloon tips for detections with integrated `RateLimiter` protection (max 3 alerts per 5s) to prevent notification flooding/spam. |
 
 ## Added in 4.5.0
@@ -480,7 +480,7 @@ Composite detections are emitted as Tier1 `DetectionEvent`s directly into the de
 
 | Component | Purpose |
 |-----------|---------|
-| `AgentWatchdog` | Service-side liveness watchdog for `WindowsSentinel.Agent.exe`. Polls every 10s; relaunches the agent in the active console user's session via `WTSQueryUserToken` → `CreateEnvironmentBlock` → `CreateProcessAsUser` when absent. 20s startup grace, 15s relaunch cooldown, max 5 relaunches per 5-minute window. Fires `Anti-Tamper: Agent Process Repeatedly Killed` (Tier1/0.70–0.90) on 3+ kills in window. |
+| `AgentWatchdog` | Service-side liveness watchdog for `Behavedr.Agent.exe`. Polls every 10s; relaunches the agent in the active console user's session via `WTSQueryUserToken` → `CreateEnvironmentBlock` → `CreateProcessAsUser` when absent. 20s startup grace, 15s relaunch cooldown, max 5 relaunches per 5-minute window. Fires `Anti-Tamper: Agent Process Repeatedly Killed` (Tier1/0.70–0.90) on 3+ kills in window. |
 | Agent self-restart | `Agent/Program.cs` wraps `host.Run()` in try/finally — `TryImmediateRestart()` relaunches the process on any exit (2s cooldown, max 5 self-restarts via `WS_AGENT_RESTART_COUNT` env var). `ScheduleDelayedRelaunch()` via detached `cmd.exe` covers fatal `IsTerminating` crashes where finally may not run. |
 | Orchestrator wiring (Agent) | `detectionEngine.SetOrchestrator(orchestrator)` now called in `Agent/Program.cs` post-`Build()`. Agent-side monitor detections (`ShellWatchdog`, `ClipboardSanitizer`, `ScreenCaptureMonitor`, etc.) now flow through incident grouping, response deduplication, and `ContextBus`. Previously bypassed the orchestrator entirely, falling back to bare `AdvancedResponseEngine`. |
 | appsettings path fix (Agent) | `ConfigureAppConfiguration` sets `BasePath` to `AppContext.BaseDirectory`. Fixes `appsettings.json` not found when agent is launched by `AgentWatchdog` with `System32` as CWD. |
@@ -496,7 +496,7 @@ Composite detections are emitted as Tier1 `DetectionEvent`s directly into the de
 | Monitor Group: NetworkIntegrity | ArpSpoofMonitor, DnsResponseValidationMonitor, PublicIpMonitor, WifiSecurityMonitor, NetworkInterfaceGuard, NetworkShareMonitor, +6 more. 6s start delay, 3 restart attempts. |
 | Monitor Group: SystemIntegrity | FirewallIntegrity, SecureBoot, WindowsUpdate, ScheduledTask, CriticalServiceGuard, RegistryMonitor, WmiPersistence, WfpIntegrityMonitor, DriverLoadMonitor, +10 more. 10s start delay, 3 restart attempts. |
 | Monitor Group: Peripheral | BluetoothMonitor, PhantomDeviceMonitor, MtpTransferGuard, VolumeMountMonitor, CastDeviceGuard, WslMonitor, +6 more. 30s start delay, 2 restart attempts. |
-| `FileShare.Delete` policy | All file I/O operations across the codebase now open files with `FileShare.ReadWrite | FileShare.Delete`. Sentinel never blocks users from deleting files, even during active scanning, hashing, quarantine reads, or log tailing. |
+| `FileShare.Delete` policy | All file I/O operations across the codebase now open files with `FileShare.ReadWrite | FileShare.Delete`. Behavedr never blocks users from deleting files, even during active scanning, hashing, quarantine reads, or log tailing. |
 | Source file layout | `BackgroundMonitors.cs` monolith (5,500 lines) eliminated. Monitor classes split into 6 group files under `Monitors/`: `CriticalMonitors.cs`, `CoreDetectionMonitors.cs`, `CredentialProtectionMonitors.cs`, `NetworkIntegrityMonitors.cs`, `SystemIntegrityMonitors.cs`, `PeripheralMonitors.cs`. |
 
 ---
@@ -505,7 +505,7 @@ Composite detections are emitted as Tier1 `DetectionEvent`s directly into the de
 
 | Rule | Rationale |
 |------|-----------|
-| All file reads use `FileShare.ReadWrite \| FileShare.Delete` | Sentinel observes, never obstructs. Users must always be able to delete their own files regardless of Sentinel's scanning state. The only exception is intentional response actions (DLL lock files placed by `DllUnloadEngine` after confirmed sideloading). |
+| All file reads use `FileShare.ReadWrite \| FileShare.Delete` | Behavedr observes, never obstructs. Users must always be able to delete their own files regardless of Behavedr's scanning state. The only exception is intentional response actions (DLL lock files placed by `DllUnloadEngine` after confirmed sideloading). |
 | Monitors are grouped by function and priority | Prevents startup thundering herd, enables independent restart on failure, and allows priority-based resource allocation. Critical self-protection monitors start first and restart indefinitely; peripheral monitors start last with limited restart budget. |
 | Monitor source files match group structure | Each MonitorGroup has a corresponding source file under `Monitors/`. No monolith files — new monitors go into the group file they belong to. |
 
@@ -518,7 +518,7 @@ Composite detections are emitted as Tier1 `DetectionEvent`s directly into the de
 | Command injection via PowerShell | Critical | `IsolationResponseEngine` | ISO dismount and Hyper-V Stop-VM now use `-EncodedCommand` (Base64-encoded Unicode) instead of string interpolation into `-Command`. Single-quote escaping as defense-in-depth. |
 | Self-exclusion bypass via junction/symlink | High | `AdvancedResponseEngine`, `HardeningModule`, `DetectionEngine` | All 3 self-exclusion path checks now use `Path.GetFullPath()` normalization + trailing separator to prevent junction/symlink bypass and prefix collision. |
 | Overprivileged process handle | High | `DllUnloadEngine` | `OpenProcess` reduced from `PROCESS_ALL_ACCESS` to `PROCESS_QUERY_INFORMATION`. Thread handles already opened with minimum-necessary `THREAD_SET_CONTEXT`. |
-| Unauthenticated threat telemetry | High | `ThreatReportService` | All proxy requests HMAC-SHA256 signed using installation entropy key. Headers: `X-Sentinel-Timestamp`, `X-Sentinel-Signature`. Prevents MITM, replay, and fake injection. |
+| Unauthenticated threat telemetry | High | `ThreatReportService` | All proxy requests HMAC-SHA256 signed using installation entropy key. Headers: `X-Behavedr-Timestamp`, `X-Behavedr-Signature`. Prevents MITM, replay, and fake injection. |
 | SecureCacheStore HMAC key predictable | High | `SecureCacheStore` | Removed boot time ticks and process ID from key derivation. Key now from Machine GUID + SYSTEM-ACL-protected entropy + domain label only. |
 | Docker imageId injection | Medium | `IsolationResponseEngine` | `imageId` from `docker inspect` output validated with `IsValidDockerIdentifier()` before use in `docker rmi`. |
 | Config overwrite on upgrade | Medium | `setup.iss` | `appsettings.json` flag changed from `ignoreversion` to `onlyifdoesntexist`. Upgrades preserve user customizations. |
@@ -542,7 +542,7 @@ Threat-intel-driven release addressing the top attack techniques of June–July 
 | Monitor | Group | Scan Interval | Key Detection |
 |---------|-------|---------------|---------------|
 | `ConnectivityCanaryMonitor` | Critical | 45s | EDRSilencer network silencing, WFP blocking, DNS poisoning |
-| `WfpIntegrityMonitor` | SystemIntegrity | 30s | WFP BLOCK filters targeting Sentinel/EDR processes |
+| `WfpIntegrityMonitor` | SystemIntegrity | 30s | WFP BLOCK filters targeting Behavedr/EDR processes |
 | `DriverLoadMonitor` | SystemIntegrity | 15s | BYOVD vulnerable driver loads (Event 7045 + registry + filesystem) |
 | `ScriptHardeningMonitor` | CoreDetection | 8s | PS history tampering, SBL enforcement, downgrade attacks, obfuscation, download cradles, reflection loading, profile persistence, CLM bypass |
 
@@ -585,7 +585,7 @@ The `UnifiedEtwSession` is the single most important architectural change since 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │                    UnifiedEtwSession                                  │
-│   Single real-time trace session (SentinelUnifiedTrace)              │
+│   Single real-time trace session (BehavedrUnifiedTrace)              │
 │   64 buffers x 256KB, QPC timestamps, AboveNormal priority          │
 │                                                                      │
 │   PROVIDERS:                                                         │

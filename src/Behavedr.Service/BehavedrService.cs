@@ -1,0 +1,287 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Behavedr.Core;
+
+namespace Behavedr.Service
+{
+    public class BehavedrService : BackgroundService
+    {
+        private readonly ILogger<BehavedrService> _logger;
+        private readonly BehavedrConfig _config;
+        private readonly JsonlEventLogger _eventLogger;
+        private readonly DetectionEngine _detectionEngine;
+        private readonly ProcessAncestryCache _ancestryCache;
+        private readonly IEnumerable<IMonitor> _monitors;
+
+        // Unified ETW session — started before monitors for event-driven telemetry
+        private readonly UnifiedEtwSession _unifiedEtwSession;
+        private readonly EtwEventDispatcher _etwEventDispatcher;
+
+        // Constructor-injected singletons that self-start
+        private readonly UsbDeviceFingerprinter _usbDeviceFingerprinter;
+        private readonly AppNetworkPolicyMonitor _networkPolicyMonitor;
+        private readonly WmiProcessMonitor _wmiProcessMonitor;
+        private readonly FileActivityMonitor _fileActivityMonitor;
+        private readonly NetworkMonitor _networkMonitor;
+        private readonly LsassDumpCanaryMonitor _lsassDumpCanaryMonitor;
+        private readonly RouteTableMonitor _routeTableMonitor;
+        private readonly MemoryBehaviorAnalyzer _memoryBehaviorAnalyzer;
+        private readonly TokenIntegrityMonitor _tokenIntegrityMonitor;
+        private readonly CredentialCanaryMonitor _credentialCanaryMonitor;
+        private readonly LocalServerMonitor _localServerMonitor;
+        private readonly ParentPidSpoofDetector _parentPidSpoofDetector;
+        private readonly ChainTracer _chainTracer;
+        private readonly string _version;
+
+        public BehavedrService(
+            ILogger<BehavedrService> logger,
+            BehavedrConfig config,
+            JsonlEventLogger eventLogger,
+            DetectionEngine detectionEngine,
+            ProcessAncestryCache ancestryCache,
+            IEnumerable<IMonitor> monitors,
+            UnifiedEtwSession unifiedEtwSession,
+            EtwEventDispatcher etwEventDispatcher,
+            UsbDeviceFingerprinter usbDeviceFingerprinter,
+            AppNetworkPolicyMonitor networkPolicyMonitor,
+            WmiProcessMonitor wmiProcessMonitor,
+            FileActivityMonitor fileActivityMonitor,
+            NetworkMonitor networkMonitor,
+            LsassDumpCanaryMonitor lsassDumpCanaryMonitor,
+            RouteTableMonitor routeTableMonitor,
+            MemoryBehaviorAnalyzer memoryBehaviorAnalyzer,
+            TokenIntegrityMonitor tokenIntegrityMonitor,
+            CredentialCanaryMonitor credentialCanaryMonitor,
+            LocalServerMonitor localServerMonitor,
+            AdvancedResponseEngine responseEngine,
+            IncidentResponseService incidentResponseService,
+            DllUnloadEngine dllUnloadEngine,
+            ParentPidSpoofDetector parentPidSpoofDetector,
+            ChainTracer chainTracer,
+            BehavedrOrchestrator orchestrator)
+        {
+            // Wire incident response into response engine (late binding to avoid circular DI)
+            responseEngine.SetIncidentResponseService(incidentResponseService);
+            responseEngine.SetDllUnloadEngine(dllUnloadEngine);
+            responseEngine.SetChainTracer(chainTracer);
+
+            // v1.3.2: Wire orchestrator into detection engine
+            detectionEngine.SetOrchestrator(orchestrator);
+
+            _logger = logger;
+            _config = config;
+            _eventLogger = eventLogger;
+            _detectionEngine = detectionEngine;
+            _ancestryCache = ancestryCache;
+            _monitors = monitors;
+            _unifiedEtwSession = unifiedEtwSession;
+            _etwEventDispatcher = etwEventDispatcher;
+            _usbDeviceFingerprinter = usbDeviceFingerprinter;
+            _networkPolicyMonitor = networkPolicyMonitor;
+            _wmiProcessMonitor = wmiProcessMonitor;
+            _fileActivityMonitor = fileActivityMonitor;
+            _networkMonitor = networkMonitor;
+            _lsassDumpCanaryMonitor = lsassDumpCanaryMonitor;
+            _routeTableMonitor = routeTableMonitor;
+            _memoryBehaviorAnalyzer = memoryBehaviorAnalyzer;
+            _tokenIntegrityMonitor = tokenIntegrityMonitor;
+            _credentialCanaryMonitor = credentialCanaryMonitor;
+            _localServerMonitor = localServerMonitor;
+            _parentPidSpoofDetector = parentPidSpoofDetector;
+            _chainTracer = chainTracer;
+            _version = LoadVersion();
+        }
+
+        private static string LoadVersion()
+        {
+            var exeDir = AppContext.BaseDirectory;
+            var versionFile = System.IO.Path.Combine(exeDir, "version.txt");
+            if (System.IO.File.Exists(versionFile))
+            {
+                var text = System.IO.File.ReadAllText(versionFile).Trim();
+                if (!string.IsNullOrEmpty(text)) return text;
+            }
+            return typeof(BehavedrService).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
+        }
+
+
+        protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+        {
+            // STABILITY v1.4.8: If ExecuteAsync returns for ANY reason, the .NET Host
+            // shuts down the entire process. Wrap everything so we NEVER return early.
+            try
+            {
+            _logger.LogInformation("Behavedr Service starting...");
+
+            // Startup Self-Test
+            if (!RunStartupSelfTest())
+            {
+                _logger.LogCritical("Behavedr startup self-test FAILED. Stopping service.");
+                return;
+            }
+
+            // Start Unified ETW Session — DISABLED pending P/Invoke stability fix.
+            // The ETW session P/Invoke struct layouts cause process termination on some
+            // Windows builds. Monitors fall back to WMI/polling until this is resolved.
+            // try
+            // {
+            //     _etwEventDispatcher.RegisterHandlers(_unifiedEtwSession);
+            //     await _unifiedEtwSession.StartAsync(CancellationToken.None);
+            // }
+            // catch (Exception ex) { _logger.LogWarning(ex, "UnifiedEtwSession start failed"); }
+
+            // Start all IMonitor implementations
+            foreach (var monitor in _monitors)
+            {
+                if (stoppingToken.IsCancellationRequested) break;
+                try
+                {
+                    await monitor.StartAsync(CancellationToken.None);
+                    _logger.LogInformation("Started monitor: {Monitor}", monitor.Name);
+                }
+                catch (OperationCanceledException) { break; }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to start monitor: {Monitor}", monitor.Name);
+                }
+            }
+
+            _logger.LogInformation("Behavedr Service successfully started.");
+
+            await _eventLogger.LogEventAsync("service_start", new
+            {
+                Status = "started",
+                Version = _version,
+                Timestamp = DateTime.UtcNow
+            });
+
+            try
+            {
+                _logger.LogInformation("Entering main keep-alive loop. StoppingToken cancelled: {Cancelled}", stoppingToken.IsCancellationRequested);
+                while (!stoppingToken.IsCancellationRequested)
+                {
+                    await Task.Delay(5000, stoppingToken);
+                }
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception ex)
+            {
+                _logger.LogCritical(ex, "Unexpected exception in keep-alive loop");
+            }
+            finally
+            {
+                _logger.LogInformation("Behavedr Service stopping...");
+
+                // Stop and dispose IMonitors
+                foreach (var monitor in _monitors)
+                {
+                    try { await monitor.StopAsync(); }
+                    catch (Exception ex) { _logger.LogError(ex, "Error stopping monitor: {Monitor}", monitor.Name); }
+
+                    if (monitor is IDisposable disposable)
+                    {
+                        try { disposable.Dispose(); }
+                        catch (Exception ex) { _logger.LogError(ex, "Error disposing monitor: {Monitor}", monitor.Name); }
+                    }
+                }
+
+                // Dispose of other injected singletons to prevent handle/thread leaks
+                var disposables = new object[]
+                {
+                    _usbDeviceFingerprinter,
+                    _networkPolicyMonitor,
+                    _wmiProcessMonitor,
+                    _fileActivityMonitor,
+                    _networkMonitor,
+                    _lsassDumpCanaryMonitor,
+                    _routeTableMonitor,
+                    _memoryBehaviorAnalyzer,
+                    _tokenIntegrityMonitor,
+                    _credentialCanaryMonitor,
+                    _localServerMonitor,
+                    _parentPidSpoofDetector,
+                    _chainTracer
+                };
+
+                foreach (var item in disposables)
+                {
+                    if (item is IDisposable disposable)
+                    {
+                        try
+                        {
+                            disposable.Dispose();
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, "Error disposing singleton: {Type}", item.GetType().Name);
+                        }
+                    }
+                }
+
+                _ancestryCache.Stop();
+                _detectionEngine.Stop();
+                await _unifiedEtwSession.StopAsync();
+            }
+            }
+            catch (Exception ex)
+            {
+                // STABILITY: Never let ExecuteAsync return — that kills the host.
+                // Log the error and enter infinite sleep until SCM sends stop signal.
+                _logger.LogCritical(ex, "FATAL: ExecuteAsync threw unexpectedly. Entering infinite wait to prevent host shutdown.");
+                try { await Task.Delay(Timeout.Infinite, stoppingToken); } catch { }
+            }
+        }
+
+        private bool RunStartupSelfTest()
+        {
+            _logger.LogInformation("Running startup self-test...");
+
+            // 1. Verify log path access
+            var logDir = Path.GetDirectoryName(_eventLogger.LogFilePath);
+            if (string.IsNullOrEmpty(logDir))
+                logDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "Behavedr");
+            if (!Directory.Exists(logDir))
+            {
+                try
+                {
+                    Directory.CreateDirectory(logDir);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError($"Self-test failed to create log directory: {ex.Message}");
+                    return false;
+                }
+            }
+
+            // 2. Verify quarantine access
+            var quarantineDir = Path.Combine(logDir, "Quarantine");
+            if (!Directory.Exists(quarantineDir))
+            {
+                try
+                {
+                    Directory.CreateDirectory(quarantineDir);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError($"Self-test failed to create quarantine directory: {ex.Message}");
+                    return false;
+                }
+            }
+
+            // 3. Verify process hardening module
+            if (!HardeningModule.ApplyOrFail())
+            {
+                _logger.LogWarning("Self-test: HardeningModule.ApplyOrFail returned false (likely non-fatal, continuing).");
+            }
+
+            _logger.LogInformation("Startup self-test PASSED.");
+            return true;
+        }
+    }
+}
+

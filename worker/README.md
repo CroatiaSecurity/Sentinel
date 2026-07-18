@@ -1,6 +1,6 @@
-# Sentinel Threat Report Proxy
+# Behavedr Threat Report Proxy
 
-Cloudflare Worker that receives threat reports from Windows Sentinel agents and forwards them to threat intelligence platforms (MalwareBazaar, URLhaus, AbuseIPDB) using server-side API keys.
+Cloudflare Worker that receives threat reports from Behavedr agents and forwards them to threat intelligence platforms (MalwareBazaar, URLhaus, AbuseIPDB) using server-side API keys.
 
 Users never need to configure API keys — the Worker holds them as encrypted secrets.
 
@@ -26,7 +26,7 @@ wrangler secret put ABUSEIPDB_KEY
 
 6. Deploy: `wrangler deploy`
 
-Your Worker will be available at: `https://sentinel-threat-proxy.<your-subdomain>.workers.dev`
+Your Worker will be available at: `https://behavedr-threat-proxy.<your-subdomain>.workers.dev`
 
 ## API Endpoints
 
@@ -37,7 +37,7 @@ Report a malicious file hash to MalwareBazaar.
   "type": "hash",
   "value": "sha256_hex_string",
   "tags": ["trojan", "rat"],
-  "comment": "Detected by Sentinel - ransomware behavior"
+  "comment": "Detected by Behavedr - ransomware behavior"
 }
 ```
 
@@ -48,7 +48,7 @@ Report a malicious URL to URLhaus.
   "type": "url",
   "value": "http://evil.com/payload.exe",
   "threat": "malware_download",
-  "tags": ["sentinel", "c2"]
+  "tags": ["behavedr", "c2"]
 }
 ```
 
@@ -72,16 +72,16 @@ Health check.
 - **URLhaus**: https://urlhaus.abuse.ch/api/ → sign up → get token
 - **AbuseIPDB**: https://www.abuseipdb.com/register → get API key (free tier: 1000 reports/day)
 
-## Sentinel Integration
+## Behavedr Integration
 
-In the Sentinel service appsettings.json, set:
+In the Behavedr service appsettings.json, set:
 ```json
 {
   "ThreatReporting": {
     "Enabled": true,
-    "ProxyEndpoint": "https://sentinel-threat-proxy.your-subdomain.workers.dev"
+    "ProxyEndpoint": "https://behavedr-threat-proxy.your-subdomain.workers.dev"
   }
 }
 ```
 
-The Sentinel agent will POST reports to this endpoint instead of directly to abuse.ch.
+The Behavedr agent will POST reports to this endpoint instead of directly to abuse.ch.

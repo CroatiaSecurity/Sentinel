@@ -10,7 +10,7 @@
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability in Windows Sentinel, please report it responsibly.
+If you discover a security vulnerability in Behavedr, please report it responsibly.
 
 **Do NOT open a public GitHub issue for security vulnerabilities.**
 
@@ -18,7 +18,7 @@ If you discover a security vulnerability in Windows Sentinel, please report it r
 
 1. **Email:** Send details to the repository owner via the email address listed on the [GitHub profile](https://github.com/croatiasecurity).
 
-2. **GitHub Private Vulnerability Reporting:** Use GitHub's [private vulnerability reporting](https://github.com/croatiasecurity/sentinel/security/advisories/new) feature if available on the repository.
+2. **GitHub Private Vulnerability Reporting:** Use GitHub's [private vulnerability reporting](https://github.com/croatiasecurity/behavedr/security/advisories/new) feature if available on the repository.
 
 3. **Include the following in your report:**
    - Description of the vulnerability
@@ -38,14 +38,14 @@ If you discover a security vulnerability in Windows Sentinel, please report it r
 
 The following are in scope for security reports:
 
-- Bypass of detection rules (attacker can evade Sentinel without kernel access)
-- Self-exclusion bypass (attacker can make Sentinel ignore their process)
+- Bypass of detection rules (attacker can evade Behavedr without kernel access)
+- Self-exclusion bypass (attacker can make Behavedr ignore their process)
 - Cache/HMAC poisoning (attacker can forge safe verdicts)
-- Privilege escalation via Sentinel (Sentinel's actions can be leveraged by an attacker)
+- Privilege escalation via Behavedr (Behavedr's actions can be leveraged by an attacker)
 - Command injection via any input that reaches Process.Start or shell execution
-- Denial of service against Sentinel (crash or resource exhaustion)
-- Information disclosure from Sentinel's logs, cache, or quarantine
-- Tampering with Sentinel's configuration or binaries without detection
+- Denial of service against Behavedr (crash or resource exhaustion)
+- Information disclosure from Behavedr's logs, cache, or quarantine
+- Tampering with Behavedr's configuration or binaries without detection
 
 The following are NOT in scope:
 
@@ -65,4 +65,4 @@ See [CHANGELOG.md](CHANGELOG.md) for the full history of security fixes, includi
 
 ### Security Design Philosophy
 
-Sentinel assumes the attacker has read the source code. Security decisions are documented in [THREAT_MODEL.md](THREAT_MODEL.md). We do not rely on security-by-obscurity for any detection or protection mechanism.
+Behavedr assumes the attacker has read the source code. Security decisions are documented in [THREAT_MODEL.md](THREAT_MODEL.md). We do not rely on security-by-obscurity for any detection or protection mechanism.

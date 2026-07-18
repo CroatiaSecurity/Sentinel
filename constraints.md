@@ -1,4 +1,4 @@
-# Windows Sentinel — Constraints
+# Behavedr — Constraints
 
 **Version: 1.5.0**
 
@@ -18,7 +18,7 @@
 | No shelling out to system tools | No `Process.Start("cmd.exe", ...)` for detection or response logic |
 | Tier2 can never trigger action | Enforced unconditionally in `AdvancedResponseEngine.HandleAsync` â€” no exceptions, no config override |
 | Active response on by default | Ships in killing mode. President's Law rules fire immediately. |
-| All file reads use `FileShare.Delete` | All file I/O opens with `FileShare.ReadWrite | FileShare.Delete` — Sentinel never blocks user file deletion, even during active scanning or hashing. Only exception: intentional DLL lock files from response actions. |
+| All file reads use `FileShare.Delete` | All file I/O opens with `FileShare.ReadWrite | FileShare.Delete` — Behavedr never blocks user file deletion, even during active scanning or hashing. Only exception: intentional DLL lock files from response actions. |
 | Monitors registered in groups | All background monitors must be registered via `MonitorGroup` with appropriate priority, start delay, and restart policy — no flat `AddHostedService` for monitors. |
 | Monitor source files match groups | Each monitor class lives in the group file it belongs to under `Monitors/` (CriticalMonitors.cs, CoreDetectionMonitors.cs, etc.). No monolith files — new monitors go into their group file. |
 | No user-session response mode toggle | The Agent MUST NOT expose any mechanism (menu item, API, named pipe, etc.) to disable ActiveResponse from user-level context. Only the Service (SYSTEM) controls response mode. |

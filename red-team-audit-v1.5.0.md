@@ -1,31 +1,31 @@
-# Red Team Audit — Sentinel EDR v1.5.0 Recommendations
+# Red Team Audit — Behavedr EDR v1.5.0 Recommendations
 
 **Date:** 2026-07-17  
 **Threat Intel Period:** June–July 2026  
 **Sources:** The Hacker News, active campaign analysis  
 **Auditor:** AI-assisted red team analysis  
-**Scope:** Identify exploitable gaps in Sentinel's detection/prevention given current real-world TTPs  
+**Scope:** Identify exploitable gaps in Behavedr's detection/prevention given current real-world TTPs  
 
 ---
 
 ## Executive Summary
 
-Sentinel is an impressively deep userland EDR with strong behavioral detection, composite correlation, and active deception. However, the **2026 threat landscape has shifted hard toward EDR-killing** — with 54+ known EDR killers using BYOVD, GentleKiller targeting 400+ security processes, and tools like EDRSilencer using WFP to silently block EDR network traffic. 
+Behavedr is an impressively deep userland EDR with strong behavioral detection, composite correlation, and active deception. However, the **2026 threat landscape has shifted hard toward EDR-killing** — with 54+ known EDR killers using BYOVD, GentleKiller targeting 400+ security processes, and tools like EDRSilencer using WFP to silently block EDR network traffic. 
 
-As a **userland-only** EDR (no kernel driver, by design constraint), Sentinel faces a fundamental asymmetry: attackers operating at kernel level can terminate, blind, or silence it before behavioral detection fires. The v1.5.0 improvements should focus on **detecting and surviving these kill attempts** rather than adding new detection categories.
+As a **userland-only** EDR (no kernel driver, by design constraint), Behavedr faces a fundamental asymmetry: attackers operating at kernel level can terminate, blind, or silence it before behavioral detection fires. The v1.5.0 improvements should focus on **detecting and surviving these kill attempts** rather than adding new detection categories.
 
 ---
 
 ## Threat Intelligence Summary (June–July 2026)
 
-| Campaign/Tool | Technique | Relevance to Sentinel |
+| Campaign/Tool | Technique | Relevance to Behavedr |
 |---|---|---|
 | **GentleKiller** (The Gentlemen RaaS) | BYOVD framework targeting 400 security processes | Direct threat — terminates EDR processes by name |
 | **PoisonX** (GodDamn Ransomware) | BYOVD driver to disable endpoint defenses | Same — driver-level process kill |
 | **Qilin/Warlock** | DLL sideloading → BYOVD → terminate 300+ EDR drivers | Multi-stage EDR kill chain |
 | **EDRSilencer** (commoditized) | WFP filters blocking EDR outbound traffic | Blinds cloud reputation lookups silently |
 | **DeepLoad** | WMI persistence + direct Win32 API calls (bypasses PowerShell monitoring) + disables PS history | Evades ScriptExecutionMonitor + PowerShellThreatMonitor |
-| **Avalon Framework** | Vendor-specific evasion for 9+ EDR products | Will target Sentinel by name once it gains visibility |
+| **Avalon Framework** | Vendor-specific evasion for 9+ EDR products | Will target Behavedr by name once it gains visibility |
 | **Mistic Backdoor** | Stealthy financially motivated persistent access | Low-and-slow C2 outside beaconing patterns |
 | **AI-Generated Ransomware** | Browser-based + polymorphic | Evades static signatures, hash reputation useless |
 | **ClickFix (evolved)** | Fake CAPTCHAs + LOLBin exploitation + direct native calls | Partially covered, but native API path is blind |
@@ -37,14 +37,14 @@ As a **userland-only** EDR (no kernel driver, by design constraint), Sentinel fa
 
 ### GAP 1: EDR Network Silencing (CRITICAL)
 
-**Attack:** EDRSilencer adds WFP filters to block Sentinel's outbound traffic to its threat proxy, CIRCL, MalwareBazaar, and VirusTotal. Sentinel continues running but all reputation lookups silently fail, returning `Unknown`. No alert is ever generated.
+**Attack:** EDRSilencer adds WFP filters to block Behavedr's outbound traffic to its threat proxy, CIRCL, MalwareBazaar, and VirusTotal. Behavedr continues running but all reputation lookups silently fail, returning `Unknown`. No alert is ever generated.
 
 **Current State:** 
 - `FileReputationEngine` logs errors at Debug level when lookups fail
 - No health-check or connectivity canary exists
-- No detection for WFP filter manipulation targeting Sentinel's process
+- No detection for WFP filter manipulation targeting Behavedr's process
 
-**Impact:** Attacker blinds Sentinel's cloud intelligence permanently. Novel malware runs freely because absence-of-evidence is correctly treated as `Unknown` (not Safe), but the ADS verdict which carries significant kill weight never fires.
+**Impact:** Attacker blinds Behavedr's cloud intelligence permanently. Novel malware runs freely because absence-of-evidence is correctly treated as `Unknown` (not Safe), but the ADS verdict which carries significant kill weight never fires.
 
 **Exploitability:** Trivial. EDRSilencer is open-source and takes 1 command.
 
@@ -52,15 +52,15 @@ As a **userland-only** EDR (no kernel driver, by design constraint), Sentinel fa
 
 ### GAP 2: BYOVD Process Termination (CRITICAL)
 
-**Attack:** Attacker loads a signed vulnerable driver (35+ known working drivers), uses it to terminate `WindowsSentinel.Service.exe` from kernel mode. Sentinel's `AntiTamperGuard` checks timing (suspend detection) and service registry integrity, but a kernel-level process kill via `ZwTerminateProcess` from Ring 0 is instant and bypasses all userland protections.
+**Attack:** Attacker loads a signed vulnerable driver (35+ known working drivers), uses it to terminate `Behavedr.Service.exe` from kernel mode. Behavedr's `AntiTamperGuard` checks timing (suspend detection) and service registry integrity, but a kernel-level process kill via `ZwTerminateProcess` from Ring 0 is instant and bypasses all userland protections.
 
 **Current State:**
 - `AntiTamperGuard` detects suspension gaps (NtSuspendProcess) and service registry tampering
 - `TlsCertificateMonitor` watches TrustedPublisher store for BYOVD-related cert additions
 - `DeviceInstallMonitor` alerts on new non-Windows kernel driver services
-- **But:** Once the driver is loaded and sends ZwTerminateProcess, Sentinel dies instantly. SCM restarts it, but the driver persists and kills it again → permanent death loop.
+- **But:** Once the driver is loaded and sends ZwTerminateProcess, Behavedr dies instantly. SCM restarts it, but the driver persists and kills it again → permanent death loop.
 
-**Impact:** Complete EDR bypass. Sentinel enters crash-restart-crash loop exactly like the v1.4.7-1.4.9 crashes, but attacker-induced and persistent.
+**Impact:** Complete EDR bypass. Behavedr enters crash-restart-crash loop exactly like the v1.4.7-1.4.9 crashes, but attacker-induced and persistent.
 
 **Exploitability:** High. All 35+ known vulnerable drivers are public. GentleKiller operationalizes new PoCs within days of disclosure.
 
@@ -97,9 +97,9 @@ As a **userland-only** EDR (no kernel driver, by design constraint), Sentinel fa
 
 ---
 
-### GAP 5: Sentinel Process Name Targeting (HIGH)
+### GAP 5: Behavedr Process Name Targeting (HIGH)
 
-**Attack:** GentleKiller and similar EDR killers maintain lists of security process names. `WindowsSentinel.Service.exe` and `WindowsSentinel.Agent.exe` are unique, identifiable names. Any attacker reading this open-source repo knows exactly what to target.
+**Attack:** GentleKiller and similar EDR killers maintain lists of security process names. `Behavedr.Service.exe` and `Behavedr.Agent.exe` are unique, identifiable names. Any attacker reading this open-source repo knows exactly what to target.
 
 **Current State:**
 - Process names are hardcoded and visible
@@ -107,7 +107,7 @@ As a **userland-only** EDR (no kernel driver, by design constraint), Sentinel fa
 - `AgentWatchdog` restarts the agent process
 - **But:** If the service itself is killed, no component restarts it except SCM — and SCM has limited retry logic
 
-**Impact:** Targeted process kill → Sentinel completely offline. Even if SCM restarts, attacker can kill repeatedly or just kill fast before critical action.
+**Impact:** Targeted process kill → Behavedr completely offline. Even if SCM restarts, attacker can kill repeatedly or just kill fast before critical action.
 
 **Exploitability:** Trivial for any attacker with admin/SYSTEM access.
 
@@ -133,11 +133,11 @@ As a **userland-only** EDR (no kernel driver, by design constraint), Sentinel fa
 **Attack:** Avalon Framework and AI-generated ransomware use polymorphic code that changes structure on every execution. No two samples share hashes. Behavioral signatures in variable names/function names are AI-obfuscated.
 
 **Current State:**
-- Sentinel correctly does NOT rely on hash-based detection for kills (behavioral detection via President's Law)
+- Behavedr correctly does NOT rely on hash-based detection for kills (behavioral detection via President's Law)
 - **But:** The 45-second `MemoryBehaviorAnalyzer` scan interval + the time before behavioral patterns manifest gives AI-assisted malware a window to act
 - Fast-acting credential stealers complete their mission in <5 seconds
 
-**Impact:** Moderate — Sentinel's behavioral approach is the correct defense, but scan intervals create a race condition.
+**Impact:** Moderate — Behavedr's behavioral approach is the correct defense, but scan intervals create a race condition.
 
 **Exploitability:** Medium. Requires sophisticated attacker or access to AI malware frameworks.
 
@@ -145,11 +145,11 @@ As a **userland-only** EDR (no kernel driver, by design constraint), Sentinel fa
 
 ### GAP 8: Outbound Connectivity Health (No Self-Awareness) (MEDIUM)
 
-**Attack:** Beyond WFP silencing, an attacker could also: route Sentinel's proxy traffic to a sinkhole, poison DNS for `sentinel-threat-proxy.znastidobrostoje-6ee.workers.dev`, or add a firewall rule blocking the proxy IP.
+**Attack:** Beyond WFP silencing, an attacker could also: route Behavedr's proxy traffic to a sinkhole, poison DNS for `behavedr-threat-proxy.znastidobrostoje-6ee.workers.dev`, or add a firewall rule blocking the proxy IP.
 
 **Current State:**
-- `DnsResponseValidationMonitor` validates canary domains — but not Sentinel's own proxy domain
-- `FirewallIntegrityMonitor` detects bulk rule additions — but a single surgical rule blocking Sentinel's proxy IP would fall under threshold
+- `DnsResponseValidationMonitor` validates canary domains — but not Behavedr's own proxy domain
+- `FirewallIntegrityMonitor` detects bulk rule additions — but a single surgical rule blocking Behavedr's proxy IP would fall under threshold
 - No periodic "am I connected to my own backend?" health check
 
 **Impact:** Silent degradation of all cloud-based detection capabilities.
@@ -160,7 +160,7 @@ As a **userland-only** EDR (no kernel driver, by design constraint), Sentinel fa
 
 ### GAP 9: Ephemeral Credential Theft (< 5 second lifetime) (MEDIUM)
 
-**Attack:** Modern infostealers (Amatera, Lumma) complete credential exfiltration in under 5 seconds: read browser DB → pack → exfil → self-delete. Sentinel's `BrowserCredentialGuardMonitor` scans every 10 seconds, and `EphemeralProcessMonitor` depends on Prefetch/Event 4688.
+**Attack:** Modern infostealers (Amatera, Lumma) complete credential exfiltration in under 5 seconds: read browser DB → pack → exfil → self-delete. Behavedr's `BrowserCredentialGuardMonitor` scans every 10 seconds, and `EphemeralProcessMonitor` depends on Prefetch/Event 4688.
 
 **Current State:**
 - `ChromeCredentialGuardMonitor` — 10s scan interval
@@ -198,11 +198,11 @@ As a **userland-only** EDR (no kernel driver, by design constraint), Sentinel fa
 **Implementation:**
 ```csharp
 /// <summary>
-/// Periodically verifies Sentinel can reach its threat intelligence endpoints.
+/// Periodically verifies Behavedr can reach its threat intelligence endpoints.
 /// If connectivity drops (3+ consecutive failures), emits Tier1 alert and activates
 /// local-only hardened detection mode (lower confidence thresholds for behavioral rules).
 /// Detects: WFP filter manipulation, DNS poisoning of proxy domain, firewall rules
-/// blocking Sentinel traffic, proxy IP sinkholing.
+/// blocking Behavedr traffic, proxy IP sinkholing.
 /// </summary>
 public sealed class ConnectivityCanaryMonitor : BackgroundService
 {
@@ -222,7 +222,7 @@ public sealed class ConnectivityCanaryMonitor : BackgroundService
 
 #### 2. BYOVD Driver Load Detection & Survival (`DriverLoadMonitor`)
 
-**Problem:** Vulnerable drivers loaded → Sentinel killed from kernel mode → permanent death.
+**Problem:** Vulnerable drivers loaded → Behavedr killed from kernel mode → permanent death.
 
 **Implementation:**
 ```csharp
@@ -240,9 +240,9 @@ public sealed class ConnectivityCanaryMonitor : BackgroundService
 ///
 /// Survival mechanism:
 /// - On BYOVD detection, immediately write forensic snapshot to disk
-/// - Spawn a sacrificial watchdog process (random name) that monitors Sentinel's PID
-/// - If Sentinel dies within 60s of BYOVD alert, watchdog triggers:
-///   a) sc start WindowsSentinel with retry loop
+/// - Spawn a sacrificial watchdog process (random name) that monitors Behavedr's PID
+/// - If Behavedr dies within 60s of BYOVD alert, watchdog triggers:
+///   a) sc start Behavedr with retry loop
 ///   b) Logs forensic evidence of kernel-level kill
 ///   c) Attempts to disable the malicious driver service via registry
 /// </summary>
@@ -255,12 +255,12 @@ public sealed class DriverLoadMonitor : BackgroundService
 
 ---
 
-#### 3. Anti-Kill Watchdog Hardening (`SentinelWatchdog` — separate process)
+#### 3. Anti-Kill Watchdog Hardening (`BehavedrWatchdog` — separate process)
 
-**Problem:** If Sentinel service is terminated (any method), only SCM restarts it. SCM has limited retry logic and is itself targetable.
+**Problem:** If Behavedr service is terminated (any method), only SCM restarts it. SCM has limited retry logic and is itself targetable.
 
 **Implementation:**
-- Spawn a **second hidden watchdog process** with a randomized name (not "Sentinel" or "Watchdog") at service startup
+- Spawn a **second hidden watchdog process** with a randomized name (not "Behavedr" or "Watchdog") at service startup
 - Watchdog monitors the service PID via a kernel wait handle (`WaitForSingleObject` on process handle)
 - On service death: 
   - Immediately attempts restart via `sc start`
@@ -277,14 +277,14 @@ public sealed class DriverLoadMonitor : BackgroundService
 
 #### 4. WFP Filter Enumeration & Defense (`WfpIntegrityMonitor`)
 
-**Problem:** WFP filters can silently block all Sentinel network activity without any current detection.
+**Problem:** WFP filters can silently block all Behavedr network activity without any current detection.
 
 **Implementation:**
 ```csharp
 /// <summary>
-/// Enumerates WFP filters targeting Sentinel's process or known-good endpoints.
+/// Enumerates WFP filters targeting Behavedr's process or known-good endpoints.
 /// Uses FwpmFilterEnum0 P/Invoke to iterate all active filters.
-/// Detects: new BLOCK filters referencing Sentinel's executable path/PID,
+/// Detects: new BLOCK filters referencing Behavedr's executable path/PID,
 /// new BLOCK filters targeting proxy endpoint IPs, bulk filter additions.
 /// Response: Tier1 alert + attempt to remove malicious filters via FwpmFilterDeleteById0.
 /// </summary>
@@ -293,7 +293,7 @@ public sealed class WfpIntegrityMonitor : BackgroundService
     // Scan every 15 seconds
     // Baseline legitimate WFP filters at startup
     // Alert on any new filter targeting:
-    //   - WindowsSentinel.Service.exe / WindowsSentinel.Agent.exe by appId
+    //   - Behavedr.Service.exe / Behavedr.Agent.exe by appId
     //   - Known proxy/API endpoint IPs by remote address condition
     //   - Generic "block all outbound" patterns from non-system processes
     // Cross-reference filter owner application ID to identify EDRSilencer process
@@ -380,7 +380,7 @@ public sealed class PsForensicGuard : BackgroundService
 
 #### 8. Microsoft Vulnerable Driver Blocklist Integration (`VulnDriverBlocklist`)
 
-**Problem:** Sentinel detects driver installs but doesn't know which drivers are exploitable.
+**Problem:** Behavedr detects driver installs but doesn't know which drivers are exploitable.
 
 **Implementation:**
 - Fetch Microsoft's Recommended Driver Block Rules list (same pattern as `CveShield` fetching CISA KEV)
@@ -431,16 +431,16 @@ Signals: event log clear, PS history disable, ETW patch attempt, AMSI bypass, Sc
 
 ### Why these gaps exist (not negligence)
 
-All identified gaps stem from Sentinel's **intentional architectural constraint: userland-only, no kernel driver**. This is the correct design choice for transparency and safety, but it means:
+All identified gaps stem from Behavedr's **intentional architectural constraint: userland-only, no kernel driver**. This is the correct design choice for transparency and safety, but it means:
 
-1. **Kernel-level attacks (BYOVD) are fundamentally unpreventable** — Sentinel can only detect and survive, not prevent
-2. **Network-level blinding (WFP)** requires kernel-level WFP API access to enumerate and remove filters — Sentinel CAN do this from userland (FwpmFilterEnum0 is a userland API) but currently doesn't
+1. **Kernel-level attacks (BYOVD) are fundamentally unpreventable** — Behavedr can only detect and survive, not prevent
+2. **Network-level blinding (WFP)** requires kernel-level WFP API access to enumerate and remove filters — Behavedr CAN do this from userland (FwpmFilterEnum0 is a userland API) but currently doesn't
 3. **Scan intervals** create unavoidable race conditions — ETW event-driven detection (already partially implemented) is the correct mitigation
 
 ### What NOT to add
 
 - **Kernel driver** — violates constraints, correct decision to stay userland
-- **Direct syscalls** — violates constraints, would also make Sentinel look like malware
+- **Direct syscalls** — violates constraints, would also make Behavedr look like malware
 - **Signature-based detection** — already correctly avoided per design philosophy
 - **More allowlist entries** — every allowlist is an attack surface; resist adding more
 
@@ -450,7 +450,7 @@ All identified gaps stem from Sentinel's **intentional architectural constraint:
 
 If implementing a subset, prioritize in this order:
 
-1. **ConnectivityCanaryMonitor** (P0-1) — Cheapest to implement, highest impact. A simple periodic HTTP health check that alerts when Sentinel is blinded.
+1. **ConnectivityCanaryMonitor** (P0-1) — Cheapest to implement, highest impact. A simple periodic HTTP health check that alerts when Behavedr is blinded.
 2. **WfpIntegrityMonitor** (P1-4) — Direct counter to the most commoditized EDR-killing tool (EDRSilencer)  
 3. **DriverLoadMonitor** (P0-2) — Cross-reference new drivers against vulnerable blocklist
 4. **Fast-path credential ETW** (P1-7) — Leverage existing UnifiedEtwSession Kernel-File handler to get instant credential access alerts
@@ -463,8 +463,8 @@ If implementing a subset, prioritize in this order:
 
 | Behavior | Detector | Justification |
 |---|---|---|
-| WFP filter targeting Sentinel's network traffic | `WfpIntegrityMonitor` | Self-protection tampering (already in President's Law) |
-| Known-vulnerable driver loaded | `DriverLoadMonitor` | Precursor to EDR kill — falls under "Sentinel self-protection tampering" |
+| WFP filter targeting Behavedr's network traffic | `WfpIntegrityMonitor` | Self-protection tampering (already in President's Law) |
+| Known-vulnerable driver loaded | `DriverLoadMonitor` | Precursor to EDR kill — falls under "Behavedr self-protection tampering" |
 | Developer tool credential exfiltration composite | `BehavioralCorrelationEngine` | Credential dumping composite (already authorized) |
 | PowerShell forensic evidence destruction | `PsForensicGuard` | Extends existing "ETW/AMSI tampering" to cover all forensic tampering |
 
@@ -487,4 +487,4 @@ If implementing a subset, prioritize in this order:
 
 ---
 
-*This audit does not claim Sentinel is weak — it's one of the most comprehensive userland EDRs documented. These recommendations target the specific blind spots that 2026 threat actors are actively exploiting against EDR products.*
+*This audit does not claim Behavedr is weak — it's one of the most comprehensive userland EDRs documented. These recommendations target the specific blind spots that 2026 threat actors are actively exploiting against EDR products.*

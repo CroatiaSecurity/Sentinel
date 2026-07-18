@@ -1,4 +1,4 @@
-# Windows Sentinel
+# Behavedr
 
 Real-time endpoint detection and response for Windows. Runs as a background service, monitors system behavior, and kills threats automatically when multiple signals correlate.
 
@@ -8,11 +8,11 @@ Real-time endpoint detection and response for Windows. Runs as a background serv
 
 ## What does it protect against?
 
-Sentinel is effective against:
+Behavedr is effective against:
 
 - **Script kiddies and commodity malware** — Ransomware, infostealers, RATs, cryptominers. Behavioral detection means it doesn't matter what the malware is named or where it came from. If it deletes shadow copies, encrypts files in bulk, dumps credentials, or injects into processes — it dies.
 
-- **Living-off-the-land attacks (LOLBins)** — PowerShell abuse, WMI lateral movement, MSHTA/rundll32 proxy execution, scheduled task persistence, UAC bypasses. Sentinel watches what trusted binaries *do*, not just that they exist.
+- **Living-off-the-land attacks (LOLBins)** — PowerShell abuse, WMI lateral movement, MSHTA/rundll32 proxy execution, scheduled task persistence, UAC bypasses. Behavedr watches what trusted binaries *do*, not just that they exist.
 
 - **Credential theft** — LSASS dumps (dbghelp.dll sideloading, direct syscall variants), browser credential store access (Chrome/Edge/Firefox), honeypot credential tripwires, Credential Guard disablement monitoring.
 
@@ -26,12 +26,12 @@ Sentinel is effective against:
 
 ## What it does NOT protect against
 
-Sentinel is honest about its limits:
+Behavedr is honest about its limits:
 
-- **Kernel-level attacks** — If the attacker loads a driver, it's game over. Sentinel runs in userland.
+- **Kernel-level attacks** — If the attacker loads a driver, it's game over. Behavedr runs in userland.
 - **Nation-state tooling** — Custom kernel implants, zero-days, hardware backdoors are out of scope.
 - **Attacker already running as SYSTEM** — They can kill the service. A watchdog adds seconds of delay, not real protection.
-- **Pre-boot attacks** — Sentinel starts after Windows. It detects boot config changes after the fact.
+- **Pre-boot attacks** — Behavedr starts after Windows. It detects boot config changes after the fact.
 
 Full transparency in [THREAT_MODEL.md](THREAT_MODEL.md).
 
@@ -40,7 +40,7 @@ Full transparency in [THREAT_MODEL.md](THREAT_MODEL.md).
 ## Is this for you?
 
 **Yes, if:**
-- You want a second layer alongside Windows Defender (Sentinel doesn't replace it)
+- You want a second layer alongside Windows Defender (Behavedr doesn't replace it)
 - You run Windows 10/11 and want behavioral detection that works even against unknown threats
 - You're a power user, developer, or small team that wants endpoint visibility without paying for enterprise EDR
 - You want open-source security you can audit yourself
@@ -48,7 +48,7 @@ Full transparency in [THREAT_MODEL.md](THREAT_MODEL.md).
 **Probably not, if:**
 - You need enterprise-grade management console, centralized reporting, or fleet deployment
 - You expect kernel-level protection (that requires signed drivers and Microsoft certification)
-- You want set-and-forget antivirus — Sentinel is opinionated and may kill processes aggressively
+- You want set-and-forget antivirus — Behavedr is opinionated and may kill processes aggressively
 
 ---
 
@@ -79,7 +79,7 @@ Full transparency in [THREAT_MODEL.md](THREAT_MODEL.md).
 
 ## Installation
 
-Download the latest installer from [releases/](releases/) and run it. Sentinel installs as a Windows Service and starts automatically.
+Download the latest installer from [releases/](releases/) and run it. Behavedr installs as a Windows Service and starts automatically.
 
 Requirements:
 - Windows 10 or 11 (x64)
@@ -94,7 +94,7 @@ Requirements:
 | Document | Description |
 |----------|-------------|
 | [CHANGELOG.md](CHANGELOG.md) | Full version history and security fixes |
-| [THREAT_MODEL.md](THREAT_MODEL.md) | What Sentinel can and cannot detect, bypass scenarios, confidence levels |
+| [THREAT_MODEL.md](THREAT_MODEL.md) | What Behavedr can and cannot detect, bypass scenarios, confidence levels |
 | [SECURITY.md](SECURITY.md) | Vulnerability reporting and responsible disclosure |
 | [design.md](design.md) | Architecture and technical design |
 | [architecture-council.md](architecture-council.md) | Detailed architecture specification |
@@ -105,12 +105,12 @@ Requirements:
 
 ## Legal Disclaimer
 
-**Windows Sentinel is provided "as is", without warranty of any kind.** See [LICENSE](LICENSE) for the full MIT license.
+**Behavedr is provided "as is", without warranty of any kind.** See [LICENSE](LICENSE) for the full MIT license.
 
-- Sentinel may terminate processes it identifies as threats. This includes false positives. The authors are not responsible for data loss, service interruption, or any damages resulting from automated response actions.
-- Sentinel is a supplementary security tool. It does not replace antivirus software, firewalls, or proper security practices.
+- Behavedr may terminate processes it identifies as threats. This includes false positives. The authors are not responsible for data loss, service interruption, or any damages resulting from automated response actions.
+- Behavedr is a supplementary security tool. It does not replace antivirus software, firewalls, or proper security practices.
 - You are responsible for configuring allowlists and reviewing detection logs in your environment.
-- Sentinel modifies system state (firewall rules, registry values, device configurations) as part of its response actions. Understand what it does before deploying in production.
+- Behavedr modifies system state (firewall rules, registry values, device configurations) as part of its response actions. Understand what it does before deploying in production.
 - This software is not certified by Microsoft or any security authority. It does not use kernel drivers and has no special OS-level protections.
 
 **Use at your own risk. Test in a non-production environment first.**

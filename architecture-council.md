@@ -1,4 +1,4 @@
-# Sentinel â€” Council of Elders Architecture
+# Behavedr â€” Council of Elders Architecture
 
 **Status:** Architecture spec. Extends, does not replace, `requirements.md`,
 `design.md`, `constraints.md` (all v1.2.0).
@@ -9,10 +9,10 @@
 
 ## The model in one paragraph
 
-Sentinel is **GIDR**, with a council. GIDR is the President: it watches what
+Behavedr is **GIDR**, with a council. GIDR is the President: it watches what
 processes **do** at runtime, and when behavior crosses the line, it kills the
 chain. Final word. The Council â€” all advisory detection modules built into
-Sentinel's C# codebase â€” advises with signals, weight, and context. The Council
+Behavedr's C# codebase â€” advises with signals, weight, and context. The Council
 **never** authorizes a kill on its own. The Council **never** vetoes the
 President. Two specific signals carry significant weight: the 3-API ADS file
 verdict, and any detector targeting the user directly (audio/webcam hijack,
@@ -69,13 +69,13 @@ Nothing else kills.
 | Lateral movement (PsExec / WMI exec / WinRM unexpected) | `ProcessMonitor` + `NetworkMonitor` |
 | Honeypot decoy access | `HoneypotMonitor` |
 | ADS verdict = `unsafe` from 3-API consensus | `VerdictGateRule` (E1) |
-| Sentinel self-protection tampering | `SelfProtection` |
-| WFP filter blocking Sentinel's network traffic | `WfpIntegrityMonitor` |
+| Behavedr self-protection tampering | `SelfProtection` |
+| WFP filter blocking Behavedr's network traffic | `WfpIntegrityMonitor` |
 | BYOVD vulnerable driver loaded (hash/name match) | `DriverLoadMonitor` |
-| Network silencing of Sentinel (EDRSilencer) | `ConnectivityCanaryMonitor` |
+| Network silencing of Behavedr (EDRSilencer) | `ConnectivityCanaryMonitor` |
 
 **Adding to this list requires explicit user sign-off and a doc update.** This
-is the most dangerous edit possible to Sentinel.
+is the most dangerous edit possible to Behavedr.
 
 ---
 
@@ -150,7 +150,7 @@ Composite-grade detection â†’ kill via the v2.0 composite path.
 | `DiskWideDllScanner` | Disk-wide scan: all drives for unsigned/suspicious DLLs not yet loaded. Feeds HashReputationService for live threat intel. Active unload on IoC match. |
 
 ### Detection consultants (PowerShell â†’ JSONL drop)
-Each drops `%ProgramData%\WindowsSentinel\consultants\<name>.jsonl`, ingested by
+Each drops `%ProgramData%\Behavedr\consultants\<name>.jsonl`, ingested by
 `ConsultantSignalIngestor` (new component). All emit **Tier2 only** unless
 correlated via `BehavioralCorrelationEngine`.
 
@@ -169,8 +169,8 @@ correlated via `BehavioralCorrelationEngine`.
 | `KeyScrambler` | Keylogger attempted / scrambling triggered (event consumer only) | **Ã—2** |
 
 ### Install-time hardening Councilors (apply config, no runtime kill output)
-These run once at Sentinel install or on-demand. They produce no runtime
-detection events but Sentinel monitors for regression of their settings.
+These run once at Behavedr install or on-demand. They produce no runtime
+detection events but Behavedr monitors for regression of their settings.
 
 | Consultant | Artifacts | What it hardens |
 |-----------|-----------|-----------------|
@@ -191,11 +191,11 @@ detection events but Sentinel monitors for regression of their settings.
 | `GShield` | 1 .ps1 (994 lines) | Also does install-time: password rotator, self-protection |
 | `GS` | Setup.bat + GSecurity.inf | LGPO security template import |
 | `Troll/Unbridge` | Unbridge.cmd | Network registry ACL hardening, bridge removal |
-| `MiniFilterDrivers` | MiniFilterDrivers.cmd | Removes bfs.sys, unionfs.sys (kernel drivers â€” Sentinel is userland but this is safe install-time cleanup) |
+| `MiniFilterDrivers` | MiniFilterDrivers.cmd | Removes bfs.sys, unionfs.sys (kernel drivers â€” Behavedr is userland but this is safe install-time cleanup) |
 | `Pac` | 1 .reg | Proxy auto-config |
 
 ### Out of scope (not Councilors)
-**Offensive/evasion:** `Unhooker` (AMSI/ETW/Defender patching â€” would be killed by Sentinel's own ETW tampering rule).
+**Offensive/evasion:** `Unhooker` (AMSI/ETW/Defender patching â€” would be killed by Behavedr's own ETW tampering rule).
 **Anti-security:** `Bios.cmd` (disables DEP, integrity services, TPM, ELAM, hypervisor, VSM).
 **Maintenance/cleanup:** `RamCleaner`, `Vacuum`, `Riddance`, `PDQ`, `BCDCleanup`, `Stripper`, `Debloat`, `Provisioning`, `Persistance`, `PhantomRemover` (login diagnostics).
 **Performance/gaming:** `GPerf`, `GameCache`, `GamingScripts`, `Benchmark`.
