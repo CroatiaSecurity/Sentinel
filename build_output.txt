@@ -1,0 +1,11 @@
+﻿  Determining projects to restore...
+  All projects are up-to-date for restore.
+C:\Users\Admin\Downloads\Sentinel-main\Sentinel-main\src\Sentinel.Core\UnifiedEtwSession.cs(568,39): error CS0227: Unsafe code may only appear if compiling with /unsafe [C:\Users\Admin\Downloads\Sentinel-main\Sentinel-main\src\Sentinel.Core\Sentinel.Core.csproj]
+
+Build FAILED.
+
+C:\Users\Admin\Downloads\Sentinel-main\Sentinel-main\src\Sentinel.Core\UnifiedEtwSession.cs(568,39): error CS0227: Unsafe code may only appear if compiling with /unsafe [C:\Users\Admin\Downloads\Sentinel-main\Sentinel-main\src\Sentinel.Core\Sentinel.Core.csproj]
+    0 Warning(s)
+    1 Error(s)
+
+Time Elapsed 00:00:00.94
