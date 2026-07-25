@@ -2,6 +2,46 @@
  
 All notable changes to Sentinel are documented in this file.
 
+## [1.6.0] - 2026-07-25
+
+### Security Hardening (Red/Blue Audit Remediation)
+
+- **[CRITICAL] Threat proxy authentication redesign** — Cloudflare Worker no longer accepts client-supplied `X-Sentinel-Key`. HMAC is verified with server-side `SENTINEL_SHARED_SECRET` only (fail closed if unset). `ThreatReportService` and `FileReputationEngine` use `ProxyAuthHelper` with `ThreatReporting:ProxySharedSecret`. Reporting is skipped when the secret is missing. Worker adds per-IP rate limiting (60/min).
+
+- **[HIGH] ActiveResponse boot-time bypass closed** — `AntiTamperGuard` force-enables `ActiveResponse` at `StartAsync` when `EnforceActiveResponse` is true (default). Boot-time false (appsettings edit + reboot) now alerts on the first integrity tick. Runtime true→false transitions still force re-enable. New `CheckAppsettingsIntegrity` monitors `appsettings.json` SHA-256.
+
+- **[HIGH] Dynamic rule forgery by local admin mitigated** — `.install_entropy` ACL is SYSTEM-only. Rules directory write is SYSTEM-only; Administrators/Users are read-only. Unsigned/forged rules still fail HMAC verification.
+
+- **[HIGH] Kill-storm rate limiting** — `MaxKillsPerMinute` (default 15) caps kill/quarantine-kill actions per rolling minute. Excess responses demoted to LogOnly with a rate-limit event.
+
+- **[HIGH] Protected security processes expanded** — `HardeningModule.SafeKillProcessTree` refuses MsMpEng, NisSrv, SecurityHealthService, Sense, MpDefenderCoreService, smartscreen, SgrmBroker when path is under Windows or Program Files\Windows Defender*.
+
+### Security Hardening (continued)
+
+- **[MEDIUM] SecureCacheStore DPAPI machine-scope** — `CRYPTPROTECT_LOCAL_MACHINE` with legacy user-scope decrypt fallback for cache migration.
+- **[MEDIUM] DriverLoadMonitor native SCM** — stop/disable/delete BYOVD services via ServiceController + advapi32 (no `sc.exe`); service names validated.
+- **[MEDIUM] CastDeviceGuard IP validation** — `IPAddress.TryParse` + reject loopback/any/broadcast before netsh.
+- **[MEDIUM] TrayIconService LOLBin removal** — Open Console no longer spawns cmd/powershell; opens log via notepad with `ArgumentList`.
+- **[LOW] Machine-specific ApplicationIntegrity paths removed** from committed appsettings (`ProtectedApps` empty by default).
+
+### Configuration
+
+| Setting | Default | Purpose |
+|---------|---------|---------|
+| `Sentinel:EnforceActiveResponse` | `true` | Force ActiveResponse on; set `false` only for lab/observe mode |
+| `Sentinel:MaxKillsPerMinute` | `15` | Kill budget; `0` = unlimited |
+| `ThreatReporting:ProxySharedSecret` | `null` | Must match Worker `SENTINEL_SHARED_SECRET` (≥16 chars) |
+
+### Worker deploy note
+
+```bash
+wrangler secret put SENTINEL_SHARED_SECRET
+```
+
+Agent/service `appsettings.json` must set the same value under `ThreatReporting:ProxySharedSecret`.
+
+---
+
 ## [1.5.9] - 2026-07-24
 
 ### Security Hardening (False Negative Elimination)

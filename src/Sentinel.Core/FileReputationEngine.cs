@@ -311,61 +311,68 @@ namespace Sentinel.Core
                 return new ApiVerdict { Source = "VirusTotal", Status = VerdictStatus.NotFound };
             }
 
+            // v1.6.0: fail closed without shared secret (worker requires signed requests)
+            if (!ProxyAuthHelper.HasSharedSecret(_reportingConfig))
+            {
+                return new ApiVerdict { Source = "VirusTotal", Status = VerdictStatus.NotFound };
+            }
+
             try
             {
-                var proxyUrl = _reportingConfig.ProxyEndpoint.TrimEnd('/') + "/lookup/vt";
+                const string path = "/lookup/vt";
                 var payload = System.Text.Json.JsonSerializer.Serialize(new { type = "hash", value = hash });
-                var content = new StringContent(payload, System.Text.Encoding.UTF8, "application/json");
-
-                // Add HMAC authentication headers if shared secret is configured
-                if (!string.IsNullOrWhiteSpace(_reportingConfig.ProxySharedSecret))
+                var (request, error) = ProxyAuthHelper.CreateAuthenticatedPost(
+                    _reportingConfig.ProxyEndpoint!, path, payload, _reportingConfig);
+                if (request == null)
                 {
-                    var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString();
-                    content.Headers.Add("X-Sentinel-Timestamp", timestamp);
-                    content.Headers.Add("X-Sentinel-Auth", _reportingConfig.ProxySharedSecret);
+                    _logger.LogDebug("[FileReputationEngine] VT proxy auth skipped: {Error}", error);
+                    return new ApiVerdict { Source = "VirusTotal", Status = VerdictStatus.NotFound };
                 }
 
-                var response = await _vtProxyHttpClient.PostAsync(proxyUrl, content, ct);
-
-                if (!response.IsSuccessStatusCode)
+                using (request)
                 {
-                    _logger.LogDebug("[FileReputationEngine] VT proxy returned {Status}", response.StatusCode);
-                    return new ApiVerdict { Source = "VirusTotal", Status = VerdictStatus.Error };
+                    var response = await _vtProxyHttpClient.SendAsync(request, ct);
+
+                    if (!response.IsSuccessStatusCode)
+                    {
+                        _logger.LogDebug("[FileReputationEngine] VT proxy returned {Status}", response.StatusCode);
+                        return new ApiVerdict { Source = "VirusTotal", Status = VerdictStatus.Error };
+                    }
+
+                    var json = await response.Content.ReadAsStringAsync(ct);
+
+                    // Parse proxy response: { success, verdict, detections, engines, detectionRate }
+                    using var doc = System.Text.Json.JsonDocument.Parse(json);
+                    var root = doc.RootElement;
+
+                    if (!root.TryGetProperty("success", out var successProp) || !successProp.GetBoolean())
+                    {
+                        return new ApiVerdict { Source = "VirusTotal", Status = VerdictStatus.Error };
+                    }
+
+                    var verdictStr = root.TryGetProperty("verdict", out var vProp) ? vProp.GetString() : "not_found";
+                    int detections = root.TryGetProperty("detections", out var dProp) ? dProp.GetInt32() : 0;
+                    int engines = root.TryGetProperty("engines", out var eProp) ? eProp.GetInt32() : 0;
+                    double detectionRate = root.TryGetProperty("detectionRate", out var drProp) ? drProp.GetDouble() : 0;
+
+                    var status = verdictStr switch
+                    {
+                        "malicious" => VerdictStatus.Malicious,
+                        "suspicious" => VerdictStatus.Suspicious,
+                        "safe" => VerdictStatus.Safe,
+                        "not_found" => VerdictStatus.NotFound,
+                        _ => VerdictStatus.Unknown
+                    };
+
+                    return new ApiVerdict
+                    {
+                        Source = "VirusTotal",
+                        Status = status,
+                        DetectionCount = detections,
+                        EngineCount = engines,
+                        DetectionRate = detectionRate
+                    };
                 }
-
-                var json = await response.Content.ReadAsStringAsync(ct);
-
-                // Parse proxy response: { success, verdict, detections, engines, detectionRate }
-                using var doc = System.Text.Json.JsonDocument.Parse(json);
-                var root = doc.RootElement;
-
-                if (!root.TryGetProperty("success", out var successProp) || !successProp.GetBoolean())
-                {
-                    return new ApiVerdict { Source = "VirusTotal", Status = VerdictStatus.Error };
-                }
-
-                var verdictStr = root.TryGetProperty("verdict", out var vProp) ? vProp.GetString() : "not_found";
-                int detections = root.TryGetProperty("detections", out var dProp) ? dProp.GetInt32() : 0;
-                int engines = root.TryGetProperty("engines", out var eProp) ? eProp.GetInt32() : 0;
-                double detectionRate = root.TryGetProperty("detectionRate", out var drProp) ? drProp.GetDouble() : 0;
-
-                var status = verdictStr switch
-                {
-                    "malicious" => VerdictStatus.Malicious,
-                    "suspicious" => VerdictStatus.Suspicious,
-                    "safe" => VerdictStatus.Safe,
-                    "not_found" => VerdictStatus.NotFound,
-                    _ => VerdictStatus.Unknown
-                };
-
-                return new ApiVerdict
-                {
-                    Source = "VirusTotal",
-                    Status = status,
-                    DetectionCount = detections,
-                    EngineCount = engines,
-                    DetectionRate = detectionRate
-                };
             }
             catch (OperationCanceledException)
             {

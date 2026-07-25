@@ -48,6 +48,12 @@ namespace Sentinel.Core
         // If ActiveResponse transitions from true to false at runtime, it means
         // an attacker modified appsettings.json or injected config — fire anti-tamper alert.
         private bool _activeResponseLastKnown;
+        // v1.6.0: Boot-time ActiveResponse=false was force-enabled; alert pending on first integrity tick
+        private bool _bootActiveResponseForcePending;
+        private bool _bootActiveResponseAlerted;
+        // v1.6.0: SHA-256 of appsettings.json at first successful read (config integrity)
+        private string? _appsettingsHash;
+        private bool _appsettingsTamperAlerted;
 
         // HARDENING: QueryPerformanceCounter as secondary time source.
         // DateTime/DateTimeOffset can be manipulated by usermode time adjustment (SetSystemTime).
@@ -113,6 +119,9 @@ namespace Sentinel.Core
             // Initialize QPC baseline
             QueryPerformanceFrequency(out _perfFrequency);
             QueryPerformanceCounter(out _lastPerfCount);
+
+            // v1.6.0: Capture initial appsettings hash for integrity monitoring
+            _appsettingsHash = TryHashAppsettings();
         }
 
         public override Task StartAsync(CancellationToken cancellationToken)
@@ -125,7 +134,34 @@ namespace Sentinel.Core
             {
                 _logger.LogDebug(ex, "[AntiTamperGuard] Failed to subscribe to PowerModeChanged events");
             }
+
+            // v1.6.0: Enforce ActiveResponse at process start (closes reboot/config-file bypass)
+            EnforceActiveResponseAtStartup();
+
             return base.StartAsync(cancellationToken);
+        }
+
+        /// <summary>
+        /// v1.6.0: If ActiveResponse is false when the service starts (e.g. appsettings edited
+        /// then reboot), force it back on when EnforceActiveResponse is true.
+        /// Alert is deferred to first integrity tick so DetectionEngine is fully online.
+        /// </summary>
+        private void EnforceActiveResponseAtStartup()
+        {
+            if (!_config.EnforceActiveResponse)
+            {
+                _logger.LogWarning("[AntiTamperGuard] EnforceActiveResponse=false — observation mode; ActiveResponse will not be force-enabled.");
+                return;
+            }
+
+            if (!_config.ActiveResponse)
+            {
+                _logger.LogCritical("[AntiTamperGuard] ActiveResponse was FALSE at startup — force-enabling (v1.6.0 boot integrity).");
+                _config.ActiveResponse = true;
+                _bootActiveResponseForcePending = true; // emit detection on first integrity check
+            }
+
+            _activeResponseLastKnown = _config.ActiveResponse;
         }
 
         public override void Dispose()
@@ -222,6 +258,7 @@ namespace Sentinel.Core
                         await CheckBinaryIntegrity();
                         await CheckServiceRegistration();
                         await CheckActiveResponseConfig();
+                        await CheckAppsettingsIntegrity();
                         await CheckAndEnforceQosPolicies();
                         EnforceFipsDisabled();
                     }
@@ -263,60 +300,148 @@ namespace Sentinel.Core
         }
 
         /// <summary>
-        /// HARDENING v1.5.9: Detects when ActiveResponse is disabled at runtime.
-        /// If ActiveResponse transitions from true → false, it means either:
-        ///   - An attacker modified appsettings.json to neuter all active responses
-        ///   - A compromised process injected config values to disable protection
-        ///   - A malicious Group Policy or script flipped the setting
+        /// HARDENING v1.5.9 + v1.6.0: Detects when ActiveResponse is disabled.
         ///
-        /// This fires an anti-tamper Tier1 detection that is immune to the ActiveResponse
-        /// flag itself (LogOnly response — always fires even when ActiveResponse=false).
-        /// The detection feeds the correlation engine and incident response, ensuring
-        /// that a disabled ActiveResponse is NEVER silent.
-        ///
-        /// Additionally, this method forcibly re-enables ActiveResponse, restoring protection.
+        /// v1.5.9: true→false transition at runtime → alert + force re-enable.
+        /// v1.6.0: Also handles boot-time false (appsettings edit + restart) and
+        /// any check where ActiveResponse is false while EnforceActiveResponse is true.
+        /// Alert is LogOnly so it always fires even if ActiveResponse was off.
         /// </summary>
         private async Task CheckActiveResponseConfig()
         {
+            if (!_config.EnforceActiveResponse)
+            {
+                _activeResponseLastKnown = _config.ActiveResponse;
+                return;
+            }
+
             bool current = _config.ActiveResponse;
 
-            if (_activeResponseLastKnown && !current)
+            // Runtime true→false transition
+            bool runtimeTransition = _activeResponseLastKnown && !current;
+            // Sticky false while enforce is on (any time ActiveResponse is off)
+            bool stickyFalse = !current;
+            // Boot path: force already applied in StartAsync; still need to alert once
+            bool bootPending = _bootActiveResponseForcePending && !_bootActiveResponseAlerted;
+
+            if (runtimeTransition || stickyFalse)
             {
-                // ActiveResponse was disabled — this is a critical tampering event
-                _logger.LogCritical("[AntiTamperGuard] CRITICAL: ActiveResponse has been DISABLED at runtime. " +
-                    "This disables all kill/quarantine/isolate responses. Treating as active tampering.");
+                _config.ActiveResponse = true;
+                _logger.LogCritical("[AntiTamperGuard] CRITICAL: ActiveResponse was DISABLED — force re-enabled (v1.6.0).");
+            }
+
+            if (runtimeTransition || bootPending)
+            {
+                string tamperType = bootPending && !runtimeTransition
+                    ? "ActiveResponseDisabledAtBoot"
+                    : "ActiveResponseDisabled";
 
                 await _detectionEngine.EmitAsync(new DetectionEvent
                 {
                     RuleName = "Anti-Tamper: ActiveResponse Disabled",
-                    Evidence = "SentinelConfig.ActiveResponse changed from true to false at runtime. " +
-                               "All active response actions (Kill, Quarantine, NetworkIsolate) are now disabled.",
-                    Reasoning = "The ActiveResponse configuration flag was disabled while Sentinel is running. " +
-                                "This neutralizes ALL active defenses — processes are only logged, never killed; " +
-                                "malicious files are never quarantined; C2 channels are never blocked. " +
-                                "This is a high-confidence indicator that an attacker has modified the " +
-                                "Sentinel configuration to operate freely without interference.",
+                    Evidence = bootPending && !runtimeTransition
+                        ? "SentinelConfig.ActiveResponse was false at startup (appsettings/reboot tamper). Force-enabled."
+                        : "SentinelConfig.ActiveResponse changed from true to false at runtime. Force-enabled.",
+                    Reasoning = "The ActiveResponse flag was off, which would neutralize kill/quarantine/isolate. " +
+                                "This is treated as high-confidence configuration tampering.",
                     Confidence = 0.99,
                     Tier = DetectionTier.Tier1Behavioral,
-                    AuthorizedResponse = ResponseAction.LogOnly, // This alert itself must always fire
+                    AuthorizedResponse = ResponseAction.LogOnly,
                     ProcessName = "SYSTEM",
                     ProcessId = 0,
                     SignalType = SignalType.AntiTamper,
                     Metadata = new Dictionary<string, string>
                     {
-                        ["TamperType"] = "ActiveResponseDisabled",
-                        ["PreviousState"] = "true",
-                        ["CurrentState"] = "false"
+                        ["TamperType"] = tamperType,
+                        ["PreviousState"] = _activeResponseLastKnown.ToString(),
+                        ["CurrentState"] = "false",
+                        ["ForcedState"] = "true"
                     }
                 });
 
-                // Forcibly re-enable ActiveResponse to restore protection
-                _config.ActiveResponse = true;
-                _logger.LogWarning("[AntiTamperGuard] ActiveResponse forcibly re-enabled. " +
-                    "Attacker's config modification has been reverted.");
+                if (bootPending)
+                {
+                    _bootActiveResponseAlerted = true;
+                    _bootActiveResponseForcePending = false;
+                }
             }
 
-            _activeResponseLastKnown = current;
+            _activeResponseLastKnown = _config.ActiveResponse;
+        }
+
+        /// <summary>
+        /// v1.6.0: Detects on-disk appsettings.json modification (hash change).
+        /// Does not auto-rewrite the file (ACL may prevent); enforces ActiveResponse in memory
+        /// and emits a Tier1 anti-tamper detection.
+        /// </summary>
+        private async Task CheckAppsettingsIntegrity()
+        {
+            try
+            {
+                var currentHash = TryHashAppsettings();
+                if (currentHash == null) return;
+
+                if (_appsettingsHash == null)
+                {
+                    _appsettingsHash = currentHash;
+                    return;
+                }
+
+                if (!string.Equals(_appsettingsHash, currentHash, StringComparison.OrdinalIgnoreCase))
+                {
+                    _logger.LogWarning("[AntiTamperGuard] appsettings.json hash changed (config file modified on disk).");
+
+                    if (_config.EnforceActiveResponse && !_config.ActiveResponse)
+                        _config.ActiveResponse = true;
+
+                    if (!_appsettingsTamperAlerted)
+                    {
+                        _appsettingsTamperAlerted = true;
+                        await _detectionEngine.EmitAsync(new DetectionEvent
+                        {
+                            RuleName = "Anti-Tamper: appsettings.json Modified",
+                            Evidence = $"appsettings.json content hash changed from {_appsettingsHash[..Math.Min(16, _appsettingsHash.Length)]}… to {currentHash[..Math.Min(16, currentHash.Length)]}…",
+                            Reasoning = "Sentinel configuration file was modified while the service is running. " +
+                                        "This may indicate an attacker disabling ActiveResponse or altering watch paths.",
+                            Confidence = 0.90,
+                            Tier = DetectionTier.Tier1Behavioral,
+                            AuthorizedResponse = ResponseAction.LogOnly,
+                            ProcessName = "SYSTEM",
+                            ProcessId = 0,
+                            SignalType = SignalType.AntiTamper,
+                            Metadata = new Dictionary<string, string>
+                            {
+                                ["TamperType"] = "AppsettingsModified",
+                                ["PreviousHashPrefix"] = _appsettingsHash[..Math.Min(16, _appsettingsHash.Length)],
+                                ["CurrentHashPrefix"] = currentHash[..Math.Min(16, currentHash.Length)]
+                            }
+                        });
+                    }
+
+                    // Accept new baseline so we alert again only on the next change
+                    _appsettingsHash = currentHash;
+                    _appsettingsTamperAlerted = false;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "[AntiTamperGuard] Appsettings integrity check failed");
+            }
+        }
+
+        private static string? TryHashAppsettings()
+        {
+            try
+            {
+                var path = Path.Combine(AppContext.BaseDirectory, "appsettings.json");
+                if (!File.Exists(path)) return null;
+                var bytes = File.ReadAllBytes(path);
+                return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes));
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         /// <summary>

@@ -479,69 +479,112 @@ namespace Sentinel.Core
         /// Attempts to stop and disable a malicious driver service before it can kill Sentinel.
         /// Race condition: if the driver loads before we act, we lose. But if we catch it
         /// during service creation (before start), we can prevent the attack.
+        /// v1.6.0: Native SCM + ServiceController — no sc.exe LOLBin dependency.
         /// </summary>
         private async Task AttemptDriverDisableAsync(string serviceName, CancellationToken ct)
         {
+            if (!IsValidServiceName(serviceName))
+            {
+                _logger.LogWarning("[DriverLoadMonitor] Refusing to act on invalid service name: {Service}", serviceName);
+                return;
+            }
+
             try
             {
                 _logger.LogWarning("[DriverLoadMonitor] Attempting to disable BYOVD driver service: {Service}", serviceName);
 
-                // Stop the service
-                var stopPsi = new ProcessStartInfo
+                // 1. Stop via ServiceController (native .NET, no shell)
+                try
                 {
-                    FileName = "sc",
-                    Arguments = $"stop \"{serviceName}\"",
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                };
-                using var stopProc = Process.Start(stopPsi);
-                if (stopProc != null)
+                    using var sc = new System.ServiceProcess.ServiceController(serviceName);
+                    if (sc.Status != System.ServiceProcess.ServiceControllerStatus.Stopped &&
+                        sc.Status != System.ServiceProcess.ServiceControllerStatus.StopPending)
+                    {
+                        sc.Stop();
+                        await Task.Run(() => sc.WaitForStatus(
+                            System.ServiceProcess.ServiceControllerStatus.Stopped,
+                            TimeSpan.FromSeconds(5)), ct);
+                    }
+                }
+                catch (Exception ex)
                 {
-                    using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                    cts.CancelAfter(5000);
-                    try { await stopProc.WaitForExitAsync(cts.Token); }
-                    catch { try { stopProc.Kill(); } catch { } }
+                    _logger.LogDebug(ex, "[DriverLoadMonitor] ServiceController.Stop failed for {Service}", serviceName);
                 }
 
-                // Disable the service
-                var disablePsi = new ProcessStartInfo
-                {
-                    FileName = "sc",
-                    Arguments = $"config \"{serviceName}\" start= disabled",
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                };
-                using var disableProc = Process.Start(disablePsi);
-                if (disableProc != null)
-                {
-                    using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                    cts.CancelAfter(5000);
-                    try { await disableProc.WaitForExitAsync(cts.Token); }
-                    catch { try { disableProc.Kill(); } catch { } }
-                }
-
-                // Delete the service entirely
-                var deletePsi = new ProcessStartInfo
-                {
-                    FileName = "sc",
-                    Arguments = $"delete \"{serviceName}\"",
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                };
-                using var deleteProc = Process.Start(deletePsi);
-                if (deleteProc != null)
-                {
-                    using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                    cts.CancelAfter(5000);
-                    try { await deleteProc.WaitForExitAsync(cts.Token); }
-                    catch { try { deleteProc.Kill(); } catch { } }
-                }
+                // 2. Disable start type + delete via native SCM P/Invoke
+                DisableAndDeleteServiceNative(serviceName);
 
                 _logger.LogWarning("[DriverLoadMonitor] BYOVD driver service '{Service}' — stop/disable/delete attempted", serviceName);
             }
             catch (Exception ex)
             {
                 _logger.LogDebug(ex, "[DriverLoadMonitor] Failed to disable driver service {Service}", serviceName);
+            }
+
+            await Task.CompletedTask;
+        }
+
+        private static bool IsValidServiceName(string name)
+        {
+            if (string.IsNullOrWhiteSpace(name) || name.Length > 256) return false;
+            foreach (var c in name)
+            {
+                if (!(char.IsLetterOrDigit(c) || c is '_' or '-' or '.' or ' '))
+                    return false;
+            }
+            return true;
+        }
+
+        // ── Native SCM (v1.6.0 — replaces sc.exe) ──────────────────────────
+        [System.Runtime.InteropServices.DllImport("advapi32.dll", EntryPoint = "OpenSCManagerW", CharSet = System.Runtime.InteropServices.CharSet.Unicode, SetLastError = true)]
+        private static extern IntPtr OpenSCManager(string? machineName, string? databaseName, uint dwDesiredAccess);
+
+        [System.Runtime.InteropServices.DllImport("advapi32.dll", EntryPoint = "OpenServiceW", CharSet = System.Runtime.InteropServices.CharSet.Unicode, SetLastError = true)]
+        private static extern IntPtr OpenService(IntPtr hSCManager, string lpServiceName, uint dwDesiredAccess);
+
+        [System.Runtime.InteropServices.DllImport("advapi32.dll", EntryPoint = "ChangeServiceConfigW", CharSet = System.Runtime.InteropServices.CharSet.Unicode, SetLastError = true)]
+        private static extern bool ChangeServiceConfig(IntPtr hService, uint dwServiceType, uint dwStartType,
+            uint dwErrorControl, string? lpBinaryPathName, string? lpLoadOrderGroup, IntPtr lpdwTagId,
+            string? lpDependencies, string? lpServiceStartName, string? lpPassword, string? lpDisplayName);
+
+        [System.Runtime.InteropServices.DllImport("advapi32.dll", SetLastError = true)]
+        private static extern bool DeleteService(IntPtr hService);
+
+        [System.Runtime.InteropServices.DllImport("advapi32.dll", SetLastError = true)]
+        [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
+        private static extern bool CloseServiceHandle(IntPtr hSCObject);
+
+        private const uint SC_MANAGER_CONNECT = 0x0001;
+        private const uint SERVICE_CHANGE_CONFIG = 0x0002;
+        private const uint DELETE = 0x10000;
+        private const uint SERVICE_NO_CHANGE = 0xFFFFFFFF;
+        private const uint SERVICE_DISABLED = 0x00000004;
+
+        private void DisableAndDeleteServiceNative(string serviceName)
+        {
+            IntPtr hScm = IntPtr.Zero;
+            IntPtr hSvc = IntPtr.Zero;
+            try
+            {
+                hScm = OpenSCManager(null, null, SC_MANAGER_CONNECT);
+                if (hScm == IntPtr.Zero) return;
+
+                hSvc = OpenService(hScm, serviceName, SERVICE_CHANGE_CONFIG | DELETE);
+                if (hSvc == IntPtr.Zero) return;
+
+                ChangeServiceConfig(hSvc, SERVICE_NO_CHANGE, SERVICE_DISABLED, SERVICE_NO_CHANGE,
+                    null, null, IntPtr.Zero, null, null, null, null);
+
+                DeleteService(hSvc);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "[DriverLoadMonitor] Native SCM disable/delete failed for {Service}", serviceName);
+            }
+            finally
+            {
+                if (hSvc != IntPtr.Zero) CloseServiceHandle(hSvc);
+                if (hScm != IntPtr.Zero) CloseServiceHandle(hScm);
             }
         }
     }

@@ -1,6 +1,6 @@
 # Sentinel — Threat Model
 
-**Version: 1.5.9**
+**Version: 1.6.0**
 
 This document assumes the attacker has read the source code.
 
@@ -246,17 +246,20 @@ This document assumes the attacker has read the source code.
 
 ---
 
-### B10: ActiveResponse config tampering (FIXED in v1.5.9)
+### B10: ActiveResponse config tampering (FIXED in v1.5.9 / v1.6.0)
 
-**Attack:** Attacker modifies `appsettings.json` or injects config to set `ActiveResponse=false`, neutering all kill/quarantine/isolate responses while Sentinel continues running (appearing functional but inert).
+**Attack:** Attacker modifies `appsettings.json` or injects config to set `ActiveResponse=false`, neutering all kill/quarantine/isolate responses while Sentinel continues running (appearing functional but inert). Includes reboot with `ActiveResponse=false` already set.
 
-**Mitigation (v1.5.9+):**
+**Mitigation (v1.5.9+ / v1.6.0):**
 - `AntiTamperGuard` monitors `ActiveResponse` flag every ~10s
 - Transition from true→false fires Tier1 anti-tamper detection (confidence 0.99)
+- **v1.6.0:** Boot-time `ActiveResponse=false` is force-enabled in `StartAsync` and alerted on first integrity tick
+- **v1.6.0:** `appsettings.json` content hash monitored; modifications emit anti-tamper detection
+- **v1.6.0:** `EnforceActiveResponse` (default true) policy; set false only for intentional observation mode
 - ActiveResponse is forcibly re-enabled immediately upon detection
 - The alert is immune to the ActiveResponse flag (uses LogOnly response type)
 
-**Residual risk:** LOW. The attacker gets at most one integrity tick (~10s) of disabled response before detection fires and config is reverted.
+**Residual risk:** LOW. Requires `EnforceActiveResponse=false` (operator choice) or kernel/SYSTEM ability to patch the process image.
 
 ---
 
@@ -274,16 +277,44 @@ This document assumes the attacker has read the source code.
 
 ---
 
-### B12: Dynamic rule injection (FIXED in v1.5.9)
+### B12: Dynamic rule injection (FIXED in v1.5.9 / v1.6.0)
 
-**Attack:** Attacker deletes the `.install_entropy` file (used for HMAC key derivation), then drops a malicious JSON rule file into the `rules/` directory. Previously, missing entropy caused HMAC verification to be skipped (fail-open), allowing arbitrary unsigned rules to load.
+**Attack:** Attacker deletes the `.install_entropy` file (used for HMAC key derivation), then drops a malicious JSON rule file into the `rules/` directory. Previously, missing entropy caused HMAC verification to be skipped (fail-open), allowing arbitrary unsigned rules to load. Local admins could also read entropy and forge valid HMACs.
 
-**Mitigation (v1.5.9+):**
+**Mitigation (v1.5.9+ / v1.6.0):**
 - `DynamicRulesEvaluator` now fails CLOSED — missing HMAC key rejects all rules
-- Rules directory is ACL'd to SYSTEM + Administrators only (v1.5.5)
+- **v1.6.0:** `.install_entropy` ACL is SYSTEM-only (Administrators cannot read signing material)
+- **v1.6.0:** Rules directory write is SYSTEM-only; Admins/Users are read-only
 - Entropy file deletion itself would require SYSTEM access
 
-**Residual risk:** LOW. Requires SYSTEM access to reach either the entropy file or the rules directory.
+**Residual risk:** LOW. Requires SYSTEM (or taking ownership of the entropy file) to forge signed rules.
+
+---
+
+### B13: Threat proxy forgery (FIXED in v1.6.0)
+
+**Attack:** Unauthenticated or client-key HMAC on the Cloudflare Worker allowed anyone to forge threat reports / burn VT quota.
+
+**Mitigation (v1.6.0+):**
+- Worker requires `SENTINEL_SHARED_SECRET` (fail closed with 503 if missing)
+- HMAC uses server-side secret only — `X-Sentinel-Key` removed
+- Agent signs with `ThreatReporting:ProxySharedSecret`; reporting skipped if secret unset
+- Per-IP rate limit (60/min) on the Worker
+
+**Residual risk:** LOW if secret is strong and not committed. Shared secret in open-source configs must be set per-deployment.
+
+---
+
+### B14: Kill-storm / response weaponization (FIXED in v1.6.0)
+
+**Attack:** Induce many false positives to make Sentinel kill large numbers of processes.
+
+**Mitigation (v1.6.0+):**
+- `MaxKillsPerMinute` (default 15) rate-limits kill and quarantine-kill actions
+- Expanded protected process list (Defender / Sense / smartscreen) with path verification
+- Excess kills demoted to LogOnly with a rate-limit response event
+
+**Residual risk:** MEDIUM. NetworkIsolate is not rate-limited; determined attackers can still cause noise.
 
 ---
 
@@ -364,6 +395,7 @@ Hard-to-bypass detections (require kernel access to evade):
 
 See CHANGELOG.md for full history. Key fixes:
 
+- **v1.6.0:** Audit remediation: threat-proxy server-side HMAC (no client key), ActiveResponse boot-time force + appsettings integrity, SYSTEM-only entropy, rules dir write SYSTEM-only, kill rate limit, protected AV processes, native SCM driver disable, Cast IP validation, tray LOLBin removal
 - **v1.5.9:** 7 false-positive/false-negative fixes: supply-chain beaconing gap (C2 never LogOnly), signed injector quarantine prevention, C2 back in President's Law, ActiveResponse tamper detection, baseline poisoning prevention, dynamic rules fail-closed, svchost correlation bypass
 - **v1.4.5:** LSA secret storage for auto-logon, Credential Guard monitoring, ScriptExecutionMonitor (PowerShell/AMSI/SAM/script drops), Tier1+Tier2 correlation fix, Agent code placement cleanup
 - **v1.4.4:** 15 red-team findings fixed (command injection, handle leaks, HMAC weakness, socket exhaustion, installer race conditions)

@@ -1,50 +1,78 @@
 /**
- * Sentinel — Threat Report Proxy Worker
- * 
+ * Sentinel — Threat Report Proxy Worker (v1.6.0)
+ *
  * Receives threat reports from Sentinel agents and forwards them to
  * abuse.ch (MalwareBazaar, URLhaus) using server-side API keys.
- * 
- * Users never see or need API keys — this Worker holds them as secrets.
- * 
+ *
+ * SECURITY v1.6.0:
+ *   - SENTINEL_SHARED_SECRET is REQUIRED (fail closed).
+ *   - HMAC-SHA256 over `timestamp.path.body` using the shared secret
+ *     as the key (never accept a client-provided signing key).
+ *   - 5-minute timestamp window against replay.
+ *   - Optional CF-Connecting-IP rate limiting (simple in-memory).
+ *
  * Endpoints:
  *   POST /report/hash    — Report a malicious hash to MalwareBazaar
  *   POST /report/url     — Report a malicious URL to URLhaus
  *   POST /report/ip      — Report a malicious IP to AbuseIPDB
  *   POST /lookup/vt      — Lookup a SHA-256 hash on VirusTotal (proxied)
- *   GET  /health         — Health check
- * 
+ *   GET  /health         — Health check (unauthenticated)
+ *
  * Deploy: wrangler deploy
- * Secrets: wrangler secret put MALWAREBAZAAR_KEY
+ * Secrets: wrangler secret put SENTINEL_SHARED_SECRET
+ *          wrangler secret put MALWAREBAZAAR_KEY
  *          wrangler secret put URLHAUS_TOKEN
  *          wrangler secret put ABUSEIPDB_KEY
  *          wrangler secret put VIRUSTOTAL_KEY
  */
 
+// Simple per-isolate rate limit: max requests per IP per minute
+const RATE_LIMIT_PER_MINUTE = 60;
+const rateBuckets = new Map();
+
+function checkRateLimit(ip) {
+  const now = Math.floor(Date.now() / 1000);
+  const window = Math.floor(now / 60);
+  const key = `${ip}:${window}`;
+  const count = rateBuckets.get(key) || 0;
+  if (count >= RATE_LIMIT_PER_MINUTE) return false;
+  rateBuckets.set(key, count + 1);
+  // Opportunistic cleanup of old windows
+  if (rateBuckets.size > 5000) {
+    for (const k of rateBuckets.keys()) {
+      if (!k.endsWith(`:${window}`) && !k.endsWith(`:${window - 1}`)) {
+        rateBuckets.delete(k);
+      }
+    }
+  }
+  return true;
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
-    // CORS headers for browser-based tools (if ever needed)
     const corsHeaders = {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, X-Sentinel-Auth, X-Sentinel-Signature, X-Sentinel-Timestamp, X-Sentinel-Key',
+      'Access-Control-Allow-Headers': 'Content-Type, X-Sentinel-Auth, X-Sentinel-Signature, X-Sentinel-Timestamp',
     };
 
     if (request.method === 'OPTIONS') {
       return new Response(null, { headers: corsHeaders });
     }
 
-    // Health check
+    // Health check — unauthenticated (no secrets exposed)
     if (url.pathname === '/health') {
       return new Response(JSON.stringify({
         status: 'ok',
         service: 'sentinel-threat-proxy',
-        timestamp: new Date().toISOString()
+        version: '1.6.0',
+        timestamp: new Date().toISOString(),
+        authRequired: true
       }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
     }
 
-    // All report endpoints require POST
     if (request.method !== 'POST') {
       return new Response(JSON.stringify({ error: 'POST required' }), {
         status: 405,
@@ -52,30 +80,49 @@ export default {
       });
     }
 
-    // Check shared secret authentication if configured on worker
-    if (env.SENTINEL_SHARED_SECRET) {
-      const authHeader = request.headers.get('X-Sentinel-Auth');
-      if (!authHeader || authHeader !== env.SENTINEL_SHARED_SECRET) {
-        return new Response(JSON.stringify({ error: 'Unauthorized: Invalid or missing X-Sentinel-Auth header' }), {
-          status: 401,
-          headers: { 'Content-Type': 'application/json', ...corsHeaders }
-        });
-      }
+    // ── v1.6.0: Fail closed if shared secret is not configured ──────────
+    if (!env.SENTINEL_SHARED_SECRET || env.SENTINEL_SHARED_SECRET.length < 16) {
+      return new Response(JSON.stringify({
+        error: 'Service misconfigured: SENTINEL_SHARED_SECRET required'
+      }), {
+        status: 503,
+        headers: { 'Content-Type': 'application/json', ...corsHeaders }
+      });
     }
 
-    // Check signature and timestamp (required for all proxy requests to prevent replay and MITM)
+    // Rate limit by client IP
+    const clientIp = request.headers.get('CF-Connecting-IP')
+      || request.headers.get('X-Forwarded-For')?.split(',')[0]?.trim()
+      || 'unknown';
+    if (!checkRateLimit(clientIp)) {
+      return new Response(JSON.stringify({ error: 'Rate limit exceeded' }), {
+        status: 429,
+        headers: { 'Content-Type': 'application/json', ...corsHeaders }
+      });
+    }
+
     const signature = request.headers.get('X-Sentinel-Signature');
     const timestamp = request.headers.get('X-Sentinel-Timestamp');
-    const clientKey = request.headers.get('X-Sentinel-Key');
+    // Optional explicit auth header — if present must match secret
+    const authHeader = request.headers.get('X-Sentinel-Auth');
 
-    if (!signature || !timestamp || !clientKey) {
-      return new Response(JSON.stringify({ error: 'Bad Request: Missing required X-Sentinel security headers' }), {
+    if (!signature || !timestamp) {
+      return new Response(JSON.stringify({
+        error: 'Bad Request: Missing X-Sentinel-Signature or X-Sentinel-Timestamp'
+      }), {
         status: 400,
         headers: { 'Content-Type': 'application/json', ...corsHeaders }
       });
     }
 
-    // Verify timestamp within 5 minutes (300 seconds) of worker time
+    if (authHeader != null && authHeader !== env.SENTINEL_SHARED_SECRET) {
+      return new Response(JSON.stringify({ error: 'Unauthorized: Invalid X-Sentinel-Auth' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json', ...corsHeaders }
+      });
+    }
+
+    // Timestamp within 5 minutes
     const timestampVal = parseInt(timestamp, 10);
     const nowSec = Math.floor(Date.now() / 1000);
     if (isNaN(timestampVal) || Math.abs(nowSec - timestampVal) > 300) {
@@ -87,9 +134,15 @@ export default {
 
     try {
       const rawBody = await request.text();
-      
-      // Verify signature over the exact raw body payload
-      const signatureValid = await verifySignature(signature, clientKey, timestamp, url.pathname, rawBody);
+
+      // Verify HMAC with server-side shared secret only (never client-supplied key)
+      const signatureValid = await verifySignature(
+        signature,
+        env.SENTINEL_SHARED_SECRET,
+        timestamp,
+        url.pathname,
+        rawBody
+      );
       if (!signatureValid) {
         return new Response(JSON.stringify({ error: 'Unauthorized: HMAC signature verification failed' }), {
           status: 401,
@@ -99,7 +152,6 @@ export default {
 
       const body = JSON.parse(rawBody);
 
-      // Basic validation — require at minimum a type and value
       if (!body.type || !body.value) {
         return new Response(JSON.stringify({ error: 'Missing type or value' }), {
           status: 400,
@@ -108,7 +160,6 @@ export default {
       }
 
       let result;
-
       switch (url.pathname) {
         case '/report/hash':
           result = await reportHash(body, env);
@@ -142,10 +193,6 @@ export default {
   }
 };
 
-/**
- * Report malicious hash to MalwareBazaar
- * Body: { type: "hash", value: "sha256hex", tags: ["trojan", "rat"], comment: "..." }
- */
 async function reportHash(body, env) {
   if (!env.MALWAREBAZAAR_KEY) {
     return { success: false, error: 'MalwareBazaar key not configured' };
@@ -169,10 +216,6 @@ async function reportHash(body, env) {
   return { success: response.ok, upstream: text.substring(0, 500) };
 }
 
-/**
- * Report malicious URL to URLhaus
- * Body: { type: "url", value: "http://evil.com/malware.exe", threat: "malware_download", tags: [...] }
- */
 async function reportUrl(body, env) {
   if (!env.URLHAUS_TOKEN) {
     return { success: false, error: 'URLhaus token not configured' };
@@ -196,10 +239,6 @@ async function reportUrl(body, env) {
   return { success: response.ok, upstream: text.substring(0, 500) };
 }
 
-/**
- * Report malicious IP to AbuseIPDB
- * Body: { type: "ip", value: "1.2.3.4", categories: [14, 15], comment: "Port scan detected" }
- */
 async function reportIp(body, env) {
   if (!env.ABUSEIPDB_KEY) {
     return { success: false, error: 'AbuseIPDB key not configured' };
@@ -224,11 +263,6 @@ async function reportIp(body, env) {
   return { success: response.ok, upstream: text.substring(0, 500) };
 }
 
-/**
- * Lookup a SHA-256 hash on VirusTotal v3 API (proxied — API key held server-side).
- * Body: { type: "hash", value: "sha256hex" }
- * Returns: { success: true, verdict: "safe"|"suspicious"|"malicious"|"not_found", detections: N, engines: N }
- */
 async function lookupVirusTotal(body, env) {
   if (!env.VIRUSTOTAL_KEY) {
     return { success: false, error: 'VirusTotal API key not configured' };
@@ -287,10 +321,8 @@ async function lookupVirusTotal(body, env) {
   }
 }
 
-/**
- * Helper to convert hex string to Uint8Array
- */
 function hexToBytes(hex) {
+  if (!hex || hex.length % 2 !== 0) return new Uint8Array(0);
   const bytes = new Uint8Array(hex.length / 2);
   for (let i = 0; i < bytes.length; i++) {
     bytes[i] = parseInt(hex.substring(i * 2, i * 2 + 2), 16);
@@ -299,32 +331,29 @@ function hexToBytes(hex) {
 }
 
 /**
- * Cryptographically verify the HMAC-SHA256 signature
+ * Verify HMAC-SHA256(secret, `${timestamp}.${path}.${body}`) against hex signature.
+ * Uses server-side shared secret only — client cannot supply the key.
  */
-async function verifySignature(signatureHex, keyHex, timestamp, path, bodyJson) {
+async function verifySignature(signatureHex, sharedSecret, timestamp, path, bodyJson) {
   try {
-    const keyBytes = hexToBytes(keyHex);
-    const sigBytes = hexToBytes(signatureHex);
-    
-    const cryptoKey = await crypto.subtle.importKey(
-      "raw",
-      keyBytes,
-      { name: "HMAC", hash: "SHA-256" },
-      false,
-      ["verify"]
-    );
-    
-    const payloadStr = `${timestamp}.${path}.${bodyJson}`;
     const encoder = new TextEncoder();
-    const payloadBytes = encoder.encode(payloadStr);
-    
-    return await crypto.subtle.verify(
-      "HMAC",
-      cryptoKey,
-      sigBytes,
-      payloadBytes
+    const keyBytes = encoder.encode(sharedSecret);
+    const sigBytes = hexToBytes(signatureHex);
+    if (sigBytes.length !== 32) return false;
+
+    const cryptoKey = await crypto.subtle.importKey(
+      'raw',
+      keyBytes,
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['verify']
     );
-  } catch (err) {
+
+    const payloadStr = `${timestamp}.${path}.${bodyJson}`;
+    const payloadBytes = encoder.encode(payloadStr);
+
+    return await crypto.subtle.verify('HMAC', cryptoKey, sigBytes, payloadBytes);
+  } catch {
     return false;
   }
 }
