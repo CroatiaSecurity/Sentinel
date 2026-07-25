@@ -190,6 +190,7 @@ namespace Sentinel.Service
                     services.AddTransient<IDetectionRule, CampaignDetectionRule>();
                     services.AddTransient<IDetectionRule, VerdictGateRule>();
                     services.AddTransient<IDetectionRule, ClickFixDetectionRule>();
+                    services.AddTransient<IDetectionRule, NpmSupplyChainRule>();
                     services.AddTransient<IDetectionRule, DllSideloadingDetectionRule>();
                     services.AddTransient<IDetectionRule, ChromeRemoteDebuggingRule>();
                     services.AddSingleton<IDetectionRule, DynamicRulesEvaluator>();
@@ -260,6 +261,7 @@ namespace Sentinel.Service
                             sp.GetRequiredService<AgentWatchdog>(),
                             sp.GetRequiredService<SyscallStubMonitor>(),
                             sp.GetRequiredService<ConnectivityCanaryMonitor>(),
+                            sp.GetRequiredService<EtwSessionGuard>(),
                         };
                         return new MonitorGroup(
                             new MonitorGroupConfig
@@ -279,6 +281,7 @@ namespace Sentinel.Service
                     services.AddSingleton<AgentWatchdog>();
                     services.AddSingleton<SyscallStubMonitor>();
                     services.AddSingleton<ConnectivityCanaryMonitor>();
+                    services.AddSingleton<EtwSessionGuard>();
                     services.AddSingleton<WfpIntegrityMonitor>();
                     services.AddSingleton<DriverLoadMonitor>();
 

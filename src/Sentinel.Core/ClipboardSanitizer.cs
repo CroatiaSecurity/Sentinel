@@ -35,6 +35,29 @@ namespace Sentinel.Core
                     var originalText = ClipboardReadHelper.ReadText();
                     if (string.IsNullOrEmpty(originalText)) return;
 
+                    // v1.6.1: ClickFix / FakeCAPTCHA — clear clipboard when it holds paste-run malware
+                    if (LooksLikeClickFixPayload(originalText))
+                    {
+                        WriteClipboardText(string.Empty);
+                        _ = _detectionEngine.EmitAsync(new DetectionEvent
+                        {
+                            RuleName = "ClickFix: Malicious Clipboard Payload",
+                            ProcessName = "SentinelAgent.exe",
+                            ProcessId = Environment.ProcessId,
+                            Confidence = 0.92,
+                            Tier = DetectionTier.Tier1Behavioral,
+                            AuthorizedResponse = ResponseAction.LogOnly,
+                            SignalType = SignalType.ReverseShell,
+                            Evidence = "Clipboard contained a paste-and-run shell/download payload (ClickFix/FakeCAPTCHA pattern). Content cleared.",
+                            Reasoning =
+                                "2025–2026 campaigns (fake Cloudflare/reCAPTCHA/Turnstile) copy PowerShell or cmd " +
+                                "into the clipboard and instruct the user to Win+R → Ctrl+V → Enter. Clearing the " +
+                                "clipboard breaks the chain before execution. Process-level ClickFixDetectionRule " +
+                                "kills the shell if the user still pastes a re-copied payload."
+                        });
+                        return;
+                    }
+
                     var sanitizedText = SanitizeText(originalText, out bool modified);
                     if (modified)
                     {
@@ -63,6 +86,39 @@ namespace Sentinel.Core
             thread.SetApartmentState(ApartmentState.STA);
             thread.Start();
             thread.Join(200); // Small join timeout
+        }
+
+        /// <summary>
+        /// v1.6.1: Heuristic for ClickFix clipboard lures (paste into Run dialog).
+        /// Conservative: requires shell/download indicators; avoids clearing normal URLs alone.
+        /// </summary>
+        public static bool LooksLikeClickFixPayload(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text) || text.Length > 8192) return false;
+            var t = text.Trim().ToLowerInvariant();
+
+            // Must look like a command, not a prose paragraph
+            bool hasShell =
+                t.Contains("powershell") || t.Contains("pwsh") ||
+                t.StartsWith("cmd") || t.Contains("cmd.exe") ||
+                t.Contains("mshta") || t.Contains("curl ") || t.Contains("wget ") ||
+                t.Contains("certutil") || t.Contains("bitsadmin") ||
+                t.Contains("iwr ") || t.Contains("irm ") ||
+                t.Contains("invoke-webrequest") || t.Contains("invoke-restmethod") ||
+                t.Contains("invoke-expression") || t.Contains("iex(") || t.Contains("|iex") ||
+                t.Contains("frombase64string");
+
+            if (!hasShell) return false;
+
+            bool hasDownloadOrEncode =
+                t.Contains("http://") || t.Contains("https://") ||
+                t.Contains("frombase64string") || t.Contains("-enc") ||
+                t.Contains("-encodedcommand") || t.Contains("downloadstring") ||
+                t.Contains("downloadfile") || t.Contains("iex") ||
+                t.Contains("invoke-expression") || t.Contains("hidden") ||
+                t.Contains("-w h") || t.Contains("-nop");
+
+            return hasDownloadOrEncode;
         }
 
         public static string SanitizeText(string text, out bool modified)

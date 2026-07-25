@@ -694,6 +694,11 @@ namespace Sentinel.Core
         }
     }
 
+    /// <summary>
+    /// Detects ClickFix / FakeCAPTCHA paste-and-run tradecraft.
+    /// Intel 2025–2026 (Microsoft, ESET +500%, Malwarebytes, Krebs): fake reCAPTCHA/Turnstile
+    /// pages instruct users to Win+R → paste PowerShell/cmd that downloads stealers/RATs.
+    /// </summary>
     [RuleCategory(DetectionCategory.ReverseShell)]
     public class ClickFixDetectionRule : IDetectionRule
     {
@@ -701,52 +706,155 @@ namespace Sentinel.Core
 
         public DetectionEvent? Evaluate(FusedTelemetryContext context)
         {
-            if (context.TriggeringEvent is ProcessTelemetry pt)
+            if (context.TriggeringEvent is not ProcessTelemetry pt)
+                return null;
+
+            var cmd = pt.CommandLine?.ToLowerInvariant() ?? "";
+            var parent = pt.ParentProcessName?.ToLowerInvariant() ?? "";
+            var name = pt.ProcessName ?? "";
+
+            // Win+R / browser-driven spawn, or shell-out from conhost (Run dialog intermediate)
+            bool isExplorerOrBrowserParent =
+                parent is "explorer" or "explorer.exe" or
+                    "chrome" or "chrome.exe" or
+                    "msedge" or "msedge.exe" or
+                    "firefox" or "firefox.exe" or
+                    "brave" or "brave.exe" or
+                    "opera" or "opera.exe" or
+                    "vivaldi" or "vivaldi.exe" or
+                    "conhost" or "conhost.exe" or
+                    "runtimebroker" or "runtimebroker.exe";
+
+            bool isSuspiciousShell =
+                name.Contains("powershell", StringComparison.OrdinalIgnoreCase) ||
+                name.Contains("pwsh", StringComparison.OrdinalIgnoreCase) ||
+                name.Contains("cmd", StringComparison.OrdinalIgnoreCase) ||
+                name.Contains("mshta", StringComparison.OrdinalIgnoreCase) ||
+                name.Contains("wscript", StringComparison.OrdinalIgnoreCase) ||
+                name.Contains("cscript", StringComparison.OrdinalIgnoreCase) ||
+                name.Contains("msdt", StringComparison.OrdinalIgnoreCase) ||
+                name.Contains("forfiles", StringComparison.OrdinalIgnoreCase);
+
+            if (!isExplorerOrBrowserParent || !isSuspiciousShell)
+                return null;
+
+            // v1.6.1: Expanded payload signatures from 2025–26 ClickFix campaigns
+            bool isClickFixPayload =
+                cmd.Contains("frombase64string") ||
+                cmd.Contains("downloadstring") ||
+                cmd.Contains("downloadfile") ||
+                cmd.Contains("downloaddata") ||
+                cmd.Contains("iex ") ||
+                cmd.Contains("|iex") ||
+                cmd.Contains("iex(") ||
+                cmd.Contains("invoke-expression") ||
+                cmd.Contains("invoke-webrequest") ||
+                cmd.Contains("invoke-restmethod") ||
+                cmd.Contains(" iwr ") ||
+                cmd.Contains(" irm ") ||
+                cmd.Contains("| iwr") ||
+                cmd.Contains("| irm") ||
+                cmd.Contains("certutil -urlcache") ||
+                cmd.Contains("certutil.exe -urlcache") ||
+                cmd.Contains("bitsadmin") ||
+                cmd.Contains("start-bitstransfer") ||
+                cmd.Contains("curl ") && (cmd.Contains("http") || cmd.Contains("|")) ||
+                cmd.Contains("wget ") && cmd.Contains("http") ||
+                cmd.Contains("-enc ") ||
+                cmd.Contains("-encodedcommand") ||
+                cmd.Contains("-e ") && cmd.Contains("powershell") ||
+                cmd.Contains("-w h") || cmd.Contains("-w hidden") || cmd.Contains("windowstyle hidden") ||
+                cmd.Contains("-nop") && (cmd.Contains("http") || cmd.Contains("iex") || cmd.Contains("irm")) ||
+                cmd.Contains("mshta") && cmd.Contains("http") ||
+                (cmd.Contains("http") && name.Contains("mshta", StringComparison.OrdinalIgnoreCase)) ||
+                cmd.Contains("javascript:") ||
+                cmd.Contains("vbscript:") ||
+                // Fake CAPTCHA clipboard often starts with verification noise then command
+                cmd.Contains("verification") && (cmd.Contains("powershell") || cmd.Contains("http")) ||
+                cmd.Contains("captcha") && cmd.Contains("http");
+
+            if (!isClickFixPayload)
+                return null;
+
+            return new DetectionEvent
             {
-                var cmd = pt.CommandLine.ToLowerInvariant();
-                var parent = pt.ParentProcessName?.ToLowerInvariant() ?? "";
+                RuleName = Name,
+                ProcessName = pt.ProcessName,
+                ProcessId = pt.ProcessId,
+                SignalType = SignalType.ReverseShell,
+                Confidence = 0.96,
+                Tier = DetectionTier.Tier1Behavioral,
+                AuthorizedResponse = ResponseAction.KillProcessTree,
+                Evidence = $"ClickFix / FakeCAPTCHA paste-run detected (parent={pt.ParentProcessName}): {pt.CommandLine}",
+                Reasoning =
+                    "Shell spawned from explorer/browser (Win+R or paste-run) with download/encode/hidden-window " +
+                    "patterns matching ClickFix and FakeCAPTCHA campaigns (Microsoft 2025, ESET +500% H1 2025). " +
+                    "Victims are socially engineered to paste attacker-controlled PowerShell/cmd themselves."
+            };
+        }
+    }
 
-                // Check if powershell/cmd is launched from explorer (Run dialog Win+R) or from a browser
-                bool isExplorerOrBrowserParent = parent == "explorer" || parent == "explorer.exe" ||
-                                                 parent == "chrome" || parent == "chrome.exe" ||
-                                                 parent == "msedge" || parent == "msedge.exe" ||
-                                                 parent == "firefox" || parent == "firefox.exe" ||
-                                                 parent == "brave" || parent == "brave.exe";
+    /// <summary>
+    /// v1.6.1: Detects compromised npm/node lifecycle scripts that shell out to downloaders.
+    /// Inspired by 2025 supply-chain waves (Shai-Hulud / Tinycolor / Crowdstrike npm packages on HN).
+    /// </summary>
+    [RuleCategory(DetectionCategory.SecurityEvasion)]
+    public class NpmSupplyChainRule : IDetectionRule
+    {
+        public string Name => "NpmSupplyChainRule";
 
-                if (isExplorerOrBrowserParent)
-                {
-                    bool isSuspiciousShell = pt.ProcessName.Contains("powershell", StringComparison.OrdinalIgnoreCase) || 
-                                             pt.ProcessName.Contains("cmd", StringComparison.OrdinalIgnoreCase) ||
-                                             pt.ProcessName.Contains("mshta", StringComparison.OrdinalIgnoreCase);
+        public DetectionEvent? Evaluate(FusedTelemetryContext context)
+        {
+            if (context.TriggeringEvent is not ProcessTelemetry pt)
+                return null;
 
-                    if (isSuspiciousShell)
-                    {
-                        bool isClickFixPayload = cmd.Contains("frombase64string") || 
-                                                 cmd.Contains("downloadstring") || 
-                                                 cmd.Contains("iex ") || 
-                                                 cmd.Contains("invoke-expression") ||
-                                                 cmd.Contains("certutil -urlcache") ||
-                                                 cmd.Contains("http") && pt.ProcessName.Contains("mshta", StringComparison.OrdinalIgnoreCase);
+            var parent = pt.ParentProcessName?.ToLowerInvariant() ?? "";
+            bool parentIsNode =
+                parent is "node" or "node.exe" or "npm" or "npm.exe" or
+                    "npx" or "npx.exe" or "yarn" or "yarn.exe" or "pnpm" or "pnpm.exe";
 
-                        if (isClickFixPayload)
-                        {
-                            return new DetectionEvent
-                            {
-                                RuleName = Name,
-                                ProcessName = pt.ProcessName,
-                                ProcessId = pt.ProcessId,
-                                SignalType = SignalType.ReverseShell,
-                                Confidence = 0.95,
-                                Tier = DetectionTier.Tier1Behavioral,
-                                AuthorizedResponse = ResponseAction.KillProcessTree,
-                                Evidence = $"Click-Fix / Run-Dialog downloader execution detected: {pt.CommandLine}",
-                                Reasoning = "Process spawned directly from explorer or a browser executed commands associated with social engineering paste-and-run payloads (ClickFix)."
-                            };
-                        }
-                    }
-                }
-            }
-            return null;
+            if (!parentIsNode)
+                return null;
+
+            var name = pt.ProcessName ?? "";
+            bool childIsShell =
+                name.Contains("powershell", StringComparison.OrdinalIgnoreCase) ||
+                name.Contains("pwsh", StringComparison.OrdinalIgnoreCase) ||
+                name.Contains("cmd", StringComparison.OrdinalIgnoreCase) ||
+                name.Contains("curl", StringComparison.OrdinalIgnoreCase) ||
+                name.Contains("wget", StringComparison.OrdinalIgnoreCase) ||
+                name.Contains("bitsadmin", StringComparison.OrdinalIgnoreCase) ||
+                name.Contains("certutil", StringComparison.OrdinalIgnoreCase);
+
+            if (!childIsShell)
+                return null;
+
+            var cmd = pt.CommandLine?.ToLowerInvariant() ?? "";
+            bool suspicious =
+                cmd.Contains("http://") || cmd.Contains("https://") ||
+                cmd.Contains("frombase64string") || cmd.Contains("downloadstring") ||
+                cmd.Contains("iex") || cmd.Contains("invoke-expression") ||
+                cmd.Contains("invoke-webrequest") || cmd.Contains("curl ") ||
+                cmd.Contains("-enc") || cmd.Contains("hidden");
+
+            if (!suspicious)
+                return null;
+
+            return new DetectionEvent
+            {
+                RuleName = Name,
+                ProcessName = pt.ProcessName,
+                ProcessId = pt.ProcessId,
+                SignalType = SignalType.SuspiciousProcess,
+                Confidence = 0.88,
+                Tier = DetectionTier.Tier1Behavioral,
+                AuthorizedResponse = ResponseAction.KillProcessTree,
+                Evidence = $"Node/npm parent spawned shell with download/encode payload: {pt.CommandLine}",
+                Reasoning =
+                    "Package-manager process (node/npm/yarn/pnpm) launched a shell with network download or " +
+                    "encoded execution — consistent with malicious postinstall/preinstall scripts in npm " +
+                    "supply-chain attacks (e.g. 2025 Shai-Hulud/Tinycolor waves)."
+            };
         }
     }
 

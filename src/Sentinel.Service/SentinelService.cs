@@ -69,6 +69,8 @@ namespace Sentinel.Service
             responseEngine.SetIncidentResponseService(incidentResponseService);
             responseEngine.SetDllUnloadEngine(dllUnloadEngine);
             responseEngine.SetChainTracer(chainTracer);
+            // v1.6.1: budget-exhaustion Tier1 alerts
+            responseEngine.SetDetectionEngine(detectionEngine);
 
             // v1.3.2: Wire orchestrator into detection engine
             detectionEngine.SetOrchestrator(orchestrator);

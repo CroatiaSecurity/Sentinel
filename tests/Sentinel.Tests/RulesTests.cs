@@ -143,7 +143,7 @@ namespace Sentinel.Tests
             Assert.NotNull(result);
             Assert.Equal("ClickFixDetectionRule", result.RuleName);
             Assert.Equal(ResponseAction.KillProcessTree, result.AuthorizedResponse);
-            Assert.Contains("Click-Fix", result.Evidence);
+            Assert.Contains("ClickFix", result.Evidence);
         }
 
         [Fact]

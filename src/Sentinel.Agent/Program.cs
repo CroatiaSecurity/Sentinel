@@ -269,6 +269,7 @@ namespace Sentinel.Agent
                     services.AddTransient<IDetectionRule, UnsignedBinaryRule>();
                     services.AddTransient<IDetectionRule, VerdictGateRule>();
                     services.AddTransient<IDetectionRule, ClickFixDetectionRule>();
+                    services.AddTransient<IDetectionRule, NpmSupplyChainRule>();
                     services.AddTransient<IDetectionRule, DllSideloadingDetectionRule>();
                     services.AddTransient<IDetectionRule, ChromeRemoteDebuggingRule>();
                     services.AddSingleton<IDetectionRule, DynamicRulesEvaluator>();
