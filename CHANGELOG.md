@@ -2,6 +2,30 @@
  
 All notable changes to Sentinel are documented in this file.
 
+## [1.6.1] - 2026-07-25
+
+### Security Hardening (1.6.0 audit + 2025–26 threat intel)
+
+- **[CRITICAL] `EtwSessionGuard`** (Critical monitor group) — Detects inactive or stalled `SentinelUnifiedTrace` ETW session (EDR-killer / `logman stop` tradecraft highlighted on HN and The Register 2025). Auto-recreates the session via `UnifiedEtwSession.RestartAsync` and emits Tier1 `Anti-Tamper: ETW Session Disabled`.
+
+- **[HIGH] NetworkIsolate rate limiting** — `MaxNetworkIsolatesPerMinute` (default 10). Exhaustion demotes further isolates and fires Tier1 `Anti-Tamper: Response Budget Exhausted`. Skips isolating major public resolvers (1.1.1.1, 8.8.8.8, 9.9.9.9) to reduce CDN/decoy collateral.
+
+- **[HIGH] Kill budget exhaustion → Tier1** — When `MaxKillsPerMinute` is hit, emits AntiTamper detection (not only LogOnly) so mass-infection or FP-weaponization is visible to operators.
+
+- **[HIGH] ClickFix / FakeCAPTCHA hardening** (Microsoft Aug 2025, ESET +500% H1 2025, Malwarebytes 2026 campaigns):
+  - Expanded `ClickFixDetectionRule` payloads: `iwr`/`irm`, hidden window, `-enc`, curl|sh patterns, conhost/RuntimeBroker parents, more browsers
+  - Agent `ClipboardSanitizer` clears clipboard when content looks like paste-run malware and alerts Tier1
+
+- **[MEDIUM] `NpmSupplyChainRule`** — node/npm/yarn/pnpm spawning shell with download/encode patterns (Shai-Hulud / Tinycolor-style npm supply-chain waves on HN 2025).
+
+### Configuration
+
+| Setting | Default | Purpose |
+|---------|---------|---------|
+| `Sentinel:MaxNetworkIsolatesPerMinute` | `10` | Cap new firewall isolates per minute |
+
+---
+
 ## [1.6.0] - 2026-07-25
 
 ### Security Hardening (Red/Blue Audit Remediation)

@@ -502,6 +502,8 @@ namespace Sentinel.Core
             finally
             {
                 FreePropertiesBuffer();
+                _sessionHandle = 0;
+                _processingThread = null;
                 IsActive = false;
             }
 
@@ -509,6 +511,30 @@ namespace Sentinel.Core
                 EventsProcessed, EventsDropped);
 
             return Task.CompletedTask;
+        }
+
+        /// <summary>
+        /// v1.6.1: Restart the real-time session after external stop/tamper
+        /// (e.g. logman stop SentinelUnifiedTrace / EDR killers).
+        /// Registered provider handlers are preserved on the instance.
+        /// </summary>
+        public async Task<bool> RestartAsync(CancellationToken ct = default)
+        {
+            try
+            {
+                _logger.LogWarning("[UnifiedEtwSession] RestartAsync — stopping and recreating session");
+                await StopAsync();
+                // Brief pause so kernel releases the session name
+                await Task.Delay(500, ct);
+                await StartAsync(ct);
+                return IsActive;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[UnifiedEtwSession] RestartAsync failed");
+                IsActive = false;
+                return false;
+            }
         }
 
         /// <summary>

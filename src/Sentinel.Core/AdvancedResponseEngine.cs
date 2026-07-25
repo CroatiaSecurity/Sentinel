@@ -25,6 +25,10 @@ namespace Sentinel.Core
         // v1.6.0: Rolling kill budget to prevent response weaponization (FP kill storms)
         private readonly ConcurrentQueue<long> _killTimestampsMs = new();
         private long _lastRateLimitLogMs;
+        // v1.6.1: NetworkIsolate budget + Tier1 alert hook
+        private readonly ConcurrentQueue<long> _isolateTimestampsMs = new();
+        private long _lastIsolateRateLimitLogMs;
+        private DetectionEngine? _detectionEngine;
 
         /// <summary>Set after DI construction to avoid circular dependency.</summary>
         public void SetReinfectionCorrelator(ReinfectionCorrelator correlator) => _reinfectionCorrelator = correlator;
@@ -45,7 +49,7 @@ namespace Sentinel.Core
 
         /// <summary>
         /// v1.6.0: Returns false when MaxKillsPerMinute budget is exhausted.
-        /// NetworkIsolate / LogOnly / cert removal are not gated.
+        /// NetworkIsolate is gated separately via TryConsumeIsolateBudget.
         /// </summary>
         private bool TryConsumeKillBudget()
         {
@@ -72,6 +76,8 @@ namespace Sentinel.Core
                         Reason = $"Kill budget exhausted ({limit}/min). Subsequent kills demoted to LogOnly until window slides.",
                         ExecutionTimeMs = 0
                     });
+                    // v1.6.1: Loud Tier1 so operators see weaponized FP / ransomware wave
+                    EmitBudgetExhaustedAlert("KillBudget", limit);
                 }
                 return false;
             }
@@ -80,11 +86,76 @@ namespace Sentinel.Core
             return true;
         }
 
+        /// <summary>
+        /// v1.6.1: Cap new NetworkIsolate targets per minute.
+        /// </summary>
+        private bool TryConsumeIsolateBudget()
+        {
+            int limit = _config.MaxNetworkIsolatesPerMinute;
+            if (limit <= 0) return true;
+
+            long now = Environment.TickCount64;
+            long windowStart = now - 60_000;
+            while (_isolateTimestampsMs.TryPeek(out long ts) && ts < windowStart)
+                _isolateTimestampsMs.TryDequeue(out _);
+
+            if (_isolateTimestampsMs.Count >= limit)
+            {
+                long lastLog = Interlocked.Read(ref _lastIsolateRateLimitLogMs);
+                if (now - lastLog > 30_000 &&
+                    Interlocked.CompareExchange(ref _lastIsolateRateLimitLogMs, now, lastLog) == lastLog)
+                {
+                    _ = _eventLogger.LogEventAsync("response", new ResponseEvent
+                    {
+                        ProcessId = 0,
+                        ProcessName = "SYSTEM",
+                        ActionTaken = "ISOLATE_RATE_LIMITED",
+                        Reason = $"NetworkIsolate budget exhausted ({limit}/min). Further isolates skipped until window slides.",
+                        ExecutionTimeMs = 0
+                    });
+                    EmitBudgetExhaustedAlert("NetworkIsolateBudget", limit);
+                }
+                return false;
+            }
+
+            _isolateTimestampsMs.Enqueue(now);
+            return true;
+        }
+
+        private void EmitBudgetExhaustedAlert(string budgetType, int limit)
+        {
+            var de = _detectionEngine;
+            if (de == null) return;
+            _ = de.EmitAsync(new DetectionEvent
+            {
+                RuleName = "Anti-Tamper: Response Budget Exhausted",
+                Evidence = $"{budgetType} hit limit of {limit} actions per minute. " +
+                           "Further destructive responses are demoted/skipped until the window slides.",
+                Reasoning = "Exhausting the automated response budget can indicate either a true mass-infection " +
+                            "event (ransomware) or an attacker weaponizing false positives / decoy beacons. " +
+                            "Operators must review immediately; detection logging continues.",
+                Confidence = 0.90,
+                Tier = DetectionTier.Tier1Behavioral,
+                AuthorizedResponse = ResponseAction.LogOnly,
+                ProcessName = "SYSTEM",
+                ProcessId = 0,
+                SignalType = SignalType.AntiTamper,
+                Metadata = new Dictionary<string, string>
+                {
+                    ["BudgetType"] = budgetType,
+                    ["LimitPerMinute"] = limit.ToString()
+                }
+            });
+        }
+
         public void SetDllUnloadEngine(DllUnloadEngine engine) => _dllUnloadEngine = engine;
 
         public void SetChainTracer(ChainTracer tracer) => _chainTracer = tracer;
 
         public void SetIncidentResponseService(IncidentResponseService irs) => _incidentResponse = irs;
+
+        /// <summary>v1.6.1: Wire DetectionEngine after DI to avoid circular construction.</summary>
+        public void SetDetectionEngine(DetectionEngine engine) => _detectionEngine = engine;
 
         private static readonly HashSet<string> PresidentsLawKeywords = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -402,6 +473,22 @@ namespace Sentinel.Core
             }
             else if (shouldIsolateNetwork)
             {
+                // v1.6.1: rate-limit isolate storms (decoy C2 / domain-fronting noise)
+                if (!TryConsumeIsolateBudget())
+                {
+                    stopwatch.Stop();
+                    _metrics.RecordResponse(stopwatch.ElapsedMilliseconds);
+                    await _eventLogger.LogEventAsync("response", new ResponseEvent
+                    {
+                        ProcessId = detection.ProcessId,
+                        ProcessName = detection.ProcessName,
+                        ActionTaken = "LOG",
+                        Reason = $"Triggered by rule: {detection.RuleName}. NetworkIsolate rate-limited (MaxNetworkIsolatesPerMinute).",
+                        ExecutionTimeMs = stopwatch.ElapsedMilliseconds
+                    });
+                    return;
+                }
+
                 // Network-level threat: block suspicious IPs extracted from evidence metadata
                 var targetIp = detection.Metadata.GetValueOrDefault("TargetIP", "");
                 if (!string.IsNullOrEmpty(targetIp))
@@ -409,9 +496,10 @@ namespace Sentinel.Core
                     // Validate IP before creating firewall rules
                     if (!System.Net.IPAddress.TryParse(targetIp, out var parsedIp) ||
                         System.Net.IPAddress.IsLoopback(parsedIp) ||
-                        targetIp == "0.0.0.0" || targetIp == "255.255.255.255")
+                        targetIp == "0.0.0.0" || targetIp == "255.255.255.255" ||
+                        IsLikelyCdnOrPublicResolver(parsedIp))
                     {
-                        // Skip invalid/loopback/broadcast IPs
+                        // Skip invalid/loopback/broadcast/major CDN-or-resolver IPs (collateral)
                     }
                     else
                     {
@@ -714,5 +802,25 @@ namespace Sentinel.Core
 
         [System.Runtime.InteropServices.DllImport("dnsapi.dll", EntryPoint = "DnsFlushResolverCache")]
         private static extern uint DnsFlushResolverCache();
+
+        /// <summary>
+        /// v1.6.1: Avoid firewall-blocking major public resolvers / well-known CDN anycast
+        /// prefixes when decoy beaconing tries to force NetworkIsolate collateral damage.
+        /// Not exhaustive — best-effort guardrail.
+        /// </summary>
+        private static bool IsLikelyCdnOrPublicResolver(IPAddress ip)
+        {
+            var bytes = ip.GetAddressBytes();
+            if (ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork && bytes.Length == 4)
+            {
+                // Cloudflare 1.1.1.0/24, 1.0.0.0/24
+                if (bytes[0] == 1 && (bytes[1] == 1 || bytes[1] == 0)) return true;
+                // Google DNS 8.8.8.0/24, 8.8.4.0/24
+                if (bytes[0] == 8 && bytes[1] == 8) return true;
+                // Quad9 9.9.9.0/24
+                if (bytes[0] == 9 && bytes[1] == 9 && bytes[2] == 9) return true;
+            }
+            return false;
+        }
     }
 }

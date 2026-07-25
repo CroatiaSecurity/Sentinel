@@ -75,6 +75,13 @@ namespace Sentinel.Core
         public int MaxKillsPerMinute { get; set; } = 15;
 
         /// <summary>
+        /// v1.6.1: Maximum new NetworkIsolate firewall targets per rolling 60 seconds.
+        /// Prevents isolate-storm DoS / CDN collateral from decoy beacons.
+        /// 0 = unlimited (not recommended).
+        /// </summary>
+        public int MaxNetworkIsolatesPerMinute { get; set; } = 10;
+
+        /// <summary>
         /// v1.6.0: When true (default), ActiveResponse=false at startup or in appsettings
         /// is treated as tampering: force re-enable + Tier1 alert.
         /// Set false only for intentional observation/lab mode.

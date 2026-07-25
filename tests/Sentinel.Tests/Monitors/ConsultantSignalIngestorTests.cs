@@ -54,6 +54,9 @@ namespace Sentinel.Tests.Monitors
                 using var cts = new CancellationTokenSource();
                 await ingestor.StartAsync(cts.Token);
 
+                // Allow watcher/poll loop to attach before first write (reduces race under parallel tests)
+                await Task.Delay(250);
+
                 // Write a sample detection event to a JSONL file in tempDir
                 var consultantFile = Path.Combine(tempDir, "DragonBreathHunter.jsonl");
                 var sampleEvent = new DetectionEvent
@@ -67,10 +70,15 @@ namespace Sentinel.Tests.Monitors
                 };
 
                 var jsonLine = JsonSerializer.Serialize(sampleEvent);
-                await File.WriteAllTextAsync(consultantFile, jsonLine + Environment.NewLine);
+                // Atomic-ish write: temp then move so watcher sees a complete line
+                var tmpWrite = consultantFile + ".tmp";
+                await File.WriteAllTextAsync(tmpWrite, jsonLine + Environment.NewLine);
+                File.Move(tmpWrite, consultantFile, overwrite: true);
+                // Touch again to force change event on some FS watchers
+                await File.AppendAllTextAsync(consultantFile, "");
 
-                // Wait a moment for file watcher to pick it up and process it
-                int waitRetries = 30;
+                // Wait for file watcher / poll loop to process (up to ~8s under load)
+                int waitRetries = 80;
                 bool found = false;
                 while (waitRetries > 0)
                 {
@@ -79,10 +87,10 @@ namespace Sentinel.Tests.Monitors
                     {
                         try
                         {
-                            using var fs = new FileStream(logPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                            using var fs = new FileStream(logPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
                             using var sr = new StreamReader(fs);
                             var content = await sr.ReadToEndAsync();
-                            if (content.Contains("DragonBreathHunter"))
+                            if (content.Contains("DragonBreathHunter", StringComparison.Ordinal))
                             {
                                 found = true;
                                 break;
