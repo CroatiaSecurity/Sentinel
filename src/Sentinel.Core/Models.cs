@@ -67,6 +67,20 @@ namespace Sentinel.Core
         public int AntiTamperTimingTickMs { get; set; } = 2000;
         public int AntiTamperIntegrityTickMs { get; set; } = 10000;
 
+        /// <summary>
+        /// v1.6.0: Maximum process kill/quarantine-kill actions per rolling 60 seconds.
+        /// Prevents weaponized false-positive storms. NetworkIsolate is not counted.
+        /// 0 = unlimited (not recommended).
+        /// </summary>
+        public int MaxKillsPerMinute { get; set; } = 15;
+
+        /// <summary>
+        /// v1.6.0: When true (default), ActiveResponse=false at startup or in appsettings
+        /// is treated as tampering: force re-enable + Tier1 alert.
+        /// Set false only for intentional observation/lab mode.
+        /// </summary>
+        public bool EnforceActiveResponse { get; set; } = true;
+
         public CveShieldConfig CveShield { get; set; } = new();
     }
 
@@ -87,8 +101,10 @@ namespace Sentinel.Core
         public string? ProxyEndpoint { get; set; }
 
         /// <summary>
-        /// HMAC shared secret for signing requests to the proxy.
-        /// Configured in appsettings.json under ThreatReporting:ProxySharedSecret.
+        /// v1.6.0: Shared secret matching Worker env SENTINEL_SHARED_SECRET.
+        /// Used as the HMAC-SHA256 key for all proxy requests. Required (≥16 chars)
+        /// when Enabled+ProxyEndpoint are set; reporting fails closed without it.
+        /// Never commit production secrets to source control.
         /// </summary>
         public string? ProxySharedSecret { get; set; }
     }

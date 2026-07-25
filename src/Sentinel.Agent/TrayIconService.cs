@@ -155,24 +155,8 @@ namespace Sentinel.Agent
 
         private void OnOpenConsole(object? sender, EventArgs e)
         {
-            try
-            {
-                var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
-                var logFile = Path.Combine(programData, "Sentinel", "events.jsonl");
-
-                // Start cmd.exe to tail the file (using PowerShell Get-Content -Tail -Wait as per 4.4.0 fix)
-                var pInfo = new ProcessStartInfo
-                {
-                    FileName = "cmd.exe",
-                    Arguments = $"/c powershell -Command \"Get-Content -Path '{logFile}' -Tail 20 -Wait\"",
-                    UseShellExecute = true
-                };
-                Process.Start(pInfo);
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Failed to open console: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
+            // v1.6.0: No cmd.exe / powershell LOLBin — open log in notepad (same as event log).
+            OnOpenEventLog(sender, e);
         }
 
         private void OnOpenQuarantine(object? sender, EventArgs e)
@@ -183,7 +167,13 @@ namespace Sentinel.Agent
                 var qDir = Path.Combine(programData, "Sentinel", "Quarantine");
                 if (Directory.Exists(qDir))
                 {
-                    Process.Start("explorer.exe", qDir);
+                    var psi = new ProcessStartInfo
+                    {
+                        FileName = "explorer.exe",
+                        UseShellExecute = false,
+                        ArgumentList = { qDir }
+                    };
+                    Process.Start(psi);
                 }
             }
             catch (Exception ex)
@@ -200,7 +190,14 @@ namespace Sentinel.Agent
                 var logFile = Path.Combine(programData, "Sentinel", "events.jsonl");
                 if (File.Exists(logFile))
                 {
-                    Process.Start("notepad.exe", logFile);
+                    // v1.6.0: ArgumentList avoids shell metacharacter injection; no cmd/powershell
+                    var psi = new ProcessStartInfo
+                    {
+                        FileName = "notepad.exe",
+                        UseShellExecute = false,
+                        ArgumentList = { logFile }
+                    };
+                    Process.Start(psi);
                 }
             }
             catch (Exception ex)

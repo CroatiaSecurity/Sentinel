@@ -205,10 +205,24 @@ namespace Sentinel.Core
 
         private async Task EnsureFirewallBlock(string ip)
         {
+            // v1.6.0: Strict IP validation before interpolating into netsh
+            if (!System.Net.IPAddress.TryParse(ip, out var parsed) ||
+                System.Net.IPAddress.IsLoopback(parsed) ||
+                parsed.Equals(System.Net.IPAddress.Any) ||
+                parsed.Equals(System.Net.IPAddress.IPv6Any) ||
+                parsed.Equals(System.Net.IPAddress.Broadcast))
+            {
+                _logger.LogDebug("[CastDeviceGuard] Refusing firewall block for invalid IP: {IP}", ip);
+                return;
+            }
+
+            // Normalize to canonical form (strips any junk that TryParse accepted)
+            ip = parsed.ToString();
             if (_blockedIps.ContainsKey(ip)) return;
             try
             {
-                var ruleName = $"Sentinel-CastGuard-Block-{ip.Replace('.', '_')}";
+                var safeLabel = ip.Replace('.', '_').Replace(':', '_');
+                var ruleName = $"Sentinel-CastGuard-Block-{safeLabel}";
                 var psi = new ProcessStartInfo("netsh",
                     $"advfirewall firewall add rule name=\"{ruleName}-OUT\" dir=out action=block remoteip={ip} enable=yes")
                 {

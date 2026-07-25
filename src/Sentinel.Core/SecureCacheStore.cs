@@ -51,6 +51,8 @@ namespace Sentinel.Core
             ref DATA_BLOB pDataOut);
 
         private const int CRYPTPROTECT_UI_FORBIDDEN = 0x1;
+        // v1.6.0: Machine-scope DPAPI — service runs as SYSTEM; bind ciphertext to host.
+        private const int CRYPTPROTECT_LOCAL_MACHINE = 0x4;
 
         public SecureCacheStore(string? customPath = null)
         {
@@ -115,15 +117,18 @@ namespace Sentinel.Core
             }
             catch { }
 
-            // 2. Installation-specific random entropy (32 bytes, SYSTEM-ACL-protected).
-            // This is the primary secret — without it, the key cannot be reconstructed.
-            // Generated on first run and persisted in the ACL-locked Secure directory.
+            // 2. Installation-specific random entropy (32 bytes).
+            // v1.6.0: File ACL is SYSTEM-only (Administrators removed) so local admins
+            // cannot read the entropy to forge dynamic rules or cache HMACs without
+            // first taking ownership / escalating to SYSTEM.
             try
             {
                 var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
                 var entropyFile = Path.Combine(programData, "Sentinel", "Secure", ".install_entropy");
                 if (File.Exists(entropyFile))
                 {
+                    // Best-effort re-lock on every load (upgrades from older ACLs)
+                    LockEntropyFileAcl(entropyFile);
                     var entropy = File.ReadAllBytes(entropyFile);
                     if (entropy.Length == 32)
                     {
@@ -142,6 +147,7 @@ namespace Sentinel.Core
                     if (!Directory.Exists(dir))
                         Directory.CreateDirectory(dir);
                     File.WriteAllBytes(entropyFile, entropy);
+                    LockEntropyFileAcl(entropyFile);
                     ms.Write(entropy);
                 }
             }
@@ -248,7 +254,8 @@ namespace Sentinel.Core
 
             try
             {
-                if (CryptProtectData(ref dataIn, "SentinelCache", ref entropy, IntPtr.Zero, ref prompt, CRYPTPROTECT_UI_FORBIDDEN, ref dataOut))
+                int flags = CRYPTPROTECT_UI_FORBIDDEN | CRYPTPROTECT_LOCAL_MACHINE;
+                if (CryptProtectData(ref dataIn, "SentinelCache", ref entropy, IntPtr.Zero, ref prompt, flags, ref dataOut))
                 {
                     var result = new byte[dataOut.cbData];
                     Marshal.Copy(dataOut.pbData, result, 0, dataOut.cbData);
@@ -280,6 +287,20 @@ namespace Sentinel.Core
 
             try
             {
+                // Try machine-scope first (v1.6.0+), then user-scope for legacy cache migration
+                int flags = CRYPTPROTECT_UI_FORBIDDEN | CRYPTPROTECT_LOCAL_MACHINE;
+                if (CryptUnprotectData(ref dataIn, IntPtr.Zero, ref entropy, IntPtr.Zero, ref prompt, flags, ref dataOut))
+                {
+                    var result = new byte[dataOut.cbData];
+                    Marshal.Copy(dataOut.pbData, result, 0, dataOut.cbData);
+                    return result;
+                }
+                if (dataOut.pbData != IntPtr.Zero)
+                {
+                    Marshal.FreeHGlobal(dataOut.pbData);
+                    dataOut.pbData = IntPtr.Zero;
+                }
+                // Legacy fallback (pre-1.6.0 user-scope blobs)
                 if (CryptUnprotectData(ref dataIn, IntPtr.Zero, ref entropy, IntPtr.Zero, ref prompt, CRYPTPROTECT_UI_FORBIDDEN, ref dataOut))
                 {
                     var result = new byte[dataOut.cbData];
@@ -299,7 +320,8 @@ namespace Sentinel.Core
         }
 
         /// <summary>
-        /// Locks the directory ACL to SYSTEM and Administrators only, removing inherited ACEs.
+        /// Locks the Secure directory ACL to SYSTEM full control + Administrators read.
+        /// Entropy file itself is SYSTEM-only (see LockEntropyFileAcl).
         /// </summary>
         private static void LockDirectoryAcl(string directoryPath)
         {
@@ -327,11 +349,12 @@ namespace Sentinel.Core
                     PropagationFlags.None,
                     AccessControlType.Allow));
 
-                // Grant Administrators full control
+                // v1.6.0: Administrators get read+execute only (not full control).
+                // Prevents casual admin rewrite of cache; entropy is still SYSTEM-only.
                 var adminSid = new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null);
                 security.AddAccessRule(new FileSystemAccessRule(
                     adminSid,
-                    FileSystemRights.FullControl,
+                    FileSystemRights.ReadAndExecute | FileSystemRights.ListDirectory,
                     InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
                     PropagationFlags.None,
                     AccessControlType.Allow));
@@ -341,6 +364,39 @@ namespace Sentinel.Core
             catch
             {
                 // Best effort — may fail if process is not elevated
+            }
+        }
+
+        /// <summary>
+        /// v1.6.0: SYSTEM-only DACL on .install_entropy so Administrators cannot
+        /// read the rule/cache signing material without taking ownership.
+        /// </summary>
+        private static void LockEntropyFileAcl(string entropyFilePath)
+        {
+            try
+            {
+                if (!File.Exists(entropyFilePath)) return;
+                var fileInfo = new FileInfo(entropyFilePath);
+                var security = fileInfo.GetAccessControl();
+                security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+
+                var rules = security.GetAccessRules(true, true, typeof(SecurityIdentifier));
+                foreach (FileSystemAccessRule rule in rules)
+                {
+                    security.RemoveAccessRuleAll(rule);
+                }
+
+                var systemSid = new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null);
+                security.AddAccessRule(new FileSystemAccessRule(
+                    systemSid,
+                    FileSystemRights.FullControl,
+                    AccessControlType.Allow));
+
+                fileInfo.SetAccessControl(security);
+            }
+            catch
+            {
+                // Best effort — requires SYSTEM or equivalent to set
             }
         }
     }

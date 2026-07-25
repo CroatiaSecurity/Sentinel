@@ -186,8 +186,11 @@ namespace Sentinel.Core
         }
 
         /// <summary>
-        /// v1.5.5: Locks down the rules directory so only SYSTEM and Administrators can write.
-        /// Prevents standard users or compromised processes from dropping malicious rule files.
+        /// v1.5.5 / v1.6.0: Locks down the rules directory.
+        /// SYSTEM: full control (only principal that can also read .install_entropy to sign).
+        /// Administrators: read-only (cannot drop new signed rules without SYSTEM).
+        /// Users: read-only.
+        /// Combined with SYSTEM-only entropy ACL this blocks admin rule forgery.
         /// </summary>
         private void SecureRulesDirectory()
         {
@@ -199,6 +202,11 @@ namespace Sentinel.Core
                 var security = dirInfo.GetAccessControl();
                 security.SetAccessRuleProtection(true, false);
 
+                // Clear existing explicit rules
+                var existing = security.GetAccessRules(true, true, typeof(System.Security.Principal.SecurityIdentifier));
+                foreach (System.Security.AccessControl.FileSystemAccessRule rule in existing)
+                    security.RemoveAccessRuleAll(rule);
+
                 var systemSid = new System.Security.Principal.SecurityIdentifier(
                     System.Security.Principal.WellKnownSidType.LocalSystemSid, null);
                 security.AddAccessRule(new System.Security.AccessControl.FileSystemAccessRule(
@@ -209,17 +217,18 @@ namespace Sentinel.Core
                     System.Security.AccessControl.PropagationFlags.None,
                     System.Security.AccessControl.AccessControlType.Allow));
 
+                // v1.6.0: Admins read-only — signing key is SYSTEM-only, so write without
+                // signature is rejected by fail-closed HMAC verification.
                 var adminsSid = new System.Security.Principal.SecurityIdentifier(
                     System.Security.Principal.WellKnownSidType.BuiltinAdministratorsSid, null);
                 security.AddAccessRule(new System.Security.AccessControl.FileSystemAccessRule(
                     adminsSid,
-                    System.Security.AccessControl.FileSystemRights.FullControl,
+                    System.Security.AccessControl.FileSystemRights.ReadAndExecute,
                     System.Security.AccessControl.InheritanceFlags.ContainerInherit |
                     System.Security.AccessControl.InheritanceFlags.ObjectInherit,
                     System.Security.AccessControl.PropagationFlags.None,
                     System.Security.AccessControl.AccessControlType.Allow));
 
-                // Users get read-only (to view rules but not modify)
                 var usersSid = new System.Security.Principal.SecurityIdentifier(
                     System.Security.Principal.WellKnownSidType.BuiltinUsersSid, null);
                 security.AddAccessRule(new System.Security.AccessControl.FileSystemAccessRule(

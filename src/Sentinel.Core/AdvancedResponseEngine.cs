@@ -1,8 +1,11 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Net;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Sentinel.Core
@@ -19,6 +22,10 @@ namespace Sentinel.Core
         private ChainTracer? _chainTracer;
         private ReinfectionCorrelator? _reinfectionCorrelator;
 
+        // v1.6.0: Rolling kill budget to prevent response weaponization (FP kill storms)
+        private readonly ConcurrentQueue<long> _killTimestampsMs = new();
+        private long _lastRateLimitLogMs;
+
         /// <summary>Set after DI construction to avoid circular dependency.</summary>
         public void SetReinfectionCorrelator(ReinfectionCorrelator correlator) => _reinfectionCorrelator = correlator;
 
@@ -34,6 +41,43 @@ namespace Sentinel.Core
             _eventLogger = eventLogger;
             _quarantineManager = quarantineManager;
             _allowlist = allowlist;
+        }
+
+        /// <summary>
+        /// v1.6.0: Returns false when MaxKillsPerMinute budget is exhausted.
+        /// NetworkIsolate / LogOnly / cert removal are not gated.
+        /// </summary>
+        private bool TryConsumeKillBudget()
+        {
+            int limit = _config.MaxKillsPerMinute;
+            if (limit <= 0) return true;
+
+            long now = Environment.TickCount64;
+            long windowStart = now - 60_000;
+            while (_killTimestampsMs.TryPeek(out long ts) && ts < windowStart)
+                _killTimestampsMs.TryDequeue(out _);
+
+            if (_killTimestampsMs.Count >= limit)
+            {
+                // Log at most once per 30s to avoid log floods
+                long lastLog = Interlocked.Read(ref _lastRateLimitLogMs);
+                if (now - lastLog > 30_000 &&
+                    Interlocked.CompareExchange(ref _lastRateLimitLogMs, now, lastLog) == lastLog)
+                {
+                    _ = _eventLogger.LogEventAsync("response", new ResponseEvent
+                    {
+                        ProcessId = 0,
+                        ProcessName = "SYSTEM",
+                        ActionTaken = "RATE_LIMITED",
+                        Reason = $"Kill budget exhausted ({limit}/min). Subsequent kills demoted to LogOnly until window slides.",
+                        ExecutionTimeMs = 0
+                    });
+                }
+                return false;
+            }
+
+            _killTimestampsMs.Enqueue(now);
+            return true;
         }
 
         public void SetDllUnloadEngine(DllUnloadEngine engine) => _dllUnloadEngine = engine;
@@ -239,7 +283,10 @@ namespace Sentinel.Core
 
                 if (int.TryParse(adderPidStr, out int adderPid) && adderPid > 4)
                 {
-                    HardeningModule.SafeKillProcessTree(adderPid);
+                    if (TryConsumeKillBudget())
+                        HardeningModule.SafeKillProcessTree(adderPid);
+                    else
+                        reason += " [kill rate-limited]";
                 }
 
                 stopwatch.Stop();
@@ -279,6 +326,22 @@ namespace Sentinel.Core
             }
             else if (shouldQuarantineAndKill)
             {
+                // v1.6.0: rate-limit destructive responses
+                if (!TryConsumeKillBudget())
+                {
+                    stopwatch.Stop();
+                    _metrics.RecordResponse(stopwatch.ElapsedMilliseconds);
+                    await _eventLogger.LogEventAsync("response", new ResponseEvent
+                    {
+                        ProcessId = detection.ProcessId,
+                        ProcessName = detection.ProcessName,
+                        ActionTaken = "LOG",
+                        Reason = $"Triggered by rule: {detection.RuleName}. QuarantineAndKill rate-limited (MaxKillsPerMinute).",
+                        ExecutionTimeMs = stopwatch.ElapsedMilliseconds
+                    });
+                    return;
+                }
+
                 // DLL sideloading/injection: quarantine the malicious DLL, kill the host process
                 var targetPidStr = detection.Metadata.GetValueOrDefault("TargetProcessId", "0");
                 int.TryParse(targetPidStr, out int targetPid);
@@ -451,6 +514,22 @@ namespace Sentinel.Core
             }
             else if (shouldKill && detection.ProcessId > 4)
             {
+                // v1.6.0: rate-limit kill storms
+                if (!TryConsumeKillBudget())
+                {
+                    stopwatch.Stop();
+                    _metrics.RecordResponse(stopwatch.ElapsedMilliseconds);
+                    await _eventLogger.LogEventAsync("response", new ResponseEvent
+                    {
+                        ProcessId = detection.ProcessId,
+                        ProcessName = detection.ProcessName,
+                        ActionTaken = "LOG",
+                        Reason = $"Triggered by rule: {detection.RuleName}. Kill rate-limited (MaxKillsPerMinute).",
+                        ExecutionTimeMs = stopwatch.ElapsedMilliseconds
+                    });
+                    return;
+                }
+
                 // Collect forensic evidence before killing
                 try { if (_incidentResponse != null) _ = _incidentResponse.CollectEvidenceAsync(detection); } catch { }
 

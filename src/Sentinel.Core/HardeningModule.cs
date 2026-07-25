@@ -410,14 +410,43 @@ namespace Sentinel.Core
                    // v1.4.0: svchost hosts hundreds of critical Windows services — killing it can
                    // BSOD or leave the system in an unrecoverable state. Protect all instances
                    // that reside in System32 (the path check below verifies legitimacy).
-                   string.Equals(name, "svchost", StringComparison.OrdinalIgnoreCase);
+                   string.Equals(name, "svchost", StringComparison.OrdinalIgnoreCase) ||
+                   // v1.6.0: Core security products — path verified below (system or Program Files)
+                   string.Equals(name, "MsMpEng", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(name, "NisSrv", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(name, "SecurityHealthService", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(name, "Sense", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(name, "MpDefenderCoreService", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(name, "smartscreen", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(name, "SgrmBroker", StringComparison.OrdinalIgnoreCase);
         }
 
         private static bool IsInSystemDirectory(string imagePath)
         {
-            var winDir = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
-            var winDirTrailing = winDir.EndsWith('\\') ? winDir : winDir + '\\';
-            return imagePath.StartsWith(winDirTrailing, StringComparison.OrdinalIgnoreCase);
+            if (string.IsNullOrEmpty(imagePath)) return false;
+            try
+            {
+                var normalized = Path.GetFullPath(imagePath);
+                var winDir = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+                var winDirTrailing = winDir.EndsWith('\\') ? winDir : winDir + '\\';
+                if (normalized.StartsWith(winDirTrailing, StringComparison.OrdinalIgnoreCase))
+                    return true;
+
+                // v1.6.0: Also treat Program Files\Windows Defender* as protected paths
+                var pf = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+                var pf86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
+                foreach (var root in new[] { pf, pf86 })
+                {
+                    if (string.IsNullOrEmpty(root)) continue;
+                    var defender = Path.Combine(root, "Windows Defender") + Path.DirectorySeparatorChar;
+                    var defenderAdv = Path.Combine(root, "Windows Defender Advanced Threat Protection") + Path.DirectorySeparatorChar;
+                    if (normalized.StartsWith(defender, StringComparison.OrdinalIgnoreCase) ||
+                        normalized.StartsWith(defenderAdv, StringComparison.OrdinalIgnoreCase))
+                        return true;
+                }
+            }
+            catch { }
+            return false;
         }
 
         public static void SecureInstallationDirectory()
