@@ -474,8 +474,8 @@ namespace Sentinel.Core
         private readonly HashSet<string> _baselineDevices = new(StringComparer.OrdinalIgnoreCase);
         private readonly HashSet<string> _alertedDevices = new(StringComparer.OrdinalIgnoreCase);
 
-        // Hardcoded whitelist — in production, read from appsettings.json Sentinel.TrustedUsbDevices
-        private static readonly HashSet<string> TrustedDevices = new(StringComparer.OrdinalIgnoreCase)
+        // Built-in HID receivers — extended at runtime from Sentinel:TrustedUsbDevices
+        private static readonly HashSet<string> BuiltInTrustedDevices = new(StringComparer.OrdinalIgnoreCase)
         {
             "VID_046D&PID_C52B", // Logitech Unifying Receiver
             "VID_046D&PID_C539", // Logitech Lightspeed Receiver
@@ -483,9 +483,21 @@ namespace Sentinel.Core
             "VID_046D&PID_C548", // Logitech Bolt Receiver
         };
 
+        private readonly HashSet<string> _trustedDevices;
+
         public UsbHidWhitelist(DetectionEngine de, SentinelConfig config, ILogger<UsbHidWhitelist> l)
         {
             _detectionEngine = de; _config = config; _logger = l;
+            _trustedDevices = new HashSet<string>(BuiltInTrustedDevices, StringComparer.OrdinalIgnoreCase);
+            // Merge operator allowlist (VID:PID or VID_xxxx&PID_yyyy)
+            foreach (var entry in config.TrustedUsbDevices ?? Array.Empty<string>())
+            {
+                var n = UsbDeviceFingerprinter.NormalizeVidPid(entry);
+                if (n == null) continue;
+                var parts = n.Split(':');
+                if (parts.Length == 2)
+                    _trustedDevices.Add($"VID_{parts[0]}&PID_{parts[1]}");
+            }
         }
 
         protected override async Task ExecuteAsync(CancellationToken ct)
@@ -512,7 +524,7 @@ namespace Sentinel.Core
 
                         // Extract VID_XXXX&PID_XXXX
                         var vidPid = ExtractVidPid(dev);
-                        if (vidPid != null && TrustedDevices.Contains(vidPid))
+                        if (vidPid != null && _trustedDevices.Contains(vidPid))
                         {
                             _baselineDevices.Add(dev);
                             continue;

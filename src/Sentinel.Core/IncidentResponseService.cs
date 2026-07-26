@@ -117,18 +117,28 @@ namespace Sentinel.Core
             }
             catch (Exception ex) { _logger.LogDebug(ex, "[IncidentResponseService] Process tree collection failed"); }
 
-            // 4. Quarantine the binary
+            // 4. Quarantine the binary — NEVER OS-critical paths (v1.6.3: powershell.exe FP)
             try
             {
                 using var proc = Process.GetProcessById(detection.ProcessId);
                 var imagePath = proc.MainModule?.FileName;
                 if (!string.IsNullOrEmpty(imagePath) && File.Exists(imagePath))
                 {
-                    var qPath = await _quarantine.QuarantineFileAtomicAsync(imagePath);
-                    if (qPath != null)
-                        evidence["QuarantinedBinary"] = imagePath;
+                    if (SecurityValidation.IsOsCriticalPath(imagePath))
+                    {
+                        evidence["QuarantineSkippedOsCritical"] = imagePath;
+                        _logger.LogWarning(
+                            "[IncidentResponseService] Refusing quarantine of OS-critical path: {Path}",
+                            imagePath);
+                    }
                     else
-                        evidence["QuarantineSkippedSigned"] = imagePath;
+                    {
+                        var qPath = await _quarantine.QuarantineFileAtomicAsync(imagePath);
+                        if (qPath != null)
+                            evidence["QuarantinedBinary"] = imagePath;
+                        else
+                            evidence["QuarantineSkippedSigned"] = imagePath;
+                    }
                 }
             }
             catch { } // Process may already be dead

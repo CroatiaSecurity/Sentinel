@@ -117,6 +117,66 @@ namespace Sentinel.Core
             return false;
         }
 
+        /// <summary>
+        /// v1.6.3: Paths that must never be deleted or quarantined (WRP / OS integrity).
+        /// Quarantining these (e.g. powershell.exe under System32) bricks the host.
+        /// </summary>
+        public static bool IsOsCriticalPath(string? path)
+        {
+            if (string.IsNullOrWhiteSpace(path)) return false;
+            try
+            {
+                var full = Path.GetFullPath(path);
+                var lower = full.ToLowerInvariant();
+
+                // Entire Windows tree except Windows\Temp (user/installer scratch)
+                var windows = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+                if (!string.IsNullOrEmpty(windows))
+                {
+                    var winRoot = Path.GetFullPath(windows).TrimEnd('\\') + "\\";
+                    var winTemp = Path.Combine(windows, "Temp").ToLowerInvariant() + "\\";
+                    if (lower.StartsWith(winRoot.ToLowerInvariant(), StringComparison.Ordinal) &&
+                        !lower.StartsWith(winTemp, StringComparison.Ordinal))
+                        return true;
+                }
+
+                // Defender / Windows Apps under Program Files
+                if (lower.Contains(@"\program files\windows defender") ||
+                    lower.Contains(@"\program files (x86)\windows defender") ||
+                    lower.Contains(@"\program files\windowsapps\") ||
+                    lower.Contains(@"\program files\windows security\") ||
+                    lower.Contains(@"\program files\powershell\") || // store/pwsh install
+                    lower.Contains(@"\program files (x86)\powershell\"))
+                    return true;
+
+                return false;
+            }
+            catch { return false; }
+        }
+
+        /// <summary>
+        /// True when path is a stock Windows PowerShell / pwsh host binary.
+        /// Used to demote AMSI false positives without ignoring impostor powershell.exe drops.
+        /// </summary>
+        public static bool IsSystemPowerShellPath(string? path)
+        {
+            if (string.IsNullOrWhiteSpace(path)) return false;
+            try
+            {
+                var lower = Path.GetFullPath(path).ToLowerInvariant();
+                if (lower.Contains(@"\windows\system32\windowspowershell\") ||
+                    lower.Contains(@"\windows\syswow64\windowspowershell\") ||
+                    lower.Contains(@"\program files\powershell\") ||
+                    lower.Contains(@"\program files (x86)\powershell\"))
+                {
+                    var name = Path.GetFileName(lower);
+                    return name is "powershell.exe" or "powershell_ise.exe" or "pwsh.exe";
+                }
+                return false;
+            }
+            catch { return false; }
+        }
+
         /// <summary>Validates a process ID is within a reasonable range.</summary>
         public static bool IsValidProcessId(int pid) => pid >= 1 && pid <= 999999;
 
