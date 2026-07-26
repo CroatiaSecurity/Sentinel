@@ -14,12 +14,16 @@ namespace Sentinel.Core
     /// <summary>
     /// Traces the full attack chain from a detected malicious process back to its
     /// origin. Walks the parent process tree, identifies the attack root (first
-    /// non-system process), and performs chain-level response:
-    ///   1. Kill all processes in the chain (except critical system processes)
-    ///   2. Quarantine non-system binaries
+    /// non-system / non-browser host process), and performs chain-level response:
+    ///   1. Kill processes in the chain (except system hosts and legitimate browsers)
+    ///   2. Quarantine non-system, unsigned binaries (signed hosts preserved)
     ///   3. Remove persistence (Run keys, scheduled tasks)
     ///   4. Log complete chain evidence
     /// Only invoked for Tier1 detections with KillAuthorized when ActiveResponse is enabled.
+    ///
+    /// Drive-by / installer safety: if malware is launched from a browser or browser
+    /// installer (chrome → dropper, ChromeSetup → setup → payload), we kill/quarantine
+    /// the payload but do NOT destroy the browser or signed installer on disk.
     /// </summary>
     public sealed class ChainTracer
     {
@@ -41,6 +45,43 @@ namespace Sentinel.Core
             "conhost", "conhost.exe", "rundll32", "rundll32.exe",
             "mshta", "mshta.exe", "wscript", "wscript.exe", "cscript", "cscript.exe",
             "regsvr32", "regsvr32.exe", "msiexec", "msiexec.exe",
+        };
+
+        /// <summary>
+        /// Browser / browser-installer process stems. Name alone is never enough —
+        /// <see cref="IsLegitimateBrowserHost"/> also requires a legitimate install path
+        /// or a valid Authenticode signature (for first-run installers on Desktop).
+        /// </summary>
+        private static readonly HashSet<string> BrowserHostNames = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "chrome", "msedge", "msedgewebview2", "firefox", "brave", "opera", "vivaldi",
+            "iexplore", "chromium",
+            // Official installers / updaters (often run from Desktop/Downloads/Temp)
+            "chromesetup", "chrome_installer", "mini_installer", "setup",
+            "googleupdate", "googleupdated", "microsoftedgeupdate",
+            "braveupdate", "opera_standalone", "firefox setup", "firefox setup stub"
+        };
+
+        private static readonly string[] LegitimateBrowserPaths =
+        {
+            @"\program files\google\chrome\",
+            @"\program files (x86)\google\chrome\",
+            @"\program files\microsoft\edge\",
+            @"\program files (x86)\microsoft\edge\",
+            @"\program files\mozilla firefox\",
+            @"\program files (x86)\mozilla firefox\",
+            @"\program files\brave software\",
+            @"\program files (x86)\brave software\",
+            @"\program files\opera\",
+            @"\program files (x86)\opera\",
+            @"\program files\vivaldi\",
+            @"\appdata\local\google\chrome\",
+            @"\appdata\local\microsoft\edge\",
+            @"\appdata\local\brave software\",
+            @"\appdata\local\vivaldi\",
+            @"\appdata\local\programs\opera\",
+            @"\appdata\local\mozilla firefox\",
+            @"\windowsapps\",
         };
 
         private static readonly string[] SystemPaths = new[]
@@ -82,19 +123,64 @@ namespace Sentinel.Core
                 result.ParentChain = chain;
                 result.AllChainProcesses = chain;
 
-                // 2. Identify attack root (first non-system binary)
-                result.AttackRoot = chain.LastOrDefault(n => !IsSystemBinary(n.ImagePath, n.ProcessName)) ?? chain.LastOrDefault();
+                // 2. Attack root = first non-system, non-browser host walking toward the parent.
+                //    malware → chrome → explorer  => attack root is malware (not chrome).
+                result.AttackRoot = chain.LastOrDefault(n =>
+                    !IsSystemBinary(n.ImagePath, n.ProcessName) &&
+                    !IsLegitimateBrowserHost(n.ImagePath, n.ProcessName))
+                    ?? chain.LastOrDefault(n => !IsSystemBinary(n.ImagePath, n.ProcessName))
+                    ?? chain.LastOrDefault();
 
                 // 3. Kill chain if active response is enabled
                 if (_config.ActiveResponse && detection.KillAuthorized)
                 {
                     foreach (var node in chain)
                     {
-                        // Protect critical system processes ONLY if they reside in legitimate system paths.
-                        // Prevents malware from renaming itself to svchost.exe/explorer.exe/etc. to evade kill.
-                        var cleanName = node.ProcessName.Replace(".exe", "");
-                        if (CriticalSystemProcesses.Contains(cleanName) && IsSystemBinary(node.ImagePath, node.ProcessName))
+                        var cleanName = node.ProcessName.Replace(".exe", "", StringComparison.OrdinalIgnoreCase);
+
+                        // Critical system hosts (explorer, csrss, …):
+                        // - Path under Windows → never kill
+                        // - Path unknown/empty → never kill (FP 2026-07-25: explorer killed when path unresolved)
+                        // - Path known OUTSIDE Windows → kill (malware renamed explorer.exe in Temp)
+                        if (CriticalSystemProcesses.Contains(cleanName))
+                        {
+                            if (string.IsNullOrEmpty(node.ImagePath) || IsSystemBinary(node.ImagePath, node.ProcessName))
+                                continue;
+                        }
+
+                        // Preserve browser / signed browser-installer ancestors.
+                        // If the *detected* process itself is a browser (extension compromise,
+                        // remote-debug abuse), we still kill that PID — only ancestors are skipped.
+                        if (node.ProcessId != detection.ProcessId &&
+                            IsLegitimateBrowserHost(node.ImagePath, node.ProcessName))
+                        {
+                            _logger.LogInformation(
+                                "[ChainTracer] Preserving browser/installer host PID {Pid} ({Name}) path={Path}",
+                                node.ProcessId, node.ProcessName, node.ImagePath);
                             continue;
+                        }
+
+                        // Signed installer ancestors (Git, ChromeSetup, SentinelSetup, …)
+                        if (node.ProcessId != detection.ProcessId &&
+                            !string.IsNullOrEmpty(node.ImagePath) &&
+                            InstallerHeuristics.LooksLikeInstallerName(node.ProcessName, node.ImagePath) &&
+                            File.Exists(node.ImagePath) &&
+                            SecurityValidation.VerifyAuthenticodeSignature(node.ImagePath))
+                        {
+                            _logger.LogInformation(
+                                "[ChainTracer] Preserving signed installer ancestor PID {Pid} ({Name})",
+                                node.ProcessId, node.ProcessName);
+                            continue;
+                        }
+
+                        if (node.ProcessId != detection.ProcessId &&
+                            InstallerHeuristics.IsInstallerExtractor(node.ProcessName, node.ImagePath))
+                        {
+                            _logger.LogInformation(
+                                "[ChainTracer] Preserving installer extractor ancestor PID {Pid} ({Name})",
+                                node.ProcessId, node.ProcessName);
+                            continue;
+                        }
 
                         try
                         {
@@ -114,7 +200,8 @@ namespace Sentinel.Core
                         }
                     }
 
-                    // 4. Quarantine non-system binaries
+                    // 4. Quarantine non-system binaries — never browsers, never signed Authenticode hosts.
+                    //    Matches AdvancedResponseEngine v1.5.9: signed injectors are killed but preserved on disk.
                     foreach (var node in chain.Where(n => !string.IsNullOrEmpty(n.ImagePath) && !IsSystemBinary(n.ImagePath, n.ProcessName)))
                     {
                         try
@@ -123,8 +210,6 @@ namespace Sentinel.Core
                             {
                                 // NEVER quarantine files from Windows system directories —
                                 // these are WRP-protected and removing them breaks the OS.
-                                // This is a safety net in case a system binary is incorrectly
-                                // identified as part of an attack chain.
                                 var lowerPath = node.ImagePath!.ToLowerInvariant();
                                 if (lowerPath.Contains(@"\windows\system32\") ||
                                     lowerPath.Contains(@"\windows\syswow64\") ||
@@ -134,8 +219,26 @@ namespace Sentinel.Core
                                     continue;
                                 }
 
+                                if (IsLegitimateBrowserHost(node.ImagePath, node.ProcessName))
+                                {
+                                    _logger.LogInformation(
+                                        "[ChainTracer] Skipping quarantine of browser/installer host: {Path}",
+                                        node.ImagePath);
+                                    continue;
+                                }
+
                                 var hash = await ComputeFileHashAsync(node.ImagePath!, ct);
-                                await _quarantineManager.QuarantineFileAtomicAsync(node.ImagePath!);
+                                // QuarantineManager refuses Authenticode-signed files by default
+                                // (Git/Chrome/VS installers, etc.). Only unsigned chain members move.
+                                var qPath = await _quarantineManager.QuarantineFileAtomicAsync(node.ImagePath!);
+                                if (qPath == null)
+                                {
+                                    _logger.LogInformation(
+                                        "[ChainTracer] Skipping quarantine (signed or refused): {Path}",
+                                        node.ImagePath);
+                                    continue;
+                                }
+
                                 result.QuarantinedFiles.Add(new QuarantinedFileInfo
                                 {
                                     OriginalPath = node.ImagePath!,
@@ -263,6 +366,60 @@ namespace Sentinel.Core
             // Never trust name alone — require path verification
             if (string.IsNullOrEmpty(imagePath)) return false;
             return SystemPaths.Any(sp => imagePath.StartsWith(sp, StringComparison.OrdinalIgnoreCase));
+        }
+
+        /// <summary>
+        /// True for a real browser or browser installer that must not be killed as a
+        /// parent of a malicious child, and must never be quarantined.
+        ///
+        /// Trust rules (never name alone):
+        /// 1. Known browser name + path under a legitimate browser install dir
+        /// 2. Known browser/installer name + valid Authenticode (covers Desktop/Downloads
+        ///    ChromeSetup.exe on a fresh Windows image before install completes)
+        /// 3. Name "setup" only via Authenticode (too generic for path-only trust)
+        ///
+        /// Malware renamed chrome.exe in Temp without a valid Google signature fails both checks.
+        /// </summary>
+        internal static bool IsLegitimateBrowserHost(string? imagePath, string processName)
+        {
+            if (string.IsNullOrEmpty(processName)) return false;
+
+            var stem = processName.Replace(".exe", "", StringComparison.OrdinalIgnoreCase).Trim();
+            if (string.IsNullOrEmpty(stem)) return false;
+
+            bool isGenericSetup = stem.Equals("setup", StringComparison.OrdinalIgnoreCase);
+            bool nameMatches = BrowserHostNames.Contains(stem) ||
+                               stem.StartsWith("firefox setup", StringComparison.OrdinalIgnoreCase) ||
+                               stem.Contains("chromesetup", StringComparison.OrdinalIgnoreCase) ||
+                               stem.Contains("chrome_installer", StringComparison.OrdinalIgnoreCase) ||
+                               stem.Contains("mini_installer", StringComparison.OrdinalIgnoreCase);
+
+            if (!nameMatches) return false;
+
+            // Installed browser at expected path (not Temp staging of "chrome.exe")
+            if (!isGenericSetup && !string.IsNullOrEmpty(imagePath))
+            {
+                var lower = imagePath.ToLowerInvariant();
+                bool inStaging = lower.Contains(@"\temp\") ||
+                                 lower.Contains(@"\downloads\") ||
+                                 lower.Contains(@"\appdata\local\temp\");
+                if (!inStaging && LegitimateBrowserPaths.Any(p => lower.Contains(p)))
+                    return true;
+            }
+
+            // Desktop extras / Downloads installers, or setup.exe extracted under Temp:
+            // require a real Authenticode signature (Google LLC, Microsoft, Mozilla, …).
+            if (!string.IsNullOrEmpty(imagePath) && File.Exists(imagePath))
+            {
+                try
+                {
+                    if (SecurityValidation.VerifyAuthenticodeSignature(imagePath))
+                        return true;
+                }
+                catch { /* treat as untrusted */ }
+            }
+
+            return false;
         }
 
         private static async Task<string> ComputeFileHashAsync(string filePath, CancellationToken ct)

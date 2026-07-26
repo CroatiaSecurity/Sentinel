@@ -1,6 +1,6 @@
 # Sentinel — Threat Model
 
-**Version: 1.6.1**
+**Version: 1.6.2**
 
 This document assumes the attacker has read the source code.
 
@@ -232,6 +232,26 @@ This document assumes the attacker has read the source code.
 
 ---
 
+### B8b: Installer / shell false kills (FIXED in v1.6.2)
+
+**Attack surface (pre-1.6.2, operator self-DoS):** Legitimate software installs and Windows shell behavior were classified as high-severity threats and chain-quarantined:
+
+1. **PPID spoof on Inno Setup** — Git for Windows / Chrome extractors (`innosetup-*.tmp`) race ETW vs kernel parent PID → Kill + ChainTracer quarantine of the signed installer.
+2. **Raw disk on explorer / taskhostw** — Shell holds `\Device\HarddiskVolume*` / disk handles; catalog-sign verify could fail → KillProcessTree on system binaries.
+3. **ChainTracer empty path** — Critical process names with unresolved image path were treated as non-system → kill/quarantine.
+4. **Signed quarantine** — Any chain path could wipe Authenticode-valid installers (Git, ChromeSetup, even SentinelSetup).
+
+**Mitigation (v1.6.2+):**
+- `InstallerHeuristics` + PPID skip for Inno/NSIS extractors and signed installer parents
+- `RawDiskAccessMonitor` never kills critical hosts under `%SystemRoot%`; volume-root LogOnly; PhysicalDrive kill only for unsigned non-Windows paths
+- `ChainTracer` preserves critical names when path empty; preserves signed installer ancestors
+- `QuarantineManager` refuses signed files unless force (cuckoo/sideload)
+- Ephemeral prefetch noise suppressed for GIT/INNOSETUP/DOTNET/setup patterns
+
+**Residual risk:** LOW for official signed installers. Unsigned portable tools in Temp may still draw LogOnly or, if also holding PhysicalDrive, kill. True PPID spoof malware that is unsigned remains kill-authorized.
+
+---
+
 ### B9: Behavioral baseline poisoning (FIXED in v1.5.9)
 
 **Attack:** Malware achieves persistence (e.g., scheduled task) and runs 10+ times over days to earn "established" status in `BehavioralBaselineService`. Once established, all future detections receive a −10 to −20 score reduction, potentially dropping below the kill threshold.
@@ -395,6 +415,7 @@ Hard-to-bypass detections (require kernel access to evade):
 
 See CHANGELOG.md for full history. Key fixes:
 
+- **v1.6.2:** Installer/shell false-positive remediation (ProgramData evidence): PPID spoof no longer kills Inno Setup extractors; Raw Disk Access never kills explorer/taskhostw under Windows; ChainTracer preserves critical hosts with empty path and signed installer ancestors; QuarantineManager refuses Authenticode-signed files by default; EphemeralProcessMonitor ignores installer prefetch noise; shared InstallerHeuristics
 - **v1.6.1:** EtwSessionGuard (heal stopped ETW session), NetworkIsolate rate limit + budget Tier1 alerts, ClickFix/FakeCAPTCHA clipboard+rule expansion, NpmSupplyChainRule
 - **v1.6.0:** Audit remediation: threat-proxy server-side HMAC (no client key), ActiveResponse boot-time force + appsettings integrity, SYSTEM-only entropy, rules dir write SYSTEM-only, kill rate limit, protected AV processes, native SCM driver disable, Cast IP validation, tray LOLBin removal
 - **v1.5.9:** 7 false-positive/false-negative fixes: supply-chain beaconing gap (C2 never LogOnly), signed injector quarantine prevention, C2 back in President's Law, ActiveResponse tamper detection, baseline poisoning prevention, dynamic rules fail-closed, svchost correlation bypass

@@ -42,30 +42,39 @@ namespace Sentinel.Core
 
         // Legitimate processes that access raw disk.
         // SECURITY NOTE: Name-only matching is NOT sufficient. The allowlist check
-        // in ScanForRawDiskHandles also verifies the binary is:
-        //   1. Located in a Windows system directory (%SystemRoot%)
-        //   2. Has a valid Authenticode signature (via IsSignedSystemBinary)
-        // An attacker naming malware "Taskmgr.exe" in a non-system path will FAIL
-        // both checks and be detected normally.
+        // in ScanForRawDiskHandles also verifies the binary is under %SystemRoot%
+        // (or Program Files for backup tools) AND catalog/Authenticode-signed.
+        // An attacker naming malware "Taskmgr.exe" in Temp will FAIL path check.
         private static readonly HashSet<string> AllowedProcesses = new(StringComparer.OrdinalIgnoreCase)
         {
             // Windows built-in disk/system management tools
             "vds", "vdsldr", "diskmgmt", "diskpart", "defrag",
             "chkdsk", "sfc", "dism", "wbengine", "vssvc",
             "msiexec", "trustedinstaller", "tiworker",
-            // v1.3.10: DISM host worker and NTLite open raw volume handles during WIM mount/unmount
-            // and offline image servicing — these are legitimate OS-image operations.
             "dismhost", "ntlite",
-            // Arsenal Image Mounter and similar WIM/ISO mounting tools open virtual disk handles
             "imagemounter", "arsenalimager", "aimdevice", "aim_ll",
-            // Windows monitoring tools that legitimately enumerate disk handles
             "Taskmgr", "resmon", "perfmon", "mmc", "SystemInformer",
-            // Hypervisor/VM tools
             "vboxsvc", "vboxheadless", "vmware-vmx", "vmms",
             "wudfhost", "storagecraft", "veeam", "acronis",
             "macrium", "clonezilla", "dd", "wimgapi",
-            "Sentinel.Service", "Sentinel.Agent", // Self-exclusion
-            "svchost", "taskhostw", "services", "system" // Legitimate system processes accessing raw disk
+            "Sentinel.Service", "Sentinel.Agent",
+            // Shell / session hosts — hold volume handles constantly (USB, mount points).
+            // Production FP 2026-07-25: killed explorer + taskhostw and chain-quarantined them.
+            "svchost", "taskhostw", "services", "system",
+            "explorer", "sihost", "dwm", "RuntimeBroker", "SearchHost",
+            "StartMenuExperienceHost", "ShellExperienceHost", "fontdrvhost",
+            "csrss", "winlogon", "lsass", "smss", "wininit"
+        };
+
+        /// <summary>
+        /// Always-preserve Windows shell/system hosts when path is under %SystemRoot%.
+        /// Signature check can fail transiently (catalog load race); never kill these.
+        /// </summary>
+        private static readonly HashSet<string> CriticalWindowsHosts = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "explorer", "taskhostw", "sihost", "dwm", "svchost", "services",
+            "csrss", "winlogon", "lsass", "smss", "wininit", "RuntimeBroker",
+            "fontdrvhost", "SearchHost", "StartMenuExperienceHost"
         };
 
         // NT kernel object manager paths that indicate raw disk access
@@ -152,26 +161,31 @@ namespace Sentinel.Core
                         if (proc.Id == selfPid) continue;
 
                         var procName = proc.ProcessName;
+                        string imagePath = "";
+                        try { imagePath = SecurityValidation.GetProcessImagePath(proc.Id) ?? ""; } catch { }
 
-                        // Skip allowed processes — but only if running from expected system paths
-                        // AND validly signed. An attacker could name malware "Taskmgr.exe" in a
-                        // user-writable directory — the dual check (path + signature) prevents bypass.
-                        if (AllowedProcesses.Contains(procName))
-                        {
-                            string? allowedPath = null;
-                            try { allowedPath = SecurityValidation.GetProcessImagePath(proc.Id); } catch { }
-                            if (!string.IsNullOrEmpty(allowedPath) &&
-                                IsInWindowsDirectory(allowedPath) &&
-                                IsSignedSystemBinary(allowedPath))
-                                continue;
-                            // Name matches but path or signature is suspicious — fall through to detection
-                        }
+                        // Critical Windows hosts under %SystemRoot%: never scan/kill.
+                        // Catalog-sign verify can fail mid-boot; explorer/taskhostw always hold volume handles.
+                        if (CriticalWindowsHosts.Contains(procName) &&
+                            (string.IsNullOrEmpty(imagePath) || IsInWindowsDirectory(imagePath)))
+                            continue;
+
+                        // Allowlist: system path + catalog/Authenticode (SecurityValidation has catalog fallback)
+                        if (AllowedProcesses.Contains(procName) &&
+                            !string.IsNullOrEmpty(imagePath) &&
+                            IsInWindowsDirectory(imagePath) &&
+                            IsCatalogOrAuthenticodeSigned(imagePath))
+                            continue;
 
                         // Check if process has any open device handles matching raw disk patterns
                         var deviceHandles = GetProcessDeviceHandles(proc.Id);
                         foreach (var devicePath in deviceHandles)
                         {
                             if (!IsRawDiskPath(devicePath)) continue;
+
+                            // Volume roots (\Device\HarddiskVolumeN\) are opened by shell/backup tools constantly.
+                            // Only PhysicalDrive / HarddiskN\DRN (true sector I/O) warrant aggressive response.
+                            bool isVolumeRootOnly = IsVolumeRootHandle(devicePath) && !IsPhysicalDriveHandle(devicePath);
 
                             var key = (proc.Id, devicePath);
                             if (_alertedAccess.TryGetValue(key, out var lastAlert) &&
@@ -180,28 +194,43 @@ namespace Sentinel.Core
 
                             _alertedAccess[key] = DateTimeOffset.UtcNow;
 
-                            // Check if the process is signed by a trusted publisher
-                            bool isTrusted = false;
-                            try
+                            bool inWindows = !string.IsNullOrEmpty(imagePath) && IsInWindowsDirectory(imagePath);
+                            bool isSigned = !string.IsNullOrEmpty(imagePath) && IsCatalogOrAuthenticodeSigned(imagePath);
+                            bool isTrusted = inWindows || isSigned;
+
+                            // Never kill:
+                            //  - anything under Windows with a resolvable path
+                            //  - signed binaries (backup tools, installers)
+                            //  - volume-root-only handles (shell noise)
+                            // Kill only: unsigned non-Windows process holding PhysicalDrive/DR handles.
+                            DetectionTier tier;
+                            ResponseAction response;
+                            double confidence;
+                            if (inWindows || isVolumeRootOnly)
                             {
-                                var mainModule = SecurityValidation.GetProcessImagePath(proc.Id);
-                                if (mainModule != null)
-                                    isTrusted = _signerTrust.IsSignedFile(mainModule);
+                                confidence = 0.40;
+                                tier = DetectionTier.Tier2Indicator;
+                                response = ResponseAction.LogOnly;
                             }
-                            catch { }
-
-                            var confidence = isTrusted ? 0.55 : 0.85;
-                            var tier = isTrusted ? DetectionTier.Tier2Indicator : DetectionTier.Tier1Behavioral;
-                            var response = isTrusted ? ResponseAction.LogOnly : ResponseAction.KillProcessTree;
-
-                            string imagePath = "";
-                            try { imagePath = SecurityValidation.GetProcessImagePath(proc.Id) ?? ""; } catch { }
+                            else if (isSigned)
+                            {
+                                confidence = 0.55;
+                                tier = DetectionTier.Tier2Indicator;
+                                response = ResponseAction.LogOnly;
+                            }
+                            else
+                            {
+                                confidence = 0.85;
+                                tier = DetectionTier.Tier1Behavioral;
+                                response = ResponseAction.KillProcessTree;
+                            }
 
                             await _detectionEngine.EmitAsync(new DetectionEvent
                             {
                                 RuleName = "Raw Disk Access: Direct Physical Device I/O",
                                 Evidence = $"Process '{procName}' (PID {proc.Id}, Path: {imagePath}) " +
-                                           $"has open handle to raw device: {devicePath}",
+                                           $"has open handle to raw device: {devicePath}" +
+                                           (isVolumeRootOnly ? " [volume root — LogOnly]" : ""),
                                 Reasoning = "A process has opened a raw disk device path (e.g., \\\\.\\PhysicalDrive0), " +
                                             "bypassing the filesystem layer entirely. This allows reading/writing disk sectors " +
                                             "without triggering file-level monitors, NTFS journaling, or ADS verdict tags. " +
@@ -217,7 +246,9 @@ namespace Sentinel.Core
                                 {
                                     ["DevicePath"] = devicePath,
                                     ["ImagePath"] = imagePath,
-                                    ["IsTrusted"] = isTrusted.ToString()
+                                    ["IsTrusted"] = isTrusted.ToString(),
+                                    ["IsVolumeRootOnly"] = isVolumeRootOnly.ToString(),
+                                    ["InWindowsDirectory"] = inWindows.ToString()
                                 }
                             });
                         }
@@ -360,12 +391,38 @@ namespace Sentinel.Core
         }
 
         /// <summary>
-        /// Verifies a binary is a legitimate system tool by checking its Authenticode signature.
-        /// No path-based trust — only signature verification.
+        /// Catalog + embedded Authenticode (explorer/taskhostw are often catalog-only).
+        /// Falls back to SignerTrustService cache when WinVerifyTrust is briefly unavailable.
         /// </summary>
-        private bool IsSignedSystemBinary(string imagePath)
+        private bool IsCatalogOrAuthenticodeSigned(string imagePath)
         {
-            return _signerTrust.IsSignedFile(imagePath);
+            try
+            {
+                if (SecurityValidation.VerifyAuthenticodeSignature(imagePath))
+                    return true;
+            }
+            catch { }
+            try { return _signerTrust.IsSignedFile(imagePath); }
+            catch { return false; }
+        }
+
+        private static bool IsVolumeRootHandle(string path)
+        {
+            if (string.IsNullOrEmpty(path)) return false;
+            return path.Contains(@"\Device\HarddiskVolume", StringComparison.OrdinalIgnoreCase) ||
+                   path.Contains(@"\\.\Volume{", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsPhysicalDriveHandle(string path)
+        {
+            if (string.IsNullOrEmpty(path)) return false;
+            // True sector device: \\.\PhysicalDrive0 or \Device\Harddisk0\DR0 — not HarddiskVolumeN
+            if (path.Contains(@"PhysicalDrive", StringComparison.OrdinalIgnoreCase)) return true;
+            if (path.Contains(@"HarddiskVolume", StringComparison.OrdinalIgnoreCase)) return false;
+            if (path.Contains(@"\Harddisk", StringComparison.OrdinalIgnoreCase) &&
+                path.Contains(@"\DR", StringComparison.OrdinalIgnoreCase))
+                return true;
+            return false;
         }
 
         /// <summary>

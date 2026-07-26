@@ -170,5 +170,31 @@ namespace Sentinel.Tests
             Assert.True(result.EndTime >= result.StartTime);
             Assert.True((result.EndTime - result.StartTime).TotalMilliseconds >= 0);
         }
+
+        [Theory]
+        [InlineData(@"C:\Program Files\Google\Chrome\Application\chrome.exe", "chrome")]
+        [InlineData(@"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe", "msedge")]
+        [InlineData(@"C:\Users\Alice\AppData\Local\Google\Chrome\Application\chrome.exe", "chrome.exe")]
+        public void IsLegitimateBrowserHost_AcceptsInstalledBrowserPaths(string path, string name)
+        {
+            Assert.True(ChainTracer.IsLegitimateBrowserHost(path, name));
+        }
+
+        [Theory]
+        [InlineData(@"C:\Users\Alice\AppData\Local\Temp\chrome.exe", "chrome")]
+        [InlineData(@"C:\Users\Alice\Downloads\msedge.exe", "msedge")]
+        [InlineData(@"C:\Temp\evil.exe", "evil")]
+        [InlineData(null, "chrome")]
+        public void IsLegitimateBrowserHost_RejectsStagingOrUnknownWithoutSignature(string? path, string name)
+        {
+            // Temp/Downloads chrome.exe without a real signed file on disk must fail
+            Assert.False(ChainTracer.IsLegitimateBrowserHost(path, name));
+        }
+
+        [Fact]
+        public void IsLegitimateBrowserHost_RejectsGenericSetupWithoutSignature()
+        {
+            Assert.False(ChainTracer.IsLegitimateBrowserHost(@"C:\Users\Alice\Desktop\setup.exe", "setup"));
+        }
     }
 }

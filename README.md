@@ -2,7 +2,7 @@
 
 Real-time endpoint detection and response for Windows. Runs as a background service, monitors system behavior, and kills threats automatically when multiple signals correlate.
 
-**Current version: 1.6.1**
+**Current version: 1.6.2**
 
 ---
 
@@ -70,7 +70,7 @@ Full transparency in [THREAT_MODEL.md](THREAT_MODEL.md).
 
 ## Test Suite
 
-318 automated tests (xUnit), all passing in < 5 seconds:
+353 automated tests (xUnit), all passing in < 5 seconds:
 - End-to-end integration tests (full pipeline: telemetry → detection → scoring → correlation → response)
 - Unit tests for all critical engines (Response, Correlation, ChainTracer, FileReputation, AntiTamper, Detection)
 - Run with `dotnet test`

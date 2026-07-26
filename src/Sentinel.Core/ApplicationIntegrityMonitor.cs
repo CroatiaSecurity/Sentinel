@@ -393,7 +393,8 @@ namespace Sentinel.Core
             {
                 if (File.Exists(executablePath))
                 {
-                    await _quarantineManager.QuarantineFileAtomicAsync(executablePath);
+                    // force: cuckoo eggs may still carry a (stolen/repurposed) signature
+                    await _quarantineManager.QuarantineFileAtomicAsync(executablePath, forceQuarantineSigned: true);
                     _logger.LogWarning("[ApplicationIntegrityMonitor] Impostor quarantined: {Path}", executablePath);
                 }
             }
