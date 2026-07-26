@@ -30,6 +30,9 @@ namespace Sentinel.Core
         private static readonly HashSet<string> RansomwareIoWhitelist = new(StringComparer.OrdinalIgnoreCase)
         {
             "chrome", "msedge", "firefox", "brave", "opera", "vivaldi", "msedgewebview2",
+            // Browser installers unpack thousands of files (looks like ransomware IO on a fresh PC)
+            "chromesetup", "chrome_installer", "mini_installer", "setup",
+            "googleupdate", "googleupdated", "microsoftedgeupdate", "braveupdate",
             "code", "cursor", "Windsurf", "Kiro", "rider64",
             "steam", "steamwebhelper",
             "OneDrive", "Dropbox",
@@ -53,32 +56,31 @@ namespace Sentinel.Core
         {
             if (processId <= 4) return;
 
-            // Name-based whitelist with path verification to prevent bypass-by-renaming.
-            // Hot path — cache the result per PID to avoid repeated I/O.
-            if (RansomwareIoWhitelist.Contains(processName))
+            // Fast path: cached "this PID is a legitimate high-IO process"
+            if (_verifiedWhitelistPids.TryGetValue(processId, out var cachedOk))
             {
-                if (_verifiedWhitelistPids.TryGetValue(processId, out var verified))
+                if (cachedOk) return;
+                // cached false → fall through and count renames
+            }
+            else
+            {
+                bool legitimate = false;
+                try
                 {
-                    if (verified) return;
-                    // Name matches but previously failed verification — fall through
-                }
-                else
-                {
-                    // First time seeing this PID — verify path
-                    bool legitimate = false;
-                    try
+                    var stem = processName.Replace(".exe", "", StringComparison.OrdinalIgnoreCase);
+                    var imagePath = SecurityValidation.GetProcessImagePath(processId);
+
+                    // 1) Known high-IO app names with path verification
+                    if (RansomwareIoWhitelist.Contains(processName) || RansomwareIoWhitelist.Contains(stem))
                     {
-                        var imagePath = SecurityValidation.GetProcessImagePath(processId);
                         if (!string.IsNullOrEmpty(imagePath))
                         {
-                            // Must NOT be from Temp/Downloads (common malware drop locations)
                             var lower = imagePath.ToLowerInvariant();
                             bool isSuspiciousDir = lower.Contains(@"\temp\") ||
                                                    lower.Contains(@"\downloads\") ||
                                                    lower.Contains(@"\appdata\local\temp\");
                             if (!isSuspiciousDir)
                             {
-                                // Must be from Program Files, AppData\Local\Programs, or known app dirs
                                 legitimate = lower.Contains(@"\program files") ||
                                              lower.Contains(@"\appdata\local\programs\") ||
                                              lower.Contains(@"\appdata\local\google\") ||
@@ -88,15 +90,29 @@ namespace Sentinel.Core
                             }
                         }
                     }
-                    catch { }
-                    _verifiedWhitelistPids[processId] = legitimate;
-                    if (legitimate) return;
+
+                    // 2) Signed installer / packager (Git-2.x-64-bit.exe, ChromeSetup, …)
+                    if (!legitimate && !string.IsNullOrEmpty(imagePath) &&
+                        (InstallerHeuristics.LooksLikeInstallerName(processName, imagePath) ||
+                         InstallerHeuristics.IsInstallerExtractor(processName, imagePath)) &&
+                        SecurityValidation.VerifyAuthenticodeSignature(imagePath))
+                    {
+                        legitimate = true;
+                    }
                 }
+                catch { }
+
+                _verifiedWhitelistPids[processId] = legitimate;
+                if (legitimate) return;
             }
 
             _renameCountByPid.AddOrUpdate(processId, 1, (_, count) => count + 1);
             _processNames.TryAdd(processId, processName);
         }
+
+        /// <summary>Back-compat shim for tests — delegates to <see cref="InstallerHeuristics"/>.</summary>
+        internal static bool LooksLikeInstallerName(string processName, string? imagePath = null)
+            => InstallerHeuristics.LooksLikeInstallerName(processName, imagePath);
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {

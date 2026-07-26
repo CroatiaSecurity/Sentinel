@@ -86,6 +86,14 @@ namespace Sentinel.Core
 
                                              if (inUserPath)
                                              {
+                                                 // Installers elevate from Temp/Downloads by design (Inno, WiX, MSI extract).
+                                                 if (InstallerHeuristics.IsInstallerExtractor(proc.ProcessName, imagePath) ||
+                                                     InstallerHeuristics.LooksLikeInstallerName(proc.ProcessName, imagePath))
+                                                 {
+                                                     _alertedPids.Add(proc.Id);
+                                                     continue;
+                                                 }
+
                                                  _ = _detectionEngine.EmitAsync(new DetectionEvent
                                                  {
                                                      RuleName = "Privilege Escalation: Elevated Process from User Path",

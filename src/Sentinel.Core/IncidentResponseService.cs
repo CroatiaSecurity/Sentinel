@@ -124,8 +124,11 @@ namespace Sentinel.Core
                 var imagePath = proc.MainModule?.FileName;
                 if (!string.IsNullOrEmpty(imagePath) && File.Exists(imagePath))
                 {
-                    await _quarantine.QuarantineFileAtomicAsync(imagePath);
-                    evidence["QuarantinedBinary"] = imagePath;
+                    var qPath = await _quarantine.QuarantineFileAtomicAsync(imagePath);
+                    if (qPath != null)
+                        evidence["QuarantinedBinary"] = imagePath;
+                    else
+                        evidence["QuarantineSkippedSigned"] = imagePath;
                 }
             }
             catch { } // Process may already be dead

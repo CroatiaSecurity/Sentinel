@@ -2,6 +2,30 @@
  
 All notable changes to Sentinel are documented in this file.
 
+## [1.6.2] - 2026-07-26
+
+### Fixed (Production false positives from ProgramData evidence)
+
+- **[CRITICAL] `ParentPidSpoofDetector` no longer kills Inno Setup / installer extractors** — Production log: `innosetup-7.0.2-x64.tmp` PPID mismatch during Git for Windows install → ChainTracer quarantined `Git-2.55.0.3-64-bit.exe`. Inno/NSIS extractors and children of signed installers are skipped; signed binaries demote to LogOnly on residual PPID races.
+
+- **[CRITICAL] `RawDiskAccessMonitor` no longer kills `explorer` / `taskhostw`** — Production log: open handles to `\Device\HarddiskVolume*` / `\Device\Harddisk0\DR0` on catalog-signed Windows hosts → KillProcessTree. Critical Windows hosts under `%SystemRoot%` are never killed; catalog Authenticode via `SecurityValidation`; volume-root handles LogOnly; kill only for unsigned non-Windows processes on PhysicalDrive/DR devices.
+
+- **[HIGH] `ChainTracer` never kills critical system names when image path is empty** — Explorer was killed when path unresolved (`IsSystemBinary` was false on null path). Empty path + critical name → preserve. Also preserves signed installer / Inno ancestors.
+
+- **[HIGH] `QuarantineManager` refuses Authenticode-signed files by default** — Central gate so Git/Chrome/VS/SentinelSetup cannot be wiped by any caller. Cuckoo/sideload may force.
+
+- **[HIGH] `EphemeralProcessMonitor` ignores installer prefetch noise** — GIT-*, INNOSETUP-*, DOTNET-SDK-*, FINALIZER, ISIDE no longer fire "Self-Deleting Executable" dropper alerts.
+
+- **[MEDIUM] `TokenIntegrityMonitor` skips elevated installers in Temp** — Inno/WiX/MSI extract + elevate is normal.
+
+- **[MEDIUM] Shared `InstallerHeuristics`** — Single source for installer name / Inno extractor / benign prefetch patterns used by PPID, ransomware IO, ephemeral, token, and chain tracer.
+
+### Tests
+
+- `InstallerFalsePositiveTests` covering Git/Inno/prefetch/browser path rules from live 2026-07-25/26 incidents.
+
+---
+
 ## [1.6.1] - 2026-07-25
 
 ### Security Hardening (1.6.0 audit + 2025–26 threat intel)

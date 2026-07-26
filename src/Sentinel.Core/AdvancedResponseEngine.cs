@@ -440,13 +440,10 @@ namespace Sentinel.Core
                     var quarantinePath = proc.MainModule?.FileName;
                     if (!string.IsNullOrEmpty(quarantinePath) && File.Exists(quarantinePath))
                     {
-                        bool injectorIsSigned = SecurityValidation.VerifyAuthenticodeSignature(quarantinePath);
-                        if (!injectorIsSigned)
-                        {
-                            await _quarantineManager.QuarantineFileAtomicAsync(quarantinePath);
-                            injectorQuarantined = true;
-                        }
-                        // else: signed binary — kill process tree but preserve the file on disk
+                        // QuarantineManager refuses signed binaries by default (returns null).
+                        var qPath = await _quarantineManager.QuarantineFileAtomicAsync(quarantinePath);
+                        injectorQuarantined = qPath != null;
+                        // signed binary — kill process tree but preserve the file on disk
                     }
                 }
                 catch { }

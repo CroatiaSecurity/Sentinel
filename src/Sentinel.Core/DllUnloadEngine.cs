@@ -400,7 +400,8 @@ namespace Sentinel.Core
                 if (!File.Exists(dllPath)) return;
 
                 // Quarantine: XOR-encrypt and move to quarantine directory
-                await _quarantineManager.QuarantineFileAtomicAsync(dllPath);
+                // force: sideloaded payload may be signed; context already proved it is hostile
+                await _quarantineManager.QuarantineFileAtomicAsync(dllPath, forceQuarantineSigned: true);
 
                 // Place a lock file: zero-byte decoy with restrictive attributes
                 // This prevents the attacker from simply re-dropping the DLL.

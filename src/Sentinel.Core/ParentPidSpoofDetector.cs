@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading;
 using Microsoft.Extensions.Logging;
@@ -11,6 +12,10 @@ namespace Sentinel.Core
     /// Detects PPID spoofing by comparing a process's declared parent PID
     /// (from PROCESS_BASIC_INFORMATION via NtQueryInformationProcess) against
     /// the actual creator PID recorded in the process ancestry cache.
+    ///
+    /// Installer extractors (Inno Setup, NSIS, etc.) frequently race ETW/WMI
+    /// ancestry or re-parent during elevation — that is NOT T1134.004. Killing
+    /// them chain-quarantines Git/Chrome/VS installers (observed in production).
     /// </summary>
     public sealed class ParentPidSpoofDetector : IDisposable
     {
@@ -67,7 +72,8 @@ namespace Sentinel.Core
 
                         // Get image path for trust verification (name alone is spoofable)
                         string? imagePath = null;
-                        try { imagePath = proc.MainModule?.FileName; } catch { }
+                        try { imagePath = SecurityValidation.GetProcessImagePath(proc.Id) ?? proc.MainModule?.FileName; }
+                        catch { try { imagePath = proc.MainModule?.FileName; } catch { } }
 
                         // Verify code signature for development tools and browser process exemptions
                         bool isDev = _allowlist.IsDevelopmentProcess(proc.ProcessName);
@@ -83,6 +89,20 @@ namespace Sentinel.Core
                             }
                         }
 
+                        // Inno Setup / NSIS / SFX extractors — ancestry races are normal
+                        if (InstallerHeuristics.IsInstallerExtractor(proc.ProcessName, imagePath))
+                        {
+                            continue;
+                        }
+
+                        // Signed official installers (Git-2.x-64-bit.exe, etc.)
+                        if (!string.IsNullOrEmpty(imagePath) &&
+                            InstallerHeuristics.LooksLikeInstallerName(proc.ProcessName, imagePath) &&
+                            (SecurityValidation.VerifyAuthenticodeSignature(imagePath) || _signerTrust.IsSignedFile(imagePath)))
+                        {
+                            continue;
+                        }
+
                         var pbi = new PROCESS_BASIC_INFORMATION();
                         int status = NtQueryInformationProcess(proc.Handle, ProcessBasicInformation,
                             ref pbi, Marshal.SizeOf<PROCESS_BASIC_INFORMATION>(), out _);
@@ -95,15 +115,35 @@ namespace Sentinel.Core
                         var (cachedParentPid, _) = _ancestryCache.GetParent(proc.Id);
                         if (cachedParentPid > 0 && cachedParentPid != kernelParentPid && kernelParentPid > 4)
                         {
-                            // PPID mismatch — the process claims a different parent than what the kernel says
+                            // Child of a signed installer/extractor → ETW race, not spoofing
+                            if (IsBenignInstallerParent(kernelParentPid) || IsBenignInstallerParent(cachedParentPid))
+                            {
+                                continue;
+                            }
+
+                            // Signed process with PPID race: log only — never kill/quarantine chain
+                            bool selfSigned = !string.IsNullOrEmpty(imagePath) && _signerTrust.IsSignedFile(imagePath);
+                            var response = selfSigned
+                                ? ResponseAction.LogOnly
+                                : ResponseAction.KillProcess;
+                            var tier = selfSigned
+                                ? DetectionTier.Tier2Indicator
+                                : DetectionTier.Tier1Behavioral;
+
                             _ = _detectionEngine.EmitAsync(new DetectionEvent
                             {
                                 RuleName = "PPID Spoofing: Parent PID Mismatch",
-                                Evidence = $"Process '{proc.ProcessName}' (PID {proc.Id}) kernel parent PID={kernelParentPid}, cached parent PID={cachedParentPid}",
-                                Reasoning = "The process's kernel-reported parent PID does not match the parent recorded via ETW process creation events, indicating PPID spoofing (T1134.004).",
-                                Confidence = 0.85, Tier = DetectionTier.Tier1Behavioral,
-                                AuthorizedResponse = ResponseAction.KillProcess,
-                                ProcessName = proc.ProcessName, ProcessId = proc.Id
+                                Evidence = $"Process '{proc.ProcessName}' (PID {proc.Id}) kernel parent PID={kernelParentPid}, cached parent PID={cachedParentPid}" +
+                                           (selfSigned ? " [signed — LogOnly]" : ""),
+                                Reasoning = "The process's kernel-reported parent PID does not match the parent recorded via ETW process creation events, indicating PPID spoofing (T1134.004)." +
+                                            (selfSigned
+                                                ? " Binary is Authenticode-signed; treated as possible ancestry race rather than kill-authorized spoof."
+                                                : ""),
+                                Confidence = selfSigned ? 0.55 : 0.85,
+                                Tier = tier,
+                                AuthorizedResponse = response,
+                                ProcessName = proc.ProcessName,
+                                ProcessId = proc.Id
                             });
                             _alertedPids.Add(proc.Id);
                         }
@@ -120,6 +160,27 @@ namespace Sentinel.Core
             {
                 _logger.LogDebug(ex, "[ParentPidSpoofDetector] Scan error");
             }
+        }
+
+        private bool IsBenignInstallerParent(int parentPid)
+        {
+            if (parentPid <= 4) return false;
+            try
+            {
+                var procInfo = _ancestryCache.GetProcessInfo(parentPid);
+                var name = procInfo.name;
+                var path = procInfo.imagePath;
+                if (string.IsNullOrEmpty(path))
+                    path = SecurityValidation.GetProcessImagePath(parentPid);
+
+                if (InstallerHeuristics.IsInstallerExtractor(name, path)) return true;
+                if (InstallerHeuristics.LooksLikeInstallerName(name, path) &&
+                    !string.IsNullOrEmpty(path) &&
+                    (SecurityValidation.VerifyAuthenticodeSignature(path) || _signerTrust.IsSignedFile(path)))
+                    return true;
+            }
+            catch { }
+            return false;
         }
 
         public void Dispose() => _timer.Dispose();

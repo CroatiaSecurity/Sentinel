@@ -196,6 +196,15 @@ namespace Sentinel.Core
                 // Name matches but NOT in system directory — continue detection (possible masquerading)
             }
 
+            // Official installers / Inno extractors: short-lived + "missing path" is normal unpack, not a dropper.
+            // Production FP: GIT-*, INNOSETUP-*, DOTNET-SDK-*, FINALIZER.EXE, ISIDE.EXE.
+            if (InstallerHeuristics.IsBenignEphemeralPrefetchName(baseName) ||
+                InstallerHeuristics.IsBenignEphemeralPrefetchName(exeName) ||
+                InstallerHeuristics.IsBenignEphemeralPrefetchName(prefetchFileName))
+            {
+                return;
+            }
+
             // Check cooldown
             if (_alertedExecutables.TryGetValue(exeName, out var lastAlert) &&
                 DateTimeOffset.UtcNow - lastAlert < AlertCooldown)
