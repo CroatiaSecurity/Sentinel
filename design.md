@@ -1,6 +1,6 @@
 # Sentinel — Design Document
 
-**Version: 1.6.2**
+**Version: 1.6.3**
 
 ---
 
@@ -420,7 +420,7 @@ Composite detections are emitted as Tier1 `DetectionEvent`s directly into the de
 |-----------|---------|
 | `ClipboardSanitizer` | Active clipboard sanitization every 2s on STA thread. Strips zero-width chars (U+200B/C/D, FEFF, 2060), RTL overrides (U+202A-E), Cyrillic homoglyphs (a/e/o/p/c), invisible Unicode tags (U+E0001-E007F). Emits Tier2 detection on sanitization. Prevents chat injection, filename spoofing, phishing URL obfuscation. |
 | `AppNetworkPolicyMonitor` | Per-app network destination learning and enforcement. 30-min learning phase records /24 subnets per process. After learning, alerts on new destinations (Tier2, 0.55). Uses GetExtendedTcpTable. Caps: 1K subnets/process, 5K total. Hourly prune. |
-| `UsbDeviceFingerprinter` | USB device baseline via WMI (Win32_PnPEntity). Fingerprints by VID:PID:Serial. Detects: BadUSB unknown HID (Tier1/0.80), composite devices (Tier1/0.75), new mass storage (Tier2/0.50), other new devices (Tier2/0.40). Known-good VID allowlist for 9 major peripheral manufacturers. |
+| `UsbDeviceFingerprinter` | USB device baseline via SetupAPI. Fingerprints by VID:PID:Serial. Detects: failed enumeration / VID_0000 (Tier1/0.82, optional auto-disable), BadUSB unknown HID (Tier1/0.80), composite (Tier1/0.75), mass storage (Tier2/0.50). `TrustedUsbDevices` allowlist (default Kingston DataTraveler `0951:1666`). |
 | Test suite expansion | 27 new tests covering ClipboardSanitizer, AppNetworkPolicy, UsbFingerprinter, EventGraph memory caps, AudioHijack module hints, RouteTable exclusions. Total: 367 tests. |
 
 ## Added in 4.4.0

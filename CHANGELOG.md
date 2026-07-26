@@ -2,6 +2,32 @@
  
 All notable changes to Sentinel are documented in this file.
 
+## [1.6.3] - 2026-07-27
+
+### Fixed (CRITICAL production incident)
+
+- **[CRITICAL] Never quarantine OS-critical paths** — Production: `Script: AMSI Bypass Detected (amsi.dll Unloaded)` on stock `C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe` → KillProcessTree + `IncidentResponseService` quarantine **deleted the host PowerShell binary**, breaking `powershell` on PATH, Explorer “Run with PowerShell”, and admin tooling. `QuarantineManager` now hard-refuses `%SystemRoot%` (except `Windows\Temp`), Windows Defender / WindowsApps / PowerShell install dirs. `forceQuarantineSigned` cannot override. Signature-check exceptions fail **closed** for Program Files / Windows paths.
+- **[CRITICAL] `IncidentResponseService` skips OS-critical quarantine** — Same gate before calling quarantine (defense in depth with ChainTracer).
+- **[HIGH] AMSI “missing amsi.dll” false positive demoted for system hosts** — Require ≥15s process age and ≥20 modules; stock System32/SysWOW64/Program Files PowerShell hosts → **LogOnly** Tier2 (`Script: AMSI Not Loaded (System PowerShell)`). Kill only non-system impostor paths named powershell/pwsh.
+
+### Security Hardening (USB)
+
+- **`UsbDeviceFingerprinter` failed-enumeration response** — `VID_0000` / “Device Descriptor Request Failed” / “Unknown USB Device” → Tier1 confidence 0.82, optional auto-disable via `ConfigFlags` (`AutoDisableFailedUsbEnumeration`, default true).
+- **Trusted USB allowlist** — `Sentinel:TrustedUsbDevices` (VID:PID). Built-in default includes `0951:1666` (Kingston DataTraveler 3.0 / common Ventoy). Matched devices log as trusted at low confidence and are not auto-disabled. `UsbHidWhitelist` merges the same list.
+
+### Configuration
+
+| Setting | Default | Purpose |
+|---------|---------|---------|
+| `Sentinel:AutoDisableFailedUsbEnumeration` | `true` | Disable failed-enum USB nodes via registry |
+| `Sentinel:TrustedUsbDevices` | `["0951:1666"]` in appsettings | Operator-trusted mass-storage / receivers |
+
+### Tests
+
+- `V163SecurityHardeningTests` — OS-critical quarantine refusal, VID:PID normalize, system PowerShell path helpers.
+
+---
+
 ## [1.6.2] - 2026-07-26
 
 ### Fixed (Production false positives from ProgramData evidence)

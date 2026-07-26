@@ -291,12 +291,19 @@ namespace Sentinel.Core
         /// Detects AMSI bypass by checking if PowerShell processes have amsi.dll loaded.
         /// If amsi.dll is missing from a running PowerShell process, it was likely unloaded
         /// via FreeLibrary to disable script scanning.
+        ///
+        /// v1.6.3: Production FP — stock System32 powershell.exe without amsi.dll (CLR bootstrap /
+        /// provider timing) triggered KillProcessTree + quarantine of the OS binary, removing
+        /// C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe from the host.
+        /// Guards: min process age, system-host demotion to LogOnly (never kill/quarantine path),
+        /// kill only for non-system impostor paths.
         /// </summary>
         private async Task CheckAmsiIntegrity(CancellationToken ct)
         {
             try
             {
                 var psProcesses = Process.GetProcessesByName("powershell")
+                    .Concat(Process.GetProcessesByName("powershell_ise"))
                     .Concat(Process.GetProcessesByName("pwsh"))
                     .ToArray();
 
@@ -304,11 +311,26 @@ namespace Sentinel.Core
                 {
                     try
                     {
+                        // Skip young processes — amsi.dll often loads after CLR + SMA init
+                        try
+                        {
+                            var age = DateTime.UtcNow - proc.StartTime.ToUniversalTime();
+                            if (age.TotalSeconds < 15)
+                                continue;
+                        }
+                        catch { continue; }
+
+                        string? imagePath = null;
+                        try { imagePath = proc.MainModule?.FileName; }
+                        catch { /* access denied — still evaluate modules if possible */ }
+
                         bool amsiLoaded = false;
+                        int moduleCount = 0;
                         try
                         {
                             foreach (ProcessModule module in proc.Modules)
                             {
+                                moduleCount++;
                                 if (module.ModuleName.Equals("amsi.dll", StringComparison.OrdinalIgnoreCase))
                                 {
                                     amsiLoaded = true;
@@ -318,25 +340,50 @@ namespace Sentinel.Core
                         }
                         catch { continue; } // Access denied — skip
 
+                        // Too few modules = still starting up even if StartTime is old (suspended)
+                        if (!amsiLoaded && moduleCount < 20)
+                            continue;
+
                         if (!amsiLoaded)
                         {
                             var alertKey = $"AmsiBypass:{proc.Id}";
                             if (_recentAlerts.ContainsKey(alertKey)) continue;
                             _recentAlerts[alertKey] = DateTime.UtcNow;
 
+                            bool systemHost = SecurityValidation.IsSystemPowerShellPath(imagePath);
+                            // Stock Windows PS without amsi: log for forensics, do NOT kill.
+                            // Impostor powershell.exe outside system paths: kill tree (binary still
+                            // protected from quarantine by QuarantineManager OS-critical gate if under Windows).
                             await _detectionEngine.EmitAsync(new DetectionEvent
                             {
-                                RuleName = "Script: AMSI Bypass Detected (amsi.dll Unloaded)",
-                                Evidence = $"PowerShell process (PID {proc.Id}) does not have amsi.dll loaded. " +
-                                           "The Anti-Malware Scan Interface has been disabled for this process.",
-                                Reasoning = "Attackers unload amsi.dll via FreeLibrary or patch AmsiScanBuffer to return " +
-                                            "AMSI_RESULT_CLEAN for all content. Without AMSI, malicious scripts execute " +
-                                            "without triggering any AV/EDR scanning at the script engine level.",
-                                Confidence = 0.90,
-                                Tier = DetectionTier.Tier1Behavioral,
-                                AuthorizedResponse = ResponseAction.KillProcessTree,
+                                RuleName = systemHost
+                                    ? "Script: AMSI Not Loaded (System PowerShell)"
+                                    : "Script: AMSI Bypass Detected (amsi.dll Unloaded)",
+                                Evidence = systemHost
+                                    ? $"System PowerShell (PID {proc.Id}, path '{imagePath}') has no amsi.dll " +
+                                      $"after {Math.Max(0, (int)(DateTime.UtcNow - proc.StartTime.ToUniversalTime()).TotalSeconds)}s " +
+                                      $"and {moduleCount} modules. Logging only — system hosts are never killed/quarantined for this signal."
+                                    : $"Non-system PowerShell-named process (PID {proc.Id}, path '{imagePath ?? "unknown"}') " +
+                                      "does not have amsi.dll loaded. Possible AMSI bypass or impostor binary.",
+                                Reasoning = systemHost
+                                    ? "Missing amsi.dll on the stock Windows PowerShell host is often a false positive " +
+                                      "(provider load timing, constrained hosts, or AMSI provider failure). " +
+                                      "v1.6.3 demotes this to LogOnly after a production incident where Kill+Quarantine " +
+                                      "deleted powershell.exe from System32."
+                                    : "Attackers unload amsi.dll via FreeLibrary or run a fake powershell.exe from a " +
+                                      "user-writable path. Non-system hosts without AMSI are treated as hostile.",
+                                Confidence = systemHost ? 0.45 : 0.90,
+                                Tier = systemHost ? DetectionTier.Tier2Indicator : DetectionTier.Tier1Behavioral,
+                                AuthorizedResponse = systemHost ? ResponseAction.LogOnly : ResponseAction.KillProcessTree,
                                 ProcessName = proc.ProcessName,
-                                ProcessId = proc.Id
+                                ProcessId = proc.Id,
+                                SignalType = SignalType.AmsiTampering,
+                                Metadata = new Dictionary<string, string>
+                                {
+                                    ["ImagePath"] = imagePath ?? "",
+                                    ["ModuleCount"] = moduleCount.ToString(),
+                                    ["SystemHost"] = systemHost.ToString()
+                                }
                             });
                         }
                     }

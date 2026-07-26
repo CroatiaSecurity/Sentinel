@@ -88,6 +88,19 @@ namespace Sentinel.Core
         /// </summary>
         public bool EnforceActiveResponse { get; set; } = true;
 
+        /// <summary>
+        /// v1.6.3: Trusted USB devices as VID:PID (hex, e.g. "0951:1666" for Kingston DataTraveler).
+        /// New mass-storage/composite devices matching these IDs are baselined at low severity
+        /// and never auto-disabled. HID BadUSB rules still apply to unknown keyboards.
+        /// </summary>
+        public string[] TrustedUsbDevices { get; set; } = Array.Empty<string>();
+
+        /// <summary>
+        /// v1.6.3: When true (default), auto-disable USB nodes that fail descriptor requests
+        /// (VID_0000 / "Device Descriptor Request Failed") via registry ConfigFlags.
+        /// </summary>
+        public bool AutoDisableFailedUsbEnumeration { get; set; } = true;
+
         public CveShieldConfig CveShield { get; set; } = new();
     }
 

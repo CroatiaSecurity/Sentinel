@@ -62,6 +62,15 @@ namespace Sentinel.Core
                 throw new FileNotFoundException("File not found for quarantine", filePath);
             }
 
+            // v1.6.3 CRITICAL: Never quarantine OS / WRP paths — production FP quarantined
+            // C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe after an AMSI false positive,
+            // removing the host binary and breaking PowerShell / shell integrations system-wide.
+            // forceQuarantineSigned cannot override this gate.
+            if (SecurityValidation.IsOsCriticalPath(filePath))
+            {
+                return null;
+            }
+
             // Central gate: never wipe signed software unless explicitly forced.
             // Covers ChainTracer, IncidentResponse, QuarantineAndKill, and any future caller.
             if (!forceQuarantineSigned)
@@ -75,7 +84,12 @@ namespace Sentinel.Core
                 }
                 catch
                 {
-                    // Signature check failed open → treat as unsigned and proceed
+                    // v1.6.3: Fail CLOSED for Program Files / Windows-adjacent paths when
+                    // signature verification throws — never treat "check failed" as unsigned.
+                    var lower = filePath.ToLowerInvariant();
+                    if (lower.Contains(@"\program files") || lower.Contains(@"\windows\"))
+                        return null;
+                    // Outside protected trees: proceed only for clearly user-writable drops.
                 }
             }
 

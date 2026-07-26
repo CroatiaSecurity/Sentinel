@@ -1,6 +1,6 @@
 # Sentinel — Threat Model
 
-**Version: 1.6.2**
+**Version: 1.6.3**
 
 This document assumes the attacker has read the source code.
 
@@ -252,6 +252,21 @@ This document assumes the attacker has read the source code.
 
 ---
 
+### B8c: Parallel quarantine path / OS binary wipe (FIXED in v1.6.3)
+
+**Attack surface (pre-1.6.3, operator self-DoS):** ChainTracer skipped System32/SysWOW64 quarantine, but `AdvancedResponseEngine` always called `IncidentResponseService.CollectEvidenceAsync` *before* ChainTracer. That path quarantined `MainModule` with no OS-path gate. Combined with AMSI “no amsi.dll” → KillProcessTree on stock PowerShell (catalog-signed verify fail-open), production deleted `C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`.
+
+**Mitigation (v1.6.3+):**
+- `QuarantineManager` hard-refuses OS-critical paths (`IsOsCriticalPath`); force flag cannot override
+- Signature-check exceptions fail closed under Windows / Program Files
+- `IncidentResponseService` skips OS-critical paths before quarantine
+- System PowerShell hosts missing amsi.dll → LogOnly only (not kill)
+- USB failed-enumeration Tier1 + auto-disable; trusted VID:PID allowlist
+
+**Residual risk:** LOW for System32 hosts. Impostor `powershell.exe` outside system paths can still be killed. Catalog verify failures on non-Windows paths may still quarantine unsigned drops (intended).
+
+---
+
 ### B9: Behavioral baseline poisoning (FIXED in v1.5.9)
 
 **Attack:** Malware achieves persistence (e.g., scheduled task) and runs 10+ times over days to earn "established" status in `BehavioralBaselineService`. Once established, all future detections receive a −10 to −20 score reduction, potentially dropping below the kill threshold.
@@ -415,6 +430,7 @@ Hard-to-bypass detections (require kernel access to evade):
 
 See CHANGELOG.md for full history. Key fixes:
 
+- **v1.6.3:** OS self-DoS closed: `QuarantineManager` + `IncidentResponseService` hard-refuse OS-critical paths (production FP deleted System32 `powershell.exe` after AMSI false positive). System PowerShell AMSI demotion to LogOnly. Failed USB enumeration Tier1 + auto-disable; `TrustedUsbDevices` allowlist.
 - **v1.6.2:** Installer/shell false-positive remediation (ProgramData evidence): PPID spoof no longer kills Inno Setup extractors; Raw Disk Access never kills explorer/taskhostw under Windows; ChainTracer preserves critical hosts with empty path and signed installer ancestors; QuarantineManager refuses Authenticode-signed files by default; EphemeralProcessMonitor ignores installer prefetch noise; shared InstallerHeuristics
 - **v1.6.1:** EtwSessionGuard (heal stopped ETW session), NetworkIsolate rate limit + budget Tier1 alerts, ClickFix/FakeCAPTCHA clipboard+rule expansion, NpmSupplyChainRule
 - **v1.6.0:** Audit remediation: threat-proxy server-side HMAC (no client key), ActiveResponse boot-time force + appsettings integrity, SYSTEM-only entropy, rules dir write SYSTEM-only, kill rate limit, protected AV processes, native SCM driver disable, Cast IP validation, tray LOLBin removal
