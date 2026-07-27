@@ -779,7 +779,7 @@ namespace Sentinel.Core
             return new DetectionEvent
             {
                 RuleName = Name,
-                ProcessName = pt.ProcessName,
+                ProcessName = pt.ProcessName ?? "",
                 ProcessId = pt.ProcessId,
                 SignalType = SignalType.ReverseShell,
                 Confidence = 0.96,
@@ -843,7 +843,7 @@ namespace Sentinel.Core
             return new DetectionEvent
             {
                 RuleName = Name,
-                ProcessName = pt.ProcessName,
+                ProcessName = pt.ProcessName ?? "",
                 ProcessId = pt.ProcessId,
                 SignalType = SignalType.SuspiciousProcess,
                 Confidence = 0.88,

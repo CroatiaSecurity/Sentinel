@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading;
@@ -155,6 +156,12 @@ namespace Sentinel.Core
                     evidence += disabled
                         ? " Device disabled via registry ConfigFlags."
                         : " Auto-disable attempted but registry write failed.";
+
+                    // v1.6.4: Full PnP ejection — remove device node to clear Windows notification icon
+                    bool ejected = EjectUsbDevice(dev.DeviceId);
+                    evidence += ejected
+                        ? " Device ejected from PnP tree."
+                        : " PnP ejection attempted but failed (device may still show in tray).";
                 }
             }
             else if (_trustedVidPid.Contains(vidPid))
@@ -176,6 +183,11 @@ namespace Sentinel.Core
                 disabled = DisableUsbDevice(dev.DeviceId);
                 if (disabled)
                     evidence += " Device disabled via registry ConfigFlags.";
+
+                // v1.6.4: Full PnP ejection — remove device node to clear Windows notification icon
+                bool ejected = EjectUsbDevice(dev.DeviceId);
+                if (ejected)
+                    evidence += " Device ejected from PnP tree.";
             }
             else if (dev.IsComposite)
             {
@@ -202,7 +214,8 @@ namespace Sentinel.Core
                 AuthorizedResponse = response,
                 Evidence = evidence,
                 Reasoning = $"New unbaselined USB device detected at runtime. Action tier resolved to {tier}." +
-                            (disabled ? " Auto-disabled." : ""),
+                            (disabled ? " Auto-disabled." : "") +
+                            (evidence.Contains("ejected from PnP tree", StringComparison.OrdinalIgnoreCase) ? " Ejected." : ""),
                 Metadata = new Dictionary<string, string>
                 {
                     { "VID", dev.Vid },
@@ -212,6 +225,7 @@ namespace Sentinel.Core
                     { "DeviceId", dev.DeviceId ?? "" },
                     { "FailedEnumeration", dev.IsFailedEnumeration.ToString() },
                     { "Disabled", disabled.ToString() },
+                    { "Ejected", evidence.Contains("ejected from PnP tree", StringComparison.OrdinalIgnoreCase).ToString() },
                     { "Trusted", _trustedVidPid.Contains(vidPid).ToString() }
                 }
             };
@@ -244,6 +258,149 @@ namespace Sentinel.Core
             catch (Exception ex)
             {
                 _logger?.LogDebug(ex, "[UsbDeviceFingerprinter] Failed to disable {Id}", deviceInstanceId);
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// v1.6.4: Fully ejects a USB device from the PnP tree, removing the Windows
+        /// notification icon. Uses CM_Request_Device_Eject on the device or its parent
+        /// hub port. Falls back to pnputil /remove-device if CM_ APIs fail.
+        /// Must be called AFTER DisableUsbDevice to ensure the device cannot re-enumerate.
+        /// </summary>
+        internal bool EjectUsbDevice(string deviceInstanceId)
+        {
+            if (string.IsNullOrWhiteSpace(deviceInstanceId)) return false;
+
+            // Strategy 1: CM_Request_Device_Eject on the device itself
+            bool ejected = TryEjectViaCfgMgr(deviceInstanceId);
+            if (ejected)
+            {
+                _logger?.LogWarning("[UsbDeviceFingerprinter] Ejected USB device via CM_Request_Device_Eject: {Id}", deviceInstanceId);
+                return true;
+            }
+
+            // Strategy 2: Eject the parent (USB hub port) — works when device node is in error state
+            ejected = TryEjectParentViaCfgMgr(deviceInstanceId);
+            if (ejected)
+            {
+                _logger?.LogWarning("[UsbDeviceFingerprinter] Ejected USB device via parent hub eject: {Id}", deviceInstanceId);
+                return true;
+            }
+
+            // Strategy 3: pnputil /remove-device — forceful removal via OS utility
+            ejected = TryEjectViaPnputil(deviceInstanceId);
+            if (ejected)
+            {
+                _logger?.LogWarning("[UsbDeviceFingerprinter] Ejected USB device via pnputil: {Id}", deviceInstanceId);
+                return true;
+            }
+
+            _logger?.LogDebug("[UsbDeviceFingerprinter] All ejection strategies failed for: {Id}", deviceInstanceId);
+            return false;
+        }
+
+        private bool TryEjectViaCfgMgr(string deviceInstanceId)
+        {
+            try
+            {
+                int result = CM_Locate_DevNode(out int devInst, deviceInstanceId, CM_LOCATE_DEVNODE_NORMAL);
+                if (result != CR_SUCCESS)
+                {
+                    // Device may already be in phantom state after disable — try phantom flag
+                    result = CM_Locate_DevNode(out devInst, deviceInstanceId, CM_LOCATE_DEVNODE_PHANTOM);
+                    if (result != CR_SUCCESS)
+                    {
+                        _logger?.LogDebug("[UsbDeviceFingerprinter] CM_Locate_DevNode failed ({Err}) for: {Id}", result, deviceInstanceId);
+                        return false;
+                    }
+                }
+
+                result = CM_Request_Device_Eject(devInst, out int vetoType, IntPtr.Zero, 0, 0);
+                if (result == CR_SUCCESS)
+                    return true;
+
+                _logger?.LogDebug("[UsbDeviceFingerprinter] CM_Request_Device_Eject failed ({Err}, veto={Veto}) for: {Id}",
+                    result, vetoType, deviceInstanceId);
+                return false;
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogDebug(ex, "[UsbDeviceFingerprinter] CfgMgr eject exception for: {Id}", deviceInstanceId);
+                return false;
+            }
+        }
+
+        private bool TryEjectParentViaCfgMgr(string deviceInstanceId)
+        {
+            try
+            {
+                int result = CM_Locate_DevNode(out int devInst, deviceInstanceId, CM_LOCATE_DEVNODE_NORMAL);
+                if (result != CR_SUCCESS)
+                    result = CM_Locate_DevNode(out devInst, deviceInstanceId, CM_LOCATE_DEVNODE_PHANTOM);
+                if (result != CR_SUCCESS)
+                    return false;
+
+                result = CM_Get_Parent(out int parentInst, devInst, 0);
+                if (result != CR_SUCCESS)
+                {
+                    _logger?.LogDebug("[UsbDeviceFingerprinter] CM_Get_Parent failed ({Err}) for: {Id}", result, deviceInstanceId);
+                    return false;
+                }
+
+                result = CM_Request_Device_Eject(parentInst, out int vetoType, IntPtr.Zero, 0, 0);
+                if (result == CR_SUCCESS)
+                    return true;
+
+                _logger?.LogDebug("[UsbDeviceFingerprinter] Parent eject failed ({Err}, veto={Veto}) for: {Id}",
+                    result, vetoType, deviceInstanceId);
+                return false;
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogDebug(ex, "[UsbDeviceFingerprinter] Parent eject exception for: {Id}", deviceInstanceId);
+                return false;
+            }
+        }
+
+        private bool TryEjectViaPnputil(string deviceInstanceId)
+        {
+            try
+            {
+                // pnputil /remove-device requires the instance ID in quotes
+                // Available on Windows 10 1809+ and Windows Server 2019+
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "pnputil.exe",
+                    Arguments = $"/remove-device \"{deviceInstanceId}\"",
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true
+                };
+
+                using var proc = Process.Start(psi);
+                if (proc == null) return false;
+
+                proc.WaitForExit(10000);
+                if (!proc.HasExited)
+                {
+                    proc.Kill();
+                    return false;
+                }
+
+                // Exit code 0 = success
+                if (proc.ExitCode == 0)
+                    return true;
+
+                var stderr = proc.StandardError.ReadToEnd();
+                _logger?.LogDebug("[UsbDeviceFingerprinter] pnputil /remove-device exit={Code} stderr={Err}",
+                    proc.ExitCode, stderr);
+                return false;
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogDebug(ex, "[UsbDeviceFingerprinter] pnputil fallback exception for: {Id}", deviceInstanceId);
                 return false;
             }
         }
@@ -290,6 +447,32 @@ namespace Sentinel.Core
 
         [DllImport("setupapi.dll", SetLastError = true)]
         private static extern bool SetupDiDestroyDeviceInfoList(IntPtr DeviceInfoSet);
+
+        // ── CfgMgr32 P/Invoke — full PnP device ejection (v1.6.4) ──
+
+        [DllImport("cfgmgr32.dll", CharSet = CharSet.Auto)]
+        private static extern int CM_Locate_DevNode(
+            out int pdnDevInst,
+            string pDeviceID,
+            int ulFlags);
+
+        [DllImport("cfgmgr32.dll")]
+        private static extern int CM_Request_Device_Eject(
+            int dnDevInst,
+            out int pVetoType,
+            IntPtr pszVetoName,
+            int ulNameLength,
+            int ulFlags);
+
+        [DllImport("cfgmgr32.dll")]
+        private static extern int CM_Get_Parent(
+            out int pdnDevInst,
+            int dnDevInst,
+            int ulFlags);
+
+        private const int CR_SUCCESS = 0;
+        private const int CM_LOCATE_DEVNODE_NORMAL = 0x00000000;
+        private const int CM_LOCATE_DEVNODE_PHANTOM = 0x00000001;
 
         private const int DIGCF_PRESENT = 0x00000002;
         private const int DIGCF_ALLCLASSES = 0x00000004;
