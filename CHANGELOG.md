@@ -2,6 +2,18 @@
  
 All notable changes to Sentinel are documented in this file.
 
+## [1.6.4] - 2026-07-27
+
+### Fixed (USB device notification icon not cleaned up)
+
+- **[HIGH] Full PnP ejection after USB device disable** — v1.6.3 disabled failed-enumeration and BadUSB devices via registry `ConfigFlags`, but the device node remained in the PnP tree, leaving the Windows "USB device not recognized" tray notification icon visible. Now `UsbDeviceFingerprinter.EjectUsbDevice` performs a 3-tier removal: (1) `CM_Request_Device_Eject` on the device itself, (2) `CM_Request_Device_Eject` on the parent hub port (handles error-state nodes), (3) `pnputil /remove-device` fallback. The device is fully torn down — no lingering icon, no trace.
+
+### Security Hardening (USB)
+
+- **`EjectUsbDevice` — complete device tree cleanup** — Failed-enumeration devices and unauthorized HID keyboards are now ejected from the PnP tree after being disabled. This eliminates the window where a hostile device that failed to enumerate remains visible to the OS (and to an attacker observing that their implant is still "connected"). Detection metadata now includes `Ejected` field.
+
+---
+
 ## [1.6.3] - 2026-07-27
 
 ### Fixed (CRITICAL production incident)
