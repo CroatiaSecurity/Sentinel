@@ -2,11 +2,56 @@
  
 All notable changes to Sentinel are documented in this file.
 
+## [1.6.5] - 2026-07-27
+
+### Test Hardening (268 → 689 tests, +157% coverage)
+
+Major test infrastructure release. Establishes comprehensive automated verification for all detection rules, composite detections, scoring logic, and security contract invariants.
+
+#### New Test Suites
+
+- **`DetectionRuleTests`** — Complete coverage of all 13 detection rules: positive matches, negative cases, edge cases, confidence values, tier assignments, response actions. Covers LsassAccessRule, RansomwareDetectionRule, ReverseShellRule, ThreatIntelInjectionRule, PrivilegeEscalationRule, AttackToolsRule, CampaignIocRule, UnsignedBinaryRule, ClickFixDetectionRule, NpmSupplyChainRule, ChromeRemoteDebuggingRule, DllSideloadingDetectionRule.
+
+- **`CompositeDetectionTests`** — BehavioralCorrelationEngine composite fire/no-fire validation: Active Ransomware Chain (C-01), Injected C2 Beacon (C-02), Credential Dump + Exfiltration (C-03), Fileless Attack Chain (C-05), Evasion + Persistence (C-09). Cross-PID isolation, signal ordering, priority, and Tier1 emission.
+
+- **`ScoringEngineExtendedTests`** — President's Law classification for all critical rules, detection categorization correctness, scoring logic with corroboration, process profile tracking.
+
+- **`RuleCategoryRegistryTests`** — Compile-time-safe attribute verification for all 13 rules against expected DetectionCategory values.
+
+- **`AttackPatternTests`** — Real-world attack patterns: credential theft (procdump, SAM hive), ransomware (vssadmin, file renames), LOLBin abuse (certutil, mshta, regsvr32, wmic), process injection (all 12 kernel APIs), C2 frameworks (cobalt, beacon, meterpreter), ClickFix 2025–2026 campaigns, npm supply-chain attacks. Includes false-positive prevention suite validating that legitimate processes never trigger kills.
+
+- **`InstallerHeuristicsTests`** — `LooksLikeInstallerName`, `IsInstallerExtractor`, `IsBenignEphemeralPrefetchName` with 30+ positive/negative test cases covering Git, Chrome, VS Code, Python, Node, Inno Setup, NSIS, WiX patterns.
+
+- **`ModelAndInfraTests`** — Config defaults (SentinelConfig, ThreatReportingConfig, CveShieldConfig), DetectionEvent kill authorization logic, telemetry defaults, EventGraph add/prune, SentinelMetrics recording/percentiles, RateLimiter/BurstRateLimiter enforcement, SafeProcessExemptionRegistry.
+
+- **`ProcessAncestryCacheExtendedTests`** — RecordProcessStart/GetParent/GetProcessInfo round-trip, authoritative entry persistence, unknown PID handling.
+
+- **`V165TestHardeningTests`** — Security contract invariants: all Tier1 rules must have KillProcess+ response, Tier2 rules must never kill, signal type correctness per rule, President's Law classification coverage, OS-critical path protection.
+
+### Architecture
+
+- All new tests are pure unit tests with no system access required (per NFR-5)
+- Tests use `[Theory]`/`[InlineData]` for comprehensive parametric coverage
+- No external dependencies — all tests run offline in CI/CD
+
+---
+
 ## [1.6.4] - 2026-07-27
+
+### Fixed (CRITICAL — Sentinel quarantining its own installer)
+
+- **[CRITICAL] Removed `DenyExecution` from `FileVerdictScanner`** — `FileVerdictScanner` was applying a Deny Execute ACL (Everyone) on files scored HighRisk/Malicious by `FileReputationEngine`. This is antivirus behavior, not EDR behavior. Sentinel's design is observe-first: detect, log, correlate, and only respond when a process *actively* does something malicious. Preemptively blocking execution based on reputation alone violated this principle and caused the installer (`SentinelSetup-1.6.4.exe`) to be blocked — unsigned + unknown to reputation DBs + Downloads path = score ~62 (HighRisk) = ACL denied. The method has been removed entirely. `FileVerdictScanner` now logs verdicts and writes ADS tags for informational purposes only.
+
+- **[CRITICAL] `DetectionEngine` on-execute reputation path demotes installer-like binaries** — The `ProcessTelemetryQueueAsync` reputation check now consults `InstallerHeuristics.LooksLikeInstallerName` before emitting kill-authorized detections. If a binary matches installer heuristics AND no reputation source positively confirms it as malicious (MalwareBazaar/VT), the detection is demoted to Tier2/LogOnly (confidence 0.45). Behavioral monitors remain active — if the "installer" does something actually malicious (credential theft, ransomware IO, injection), those detections fire independently at full Tier1.
 
 ### Fixed (USB device notification icon not cleaned up)
 
 - **[HIGH] Full PnP ejection after USB device disable** — v1.6.3 disabled failed-enumeration and BadUSB devices via registry `ConfigFlags`, but the device node remained in the PnP tree, leaving the Windows "USB device not recognized" tray notification icon visible. Now `UsbDeviceFingerprinter.EjectUsbDevice` performs a 3-tier removal: (1) `CM_Request_Device_Eject` on the device itself, (2) `CM_Request_Device_Eject` on the parent hub port (handles error-state nodes), (3) `pnputil /remove-device` fallback. The device is fully torn down — no lingering icon, no trace.
+
+### Cleanup (dead code removal)
+
+- **Removed 21 dead files from `HardeningResources/`** — Legacy PowerShell scripts (GorstaksEDR.ps1, Audio.ps1, Browsers.ps1, configure-dns-doh-dot.ps1, FakeUacDetection.ps1, LNKProtection.ps1, RansomwareScarewareDetection.ps1, ShowAllTrayIcons.ps1), .reg exports (Browsers.reg, Certs.reg, COM Auto Approval.reg, Firewall.reg, GSecurity.reg, IPSecPolicy.reg, PiholeLite.reg, Privacy.reg, Services.reg, Sminkica.reg), and GSecurity.bat. None were embedded or referenced by C# code — all hardening is native C# since v1.5.7. Only `LGPO.exe` and `GSecurity.inf` remain (embedded resources used by `HardeningModule`).
+- **Removed stray root files** — `git_out.txt` (UTF-16 git error dump), `queryex` (orphan 2-word text file).
 
 ### Security Hardening (USB)
 

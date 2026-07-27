@@ -2,7 +2,7 @@
 
 Real-time endpoint detection and response for Windows. Runs as a background service, monitors system behavior, and kills threats automatically when multiple signals correlate.
 
-**Current version: 1.6.3**
+**Current version: 1.6.5**
 
 ---
 
