@@ -1,6 +1,6 @@
 # Sentinel — Design Document
 
-**Version: 1.6.3**
+**Version: 1.6.5**
 
 ---
 
