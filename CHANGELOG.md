@@ -2,6 +2,40 @@
  
 All notable changes to Sentinel are documented in this file.
 
+## [1.7.0] - 2026-07-29
+
+### Added — BYOVD Certificate Tracing (DriverLoadMonitor)
+
+Closes the BYOVD attack chain at the certificate level. When a vulnerable or suspicious kernel driver is detected, Sentinel now traces back to the Authenticode signing certificate and revokes it if it was planted in the Windows certificate store.
+
+- **`TracAndRevokeDriverCertAsync`** — Extracts the Authenticode cert from a detected BYOVD driver. Checks if the cert (or its issuer) exists in `TrustedPublisher` or `Root` stores (LocalMachine + CurrentUser). If it's NOT a well-known public CA (Microsoft, DigiCert, NVIDIA, Intel, etc.), fires `RemoveCertAndKillAdder` (0.95 confidence) to revoke the planted cert and kill the installer process tree.
+
+- **`ScanForOtherDriversSignedByCertAsync`** — After cert revocation, scans `System32\drivers` for any other `.sys` files signed by the same identity. Disables and deletes their service registrations (up to 10 per scan). Fires Tier1 detection for each additional driver found.
+
+- **Public CA safeguard** — Well-known CAs (DigiCert, GlobalSign, Sectigo, etc.) and major hardware vendors (NVIDIA, Intel, Realtek, Broadcom, etc.) are never revoked. Only non-public planted certs trigger the revocation chain.
+
+- **Attack chain closed:**
+  1. Attacker plants fake cert in TrustedPublisher → Sentinel detects via DriverLoadMonitor
+  2. Attacker signs driver with planted cert → Windows DSE validates it
+  3. DriverLoadMonitor detects new kernel driver → extracts Authenticode cert
+  4. Cert found in TrustedPublisher, NOT a public CA → fires RemoveCertAndKillAdder
+  5. Response engine removes cert from store, kills adder process tree
+  6. Cross-driver scan disables all other services using that cert
+  7. Driver cannot be reloaded (DSE will now reject the signature)
+
+### Fixed — Documentation Accuracy
+
+- **README.md** — Removed inaccurate "game over" language about kernel driver attacks. Sentinel has multi-layer BYOVD defense (pre-load detection, cert revocation, prerequisite monitoring). Updated to accurately describe capabilities including BYOVD defense, 80+ monitors, and the full attack-chain coverage.
+
+- **design.md** — Version bumped to 1.7.0. DriverLoadMonitor description updated to include cert-tracing. ConfigIntegrityMonitor clarified as integrated into AntiTamperGuard. Added full v1.7.0 section documenting cert-tracing capability, confidence levels, and response actions.
+
+### Integrity Audit
+
+- **No deletions detected** — Full git history review (v1.6.0 through v1.6.9) shows no suspicious file removals or code deletions.
+- **All design.md components verified** — Every monitor, engine, rule, and infrastructure component listed in design.md was confirmed present in the source tree. The only discrepancy (`ConfigIntegrityMonitor`) was a naming issue — the functionality exists in `AntiTamperGuard.CheckAppsettingsIntegrity()`.
+
+---
+
 ## [1.6.9] - 2026-07-28
 
 ### Fixed (False Positive — IDE/Development Tool Kill)
