@@ -1,6 +1,6 @@
 # Sentinel — Design Document
 
-**Version: 1.6.5**
+**Version: 1.6.6**
 
 ---
 
@@ -66,6 +66,7 @@ The fusion layer is PASSIVE â€” it never blocks, kills, or modifies telemet
 | `WebcamMicMonitor` | **1.6.0** Detects background processes accessing camera/microphone via DLL analysis (Media Foundation, DirectShow, WASAPI). Allowlists browsers, conferencing, streaming apps. Confirmation threshold prevents transient FPs. Scans every 20s | No |
 | `NamedPipeMonitor` | **3.1.0** Polls `\\.\pipe\` for C2/lateral movement pipe patterns (Cobalt Strike, PsExec, Impacket, Metasploit). Uses `GetNamedPipeServerProcessId` for owner attribution. Scans every 15s | No |
 | `WmiPersistenceMonitor` | **3.1.0** Periodic WMI namespace scan for `__EventFilter`/`__EventConsumer`/`__FilterToConsumerBinding` persistence (T1546.003). Scans every 5min | No |
+| `WmiProviderIntegrityMonitor` | **1.6.6** Enumerates all `__Win32Provider` objects across WMI namespaces, resolves CLSID→InprocServer32→DLL, validates Authenticode. Baselines at startup; detects new unsigned providers, suspicious modules in WmiPrvSE.exe, and MOF auto-recovery persistence. Targets performance-throttling rootkits in power/thermal namespaces. Scans every 5min | No |
 | `ChromeCredentialGuardMonitor` | **3.2.0** Monitors Chromium browser credential files (Login Data, Cookies, Local State, Web Data) via FileSystemWatcher + process scanning. Detects copy-then-read patterns. Covers Chrome, Edge, Brave, Opera, Vivaldi, Arc. Scans every 10s | No |
 | `FirefoxCredentialGuardMonitor` | **3.2.0** Monitors Firefox/Gecko credential files (key4.db, logins.json, cookies.sqlite, cert9.db) via FileSystemWatcher. Covers Firefox, Waterfox, Pale Moon, Thunderbird. Scans every 10s | No |
 | `MicrosoftAccountGuardMonitor` | **3.2.0** Monitors TokenBroker cache (.tbres), detects PRT extraction (BrowserCore abuse), Azure AD token theft tools (ROADtools, AADInternals). Scans every 12s | No |
@@ -269,6 +270,12 @@ Composite detections are emitted as Tier1 `DetectionEvent`s directly into the de
 | `WebcamMicMonitor` | Detects background processes accessing camera/microphone via DLL analysis |
 | 2 new composite rules | Camera/Mic+Network (exfiltration), Camera+ScreenCapture (total surveillance) |
 | Full Surveillance Suite update | Now 4 vectors (screen+clipboard+audio+webcam), max confidence 0.99 |
+
+## Added in 1.6.6
+
+| Component | Purpose |
+|-----------|---------|
+| `WmiProviderIntegrityMonitor` | Detects malicious WMI provider DLLs that run inside WmiPrvSE.exe (SYSTEM). Enumerates all `__Win32Provider` objects across WMI namespaces, resolves CLSID→InprocServer32→DLL path, validates Authenticode signatures. Baselines providers at startup; alerts on new providers at runtime. Scans WmiPrvSE.exe loaded modules for non-system unsigned DLLs. Checks MOF auto-recovery registry for non-Windows entries. Targets performance-throttling rootkits that intercept power/thermal WMI queries. Sensitive namespaces (root\WMI, root\Intel, root\CIMV2\power) trigger highest confidence (0.88). Scans every 5min |
 
 ## Added in 1.7.0
 

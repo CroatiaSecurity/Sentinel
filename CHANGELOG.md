@@ -2,6 +2,23 @@
  
 All notable changes to Sentinel are documented in this file.
 
+## [1.6.6] - 2026-07-28
+
+### Added
+
+- **`WmiProviderIntegrityMonitor`** — New monitor detecting malicious WMI provider DLLs running inside WmiPrvSE.exe (SYSTEM). Targets performance-throttling rootkits that intercept power/thermal WMI queries to fake readings and silently cap CPU performance.
+  - Enumerates all `__Win32Provider` objects across WMI namespaces (recursive, up to 3 levels)
+  - Resolves CLSID → InprocServer32 → DLL path via registry
+  - Validates Authenticode signatures on all provider DLLs
+  - Baselines providers at startup; alerts on new providers at runtime
+  - Scans WmiPrvSE.exe loaded modules for non-system unsigned DLLs
+  - Checks MOF auto-recovery registry for non-Windows persistence entries
+  - Sensitive namespaces (root\WMI, root\Intel, root\CIMV2\power) → 0.88 confidence, kill-authorized
+  - Non-system path unsigned providers → 0.75–0.82 confidence
+  - Scans every 5 minutes in SystemIntegrity MonitorGroup
+
+---
+
 ## [1.6.5] - 2026-07-27
 
 ### Test Hardening (268 → 689 tests, +157% coverage)

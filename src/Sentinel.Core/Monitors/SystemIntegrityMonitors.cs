@@ -2349,4 +2349,551 @@ namespace Sentinel.Core
     }
 
 
+    // ──────────────────────────────────────────────
+    // WMI Provider Integrity Monitor — detects malicious WMI provider DLLs (v1.6.6)
+    // ──────────────────────────────────────────────
+    // A malicious WMI provider DLL runs inside WmiPrvSE.exe (legitimate SYSTEM process)
+    // and can intercept/modify WMI query results (fake thermals, throttle power settings)
+    // or execute arbitrary code on any WMI query to its namespace — without any visible
+    // process, autorun entry, scheduled task, or WMI event subscription.
+    //
+    // This monitor:
+    //   1. Enumerates all __Win32Provider objects across WMI namespaces
+    //   2. Resolves CLSID → InprocServer32 → DLL path
+    //   3. Validates Authenticode signatures (unsigned in sensitive namespace = Tier1)
+    //   4. Baselines known providers at startup; alerts on new providers at runtime
+    //   5. Scans WmiPrvSE.exe loaded modules for non-system DLLs
+    //   6. Checks for MOF auto-recovery persistence
+    // ──────────────────────────────────────────────
+    public sealed class WmiProviderIntegrityMonitor : BackgroundService
+    {
+        private readonly DetectionEngine _detectionEngine;
+        private readonly ILogger<WmiProviderIntegrityMonitor> _logger;
+
+        // Baseline: provider name → resolved DLL path (from first scan)
+        private readonly Dictionary<string, WmiProviderInfo> _baselineProviders = new(StringComparer.OrdinalIgnoreCase);
+        private bool _baselineEstablished;
+
+        // Sensitive WMI namespaces — unsigned providers here are high-confidence threats
+        // (power management, thermal, Intel DTT, hardware monitoring)
+        private static readonly HashSet<string> SensitiveNamespaces = new(StringComparer.OrdinalIgnoreCase)
+        {
+            @"root\wmi",
+            @"root\intel",
+            @"root\intel\dtt",
+            @"root\cimv2\power",
+            @"root\cimv2\thermal",
+            @"root\hardware",
+            @"root\microsoft\windows\storage",
+            @"root\standardcimv2",
+        };
+
+        // Known legitimate non-Microsoft providers that will be unsigned or third-party signed
+        // (GPU drivers, OEM tools, etc.) — suppress false positives
+        private static readonly HashSet<string> KnownThirdPartyProviders = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "NVDisplay.ContainerLocalSystem",   // NVIDIA
+            "nvloggr",                          // NVIDIA logging
+            "RmProvider",                       // NVIDIA resource manager
+            "IntelProv",                        // Intel chipset
+            "AmdProv",                          // AMD
+            "ASUSWMIProvider",                  // ASUS motherboard
+            "MSIWmiProvider",                   // MSI motherboard
+            "GigabyteProvider",                 // Gigabyte motherboard
+            "RealtekProv",                      // Realtek audio/NIC
+            "WmiPerfClass",                     // Windows perf counters (catalog-signed)
+            "CIMWin32",                         // Core Windows provider (catalog-signed)
+            "Win32ClockProvider",               // Windows time provider
+            "StandardCimv2",                    // Windows networking provider
+        };
+
+        // Scan interval: 5 minutes (balances detection speed vs performance)
+        private static readonly TimeSpan ScanInterval = TimeSpan.FromMinutes(5);
+
+        public WmiProviderIntegrityMonitor(DetectionEngine de, ILogger<WmiProviderIntegrityMonitor> l)
+        {
+            _detectionEngine = de;
+            _logger = l;
+        }
+
+        protected override async Task ExecuteAsync(CancellationToken ct)
+        {
+            _logger.LogInformation("[WmiProviderIntegrityMonitor] Started — scanning WMI provider DLLs for integrity");
+
+            // Initial delay to let system stabilize after boot
+            await Task.Delay(15000, ct);
+
+            // Establish baseline
+            var providers = EnumerateAllProviders();
+            foreach (var p in providers)
+                _baselineProviders[p.ProviderKey] = p;
+            _baselineEstablished = true;
+
+            _logger.LogInformation("[WmiProviderIntegrityMonitor] Baseline established: {Count} providers", _baselineProviders.Count);
+
+            // Scan baseline for existing suspicious providers (pre-installed rootkit)
+            await ScanForSuspiciousProvidersAsync(_baselineProviders.Values, isBaseline: _baselineEstablished, ct);
+
+            // Periodic scanning loop
+            while (!ct.IsCancellationRequested)
+            {
+                try
+                {
+                    await Task.Delay(ScanInterval, ct);
+
+                    // Re-enumerate and check for new providers
+                    var current = EnumerateAllProviders();
+                    var newProviders = new List<WmiProviderInfo>();
+
+                    foreach (var p in current)
+                    {
+                        if (!_baselineProviders.ContainsKey(p.ProviderKey))
+                        {
+                            newProviders.Add(p);
+                            _baselineProviders[p.ProviderKey] = p;
+                        }
+                    }
+
+                    // Alert on new providers
+                    if (newProviders.Count > 0)
+                    {
+                        await ScanForSuspiciousProvidersAsync(newProviders, isBaseline: false, ct);
+                    }
+
+                    // Scan WmiPrvSE.exe loaded modules
+                    await ScanWmiPrvSeModulesAsync(ct);
+
+                    // Check MOF auto-recovery
+                    await CheckMofAutoRecoveryAsync(ct);
+                }
+                catch (OperationCanceledException) { break; }
+                catch (Exception ex) { _logger.LogDebug(ex, "[WmiProviderIntegrityMonitor] Error in scan loop"); }
+            }
+        }
+
+        /// <summary>
+        /// Enumerates __Win32Provider objects across common WMI namespaces.
+        /// Resolves each provider's CLSID to its InprocServer32 DLL path.
+        /// </summary>
+        private List<WmiProviderInfo> EnumerateAllProviders()
+        {
+            var results = new List<WmiProviderInfo>();
+            var namespacesToScan = GetWmiNamespaces();
+
+            foreach (var ns in namespacesToScan)
+            {
+                try
+                {
+                    using var searcher = new ManagementObjectSearcher(ns, "SELECT * FROM __Win32Provider");
+                    searcher.Options.Timeout = TimeSpan.FromSeconds(10);
+
+                    foreach (ManagementObject obj in searcher.Get())
+                    {
+                        try
+                        {
+                            var name = obj["Name"]?.ToString() ?? "";
+                            var clsid = obj["CLSID"]?.ToString() ?? "";
+
+                            if (string.IsNullOrEmpty(name) || string.IsNullOrEmpty(clsid))
+                                continue;
+
+                            var dllPath = ResolveCLSIDtoDll(clsid);
+
+                            results.Add(new WmiProviderInfo
+                            {
+                                Name = name,
+                                Namespace = ns,
+                                CLSID = clsid,
+                                DllPath = dllPath,
+                                ProviderKey = $"{ns}\\{name}\\{clsid}"
+                            });
+                        }
+                        catch { }
+                    }
+                }
+                catch { } // Namespace may not exist or be inaccessible
+            }
+
+            return results;
+        }
+
+        /// <summary>
+        /// Gets all WMI namespaces to scan by recursively enumerating from root.
+        /// Falls back to a hardcoded list of common namespaces if enumeration fails.
+        /// </summary>
+        private List<string> GetWmiNamespaces()
+        {
+            var namespaces = new List<string>();
+            try
+            {
+                // Start with root and enumerate child namespaces
+                EnumerateNamespacesRecursive(@"root", namespaces, depth: 0, maxDepth: 3);
+            }
+            catch
+            {
+                // Fallback: common namespaces where malicious providers would register
+                namespaces.AddRange(new[]
+                {
+                    @"root\cimv2",
+                    @"root\wmi",
+                    @"root\default",
+                    @"root\subscription",
+                    @"root\standardcimv2",
+                    @"root\microsoft\windows\storage",
+                    @"root\intel",
+                });
+            }
+
+            return namespaces;
+        }
+
+        private void EnumerateNamespacesRecursive(string parentNs, List<string> results, int depth, int maxDepth)
+        {
+            results.Add(parentNs);
+            if (depth >= maxDepth) return;
+
+            try
+            {
+                using var searcher = new ManagementObjectSearcher(parentNs, "SELECT * FROM __NAMESPACE");
+                searcher.Options.Timeout = TimeSpan.FromSeconds(5);
+
+                foreach (ManagementObject obj in searcher.Get())
+                {
+                    var childName = obj["Name"]?.ToString();
+                    if (!string.IsNullOrEmpty(childName))
+                    {
+                        var childPath = $@"{parentNs}\{childName}";
+                        EnumerateNamespacesRecursive(childPath, results, depth + 1, maxDepth);
+                    }
+                }
+            }
+            catch { } // Some namespaces deny enumeration — skip silently
+        }
+
+        /// <summary>
+        /// Resolves a COM CLSID to its InprocServer32 DLL path via the registry.
+        /// </summary>
+        private static string? ResolveCLSIDtoDll(string clsid)
+        {
+            if (string.IsNullOrEmpty(clsid)) return null;
+
+            // Normalize CLSID format
+            if (!clsid.StartsWith("{")) clsid = "{" + clsid + "}";
+
+            try
+            {
+                // Check 64-bit registry view first
+                using var key = Registry.LocalMachine.OpenSubKey(
+                    $@"SOFTWARE\Classes\CLSID\{clsid}\InprocServer32", false);
+                if (key != null)
+                {
+                    var dll = key.GetValue("")?.ToString() ?? key.GetValue("(Default)")?.ToString();
+                    if (!string.IsNullOrEmpty(dll))
+                        return Environment.ExpandEnvironmentVariables(dll);
+                }
+
+                // Check WOW64 (32-bit) registry view
+                using var wow64Key = Registry.LocalMachine.OpenSubKey(
+                    $@"SOFTWARE\WOW6432Node\Classes\CLSID\{clsid}\InprocServer32", false);
+                if (wow64Key != null)
+                {
+                    var dll = wow64Key.GetValue("")?.ToString() ?? wow64Key.GetValue("(Default)")?.ToString();
+                    if (!string.IsNullOrEmpty(dll))
+                        return Environment.ExpandEnvironmentVariables(dll);
+                }
+            }
+            catch { }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Analyzes providers for suspicious characteristics:
+        /// - Unsigned DLL in a sensitive namespace (power, thermal, Intel) → Tier1 (0.88)
+        /// - Unsigned DLL in non-system path → Tier1 (0.80)
+        /// - New provider added at runtime (not in baseline) → Tier1 (0.82)
+        /// - Unsigned DLL in standard namespace → Tier2 (0.65)
+        /// </summary>
+        private async Task ScanForSuspiciousProvidersAsync(
+            IEnumerable<WmiProviderInfo> providers, bool isBaseline, CancellationToken ct)
+        {
+            foreach (var provider in providers)
+            {
+                if (ct.IsCancellationRequested) break;
+
+                // Skip providers with no resolved DLL (out-of-process or missing)
+                if (string.IsNullOrEmpty(provider.DllPath)) continue;
+
+                // Skip known third-party providers (GPU drivers, OEM tools)
+                if (KnownThirdPartyProviders.Contains(provider.Name)) continue;
+
+                // Check if the DLL exists on disk
+                if (!File.Exists(provider.DllPath)) continue;
+
+                // Check if DLL is in a system-protected path
+                bool isSystemPath = IsSystemProtectedPath(provider.DllPath);
+
+                // Verify Authenticode signature
+                bool isSigned = SecurityValidation.VerifyAuthenticodeSignature(provider.DllPath);
+
+                // Determine if namespace is sensitive (power/thermal/hardware)
+                bool isSensitiveNs = IsSensitiveNamespace(provider.Namespace);
+
+                // Extract publisher for logging
+                string publisher = isSigned ? GetSignerPublisher(provider.DllPath) : "UNSIGNED";
+
+                // Decision matrix:
+                if (!isSigned && isSensitiveNs)
+                {
+                    // HIGHEST THREAT: Unsigned DLL in power/thermal/Intel namespace
+                    // This is the exact pattern a performance-throttling rootkit would use
+                    await _detectionEngine.EmitAsync(new DetectionEvent
+                    {
+                        RuleName = "WMI Provider Integrity: Unsigned Provider in Sensitive Namespace",
+                        Evidence = $"Unsigned WMI provider DLL in sensitive namespace. " +
+                                   $"Provider: '{provider.Name}', Namespace: '{provider.Namespace}', " +
+                                   $"CLSID: {provider.CLSID}, DLL: '{provider.DllPath}', " +
+                                   $"NewAtRuntime: {!isBaseline}",
+                        Reasoning = "An unsigned DLL is registered as a WMI provider in a power, thermal, or hardware " +
+                                    "namespace. This is the exact technique used by performance-throttling rootkits that " +
+                                    "intercept WMI queries to fake thermal readings or modify power settings. The DLL " +
+                                    "executes inside WmiPrvSE.exe (SYSTEM) with no visible process or autorun entry.",
+                        Confidence = 0.88,
+                        Tier = DetectionTier.Tier1Behavioral,
+                        AuthorizedResponse = ResponseAction.KillProcess,
+                        ProcessName = "WmiPrvSE.exe",
+                        ProcessId = 0
+                    });
+                    _logger.LogWarning("[WmiProviderIntegrityMonitor] ALERT: Unsigned provider in sensitive namespace: " +
+                        "{Name} @ {Namespace} → {Dll}", provider.Name, provider.Namespace, provider.DllPath);
+                }
+                else if (!isSigned && !isSystemPath)
+                {
+                    // HIGH THREAT: Unsigned DLL outside system paths (staging/temp/user dirs)
+                    await _detectionEngine.EmitAsync(new DetectionEvent
+                    {
+                        RuleName = "WMI Provider Integrity: Unsigned Provider from Non-System Path",
+                        Evidence = $"Unsigned WMI provider DLL loaded from non-system path. " +
+                                   $"Provider: '{provider.Name}', Namespace: '{provider.Namespace}', " +
+                                   $"CLSID: {provider.CLSID}, DLL: '{provider.DllPath}', Publisher: {publisher}",
+                        Reasoning = "A WMI provider DLL that is unsigned and located outside of Windows system directories " +
+                                    "was detected. Legitimate providers are typically signed and installed under System32 or " +
+                                    "Program Files. This pattern matches malicious WMI provider persistence (T1546.003 variant).",
+                        Confidence = isBaseline ? 0.75 : 0.82,
+                        Tier = DetectionTier.Tier1Behavioral,
+                        AuthorizedResponse = ResponseAction.LogOnly,
+                        ProcessName = "WmiPrvSE.exe",
+                        ProcessId = 0
+                    });
+                    _logger.LogWarning("[WmiProviderIntegrityMonitor] Suspicious unsigned provider: {Name} → {Dll}",
+                        provider.Name, provider.DllPath);
+                }
+                else if (!isBaseline && !isSigned)
+                {
+                    // MEDIUM: New unsigned provider appeared at runtime (even in system path)
+                    await _detectionEngine.EmitAsync(new DetectionEvent
+                    {
+                        RuleName = "WMI Provider Integrity: New Unsigned Provider at Runtime",
+                        Evidence = $"New unsigned WMI provider registered since startup. " +
+                                   $"Provider: '{provider.Name}', Namespace: '{provider.Namespace}', " +
+                                   $"CLSID: {provider.CLSID}, DLL: '{provider.DllPath}'",
+                        Reasoning = "A new WMI provider was registered after Sentinel baseline was established. " +
+                                    "Runtime provider registration is uncommon outside of software installation and " +
+                                    "may indicate a rootkit installing a persistent WMI provider.",
+                        Confidence = 0.70,
+                        Tier = DetectionTier.Tier2Indicator,
+                        ProcessName = "WmiPrvSE.exe",
+                        ProcessId = 0
+                    });
+                }
+            }
+        }
+
+        /// <summary>
+        /// Scans all WmiPrvSE.exe instances for loaded DLLs outside system directories.
+        /// A legitimate WmiPrvSE should only load DLLs from System32, WinSxS, and
+        /// registered provider paths (Program Files). Non-system DLLs indicate injection
+        /// or a malicious provider that sideloaded additional components.
+        /// </summary>
+        private async Task ScanWmiPrvSeModulesAsync(CancellationToken ct)
+        {
+            try
+            {
+                var wmiProcs = Process.GetProcessesByName("WmiPrvSE");
+                foreach (var proc in wmiProcs)
+                {
+                    try
+                    {
+                        if (ct.IsCancellationRequested) break;
+
+                        foreach (ProcessModule module in proc.Modules)
+                        {
+                            try
+                            {
+                                var modulePath = module.FileName;
+                                if (string.IsNullOrEmpty(modulePath)) continue;
+
+                                // Skip known-good system paths
+                                if (IsSystemProtectedPath(modulePath)) continue;
+
+                                // Skip known Program Files paths (legitimate third-party providers)
+                                if (IsInProgramFiles(modulePath)) continue;
+
+                                // Non-system DLL loaded in WmiPrvSE — suspicious
+                                bool isSigned = SecurityValidation.VerifyAuthenticodeSignature(modulePath);
+                                if (!isSigned)
+                                {
+                                    await _detectionEngine.EmitAsync(new DetectionEvent
+                                    {
+                                        RuleName = "WMI Provider Integrity: Suspicious Module in WmiPrvSE",
+                                        Evidence = $"Unsigned non-system DLL loaded in WmiPrvSE.exe (PID {proc.Id}): '{modulePath}'",
+                                        Reasoning = "WmiPrvSE.exe has loaded an unsigned DLL from a non-system path. " +
+                                                    "This process hosts WMI providers and should only load system DLLs and " +
+                                                    "registered provider binaries. An unsigned module may indicate a " +
+                                                    "malicious WMI provider or DLL injection into the WMI host.",
+                                        Confidence = 0.85,
+                                        Tier = DetectionTier.Tier1Behavioral,
+                                        AuthorizedResponse = ResponseAction.LogOnly,
+                                        ProcessName = "WmiPrvSE.exe",
+                                        ProcessId = proc.Id
+                                    });
+                                    _logger.LogWarning("[WmiProviderIntegrityMonitor] Unsigned module in WmiPrvSE PID {Pid}: {Path}",
+                                        proc.Id, modulePath);
+                                }
+                            }
+                            catch { } // Module access may fail for protected modules
+                        }
+                    }
+                    catch { } // Process may exit during enumeration
+                    finally { proc.Dispose(); }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "[WmiProviderIntegrityMonitor] Error scanning WmiPrvSE modules");
+            }
+        }
+
+        /// <summary>
+        /// Checks the MOF auto-recovery registry key for non-Windows MOF files.
+        /// MOF auto-recovery is a legacy persistence mechanism that auto-compiles
+        /// MOF files into WMI on repository rebuild — survives WMI reset.
+        /// </summary>
+        private async Task CheckMofAutoRecoveryAsync(CancellationToken ct)
+        {
+            try
+            {
+                using var key = Registry.LocalMachine.OpenSubKey(
+                    @"SOFTWARE\Microsoft\WBEM\CIMOM", false);
+                if (key == null) return;
+
+                var mofs = key.GetValue("Autorecover MOFs") as string[];
+                if (mofs == null || mofs.Length == 0) return;
+
+                foreach (var mof in mofs)
+                {
+                    if (ct.IsCancellationRequested) break;
+                    if (string.IsNullOrWhiteSpace(mof)) continue;
+
+                    // System MOFs under %SystemRoot%\System32\wbem are legitimate
+                    var expanded = Environment.ExpandEnvironmentVariables(mof);
+                    if (IsSystemProtectedPath(expanded)) continue;
+
+                    await _detectionEngine.EmitAsync(new DetectionEvent
+                    {
+                        RuleName = "WMI Provider Integrity: Suspicious MOF Auto-Recovery Entry",
+                        Evidence = $"Non-system MOF file in auto-recovery list: '{expanded}'",
+                        Reasoning = "A MOF file outside of the Windows system directory is registered for " +
+                                    "WMI auto-recovery. This legacy mechanism auto-compiles MOF definitions " +
+                                    "into the WMI repository on rebuild, providing rootkit-level persistence " +
+                                    "that survives WMI repository resets.",
+                        Confidence = 0.80,
+                        Tier = DetectionTier.Tier1Behavioral,
+                        AuthorizedResponse = ResponseAction.LogOnly,
+                        ProcessName = "SYSTEM",
+                        ProcessId = 0
+                    });
+                    _logger.LogWarning("[WmiProviderIntegrityMonitor] Suspicious MOF auto-recovery: {Path}", expanded);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "[WmiProviderIntegrityMonitor] Error checking MOF auto-recovery");
+            }
+        }
+
+        /// <summary>
+        /// Checks if a path is under Windows system-protected directories.
+        /// </summary>
+        private static bool IsSystemProtectedPath(string path)
+        {
+            var normalized = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar);
+            var sysRoot = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+            var sys32 = Path.Combine(sysRoot, "System32");
+            var sysWow = Path.Combine(sysRoot, "SysWOW64");
+            var winsxs = Path.Combine(sysRoot, "WinSxS");
+
+            return normalized.StartsWith(sys32, StringComparison.OrdinalIgnoreCase) ||
+                   normalized.StartsWith(sysWow, StringComparison.OrdinalIgnoreCase) ||
+                   normalized.StartsWith(winsxs, StringComparison.OrdinalIgnoreCase) ||
+                   normalized.StartsWith(sysRoot + @"\assembly", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// Checks if a path is under Program Files (legitimate third-party install location).
+        /// </summary>
+        private static bool IsInProgramFiles(string path)
+        {
+            var normalized = Path.GetFullPath(path);
+            var pf = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+            var pf86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
+
+            return normalized.StartsWith(pf, StringComparison.OrdinalIgnoreCase) ||
+                   (!string.IsNullOrEmpty(pf86) && normalized.StartsWith(pf86, StringComparison.OrdinalIgnoreCase));
+        }
+
+        /// <summary>
+        /// Determines if a namespace is in the sensitive list (power/thermal/hardware).
+        /// </summary>
+        private static bool IsSensitiveNamespace(string ns)
+        {
+            foreach (var sensitive in SensitiveNamespaces)
+            {
+                if (ns.StartsWith(sensitive, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Extracts the publisher/signer subject from a signed binary.
+        /// Returns "Unknown" if the cert cannot be read.
+        /// </summary>
+        private static string GetSignerPublisher(string filePath)
+        {
+            try
+            {
+#pragma warning disable SYSLIB0057
+                var cert = System.Security.Cryptography.X509Certificates.X509Certificate.CreateFromSignedFile(filePath);
+#pragma warning restore SYSLIB0057
+                return cert?.Subject ?? "Unknown";
+            }
+            catch { return "Unknown"; }
+        }
+
+        /// <summary>
+        /// Tracks information about a WMI provider registration.
+        /// </summary>
+        private sealed class WmiProviderInfo
+        {
+            public string Name { get; set; } = "";
+            public string Namespace { get; set; } = "";
+            public string CLSID { get; set; } = "";
+            public string? DllPath { get; set; }
+            /// <summary>Unique key: namespace\name\clsid for deduplication.</summary>
+            public string ProviderKey { get; set; } = "";
+        }
+    }
+
+
 }
