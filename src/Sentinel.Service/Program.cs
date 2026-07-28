@@ -441,6 +441,7 @@ namespace Sentinel.Service
                             sp.GetRequiredService<AcousticThreatMonitor>(),
                             sp.GetRequiredService<WfpIntegrityMonitor>(),
                             sp.GetRequiredService<DriverLoadMonitor>(),
+                            sp.GetRequiredService<WmiProviderIntegrityMonitor>(),
                         };
                         return new MonitorGroup(
                             new MonitorGroupConfig
@@ -471,6 +472,7 @@ namespace Sentinel.Service
                     services.AddSingleton<CveShieldHardener>();
                     services.AddSingleton<ApplicationIntegrityMonitor>();
                     services.AddSingleton<AcousticThreatMonitor>();
+                    services.AddSingleton<WmiProviderIntegrityMonitor>();
 
                     // ── Group 6: Peripheral & Environmental ───────────────────────────
                     // Starts late (30s). Monitors hardware peripherals and external media.
