@@ -262,6 +262,7 @@ namespace Sentinel.Service
                             sp.GetRequiredService<SyscallStubMonitor>(),
                             sp.GetRequiredService<ConnectivityCanaryMonitor>(),
                             sp.GetRequiredService<EtwSessionGuard>(),
+                            sp.GetRequiredService<EtwProviderTamperMonitor>(),
                         };
                         return new MonitorGroup(
                             new MonitorGroupConfig
@@ -282,6 +283,7 @@ namespace Sentinel.Service
                     services.AddSingleton<SyscallStubMonitor>();
                     services.AddSingleton<ConnectivityCanaryMonitor>();
                     services.AddSingleton<EtwSessionGuard>();
+                    services.AddSingleton<EtwProviderTamperMonitor>();
                     services.AddSingleton<WfpIntegrityMonitor>();
                     services.AddSingleton<DriverLoadMonitor>();
 
@@ -309,6 +311,10 @@ namespace Sentinel.Service
                             sp.GetRequiredService<AdsDataStagingMonitor>(),
                             sp.GetRequiredService<ScriptExecutionMonitor>(),
                             sp.GetRequiredService<ScriptHardeningMonitor>(),
+                            sp.GetRequiredService<NamedPipeMonitor>(),
+                            sp.GetRequiredService<RpcLateralMonitor>(),
+                            sp.GetRequiredService<TokenTheftMonitor>(),
+                            sp.GetRequiredService<CloudSyncExfilMonitor>(),
                         };
                         return new MonitorGroup(
                             new MonitorGroupConfig
@@ -336,6 +342,10 @@ namespace Sentinel.Service
                     services.AddSingleton<AdsDataStagingMonitor>();
                     services.AddSingleton<ScriptExecutionMonitor>();
                     services.AddSingleton<ScriptHardeningMonitor>();
+                    services.AddSingleton<NamedPipeMonitor>();
+                    services.AddSingleton<RpcLateralMonitor>();
+                    services.AddSingleton<TokenTheftMonitor>();
+                    services.AddSingleton<CloudSyncExfilMonitor>();
 
                     // ── Group 3: Credential Protection ────────────────────────────────
                     // Starts after core detection (4s). Protects credentials and sessions.
@@ -345,6 +355,7 @@ namespace Sentinel.Service
                         {
                             sp.GetRequiredService<CanaryFileMonitor>(),
                             sp.GetRequiredService<BrowserCredentialGuard>(),
+                            sp.GetRequiredService<BrowserC2Guard>(),
                             sp.GetRequiredService<MicrosoftAccountGuardMonitor>(),
                             sp.GetRequiredService<NullSessionGuard>(),
                             sp.GetRequiredService<BuiltinAdminGuard>(),
@@ -365,6 +376,7 @@ namespace Sentinel.Service
                     });
                     services.AddSingleton<CanaryFileMonitor>();
                     services.AddSingleton<BrowserCredentialGuard>();
+                    services.AddSingleton<BrowserC2Guard>();
                     services.AddSingleton<MicrosoftAccountGuardMonitor>();
                     services.AddSingleton<NullSessionGuard>();
                     services.AddSingleton<BuiltinAdminGuard>();

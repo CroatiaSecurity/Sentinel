@@ -85,9 +85,11 @@ namespace Sentinel.Tests
         }
 
         [Fact]
-        public void FileVerdictAds_UnsafeVerdict_CanBeUsedForDenyExecution()
+        public void FileVerdictAds_UnsafeVerdict_IsLoggedOnly()
         {
-            // Verifies the deny-execution ACL logic works on a test file
+            // v1.6.4: DenyExecution was removed. Sentinel is observe-only for file verdicts.
+            // This test verifies the old ACL-blocking behavior is gone — unsafe verdicts
+            // are logged but never modify file permissions.
             var tempDir = Path.Combine(Path.GetTempPath(), "fvs_deny_test_" + Guid.NewGuid().ToString("N")[..8]);
             Directory.CreateDirectory(tempDir);
             var testFile = Path.Combine(tempDir, "malware_sample.exe");
@@ -96,31 +98,21 @@ namespace Sentinel.Tests
             {
                 File.WriteAllText(testFile, "fake malware content");
 
-                // Apply Deny Execute ACL (same logic as FileVerdictScanner.DenyExecution)
+                // Verify NO deny rule is present (Sentinel should never add one)
                 var fileInfo = new FileInfo(testFile);
                 var acl = fileInfo.GetAccessControl();
-                var rule = new FileSystemAccessRule(
-                    new SecurityIdentifier(WellKnownSidType.WorldSid, null),
-                    FileSystemRights.ExecuteFile,
-                    AccessControlType.Deny);
-                acl.AddAccessRule(rule);
-                fileInfo.SetAccessControl(acl);
-
-                // Verify the deny rule is present
-                var newAcl = fileInfo.GetAccessControl();
-                var rules = newAcl.GetAccessRules(true, false, typeof(SecurityIdentifier));
+                var rules = acl.GetAccessRules(true, false, typeof(SecurityIdentifier));
                 bool hasDenyExecute = false;
                 foreach (FileSystemAccessRule r in rules)
                 {
                     if (r.AccessControlType == AccessControlType.Deny &&
-                        r.FileSystemRights.HasFlag(FileSystemRights.ExecuteFile) &&
-                        r.IdentityReference.Value == new SecurityIdentifier(WellKnownSidType.WorldSid, null).Value)
+                        r.FileSystemRights.HasFlag(FileSystemRights.ExecuteFile))
                     {
                         hasDenyExecute = true;
                         break;
                     }
                 }
-                Assert.True(hasDenyExecute, "Deny Execute ACL should be set on the file");
+                Assert.False(hasDenyExecute, "No Deny Execute ACL should exist — Sentinel is observe-only");
             }
             finally
             {

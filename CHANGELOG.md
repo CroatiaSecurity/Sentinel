@@ -2,6 +2,71 @@
  
 All notable changes to Sentinel are documented in this file.
 
+## [1.6.8] - 2026-07-28
+
+### Added — Detection Gap Closure (Red/Blue Audit P1–P3)
+
+Closes all remaining detection gaps from the v1.6.4 red/blue audit. Adds browser-based C2 detection, real TI-keyword memory scanning, indirect syscall detection, PrintNightmare exploitation detection, and container-to-host lateral movement. Implements cross-monitor composite correlation for named pipes and token theft.
+
+- **`BrowserC2Guard`** (CredentialProtection Group, 30s interval) — Full browser-based C2 monitor expanding `ChromeRemoteDebuggingRule`. Three detection modes: (1) Headless Chrome-as-proxy — detects headless Chromium with debug port launched by non-browser parent (0.78–0.90/KillProcessTree). (2) CDP session hijacking — scans for non-browser TCP connections to active debug ports via GetExtendedTcpTable P/Invoke (0.88/NetworkIsolate). (3) Extension manifest integrity — scans Chromium extension manifests for dangerous permissions (debugger, nativeMessaging, proxy, `<all_urls>`) with trusted extension allowlist (0.55–0.78/LogOnly).
+
+### Enhanced — Monitor Expansions
+
+- **`EtwThreatIntelMonitor`** — Now detects ALLOCVM_REMOTE + PROTECTVM_REMOTE effects by scanning high-value injection targets (svchost, explorer, lsass, etc.) for unbacked RWX memory regions via VirtualQueryEx. Targets the observable results of the Microsoft-Windows-Threat-Intelligence ETW provider keywords (GUID `{F4E1897C-BB5D-5668-F1D8-040F4D8DD344}`). Since Sentinel runs as a service (not PPL), it detects effects rather than subscribing to the kernel provider directly. Fires at 0.88 confidence. Runs every 3rd scan cycle.
+
+- **`SyscallStubMonitor`** — Expanded with indirect syscall / Hell's Gate detection. Scans non-image executable memory in target processes via ReadProcessMemory looking for the syscall stub pattern: `4C 8B D1 B8 xx xx 00 00 ... 0F 05` (mov r10,rcx; mov eax,SSN; syscall). Requires 3+ distinct stubs for a Tier1 alert (0.92/KillProcessTree). JIT processes excluded. Runs every 2nd 30s cycle.
+
+- **`PrintSpoolerMonitor`** — Added PrintNightmare-class exploitation detection (CVE-2021-34527): (1) Baselines printer driver DLLs at startup in spool\drivers paths. (2) Detects new unsigned DLLs appearing in driver directories with Authenticode verification and recency scoring (0.75–0.92/Quarantine–QuarantineAndKill). (3) Detects spoolsv.exe spawning unexpected child processes — only splwow64.exe and printfilterpipelinesvc.exe are legitimate (0.90/KillProcessTree).
+
+- **`WslMonitor`** — Added container-to-host lateral movement detection: (1) WSL processes writing to sensitive Windows paths via /mnt/c/ (System32, ProgramData, startup folders) → 0.85/KillProcessTree. (2) WSL interop spawning security-sensitive Windows binaries (reg, sc, bcdedit, schtasks, netsh, certutil) → 0.82/KillProcessTree. (3) Docker overlay filesystem processes accessing host resources (Windows dirs, registry, lsass) → 0.88/KillProcessTree.
+
+### Enhanced — Composite Detections (BehavioralCorrelationEngine)
+
+- **Named Pipe C2 + Network Beaconing** (0.95) — Fires when a process has both named pipe C2/lateral-movement signals AND network beaconing on the same PID. Enables high-confidence kill for Cobalt Strike/Impacket pipe + beacon combos.
+
+- **Token Theft + Lateral Movement** (0.93) — Fires when token manipulation (SYSTEM token theft, SeImpersonatePrivilege from suspicious path) combines with lateral movement indicators (RPC, SMB, named pipe, network share) on the same PID. Detects post-exploitation pivot pattern (MITRE T1134 + T1021).
+
+### Enhanced — ContextBus Integration
+
+- **`NamedPipeMonitor`** → publishes `NamedPipeSignal` on known-bad and high-entropy pipe detections
+- **`TokenTheftMonitor`** → publishes `TokenTheftSignal` on SYSTEM token theft and SeImpersonatePrivilege detections
+- New signal types: `NamedPipeSignal`, `TokenTheftSignal`, `TokenTheftType` enum in `EnrichmentSignals.cs`
+
+### Architecture
+
+- **CredentialProtection Group** expanded from 6 to 7 monitors (+BrowserC2Guard)
+- BrowserC2Guard uses direct `GetExtendedTcpTable` P/Invoke for CDP client detection (no NetworkMonitor coupling)
+- All new detection uses existing DI patterns with optional ContextBus parameters for backward compatibility
+- ETW-TI comment documentation includes verified provider GUID, kernel function names, and PPL requirement explanation
+
+---
+
+## [1.6.7] - 2026-07-28
+
+### Added — Blind Spot Elimination (5 new monitors from Red/Blue Audit P0–P2)
+
+Addresses the highest-priority detection gaps identified in the v1.6.0 red/blue team audit. Closes named pipe C2, outbound lateral movement, token theft, cloud sync exfiltration, and ETW provider tampering blind spots.
+
+- **`NamedPipeMonitor`** (CoreDetection Group, 15s interval) — Enumerates `\\.\pipe\` and detects C2/lateral movement named pipes. Matches known-bad patterns for Cobalt Strike (msagent_, MSSE-, postex_), PsExec (psexecsvc, svcctl, RemCom_), Impacket (csexec_), Metasploit (meterpreter_, msf_), Sliver, and Havoc. Detects high-entropy pipe names from non-system processes as potential custom C2 channels. Uses `GetNamedPipeServerProcessId` P/Invoke for owner PID attribution. Baselines all existing pipes at startup to avoid false positives. Known-bad pattern → Tier1/0.82/KillProcessTree. High-entropy from non-system → Tier2/0.65/LogOnly. Addresses audit finding "Named pipes — IOC-ish only — HIGH blind spot."
+
+- **`RpcLateralMonitor`** (CoreDetection Group, 10s interval) — Detects outbound lateral movement via RPC/DCOM/WMI/WinRM. Monitors TCP connections to ports 135, 445, 5985, 5986 from suspicious parent processes (script hosts, Office apps, LOLBins). Pattern-matches command lines for explicit lateral movement: `wmic /node:`, `Invoke-Command -ComputerName`, `winrs -r:`, `sc \\host`, `schtasks /s`, `reg \\host`. Confirmed command pattern → Tier1/0.88/KillProcessTree. Suspicious connection without pattern → Tier2/0.62/LogOnly. Addresses audit finding "RPC / DCOM lateral — Port block only — HIGH blind spot."
+
+- **`TokenTheftMonitor`** (CoreDetection Group, 20s interval) — Detects token manipulation beyond integrity level changes (which TokenIntegrityMonitor covers). Scans all processes for SYSTEM/LocalService/NetworkService tokens held by non-service processes. Detects SeImpersonatePrivilege enabled from user-writable paths (potato-class privilege escalation: GodPotato, JuicyPotato, PrintSpoofer). Uses OpenProcessToken + GetTokenInformation + LookupAccountSid for token user inspection. SYSTEM token from suspicious path → Tier1/0.90/KillProcessTree. SeImpersonate from temp → Tier1/0.85/KillProcessTree. Addresses audit finding "Token theft / make_token / Rubeus — Partial — Med–High blind spot."
+
+- **`CloudSyncExfilMonitor`** (CoreDetection Group, 15s interval) — Monitors cloud sync directories (OneDrive, Dropbox, Google Drive, MEGA, iCloud, pCloud) for data staging exfiltration. Discovers sync directories via environment variables and well-known paths. Baselines file counts at startup; alerts on burst file creation (50+ new files since baseline). Detects exfiltration sync tools (rclone, megasync, megacmd, cyberduck, FreeFileSync) — tools from suspicious paths → Tier1/0.88/KillProcessTree. Burst staging in sync folder → Tier2/0.62–0.82/LogOnly. Addresses audit finding "Cloud sync exfil (OneDrive/Dropbox/rclone) — Weak — Med–High blind spot."
+
+- **`EtwProviderTamperMonitor`** (Critical Group, 30s interval, restarts indefinitely) — Detects ETW provider manipulation in OTHER processes beyond Sentinel's own session (which EtwSessionGuard covers). Three detection modes: (1) Enumerates active ETW sessions via QueryAllTracesW; alerts if critical sessions (EventLog-Security, SentinelUnifiedTrace, etc.) are stopped. (2) Reads EtwEventWrite function prologue in lsass.exe and EventLog svchost via ReadProcessMemory; detects RET/NOP/JMP patches that blind ETW consumers. (3) Monitors for logman.exe/wevtutil.exe with manipulation commands (stop/delete/disable patterns). ETW patch confirmed → Tier1/0.95/KillProcessTree. Session stopped → Tier1/0.92/LogOnly. logman manipulation → Tier1/0.88–0.95/KillProcessTree. Addresses audit finding "ETW blind / provider strip — Weak — HIGH blind spot."
+
+### Architecture
+
+- **CoreDetection Group** expanded from 17 to 21 monitors (+NamedPipeMonitor, RpcLateralMonitor, TokenTheftMonitor, CloudSyncExfilMonitor)
+- **Critical Group** expanded from 6 to 7 monitors (+EtwProviderTamperMonitor)
+- All new monitors follow BackgroundService + DI pattern with CancellationToken threading
+- All file I/O uses `FileShare.ReadWrite | FileShare.Delete` per design constraints
+- No kernel drivers, no direct syscalls — all detection is userland-compatible
+
+---
+
 ## [1.6.6] - 2026-07-28
 
 ### Added

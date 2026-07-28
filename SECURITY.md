@@ -4,7 +4,7 @@
 
 | Version | Supported |
 |---------|-----------|
-| 1.6.x   | Yes (current: 1.6.3) |
+| 1.6.x   | Yes (current: 1.6.8) |
 | 1.5.x   | Security fixes only |
 | 1.4.x   | Security fixes only |
 | < 1.4   | No        |
@@ -59,6 +59,7 @@ The following are NOT in scope:
 
 See [CHANGELOG.md](CHANGELOG.md) for the full history of security fixes, including:
 
+- v1.6.8: Browser C2 detection gaps, indirect syscall evasion, PrintNightmare exploitation, container escape blind spots
 - v1.6.0: Threat-proxy auth redesign, ActiveResponse boot enforce, SYSTEM-only entropy, kill rate limits
 - v1.4.5: LSA secret storage, Credential Guard monitoring, correlation engine fix
 - v1.4.4: 15 red-team findings (command injection, HMAC weakness, handle leaks, self-exclusion bypass)
