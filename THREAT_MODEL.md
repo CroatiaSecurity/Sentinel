@@ -1,6 +1,6 @@
 # Sentinel — Threat Model
 
-**Version: 1.6.3**
+**Version: 1.7.0**
 
 This document assumes the attacker has read the source code.
 
@@ -11,8 +11,11 @@ This document assumes the attacker has read the source code.
 ```
 ┌─────────────────────────────────────────────────────────┐
 │ KERNEL (ring 0)                                         │
-│   - Sentinel has NO visibility here                     │
-│   - Attacker with driver = game over                    │
+│   - Sentinel has NO kernel component                    │
+│   - Active driver can suppress userland (but Sentinel   │
+│     detects the ENTIRE chain leading to driver load:    │
+│     priv esc → cert plant → .sys drop → service create) │
+│   - v1.7.0: Planted signing certs are auto-revoked     │
 └─────────────────────────────────────────────────────────┘
                           │
 ┌─────────────────────────────────────────────────────────┐
@@ -39,7 +42,21 @@ This document assumes the attacker has read the source code.
 
 ---
 
-## Monitor Coverage Summary (v1.4.5)
+## Monitor Coverage Summary (v1.7.0)
+
+See design.md for the full 80+ monitor inventory. Key additions since v1.4.5:
+
+- **DriverLoadMonitor** (v1.5.0) — BYOVD detection + cert-tracing (v1.7.0)
+- **BrowserC2Guard** (v1.6.8) — Headless Chrome proxy, CDP hijacking, extension integrity
+- **EtwThreatIntelMonitor expanded** (v1.6.8) — Unbacked RWX region detection
+- **SyscallStubMonitor expanded** (v1.6.8) — Hell's Gate / indirect syscall detection
+- **PrintSpoolerMonitor expanded** (v1.6.8) — PrintNightmare-class exploitation
+- **WslMonitor expanded** (v1.6.8) — Container-to-host lateral movement
+- **WfpIntegrityMonitor** (v1.6.8) — WFP filter tamper detection
+- **WmiProviderIntegrityMonitor** (v1.6.6) — Malicious WMI provider DLLs
+- **ConnectivityCanaryMonitor** — EDRSilencer detection
+- **EtwSessionGuard** (v1.6.1) — Self-healing ETW session
+- **EtwProviderTamperMonitor** — EtwEventWrite patch detection
 
 ### Group 1: Critical (Self-Protection)
 | Monitor | Purpose |
@@ -145,10 +162,17 @@ This document assumes the attacker has read the source code.
 **Attack:** Load a signed vulnerable driver, use it to kill Sentinel from kernel.
 
 **Mitigation:**
-- BYOVD detection rule (known vulnerable driver hashes)
+- `DriverLoadMonitor` detects Event 7045 (service install), registry service creation, and .sys drops in user-writable paths every 15s
+- Embedded blocklist of 35+ known vulnerable driver hashes (Microsoft WDBL + LOLDrivers)
+- Known vulnerable driver filenames flagged even without hash match
+- High-confidence matches (hash or name+non-standard-path) → `KillProcessTree` + service disable/delete via native SCM
+- **v1.7.0 cert-tracing:** Extracts Authenticode cert from detected driver → checks if cert was planted in TrustedPublisher/Root stores → if NOT a public CA, fires `RemoveCertAndKillAdder` (revokes cert, kills installer chain, scans for other drivers signed by same cert)
+- Prerequisite monitoring: privilege escalation, UAC bypass, token manipulation all detected before attacker reaches the point of driver installation
+- `SecureBootIntegrityMonitor` detects test signing mode / kernel debug enabled
+- `WfpIntegrityMonitor` detects WFP filters blocking Sentinel/EDR processes
 - Memory Integrity (HVCI) monitoring — alerts if disabled
 
-**Residual risk:** HIGH. If HVCI is off and attacker has admin, they can load any signed driver. Sentinel cannot prevent kernel-level attacks.
+**Residual risk:** MEDIUM. Sentinel wins the race in most scenarios because it monitors the prerequisites (priv esc, file drop, service creation, cert planting). If an attacker has admin, bypasses all prerequisite detections silently, uses an unknown driver not on the blocklist signed by a legitimate public CA (not a planted cert), AND loads it faster than the 15s poll — then the driver can suppress Sentinel. Remote alerting fires before suppression in most cases.
 
 ---
 
@@ -357,16 +381,15 @@ This document assumes the attacker has read the source code.
 
 Fundamental limitations, not bugs:
 
-1. **Kernel-level attacks** — No visibility below ring 3
+1. **Kernel-level attacks with novel implants** — No visibility below ring 3; however, attack surface is drastically reduced (WinRM, RDP, SMB, remote WMI, Remote Registry, SSH all disabled with self-healing IPSec; 50+ ports blocked; DEP/SEHOP/Spectre mitigations enforced). Cozy Bear (APT29) relies on WinRM and WMI for lateral movement — both are dead on a Sentinel-hardened machine.
 2. **Hardware implants** — No firmware/UEFI visibility (but detects Secure Boot disabled)
 3. **Pre-boot attacks** — Sentinel starts after Windows boots (detects boot config tampering)
 4. **Attacker with physical access + offline disk** — Can boot from USB, modify disk (but detects post-idle hardware changes)
 5. **Attacker already running as SYSTEM** — Can kill Sentinel (watchdog adds delay only)
-6. **Nation-state tooling** — Custom kernel implants, 0-days, hardware backdoors
-7. **Encrypted C2 over legitimate ports** — Looks like normal HTTPS (but TLS cert monitor detects rogue CA installations)
-8. **Direct syscalls from custom code** — Bypasses ntdll hooks (SyscallStubMonitor detects unhooking attempts)
-9. **GPU memory-resident malware** — Code in GPU VRAM/compute shaders has no CPU-side memory to scan
-10. **Physical-layer Wi-Fi attacks** — Cannot see deauth frames directly (detects rapid disconnects)
+6. **Encrypted C2 over legitimate ports** — Looks like normal HTTPS (but TLS cert monitor detects rogue CA installations; beaconing detector catches statistical patterns)
+7. **Direct syscalls from custom code** — Bypasses ntdll hooks (SyscallStubMonitor detects unhooking attempts; v1.6.8 Hell's Gate in-memory pattern detection scans for syscall stubs in non-image regions)
+8. **GPU memory-resident malware** — Code in GPU VRAM/compute shaders has no CPU-side memory to scan
+9. **Physical-layer Wi-Fi attacks** — Cannot see deauth frames directly (detects rapid disconnects)
 
 ---
 
@@ -430,6 +453,9 @@ Hard-to-bypass detections (require kernel access to evade):
 
 See CHANGELOG.md for full history. Key fixes:
 
+- **v1.7.0:** BYOVD cert-tracing: `DriverLoadMonitor` now extracts Authenticode cert from detected drivers, checks TrustedPublisher/Root stores, revokes planted non-public certs via `RemoveCertAndKillAdder`, scans System32\drivers for other drivers signed by same identity. Closes the fake-Chromecast-CA / planted-cert BYOVD attack chain.
+- **v1.6.9:** IDE false-positive kill prevention: V8 JIT code matching syscall-stub patterns no longer kills Electron IDEs; ChainTracer preserves IDE host ancestors; AdvancedResponseEngine IDE host protection demotes to LogOnly for non-President's-Law rules.
+- **v1.6.8:** BrowserC2Guard (headless Chrome proxy + CDP hijack + extension integrity), EtwThreatIntelMonitor RWX detection, SyscallStubMonitor Hell's Gate patterns, PrintSpoolerMonitor PrintNightmare exploitation, WslMonitor container-to-host lateral movement, Named Pipe + Beaconing and Token + Lateral composite detections.
 - **v1.6.3:** OS self-DoS closed: `QuarantineManager` + `IncidentResponseService` hard-refuse OS-critical paths (production FP deleted System32 `powershell.exe` after AMSI false positive). System PowerShell AMSI demotion to LogOnly. Failed USB enumeration Tier1 + auto-disable; `TrustedUsbDevices` allowlist.
 - **v1.6.2:** Installer/shell false-positive remediation (ProgramData evidence): PPID spoof no longer kills Inno Setup extractors; Raw Disk Access never kills explorer/taskhostw under Windows; ChainTracer preserves critical hosts with empty path and signed installer ancestors; QuarantineManager refuses Authenticode-signed files by default; EphemeralProcessMonitor ignores installer prefetch noise; shared InstallerHeuristics
 - **v1.6.1:** EtwSessionGuard (heal stopped ETW session), NetworkIsolate rate limit + budget Tier1 alerts, ClickFix/FakeCAPTCHA clipboard+rule expansion, NpmSupplyChainRule
