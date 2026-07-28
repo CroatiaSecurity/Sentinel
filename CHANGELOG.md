@@ -2,6 +2,26 @@
  
 All notable changes to Sentinel are documented in this file.
 
+## [1.6.9] - 2026-07-28
+
+### Fixed (False Positive — IDE/Development Tool Kill)
+
+- **[CRITICAL] SyscallStubMonitor no longer kills Kiro / Electron IDEs** — V8's JIT compiler generates machine code in private RWX memory that matches the Hell's Gate / indirect syscall stub pattern (`4C 8B D1 B8 xx xx 00 00 … 0F 05`). The `IsJitProcess` exemption list was missing Kiro, Windsurf, Positron, Devin, Electron, and several other JIT/Chromium-based processes. All known Electron IDEs and V8 embedders are now exempted from in-memory syscall-stub scanning.
+
+- **[HIGH] AdvancedResponseEngine IDE host protection** — Even if a future detection fires against a signed IDE process in a legitimate install path (Program Files, AppData\Local\Programs), the response engine now demotes to `LogOnly` unless the rule is a President's Law category (confirmed injection/C2 INTO the IDE, not BY the IDE). This prevents any heuristic-based kill of developer tools.
+
+- **[HIGH] ChainTracer preserves IDE host ancestors** — When a child process of an IDE (node.exe, tsserver, extension host) triggers a detection, the ChainTracer kill-chain walker now recognizes IDE hosts (Kiro, VS Code, Cursor, Rider, etc.) and preserves them — killing only the offending child. Requires the IDE binary to reside in a legitimate path or be Authenticode-signed.
+
+- **[MEDIUM] AllowlistService.DevelopmentProcesses updated** — Added `kiro`, `positron`, and `Devin` to the central development process list used for behavioral demotion.
+
+### Fixed (USB device notification icon not cleaned up)
+
+- **[HIGH] Startup baseline scan ejects pre-existing failed-enumeration devices** — v1.6.4's `EjectUsbDevice` only ran for devices detected at runtime (post-baseline). If a hostile/broken USB device was already connected at boot, it was silently baselined and the Windows "USB device not recognized" tray notification icon persisted indefinitely. Now `UsbDeviceFingerprinter` scans all baseline devices at startup and auto-disables + ejects any in failed-enumeration state (VID_0000, "Device Descriptor Request Failed", "Unknown USB Device").
+
+- **[LOW] Extracted `IsFailedEnumerationDevice` helper** — Consolidated the 4-way failed-enumeration check into a single reusable method, eliminating logic duplication between startup scan and runtime poll.
+
+---
+
 ## [1.6.8] - 2026-07-28
 
 ### Added — Detection Gap Closure (Red/Blue Audit P1–P3)

@@ -244,6 +244,29 @@ namespace Sentinel.Core
             }
             catch { }
 
+            // v1.6.9: IDE / development tool protection — Electron/V8 apps generate JIT code
+            // that matches syscall-stub patterns, RWX memory patterns, and other heuristics.
+            // Killing an IDE is an irreversible false positive that destroys the developer's
+            // session. Demote to LogOnly unless this is a President's Law rule (actual confirmed
+            // malicious activity like process injection INTO the IDE).
+            if (!isPresidentsLaw && detection.ProcessId > 0 &&
+                ChainTracer.IsLegitimateIdeHost(imagePath, detection.ProcessName))
+            {
+                reason = $"LogOnly (IDE host protection: {detection.ProcessName} at '{imagePath}')";
+                stopwatch.Stop();
+                _metrics.RecordResponse(stopwatch.ElapsedMilliseconds);
+                var ideLog = new ResponseEvent
+                {
+                    ProcessId = detection.ProcessId,
+                    ProcessName = detection.ProcessName,
+                    ActionTaken = "LOG",
+                    Reason = reason,
+                    ExecutionTimeMs = stopwatch.ElapsedMilliseconds
+                };
+                await _eventLogger.LogEventAsync("response", ideLog);
+                return;
+            }
+
             if (_allowlist != null && _allowlist.ShouldSuppress(detection.ProcessName, imagePath, detection.RuleName))
             {
                 effectiveTier = DetectionTier.Tier2Indicator;

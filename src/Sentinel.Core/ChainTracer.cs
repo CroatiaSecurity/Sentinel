@@ -62,6 +62,35 @@ namespace Sentinel.Core
             "braveupdate", "opera_standalone", "firefox setup", "firefox setup stub"
         };
 
+        /// <summary>
+        /// IDE / development tool process stems. These are Electron/CEF apps that spawn
+        /// many child processes (node, electron helpers, conhost, terminals). If a child
+        /// triggers a detection, we kill the child but NEVER walk up and kill the IDE host
+        /// — that destroys the developer's session and is an irreversible false positive.
+        /// Protection requires the binary to reside in a legitimate install path (Program Files
+        /// or user AppData/Local/Programs) to prevent abuse via renames in Temp/Downloads.
+        /// </summary>
+        private static readonly HashSet<string> IdeHostProcessNames = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "code", "Code - Insiders", "kiro", "cursor", "windsurf", "positron",
+            "Devin", "Antigravity IDE",
+            "rider64", "idea64", "phpstorm64", "webstorm64", "goland64",
+            "pycharm64", "clion64", "rubymine64", "datagrip64",
+            "devenv", // Visual Studio
+        };
+
+        private static readonly string[] LegitimateIdePaths =
+        {
+            @"\program files\",
+            @"\program files (x86)\",
+            @"\appdata\local\programs\",
+            @"\appdata\local\kiro\",
+            @"\appdata\local\cursor\",
+            @"\appdata\local\microsoft vs code\",
+            @"\appdata\local\devin\",
+            @"\jetbrains\",
+        };
+
         private static readonly string[] LegitimateBrowserPaths =
         {
             @"\program files\google\chrome\",
@@ -179,6 +208,19 @@ namespace Sentinel.Core
                             _logger.LogInformation(
                                 "[ChainTracer] Preserving installer extractor ancestor PID {Pid} ({Name})",
                                 node.ProcessId, node.ProcessName);
+                            continue;
+                        }
+
+                        // IDE / development tool hosts (Kiro, VS Code, Cursor, Rider, etc.):
+                        // These Electron/JIT apps spawn many child processes (node, tsserver,
+                        // extension hosts, terminals). Killing the IDE host is an irreversible
+                        // false positive that destroys the developer's entire session.
+                        // We only skip killing if the binary is in a legitimate install path.
+                        if (node.ProcessId != detection.ProcessId && IsLegitimateIdeHost(node.ImagePath, node.ProcessName))
+                        {
+                            _logger.LogInformation(
+                                "[ChainTracer] Preserving IDE host PID {Pid} ({Name}) path={Path}",
+                                node.ProcessId, node.ProcessName, node.ImagePath);
                             continue;
                         }
 
@@ -433,6 +475,37 @@ namespace Sentinel.Core
                 return Convert.ToHexString(hash);
             }
             catch { return ""; }
+        }
+
+        /// <summary>
+        /// v1.6.9: Determines whether a process is a legitimate IDE/dev-tool host.
+        /// Requires BOTH: (1) process name matches known IDE stems, AND (2) binary
+        /// resides in a legitimate install path (Program Files, AppData\Local\Programs, etc.).
+        /// An attacker renaming malware "kiro.exe" in Temp/Downloads will NOT be protected.
+        /// </summary>
+        internal static bool IsLegitimateIdeHost(string? imagePath, string processName)
+        {
+            if (string.IsNullOrEmpty(processName)) return false;
+            var cleanName = processName.Replace(".exe", "", StringComparison.OrdinalIgnoreCase);
+            if (!IdeHostProcessNames.Contains(cleanName)) return false;
+
+            // Name matches — verify the path is legitimate
+            if (!string.IsNullOrEmpty(imagePath))
+            {
+                var lowerPath = imagePath.ToLowerInvariant();
+                if (LegitimateIdePaths.Any(p => lowerPath.Contains(p)))
+                    return true;
+
+                // Fallback: if binary is validly signed, trust it regardless of path
+                try
+                {
+                    if (File.Exists(imagePath) && SecurityValidation.VerifyAuthenticodeSignature(imagePath))
+                        return true;
+                }
+                catch { }
+            }
+
+            return false;
         }
     }
 
