@@ -168,16 +168,43 @@ namespace Sentinel.Core
                                             }
                                             else if (repoResult.Verdict == FileVerdict.HighRisk)
                                             {
+                                                // v1.6.4: EDR philosophy — "unknown" ≠ "malicious".
+                                                // If the binary looks like a legitimate installer and NO reputation
+                                                // source positively confirmed it as malicious (just "not found" / error),
+                                                // demote to Tier2/LogOnly. Let it run; behavioral monitors will catch
+                                                // actual malicious activity. This prevents killing our own installer
+                                                // and other legitimate unsigned software (Git, Python, etc.).
+                                                var isInstallerLike = InstallerHeuristics.LooksLikeInstallerName(pt.ProcessName, imagePath);
+                                                var hasPositiveMaliciousSignal =
+                                                    repoResult.HashReputation.MalwareBazaarVerdict.Status == VerdictStatus.Malicious ||
+                                                    (repoResult.HashReputation.VirusTotalVerdict.Status == VerdictStatus.Malicious) ||
+                                                    isIoC;
+
+                                                var effectiveTier = DetectionTier.Tier1Behavioral;
+                                                var effectiveResponse = ResponseAction.KillProcess;
+                                                var effectiveConfidence = 0.80;
+
+                                                if (isInstallerLike && !hasPositiveMaliciousSignal)
+                                                {
+                                                    // Installer-like + merely "unknown" = observe only
+                                                    effectiveTier = DetectionTier.Tier2Indicator;
+                                                    effectiveResponse = ResponseAction.LogOnly;
+                                                    effectiveConfidence = 0.45;
+                                                }
+
                                                 var reputationEvent = new DetectionEvent
                                                 {
                                                     RuleName = "File Reputation: High-Risk Binary Executed",
                                                     Evidence = $"Process '{pt.ProcessName}' (PID {pt.ProcessId}) binary scored {repoResult.CompositeScore}/100 " +
                                                                $"(Verdict: {repoResult.Verdict}, Signed: {repoResult.IsSigned})",
-                                                    Reasoning = "The binary's reputation score indicates high risk based on multi-signal analysis. " +
-                                                                "Flagged by one or more threat intelligence sources or exhibits suspicious static properties.",
-                                                    Confidence = 0.80,
-                                                    Tier = DetectionTier.Tier1Behavioral,
-                                                    AuthorizedResponse = ResponseAction.KillProcess,
+                                                    Reasoning = isInstallerLike && !hasPositiveMaliciousSignal
+                                                        ? "The binary scored HighRisk but matches installer heuristics and has no positive malicious confirmation. " +
+                                                          "Demoted to Tier2/LogOnly per EDR observe-first principle. Behavioral monitors remain active."
+                                                        : "The binary's reputation score indicates high risk based on multi-signal analysis. " +
+                                                          "Flagged by one or more threat intelligence sources or exhibits suspicious static properties.",
+                                                    Confidence = effectiveConfidence,
+                                                    Tier = effectiveTier,
+                                                    AuthorizedResponse = effectiveResponse,
                                                     ProcessName = pt.ProcessName,
                                                     ProcessId = pt.ProcessId,
                                                     SignalType = SignalType.SuspiciousProcess,
@@ -185,7 +212,9 @@ namespace Sentinel.Core
                                                     {
                                                         { "SHA256", hash },
                                                         { "CompositeScore", repoResult.CompositeScore.ToString() },
-                                                        { "FileVerdict", repoResult.Verdict.ToString() }
+                                                        { "FileVerdict", repoResult.Verdict.ToString() },
+                                                        { "InstallerHeuristic", isInstallerLike.ToString() },
+                                                        { "Demoted", (isInstallerLike && !hasPositiveMaliciousSignal).ToString() }
                                                     }
                                                 };
                                                 await ProcessDetectionAsync(reputationEvent);

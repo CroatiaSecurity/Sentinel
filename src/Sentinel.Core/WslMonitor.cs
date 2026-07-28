@@ -108,6 +108,8 @@ namespace Sentinel.Core
                     await ScanWslProcesses(ct);
                     await CheckNewDistroInstalls(ct);
                     await MonitorWslFileAccess(ct);
+                    // v1.6.8: Detect lateral movement FROM container/WSL INTO host
+                    await DetectContainerToHostLateralMovement(ct);
                 }
                 catch (OperationCanceledException) { break; }
                 catch (Exception ex) { _logger.LogDebug(ex, "[WslMonitor] Error"); }
@@ -342,6 +344,276 @@ namespace Sentinel.Core
         {
             if (string.IsNullOrEmpty(value)) return "";
             return value.Length <= maxLength ? value : value[..maxLength] + "...";
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // v1.6.8: Container/WSL Lateral Movement INTO Host Detection
+        //
+        // Blind spot: WslMonitor tracked activity FROM host INTO WSL and suspicious
+        // commands inside WSL. It did NOT detect lateral movement FROM container/WSL
+        // INTO the Windows host, which includes:
+        // - WSL processes writing to sensitive Windows paths via /mnt/c/
+        // - Docker container escape indicators (mount namespace manipulation)
+        // - Processes spawned from \\wsl$ paths that access Windows credentials
+        // - WSL interop (.exe spawning from Linux context) targeting system resources
+        // ═══════════════════════════════════════════════════════════════
+
+        private readonly HashSet<string> _alertedLateralPaths = new(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// Detects lateral movement FROM WSL/container INTO the Windows host.
+        /// Called from the main scan loop.
+        /// </summary>
+        private async Task DetectContainerToHostLateralMovement(CancellationToken ct)
+        {
+            await DetectWslHostFilesystemWrites(ct);
+            await DetectWslInteropEscalation(ct);
+            await DetectDockerEscapeIndicators(ct);
+        }
+
+        /// <summary>
+        /// Detects WSL processes writing to sensitive Windows host paths via /mnt/c/ mapping.
+        /// This catches attackers using WSL to modify Windows system files, drop payloads,
+        /// or edit startup/autorun locations from within the Linux environment.
+        /// </summary>
+        private async Task DetectWslHostFilesystemWrites(CancellationToken ct)
+        {
+            // Check for wsl.exe/bash.exe processes with commands targeting sensitive host paths
+            foreach (var kvp in _trackedWslProcesses)
+            {
+                if (ct.IsCancellationRequested) break;
+
+                var info = kvp.Value;
+                var cmdLower = info.CommandLine.ToLowerInvariant();
+
+                // Detect writes to sensitive Windows paths from WSL
+                var sensitiveHostPaths = new[]
+                {
+                    "/mnt/c/windows/system32",
+                    "/mnt/c/windows/syswow64",
+                    "/mnt/c/programdata",
+                    "/mnt/c/users/*/appdata/roaming/microsoft/windows/start menu/programs/startup",
+                    "/mnt/c/users/*/ntuser.dat",
+                    @"\\\\wsl.*\\.*\\windows",
+                };
+
+                // Check for write operations targeting host paths
+                bool isWriteOperation = cmdLower.Contains(">") || cmdLower.Contains("tee ") ||
+                                        cmdLower.Contains("cp ") || cmdLower.Contains("mv ") ||
+                                        cmdLower.Contains("dd ") || cmdLower.Contains("install ") ||
+                                        cmdLower.Contains("wget -o") || cmdLower.Contains("curl -o");
+
+                bool targetsSensitivePath = cmdLower.Contains("/mnt/c/windows") ||
+                                            cmdLower.Contains("/mnt/c/programdata") ||
+                                            cmdLower.Contains("/mnt/c/program files") ||
+                                            (cmdLower.Contains("/mnt/c/users") && cmdLower.Contains("startup"));
+
+                if (isWriteOperation && targetsSensitivePath)
+                {
+                    string alertKey = $"wsl_lateral_{info.Pid}_{cmdLower.GetHashCode()}";
+                    if (_alertedLateralPaths.Contains(alertKey)) continue;
+                    _alertedLateralPaths.Add(alertKey);
+
+                    await _detectionEngine.EmitAsync(new DetectionEvent
+                    {
+                        RuleName = "WSL: Lateral Movement — Host Filesystem Write to Sensitive Path",
+                        Evidence = $"WSL process '{info.ProcessName}' (PID {info.Pid}) writing to sensitive Windows path. " +
+                                   $"Command: {Truncate(info.CommandLine, 250)}",
+                        Reasoning = "A process running inside WSL is writing to a sensitive Windows host filesystem location " +
+                                    "via the /mnt/ mount point. WSL has full read-write access to the Windows filesystem, " +
+                                    "allowing attackers to drop payloads into system directories, modify startup items, " +
+                                    "or overwrite system binaries — all from within the Linux environment where " +
+                                    "Windows-native AV/EDR has limited visibility (MITRE T1611).",
+                        Confidence = 0.85,
+                        Tier = DetectionTier.Tier1Behavioral,
+                        AuthorizedResponse = ResponseAction.KillProcessTree,
+                        SignalType = SignalType.SuspiciousProcess,
+                        ProcessName = info.ProcessName,
+                        ProcessId = info.Pid,
+                        Metadata = new Dictionary<string, string>
+                        {
+                            ["CommandLine"] = Truncate(info.CommandLine, 500),
+                            ["Technique"] = "T1611-ContainerEscape"
+                        }
+                    });
+                }
+            }
+        }
+
+        /// <summary>
+        /// Detects WSL interop abuse: Linux processes spawning Windows .exe files
+        /// targeting credential stores, security tools, or system configuration.
+        /// WSL interop allows running Windows binaries from within Linux via /mnt/c/ or
+        /// direct .exe invocation — this is a lateral movement vector into the host.
+        /// </summary>
+        private async Task DetectWslInteropEscalation(CancellationToken ct)
+        {
+            // Look for WSL-spawned processes targeting Windows security-sensitive binaries
+            foreach (var proc in Process.GetProcesses())
+            {
+                if (ct.IsCancellationRequested) break;
+
+                try
+                {
+                    // Check if this process was spawned by a WSL process
+                    int parentPid = GetParentPidForWsl(proc.Id);
+                    if (parentPid <= 0) continue;
+
+                    bool parentIsWsl = _trackedWslProcesses.ContainsKey(parentPid);
+                    if (!parentIsWsl)
+                    {
+                        // Also check if parent is wsl.exe / bash.exe
+                        try
+                        {
+                            using var parent = Process.GetProcessById(parentPid);
+                            var parentName = parent.ProcessName.ToLowerInvariant();
+                            parentIsWsl = parentName is "wsl" or "wslhost" or "bash";
+                        }
+                        catch { continue; }
+                    }
+
+                    if (!parentIsWsl) continue;
+
+                    string procName = proc.ProcessName.ToLowerInvariant();
+                    string cmdLine = GetProcessCommandLine(proc.Id).ToLowerInvariant();
+
+                    // Sensitive Windows commands spawned from WSL context
+                    bool isSensitive =
+                        procName is "reg" or "regedit" or "sc" or "bcdedit" or "schtasks" or
+                                   "netsh" or "wmic" or "vssadmin" or "icacls" or "takeown" or
+                                   "certutil" or "bitsadmin" or "mshta" or "regsvr32" ||
+                        (procName == "powershell" && (cmdLine.Contains("bypass") || cmdLine.Contains("encodedcommand"))) ||
+                        (procName == "cmd" && (cmdLine.Contains("reg add") || cmdLine.Contains("sc create")));
+
+                    if (isSensitive)
+                    {
+                        string alertKey = $"wsl_interop_{proc.Id}_{procName}";
+                        if (_alertedLateralPaths.Contains(alertKey)) continue;
+                        _alertedLateralPaths.Add(alertKey);
+
+                        await _detectionEngine.EmitAsync(new DetectionEvent
+                        {
+                            RuleName = "WSL: Lateral Movement — Interop Spawning Sensitive Windows Process",
+                            Evidence = $"WSL interop spawned sensitive Windows process: '{proc.ProcessName}' (PID {proc.Id}). " +
+                                       $"Parent PID: {parentPid} (WSL). Command: {Truncate(cmdLine, 200)}",
+                            Reasoning = "A Windows security-sensitive process was spawned from a WSL/Linux parent context via " +
+                                        "WSL interop. This allows attackers to use Linux-native tools for reconnaissance, " +
+                                        "then pivot into Windows host configuration modification via .exe spawning — " +
+                                        "effectively escaping the container boundary for host compromise (MITRE T1611, T1059).",
+                            Confidence = 0.82,
+                            Tier = DetectionTier.Tier1Behavioral,
+                            AuthorizedResponse = ResponseAction.KillProcessTree,
+                            SignalType = SignalType.SuspiciousProcess,
+                            ProcessName = proc.ProcessName,
+                            ProcessId = proc.Id,
+                            Metadata = new Dictionary<string, string>
+                            {
+                                ["ParentPid"] = parentPid.ToString(),
+                                ["CommandLine"] = Truncate(cmdLine, 500),
+                                ["Technique"] = "T1611-WSLInteropEscape"
+                            }
+                        });
+                    }
+                }
+                catch { }
+                finally { proc.Dispose(); }
+            }
+        }
+
+        /// <summary>
+        /// Detects Docker container escape indicators visible from the Windows host:
+        /// - Docker Desktop spawning processes with elevated privileges
+        /// - com.docker.* processes accessing Windows credential stores
+        /// - Unexpected mount namespace manipulation (Hyper-V socket abuse)
+        /// </summary>
+        private async Task DetectDockerEscapeIndicators(CancellationToken ct)
+        {
+            // Check for Docker-related processes doing suspicious things
+            foreach (var proc in Process.GetProcesses())
+            {
+                if (ct.IsCancellationRequested) break;
+
+                try
+                {
+                    var name = proc.ProcessName.ToLowerInvariant();
+
+                    // Detect processes spawned by Docker that access host resources suspiciously
+                    if (name.StartsWith("com.docker") || name == "docker" || name == "dockerd")
+                    {
+                        // Docker processes shouldn't be spawning cmd/powershell with suspicious args
+                        continue; // Docker itself is legitimate — we monitor its children
+                    }
+
+                    // Detect processes whose parent is a Docker container runtime
+                    // that are accessing Windows security-sensitive resources
+                    string imagePath = SecurityValidation.GetProcessImagePath(proc.Id) ?? "";
+
+                    // Process running from Docker overlay filesystem reaching into host
+                    if (imagePath.Contains(@"\Docker\", StringComparison.OrdinalIgnoreCase) &&
+                        imagePath.Contains(@"\overlay2\", StringComparison.OrdinalIgnoreCase))
+                    {
+                        string cmdLine = GetProcessCommandLine(proc.Id);
+                        bool targetsSensitiveResource =
+                            cmdLine.Contains(@"\Windows\", StringComparison.OrdinalIgnoreCase) ||
+                            cmdLine.Contains(@"\ProgramData\", StringComparison.OrdinalIgnoreCase) ||
+                            cmdLine.Contains("HKLM", StringComparison.OrdinalIgnoreCase) ||
+                            cmdLine.Contains("lsass", StringComparison.OrdinalIgnoreCase);
+
+                        if (targetsSensitiveResource)
+                        {
+                            string alertKey = $"docker_escape_{proc.Id}";
+                            if (_alertedLateralPaths.Contains(alertKey)) continue;
+                            _alertedLateralPaths.Add(alertKey);
+
+                            await _detectionEngine.EmitAsync(new DetectionEvent
+                            {
+                                RuleName = "WSL: Container Escape — Docker Process Accessing Host Resources",
+                                Evidence = $"Process '{proc.ProcessName}' (PID {proc.Id}) from Docker overlay filesystem " +
+                                           $"is accessing sensitive host resources. Image: {Truncate(imagePath, 150)}. " +
+                                           $"Command: {Truncate(cmdLine, 200)}",
+                                Reasoning = "A process originating from a Docker container filesystem layer is directly " +
+                                            "accessing sensitive Windows host resources. This indicates a container escape " +
+                                            "where the isolated process has broken out of its namespace boundary to reach " +
+                                            "the host filesystem, registry, or credential stores (MITRE T1611).",
+                                Confidence = 0.88,
+                                Tier = DetectionTier.Tier1Behavioral,
+                                AuthorizedResponse = ResponseAction.KillProcessTree,
+                                SignalType = SignalType.SuspiciousProcess,
+                                ProcessName = proc.ProcessName,
+                                ProcessId = proc.Id,
+                                Metadata = new Dictionary<string, string>
+                                {
+                                    ["ImagePath"] = imagePath,
+                                    ["Technique"] = "T1611-ContainerEscape/Docker"
+                                }
+                            });
+                        }
+                    }
+                }
+                catch { }
+                finally { proc.Dispose(); }
+            }
+
+            // Prune stale alert keys to prevent unbounded growth
+            if (_alertedLateralPaths.Count > 500)
+            {
+                _alertedLateralPaths.Clear();
+            }
+        }
+
+        private static int GetParentPidForWsl(int pid)
+        {
+            try
+            {
+                using var searcher = new ManagementObjectSearcher(
+                    $"SELECT ParentProcessId FROM Win32_Process WHERE ProcessId = {pid}");
+                foreach (ManagementObject obj in searcher.Get())
+                {
+                    return Convert.ToInt32(obj["ParentProcessId"]);
+                }
+            }
+            catch { }
+            return 0;
         }
 
         private class WslProcessInfo

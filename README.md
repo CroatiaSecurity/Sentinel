@@ -2,7 +2,7 @@
 
 Real-time endpoint detection and response for Windows. Runs as a background service, monitors system behavior, and kills threats automatically when multiple signals correlate.
 
-**Current version: 1.6.6**
+**Current version: 1.6.8**
 
 ---
 
@@ -14,13 +14,19 @@ Sentinel is effective against:
 
 - **Living-off-the-land attacks (LOLBins)** — PowerShell abuse, WMI lateral movement, MSHTA/rundll32 proxy execution, scheduled task persistence, UAC bypasses. Sentinel watches what trusted binaries *do*, not just that they exist.
 
-- **Credential theft** — LSASS dumps (dbghelp.dll sideloading, direct syscall variants), browser credential store access (Chrome/Edge/Firefox), honeypot credential tripwires, Credential Guard disablement monitoring.
+- **Credential theft** — LSASS dumps (dbghelp.dll sideloading, direct syscall variants), browser credential store access (Chrome/Edge/Firefox), honeypot credential tripwires, Credential Guard disablement monitoring, token theft / impersonation (SYSTEM token from user process, SeImpersonatePrivilege abuse).
+
+- **Browser-based C2** — Headless Chrome used as a proxy, Chrome DevTools Protocol session hijacking, malicious extensions with debugger/nativeMessaging/proxy permissions. Correlates with beaconing for high-confidence composite kills.
 
 - **Physical access attacks** — BadUSB/Rubber Ducky devices (HID whitelist), post-idle hardware change detection, new Bluetooth devices, rogue USB drives.
 
 - **Network attacks** — ARP spoofing, DNS poisoning, rogue Wi-Fi, unauthorized Cast/screen-share devices, C2 beaconing (statistical), DNS tunneling/exfiltration, phantom network devices.
 
-- **Persistence mechanisms** — Scheduled tasks, WMI subscriptions, registry run keys, DLL sideloading, boot config tampering.
+- **Persistence mechanisms** — Scheduled tasks, WMI subscriptions, registry run keys, DLL sideloading, boot config tampering, PrintNightmare-class spooler exploitation (driver DLL planting + child process detection).
+
+- **Container/WSL escape** — Detects lateral movement FROM WSL/Docker INTO the Windows host: filesystem writes to sensitive paths via /mnt/c/, WSL interop spawning security-sensitive Windows binaries, Docker container processes accessing host resources.
+
+- **Advanced evasion** — Indirect syscalls / Hell's Gate pattern detection (scans process memory for syscall stubs in non-image regions), process injection via unbacked RWX memory detection, named pipe C2 enumeration with known-bad pattern matching.
 
 - **Hardware security downgrade** — Detects if someone disables TPM, Secure Boot, BitLocker, or Credential Guard.
 
@@ -56,11 +62,11 @@ Full transparency in [THREAT_MODEL.md](THREAT_MODEL.md).
 
 1. **Unified ETW Session** — A single real-time kernel trace session subscribes to 9 Windows providers (Kernel-Process, Kernel-File, Kernel-Registry, DNS-Client, Threat-Intelligence, PowerShell, Firewall, TaskScheduler, Kernel-Network). Detection latency is ~50ms — fast enough to catch droppers that execute and exit in under a second.
 
-2. **Monitors** — 50+ background monitors consume ETW telemetry and perform additional analysis (behavioral baselines, statistical beaconing detection, memory scanning, hardware state checks). Monitors that previously polled every 5-30 seconds now react instantly via ETW events.
+2. **Monitors** — 55+ background monitors consume ETW telemetry and perform additional analysis (behavioral baselines, statistical beaconing detection, memory scanning, hardware state checks). Monitors that previously polled every 5-30 seconds now react instantly via ETW events.
 
 3. **Detection engine** — Events are scored by the multi-factor ScoringEngine and classified into tiers. Tier 1 (behavioral) signals are high-confidence. Tier 2 (indicator) signals are corroborating evidence. Rules declare their detection category at compile time via attributes.
 
-4. **Correlation** — The BehavioralCorrelationEngine evaluates multi-signal composites on the same process within 60 seconds. 10 composite patterns (Injected C2 Beacon, Active Ransomware Chain, Credential Dump + Exfiltration, etc.) produce kill-authorized detections with 0.90-0.99 confidence.
+4. **Correlation** — The BehavioralCorrelationEngine evaluates multi-signal composites on the same process within 60 seconds. 12 composite patterns (Injected C2 Beacon, Active Ransomware Chain, Credential Dump + Exfiltration, Named Pipe C2 + Beaconing, Token Theft + Lateral Movement, etc.) produce kill-authorized detections with 0.90-0.99 confidence.
 
 5. **Response** — Authorized responses range from log-only to process termination, quarantine, network isolation, certificate removal, and persistence cleanup. The ChainTracer walks the parent process tree, quarantines attack-root binaries, and removes persistence (Run keys, scheduled tasks). Only corroborated threats get killed.
 
@@ -70,7 +76,7 @@ Full transparency in [THREAT_MODEL.md](THREAT_MODEL.md).
 
 ## Test Suite
 
-353 automated tests (xUnit), all passing in < 5 seconds:
+689 automated tests (xUnit), all passing in < 5 seconds:
 - End-to-end integration tests (full pipeline: telemetry → detection → scoring → correlation → response)
 - Unit tests for all critical engines (Response, Correlation, ChainTracer, FileReputation, AntiTamper, Detection)
 - Run with `dotnet test`
@@ -83,7 +89,7 @@ Download the latest installer from [releases/](releases/) and run it. Sentinel i
 
 Requirements:
 - Windows 10 or 11 (x64)
-- .NET 8 Runtime
+- .NET 10 Runtime
 - Administrator privileges for installation
 - Runs as SYSTEM after install
 

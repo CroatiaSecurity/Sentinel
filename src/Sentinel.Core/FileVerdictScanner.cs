@@ -326,17 +326,19 @@ namespace Sentinel.Core
                     _verdictAds.SetVerdict(filePath, hash, verdict);
                 }
 
-                // If malicious/high-risk, deny execute permission immediately
+                // v1.6.4: Observe-only — log verdict but NEVER modify file permissions.
+                // Sentinel is an EDR (detect + respond to behavior), not an antivirus.
+                // Blocking execution based on reputation scores alone caused false positives
+                // (including quarantining our own installer) and violates the design principle
+                // that response actions only fire when a process is ACTIVELY malicious.
                 if (verdict == HashVerdict.Unsafe)
                 {
-                    DenyExecution(filePath);
                     _logger.LogWarning(
-                        "[FileVerdictScanner] Blocked file: {FilePath} (SHA256: {Hash}, Score={Score}, Verdict={Verdict})",
+                        "[FileVerdictScanner] Unsafe file on disk: {FilePath} (SHA256: {Hash}, Score={Score}, Verdict={Verdict})",
                         filePath, hash, reputationResult.CompositeScore, reputationResult.Verdict);
                 }
                 else if (reputationResult.Verdict == FileVerdict.Suspicious && reputationResult.CompositeScore >= 55)
                 {
-                    // Log suspicious files for analyst review without blocking
                     _logger.LogInformation(
                         "[FileVerdictScanner] Suspicious file: {FilePath} (Score={Score}, Entropy={Entropy:F2}, Signed={Signed})",
                         filePath, reputationResult.CompositeScore,
@@ -346,29 +348,6 @@ namespace Sentinel.Core
             catch (Exception ex)
             {
                 _logger.LogDebug(ex, "Error in ScanFileInternalAsync for {FilePath}", filePath);
-            }
-        }
-
-        /// <summary>
-        /// Adds a Deny Execute ACL for Everyone on a malicious file, preventing execution.
-        /// </summary>
-        private void DenyExecution(string filePath)
-        {
-            try
-            {
-                var fileInfo = new FileInfo(filePath);
-                var acl = fileInfo.GetAccessControl();
-                var rule = new System.Security.AccessControl.FileSystemAccessRule(
-                    new System.Security.Principal.SecurityIdentifier(
-                        System.Security.Principal.WellKnownSidType.WorldSid, null),
-                    System.Security.AccessControl.FileSystemRights.ExecuteFile,
-                    System.Security.AccessControl.AccessControlType.Deny);
-                acl.AddAccessRule(rule);
-                fileInfo.SetAccessControl(acl);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogDebug(ex, "Failed to deny execution on file: {FilePath}", filePath);
             }
         }
 

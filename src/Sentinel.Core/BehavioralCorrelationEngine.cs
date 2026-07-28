@@ -222,6 +222,18 @@ namespace Sentinel.Core
                 return;
             }
 
+            // ═══ v1.6.8: Named Pipe C2 + Network Beaconing (0.95) ═══
+            // Named pipe matching C2/lateral-movement pattern + network C2 beaconing on same PID
+            var hasNamedPipe = currentSignals.Any(s =>
+                s.RuleName.Contains("Named Pipe", StringComparison.OrdinalIgnoreCase));
+            if (hasNamedPipe && types.Contains(SignalType.NetworkC2))
+            {
+                await EmitCompositeAsync(pid, "Named Pipe C2 + Network Beaconing", 0.95,
+                    "Suspicious named pipe correlated with C2 network beaconing on the same process.",
+                    "A process created a named pipe matching C2/lateral-movement patterns AND maintains periodic network beaconing — confirms active C2 implant using IPC for inter-process staging.");
+                return;
+            }
+
             // Spoofed Process + Network (0.92)
             // PPID spoofing detection + any network activity
             var hasPpidSpoof = currentSignals.Any(s =>
@@ -247,6 +259,24 @@ namespace Sentinel.Core
                 await EmitCompositeAsync(pid, "Evasion + Persistence Install", 0.91,
                     "Security evasion combined with persistence mechanism installation.",
                     "Process evaded security controls then installed persistence — establishing long-term access.");
+                return;
+            }
+
+            // ═══ v1.6.8: Token Theft + Lateral Movement (0.93) ═══
+            // Token theft/impersonation + RPC/SMB lateral movement or named pipe IPC
+            var hasTokenTheft = currentSignals.Any(s =>
+                s.RuleName.Contains("Token Theft", StringComparison.OrdinalIgnoreCase) ||
+                s.RuleName.Contains("Impersonate", StringComparison.OrdinalIgnoreCase));
+            var hasLateralMovement = currentSignals.Any(s =>
+                s.RuleName.Contains("Lateral", StringComparison.OrdinalIgnoreCase) ||
+                s.RuleName.Contains("RPC", StringComparison.OrdinalIgnoreCase) ||
+                s.RuleName.Contains("Named Pipe", StringComparison.OrdinalIgnoreCase) ||
+                s.RuleName.Contains("Network Share", StringComparison.OrdinalIgnoreCase));
+            if (hasTokenTheft && hasLateralMovement)
+            {
+                await EmitCompositeAsync(pid, "Token Theft + Lateral Movement", 0.93,
+                    "Token manipulation combined with lateral movement indicators on the same process.",
+                    "Process stole/impersonated a privileged token then initiated lateral movement (RPC/SMB/named pipe) — classic post-exploitation pivot pattern (MITRE T1134 + T1021).");
                 return;
             }
 

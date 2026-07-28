@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -104,6 +105,7 @@ namespace Sentinel.Core
                     await Task.Delay(ScanInterval, ct);
                     await CheckSpoolBurst(ct);
                     await ScanForSuspiciousPrintOutput(ct);
+                    await ScanForPrintNightmareExploitation(ct);
                 }
                 catch (OperationCanceledException) { break; }
                 catch (Exception ex) { _logger.LogDebug(ex, "[PrintSpoolerMonitor] Error"); }
@@ -208,6 +210,257 @@ namespace Sentinel.Core
             }
             catch { }
         }
+
+        // ═══════════════════════════════════════════════════════════════
+        // v1.6.8: PrintNightmare-Class Exploitation Detection
+        //
+        // Detects exploitation of the print spooler for privilege escalation:
+        // - CVE-2021-34527 (PrintNightmare): AddPrinterDriverEx loading arbitrary DLLs
+        // - CVE-2021-1675: Similar via AddPrinterDriver
+        // - SpoolFool / other spooler LPE variants
+        //
+        // Detection approach:
+        // 1. Monitor driver store paths for new printer driver DLLs appearing
+        // 2. Detect unsigned DLLs loaded by spoolsv.exe from non-standard paths
+        // 3. Watch for new printer driver installations via registry
+        // 4. Monitor for spoolsv.exe spawning child processes (exploitation indicator)
+        // ═══════════════════════════════════════════════════════════════
+
+        private readonly HashSet<string> _baselineDriverDlls = new(StringComparer.OrdinalIgnoreCase);
+        private readonly ConcurrentDictionary<string, byte> _alertedDriverPaths = new();
+        private bool _driverBaselineComplete;
+
+        /// <summary>
+        /// Called from ExecuteAsync on startup to baseline existing printer driver DLLs.
+        /// </summary>
+        private void BaselinePrinterDrivers()
+        {
+            try
+            {
+                // Windows printer drivers directory
+                var driverPaths = new[]
+                {
+                    Path.Combine(Environment.SystemDirectory, @"spool\drivers\x64\3"),
+                    Path.Combine(Environment.SystemDirectory, @"spool\drivers\x64\4"),
+                    Path.Combine(Environment.SystemDirectory, @"spool\drivers\W32X86\3"),
+                };
+
+                foreach (var driverDir in driverPaths)
+                {
+                    if (!Directory.Exists(driverDir)) continue;
+                    foreach (var dll in Directory.GetFiles(driverDir, "*.dll", SearchOption.AllDirectories))
+                    {
+                        _baselineDriverDlls.Add(dll);
+                    }
+                }
+                _driverBaselineComplete = true;
+                _logger.LogDebug("[PrintSpoolerMonitor] Baselined {Count} printer driver DLLs", _baselineDriverDlls.Count);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "[PrintSpoolerMonitor] Driver baseline failed");
+            }
+        }
+
+        /// <summary>
+        /// Detects PrintNightmare-class exploitation by monitoring:
+        /// 1. New DLLs in printer driver directories (AddPrinterDriverEx exploitation)
+        /// 2. spoolsv.exe spawning unexpected child processes
+        /// 3. Unsigned or remote-path DLLs in driver store
+        /// </summary>
+        private async Task ScanForPrintNightmareExploitation(CancellationToken ct)
+        {
+            if (!_driverBaselineComplete)
+            {
+                BaselinePrinterDrivers();
+                return;
+            }
+
+            // 1. Check for new DLLs in printer driver directories
+            await DetectNewDriverDlls(ct);
+
+            // 2. Detect spoolsv.exe spawning child processes (exploitation indicator)
+            await DetectSpoolerChildProcesses(ct);
+        }
+
+        private async Task DetectNewDriverDlls(CancellationToken ct)
+        {
+            var driverPaths = new[]
+            {
+                Path.Combine(Environment.SystemDirectory, @"spool\drivers\x64\3"),
+                Path.Combine(Environment.SystemDirectory, @"spool\drivers\x64\4"),
+                Path.Combine(Environment.SystemDirectory, @"spool\drivers\W32X86\3"),
+            };
+
+            foreach (var driverDir in driverPaths)
+            {
+                if (ct.IsCancellationRequested) break;
+                if (!Directory.Exists(driverDir)) continue;
+
+                try
+                {
+                    foreach (var dllPath in Directory.GetFiles(driverDir, "*.dll", SearchOption.AllDirectories))
+                    {
+                        if (_baselineDriverDlls.Contains(dllPath)) continue;
+                        if (_alertedDriverPaths.ContainsKey(dllPath)) continue;
+
+                        // New DLL appeared in printer driver directory — potential PrintNightmare
+                        _alertedDriverPaths[dllPath] = 0;
+
+                        // Check if the DLL is Authenticode signed
+                        bool isSigned = SecurityValidation.VerifyAuthenticodeSignature(dllPath);
+                        var fileInfo = new FileInfo(dllPath);
+                        bool isRecent = (DateTime.UtcNow - fileInfo.CreationTimeUtc).TotalMinutes < 5;
+
+                        double confidence = 0.75;
+                        var response = ResponseAction.LogOnly;
+
+                        if (!isSigned && isRecent)
+                        {
+                            confidence = 0.92;
+                            response = ResponseAction.QuarantineAndKill;
+                        }
+                        else if (!isSigned)
+                        {
+                            confidence = 0.85;
+                            response = ResponseAction.Quarantine;
+                        }
+                        else if (isRecent)
+                        {
+                            confidence = 0.70;
+                        }
+
+                        await _detectionEngine.EmitAsync(new DetectionEvent
+                        {
+                            RuleName = "Print Spooler: PrintNightmare Driver DLL Planted",
+                            Evidence = $"New DLL appeared in printer driver directory: '{dllPath}'. " +
+                                       $"Signed: {isSigned}, Created: {fileInfo.CreationTimeUtc:O}, Size: {fileInfo.Length} bytes.",
+                            Reasoning = "A new DLL was planted in the Windows printer driver directory after Sentinel's baseline. " +
+                                        "This is the primary indicator of PrintNightmare (CVE-2021-34527) exploitation where " +
+                                        "AddPrinterDriverEx is called with a malicious DLL path. The spooler loads this DLL as SYSTEM, " +
+                                        "giving the attacker immediate privilege escalation.",
+                            Confidence = confidence,
+                            Tier = DetectionTier.Tier1Behavioral,
+                            AuthorizedResponse = response,
+                            SignalType = SignalType.SuspiciousProcess,
+                            ProcessName = "spoolsv",
+                            ProcessId = GetSpoolerPid(),
+                            Metadata = new Dictionary<string, string>
+                            {
+                                ["DllPath"] = dllPath,
+                                ["IsSigned"] = isSigned.ToString(),
+                                ["IsRecent"] = isRecent.ToString(),
+                                ["CVE"] = "CVE-2021-34527"
+                            }
+                        });
+                    }
+                }
+                catch { }
+            }
+        }
+
+        private async Task DetectSpoolerChildProcesses(CancellationToken ct)
+        {
+            // spoolsv.exe should NOT spawn child processes in normal operation.
+            // If it does, it's likely executing a planted DLL that launched a payload.
+            try
+            {
+                var spoolerProcesses = Process.GetProcessesByName("spoolsv");
+                foreach (var spooler in spoolerProcesses)
+                {
+                    try
+                    {
+                        int spoolerPid = spooler.Id;
+
+                        // Find child processes of spoolsv.exe
+                        foreach (var proc in Process.GetProcesses())
+                        {
+                            try
+                            {
+                                if (proc.Id == spoolerPid || proc.Id <= 4) continue;
+
+                                // Check parent PID via WMI (lightweight — cached in ProcessAncestryCache equivalent)
+                                int parentPid = GetParentPid(proc.Id);
+                                if (parentPid != spoolerPid) continue;
+
+                                string childName = proc.ProcessName;
+
+                                // Known legitimate spooler children
+                                if (childName.Equals("splwow64", StringComparison.OrdinalIgnoreCase) ||
+                                    childName.Equals("printfilterpipelinesvc", StringComparison.OrdinalIgnoreCase))
+                                    continue;
+
+                                string childPath = SecurityValidation.GetProcessImagePath(proc.Id) ?? "";
+                                string alertKey = $"spooler_child_{proc.Id}_{childName}";
+                                if (_alertedDriverPaths.ContainsKey(alertKey)) continue;
+                                _alertedDriverPaths[alertKey] = 0;
+
+                                await _detectionEngine.EmitAsync(new DetectionEvent
+                                {
+                                    RuleName = "Print Spooler: Exploitation — Unexpected Child Process",
+                                    Evidence = $"spoolsv.exe (PID {spoolerPid}) spawned unexpected child: '{childName}' " +
+                                               $"(PID {proc.Id}) at '{Truncate(childPath, 120)}'.",
+                                    Reasoning = "The Windows Print Spooler service spawned an unexpected child process. " +
+                                                "In normal operation, spoolsv.exe only spawns splwow64.exe or printfilterpipelinesvc.exe. " +
+                                                "Any other child process indicates that a loaded printer driver DLL executed a payload — " +
+                                                "this is the exploitation phase of PrintNightmare or similar spooler privilege escalation attacks.",
+                                    Confidence = 0.90,
+                                    Tier = DetectionTier.Tier1Behavioral,
+                                    AuthorizedResponse = ResponseAction.KillProcessTree,
+                                    SignalType = SignalType.SuspiciousProcess,
+                                    ProcessName = childName,
+                                    ProcessId = proc.Id,
+                                    Metadata = new Dictionary<string, string>
+                                    {
+                                        ["ParentPid"] = spoolerPid.ToString(),
+                                        ["ChildPath"] = childPath,
+                                        ["Technique"] = "PrintNightmare/SpoolFool"
+                                    }
+                                });
+                            }
+                            catch { }
+                            finally { proc.Dispose(); }
+                        }
+                    }
+                    finally { spooler.Dispose(); }
+                }
+            }
+            catch { }
+        }
+
+        private static int GetSpoolerPid()
+        {
+            try
+            {
+                var procs = Process.GetProcessesByName("spoolsv");
+                if (procs.Length > 0)
+                {
+                    int pid = procs[0].Id;
+                    foreach (var p in procs) p.Dispose();
+                    return pid;
+                }
+            }
+            catch { }
+            return 0;
+        }
+
+        private static int GetParentPid(int pid)
+        {
+            try
+            {
+                using var searcher = new System.Management.ManagementObjectSearcher(
+                    $"SELECT ParentProcessId FROM Win32_Process WHERE ProcessId = {pid}");
+                foreach (var obj in searcher.Get())
+                {
+                    return Convert.ToInt32(obj["ParentProcessId"]);
+                }
+            }
+            catch { }
+            return 0;
+        }
+
+        private static string Truncate(string s, int maxLen)
+            => s.Length <= maxLen ? s : s[..maxLen] + "...";
 
         public override void Dispose()
         {

@@ -164,4 +164,46 @@ namespace Sentinel.Core
         public string Subnet { get; set; } = string.Empty;
         public bool IsEnforcementPhase { get; set; }
     }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Named Pipe Signals (v1.6.8)
+    // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Published by NamedPipeMonitor when a suspicious named pipe is detected.
+    /// Consumed by: BehavioralCorrelationEngine (composite pipe + beacon detection),
+    ///              ChainTracer (enrich chain evidence with IPC indicators).
+    /// </summary>
+    public sealed class NamedPipeSignal : EnrichmentSignal
+    {
+        public string PipeName { get; set; } = string.Empty;
+        public string MatchedPattern { get; set; } = string.Empty;
+        public uint OwnerPid { get; set; }
+        public bool IsKnownBadPattern { get; set; }
+        public double Entropy { get; set; }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Token Theft Signals (v1.6.8)
+    // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Published by TokenTheftMonitor when token manipulation is detected.
+    /// Consumed by: BehavioralCorrelationEngine (composite token theft + lateral movement),
+    ///              ChainTracer (enrich chain evidence with privilege escalation indicators).
+    /// </summary>
+    public sealed class TokenTheftSignal : EnrichmentSignal
+    {
+        public string TokenUserName { get; set; } = string.Empty;
+        public TokenTheftType TheftType { get; set; }
+        public string ImagePath { get; set; } = string.Empty;
+        public bool HasImpersonatePrivilege { get; set; }
+    }
+
+    public enum TokenTheftType
+    {
+        SystemTokenFromUserProcess,
+        ImpersonatePrivilegeFromSuspiciousPath,
+        CrossSessionTokenDuplication,
+    }
 }
