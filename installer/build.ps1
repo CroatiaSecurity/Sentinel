@@ -1,10 +1,10 @@
-# Windows Sentinel Installer Build Script
+# Sentinel Installer Build Script
 # Usage: .\build.ps1
 
 $ErrorActionPreference = "Stop"
 
 Write-Host "==============================================" -ForegroundColor Cyan
-Write-Host "   Windows Sentinel - Building Installer      " -ForegroundColor Cyan
+Write-Host "   Sentinel - Building Installer      " -ForegroundColor Cyan
 Write-Host "==============================================" -ForegroundColor Cyan
 
 # 0. Read version from single source of truth
@@ -25,7 +25,7 @@ Write-Host "Stamped $($CsprojFiles.Count) .csproj files with version $Version" -
 $SetupScript = Join-Path $PSScriptRoot "setup.iss"
 $issContent = [System.IO.File]::ReadAllText($SetupScript)
 $issContent = $issContent -replace 'AppVersion=.*', "AppVersion=$Version"
-$issContent = $issContent -replace 'OutputBaseFilename=WindowsSentinelSetup-.*', "OutputBaseFilename=WindowsSentinelSetup-$Version"
+$issContent = $issContent -replace 'OutputBaseFilename=SentinelSetup-.*', "OutputBaseFilename=SentinelSetup-$Version"
 [System.IO.File]::WriteAllText($SetupScript, $issContent)
 
 # 1. Clean previous build artifacts and publish folder
@@ -39,12 +39,12 @@ if (Test-Path $PublishDir) {
 
 # 2. Build and Publish Service (win-x64 self-contained single-file)
 Write-Host "Publishing Sentinel Service (win-x64 self-contained)..." -ForegroundColor Yellow
-$ServiceProj = Join-Path $PSScriptRoot "..\src\WindowsSentinel.Service\WindowsSentinel.Service.csproj"
+$ServiceProj = Join-Path $PSScriptRoot "..\src\Sentinel.Service\Sentinel.Service.csproj"
 & "C:\Program Files\dotnet\dotnet.exe" publish $ServiceProj -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -p:PublishReadyToRun=false -o (Join-Path $PublishDir "service")
 
 # 3. Build and Publish Agent (win-x64 self-contained single-file)
 Write-Host "Publishing Sentinel Agent (win-x64 self-contained)..." -ForegroundColor Yellow
-$AgentProj = Join-Path $PSScriptRoot "..\src\WindowsSentinel.Agent\WindowsSentinel.Agent.csproj"
+$AgentProj = Join-Path $PSScriptRoot "..\src\Sentinel.Agent\Sentinel.Agent.csproj"
 & "C:\Program Files\dotnet\dotnet.exe" publish $AgentProj -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -o (Join-Path $PublishDir "agent")
 
 # 3a. Copy Sentinel.ico and version.txt to publish outputs
@@ -59,7 +59,9 @@ Copy-Item $VersionFile -Destination (Join-Path $PublishDir "service\version.txt"
 Write-Host "Locating Inno Setup compiler..." -ForegroundColor Yellow
 $DefaultIsccPaths = @(
     "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
-    "C:\Program Files\Inno Setup 6\ISCC.exe"
+    "C:\Program Files\Inno Setup 6\ISCC.exe",
+    "C:\Program Files (x86)\Inno Setup 7\ISCC.exe",
+    "C:\Program Files\Inno Setup 7\ISCC.exe"
 )
 
 $IsccPath = $null
@@ -90,6 +92,17 @@ $SetupScript = Join-Path $PSScriptRoot "setup.iss"
 
 Write-Host "==============================================" -ForegroundColor Green
 Write-Host "Build completed successfully!" -ForegroundColor Green
-Write-Host "Installer output: installer\WindowsSentinelSetup-$Version.exe" -ForegroundColor Green
+Write-Host "Installer output: installer\SentinelSetup-$Version.exe" -ForegroundColor Green
 Write-Host "==============================================" -ForegroundColor Green
+
+# 6. Copy installer to releases folder for push.ps1 pickup
+$ReleasesDir = Join-Path $PSScriptRoot "..\releases\$Version"
+if (-not (Test-Path $ReleasesDir)) { New-Item -ItemType Directory -Path $ReleasesDir -Force | Out-Null }
+$InstallerPath = Join-Path $PSScriptRoot "SentinelSetup-$Version.exe"
+if (Test-Path $InstallerPath) {
+    Copy-Item $InstallerPath -Destination $ReleasesDir -Force
+    Write-Host "Copied installer to releases\$Version\ for GitHub Release upload" -ForegroundColor Green
+} else {
+    Write-Host "WARNING: Installer not found at expected path, skipping releases copy" -ForegroundColor Yellow
+}
 

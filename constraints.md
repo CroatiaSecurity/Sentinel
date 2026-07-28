@@ -1,6 +1,6 @@
-# Windows Sentinel — Constraints
+# Sentinel — Constraints
 
-**Version: 0.8.4**
+**Version: 1.5.9**
 
 ---
 
@@ -18,6 +18,19 @@
 | No shelling out to system tools | No `Process.Start("cmd.exe", ...)` for detection or response logic |
 | Tier2 can never trigger action | Enforced unconditionally in `AdvancedResponseEngine.HandleAsync` â€” no exceptions, no config override |
 | Active response on by default | Ships in killing mode. President's Law rules fire immediately. |
+| All file reads use `FileShare.Delete` | All file I/O opens with `FileShare.ReadWrite | FileShare.Delete` — Sentinel never blocks user file deletion, even during active scanning or hashing. Only exception: intentional DLL lock files from response actions. |
+| Monitors registered in groups | All background monitors must be registered via `MonitorGroup` with appropriate priority, start delay, and restart policy — no flat `AddHostedService` for monitors. |
+| Monitor source files match groups | Each monitor class lives in the group file it belongs to under `Monitors/` (CriticalMonitors.cs, CoreDetectionMonitors.cs, etc.). No monolith files — new monitors go into their group file. |
+| No user-session response mode toggle | The Agent MUST NOT expose any mechanism (menu item, API, named pipe, etc.) to disable ActiveResponse from user-level context. Only the Service (SYSTEM) controls response mode. |
+| No async/await on STA thread | The Agent's WinForms STA message pump MUST NOT have async continuations posted to its SynchronizationContext. All background work (log tailing, file I/O, network) MUST run on dedicated `Thread` instances or `Task.Run` with `ConfigureAwait(false)`. Violations freeze the tray icon. |
+| No Win32 notification API calls | `ShowBalloonTip` and toast notification APIs MUST NOT be called — `WpnService` is removed by hardening. These calls silently deadlock the STA pump without throwing. |
+| Critical group: no heavy I/O at startup | Monitors in the Critical group (0ms start delay) MUST NOT perform registry enumeration, subprocess spawning, or disk-wide scanning in their constructor or early `ExecuteAsync`. Heavy-I/O monitors belong in SystemIntegrity (10s delay) or later groups. |
+| Absence ≠ safety in reputation | Hash reputation services MUST return `Unknown` (not `Safe`) when a hash is absent from all databases. Only a positive trust signal (e.g., CIRCL trust > 60) can confirm Safe. |
+| No string interpolation into shell commands | All PowerShell/cmd invocations MUST use `-EncodedCommand` or `ArgumentList` — never string-interpolate untrusted data into `-Command` strings. |
+| Minimum-privilege process handles | `OpenProcess` calls MUST request only the access rights actually used. Never open with `PROCESS_ALL_ACCESS` unless every right is exercised. |
+| Signed threat report requests | All outbound threat intelligence reports MUST be HMAC-signed with the installation entropy key. Unsigned requests to the proxy are forbidden. |
+| Validate all external process output | Data from `Process.Start` stdout (docker inspect, netsh, sc.exe, etc.) is untrusted. MUST be validated before use in subsequent commands or logic. |
+| Installer preserves user config | `appsettings.json` MUST use `onlyifdoesntexist` flag — upgrades never overwrite user customizations. |
 
 ---
 
@@ -84,7 +97,7 @@
 ## Operational Constraints
 
 - Must run on Windows 10 / Windows Server 2019 or later
-- Must target `net8.0-windows`
+- Must target `net10.0-windows`
 - Must function as a standard user (reduced capability, no crash)
 - Must function as an elevated user (full capability)
 - Log files must not grow unbounded â€” rotation required (50 MB / 5 files)

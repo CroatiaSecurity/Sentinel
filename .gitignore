@@ -54,3 +54,8 @@ releases/
 .gide_history.json
 publish/
 installer/*.exe
+
+# Large files (>25MB)
+installer/WindowsSentinelSetup-1.2.5.exe
+publish/service/WindowsSentinel.Service.exe
+publish/agent/WindowsSentinel.Agent.exe

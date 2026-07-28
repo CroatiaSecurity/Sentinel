@@ -1,6 +1,6 @@
-# Windows Sentinel — Requirements
+# Sentinel — Requirements
 
-**Version: 1.0.1**
+**Version: 1.5.9**
 
 ---
 
@@ -140,7 +140,7 @@ Constraints:
 ### FR-7: Logging
 
 - Output format: JSONL (newline-delimited JSON), `System.Text.Json` only
-- Default path: `%ProgramData%\WindowsSentinel\events.jsonl`
+- Default path: `%ProgramData%\Sentinel\events.jsonl`
 - Size-based rotation: 50 MB per file, up to 5 rotated files
 - Each entry must include: `type`, `timestamp`, `data` (with `ruleName`, `evidence`, `reasoning`, `confidence`, `tier`, `processName`, `processId`, `metadata`)
 - Rate limiting: max 100 entries/second, burst of 200 (prevents log flooding attacks)

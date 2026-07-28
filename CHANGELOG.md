@@ -1,6 +1,883 @@
 # Changelog
+ 
+All notable changes to Sentinel are documented in this file.
 
-All notable changes to Windows Sentinel are documented in this file.
+## [1.5.9] - 2026-07-24
+
+### Security Hardening (False Negative Elimination)
+
+- **[CRITICAL] BeaconingDetector no longer demotes to LogOnly** — Supply-chain compromised binaries (SolarWinds-style) that are legitimately signed and installed in Program Files previously achieved trust score ≥5, receiving `LogOnly` response — their C2 channel was never blocked. Now the maximum demotion for confirmed statistical beaconing is `NetworkIsolate`: the C2 IP is always firewall-blocked regardless of trust score. The detection still fires and is logged for analyst review.
+
+- **[CRITICAL] C2 Beaconing re-added to President's Law** — `AllowlistService.ShouldSuppress()` previously allowed user-allowlisted processes to fully suppress C2 beaconing detections. An attacker running a Cobalt Strike beacon inside an allowlisted process (e.g., chrome.exe via extension compromise) would have all beaconing alerts silenced. C2Beaconing is now classified as a President's Law category — it can never be suppressed by allowlisting.
+
+- **[HIGH] ActiveResponse config tampering detection** — `AntiTamperGuard` now monitors `SentinelConfig.ActiveResponse` every integrity tick (~10s). If the flag transitions from `true` → `false` at runtime (attacker modified `appsettings.json`), Sentinel fires a Tier1 anti-tamper detection (confidence 0.99, `SignalType.AntiTamper`) and forcibly re-enables `ActiveResponse`. This alert fires regardless of the ActiveResponse flag since its own response is `LogOnly`.
+
+- **[HIGH] Baseline poisoning prevention** — `BehavioralBaselineService.IsEstablishedProcess()` now requires ZERO detection events for the process name within a 7-day window. Previously, malware with persistence could run 10+ times to earn "established" status and receive a −10 score reduction from `ScoringEngine`, weakening all future detections. `ScoringEngine.Score()` now records every detection via `RecordDetectionForProcess()`, permanently revoking established status until 7 days elapse with no new detections.
+
+- **[HIGH] DynamicRulesEvaluator fails closed** — When the HMAC signing key (derived from `.install_entropy`) is unavailable, all dynamic rule files are now REJECTED instead of loaded without verification. Previously, an attacker who deleted the entropy file could inject arbitrary unsigned rules into the `rules/` directory. Test mode uses a dedicated `_isTestMode` flag that bypasses this check only via the test constructor.
+
+- **[HIGH] svchost removed from correlation engine exemption** — `BehavioralCorrelationEngine.ElectronAndJitApps` no longer includes `svchost`. It is the #1 process injection target for living-off-the-land attacks, not a JIT/Electron app. Attackers injecting into svchost and generating only Tier2 signals (suspicious DNS, unusual network patterns) would never trigger composite detection. Now svchost participates fully in behavioral correlation.
+
+### Fixed (False Positive Reduction)
+
+- **[HIGH] Signed injector binaries no longer quarantined from disk** — `AdvancedResponseEngine` now verifies Authenticode signature before quarantining the injector binary in `QuarantineAndKill` responses. Legitimate debugging tools, profilers, and AV hooking engines that use injection APIs (VirtualAllocEx, CreateRemoteThread) are still killed (stopping the injection) but their binary is preserved on disk. Unsigned injectors are quarantined as before. This prevents irreversible destruction of legitimate tools.
+
+### Fixed (Build)
+
+- **[LOW] Fixed CS8600 nullable warnings in HardeningModule.cs** — `ExtractResource()` return values (`lgpoPath`, `infPath`) changed from `string` to `string?` to match the method's nullable return type. Build now produces 0 warnings.
+
+---
+
+## [1.5.8] - 2026-07-22
+
+### Fixed
+
+- **[HIGH] IDE commands no longer blocked by PhantomKeystrokeGuard** — `IsIdeTargetProcess()` only checked the foreground window's direct process name. When an IDE's integrated terminal had focus, the foreground window often belonged to a child process (conhost.exe, node.exe, Electron helper) rather than the IDE itself. Injected keystrokes from IDE terminal automation were incorrectly blocked.
+
+  **Fix**: `IsIdeTargetProcess()` now walks up to 4 levels of parent process ancestry via `NtQueryInformationProcess`. If any ancestor is in the IDE process list, keystrokes pass through. Uses `PROCESS_QUERY_LIMITED_INFORMATION` for minimal privilege.
+
+- **[MEDIUM] ClickjackingGuard no longer false-alerts on IDE synthetic mouse clicks** — The mouse hook had no IDE exemption. Every synthetic mouse click (autocomplete selection, code lens, inline rename, drag-drop) counted toward the "5+ injected clicks = clickjacking" alert threshold, generating noise for developers.
+
+  **Fix**: Added `IsIdeMouseTarget()` with parent-chain-walking logic to the `MouseHookCallback`. IDE-sourced synthetic clicks are passed through without accumulating toward the alert threshold. Detection logic unchanged for non-IDE processes.
+
+### Changed (Hardening Module Refactor)
+
+- **[CRITICAL] Replaced script-based hardening with native C#** — `ApplyUserSetupScriptsHardening()` previously extracted all embedded `.reg` files, ran `reg.exe import` on each, shelled out to `takeown.exe`/`icacls.exe` to strip ACLs from system binaries, disabled services via `sc.exe`, and ran `label.exe`/`net.exe`/`netsh.exe` for non-security operations. The legacy `GSecurity.bat` (still present as dead embedded resource) ran all `.ps1` files with `-ExecutionPolicy Bypass -WindowStyle Hidden`.
+
+  **Replaced with**:
+  - `DisableRemoteAccessServices()` — uses `ServiceController` API + registry `Start=4` to disable remote access services (RDP, WinRM, SSH, Telnet, SNMP, UPnP, third-party remote tools)
+  - `ApplyRegistryHardening()` — direct `Registry.LocalMachine.CreateSubKey()` writes for 30+ security settings covering LSA hardening, TLS enforcement, exploit mitigations (SEHOP, Spectre/Meltdown, DEP), privilege escalation prevention, information disclosure prevention, network hardening, and firewall enforcement. Each setting documented with MITRE ATT&CK or CIS benchmark reference.
+  - `EnforceDepAlwaysOn()` — single `bcdedit.exe /set nx AlwaysOn` (no .NET equivalent)
+  - `ApplyLgpoSecurityPolicy()` — extracts only `LGPO.exe` + `GSecurity.inf`, applies policy, cleans up
+
+### Removed
+
+- **All `.ps1` scripts from HardeningResources** (8 files): `Audio.ps1`, `Browsers.ps1`, `configure-dns-doh-dot.ps1`, `FakeUacDetection.ps1`, `LNKProtection.ps1`, `RansomwareScarewareDetection.ps1`, `ShowAllTrayIcons.ps1` — either non-security (audio, cosmetics), already implemented natively in C# monitors, or opinionated user preferences.
+- **`GSecurity.bat`** — the dangerous batch script that ran all `.ps1` files with `-ExecutionPolicy Bypass`. Was the execution vector for the GorstaksEDR.ps1 supply-chain compromise.
+- **All `.reg` files from HardeningResources** (10 files): `Browsers.reg`, `Certs.reg`, `COM Auto Approval.reg`, `Firewall.reg`, `GSecurity.reg`, `IPSecPolicy.reg`, `PiholeLite.reg`, `Privacy.reg`, `Services.reg`, `Sminkica.reg` — security-relevant settings migrated to native C#; non-security files (ad-blocking, cosmetics, browser extension force-install, MRU clearing) removed entirely.
+- **ACL stripping from system binaries** — `takeown`/`icacls /reset`/`icacls /inheritance:r` on conhost.exe, WmiPrvSE.exe, consent.exe, dllhost.exe, etc. was dangerous (breaks Windows Update servicing) and provided no security benefit.
+- **Non-security operations** — volume labeling (`label C: Windows`), user deletion (`net user defaultuser0 /delete`), TCP autotuninglevel restriction.
+
+### HardeningResources
+
+- Reduced from 20 files to 2: `LGPO.exe` and `GSecurity.inf`
+- `.csproj` updated from wildcard glob (`HardeningResources\**\*`) to explicit file references
+
+---
+
+### Fixed (prior 1.5.7 entry)
+
+- **[HIGH] Signed processes no longer bypass DLL sideloading detection** — `MemoryBehaviorAnalyzer` had the `IsSignedProcess()` check positioned *before* the DLL sideloading scan (`DllUnloadEngine.CheckAndUnloadAsync`). This meant any process with a valid Authenticode signature was entirely skipped for sideloading analysis. Attackers exploit this by dropping malicious DLLs (e.g., input-hooking DLLs that cause cursor tremor/shaking) alongside signed binaries — precisely because they know signed hosts won't be scanned.
+
+- **Fix**: Moved the DLL sideloading check above the signed-process bypass. `DllUnloadEngine.CheckAndUnloadAsync()` now runs on all processes regardless of signature status. If a sideloaded DLL is found, it is unloaded via `QueueUserAPC` + `FreeLibrary`, or the host process is killed and the DLL quarantined. The signed-process bypass still applies to all subsequent memory checks (hollowing, module growth, RWX regions) — only sideloading detection is exempt.
+
+### Changed
+
+- `MemoryBehaviorAnalyzer.ExecuteAsync` — DLL sideloading check now precedes signed-process bypass
+
+---
+
+## [1.5.6] - 2026-07-21
+
+### Fixed
+
+- **[CRITICAL] Fixed self-quarantine of explorer.exe, powershell.exe, and Sentinel service** — `SecurityValidation.VerifyAuthenticodeSignature` only checked embedded Authenticode signatures. Many Windows system binaries (explorer.exe, powershell.exe, cmd.exe, svchost.exe, conhost.exe) are catalog-signed rather than having embedded signatures. When the embedded check failed, these binaries appeared "unsigned" to the `FileReputationEngine`, received Suspicious scores (~43-55/100), triggered `BehavioralCorrelationEngine` escalation (Electron/JIT exemption also depends on Authenticode verification), and ultimately got killed/quarantined by `AdvancedResponseEngine`.
+
+- **Fix**: Added native `CryptCATAdmin` API fallback (`CryptCATAdminAcquireContext2` → `CryptCATAdminCalcHashFromFileHandle2` → `CryptCATAdminEnumCatalogFromHash` → `WinVerifyTrust` with `WTD_CHOICE_CATALOG`). This is a pure P/Invoke path with no shell command dependency, no PATH poisoning risk, and proper handle cleanup. The Windows Catalog Store (`catroot2`) is protected by TrustedInstaller ACLs and cannot be tampered with by non-kernel attackers.
+
+- **Audit finding remediated (BT-MEDIUM-1)**: Added `WTD_STATEACTION_CLOSE` call after catalog `WinVerifyTrust` verify to free internal trust provider state per Windows SDK requirements.
+
+### Security Audit
+
+- Red/blue team audit completed (`audit-redblue-v1.5.6.md`). No critical or high-severity findings. The fix introduces no new attack surface — catalog store integrity is protected by Windows Resource Protection and TrustedInstaller ACLs. All handle/memory resources are properly released in finally blocks.
+
+### Changed
+
+- `SecurityValidation.VerifyAuthenticodeSignature` — now falls back to catalog signature verification when embedded Authenticode check fails
+- Added P/Invoke declarations: `CryptCATAdminAcquireContext2`, `CryptCATAdminCalcHashFromFileHandle2`, `CryptCATAdminEnumCatalogFromHash`, `CryptCATAdminReleaseCatalogContext`, `CryptCATAdminReleaseContext`, `CryptCATCatalogInfoFromContext`, `CreateFileW`
+- Added structs: `CATALOG_INFO`, `WINTRUST_CATALOG_INFO`
+- Added private methods: `VerifyCatalogSignature`, `VerifyCatalogWithWinVerifyTrust`
+
+## [1.5.5] - 2026-07-21
+
+### Security — Critical Audit Remediation (Red/Blue Team Audit v1.5.4)
+
+Addresses all critical and high-severity findings from the comprehensive red/blue team security audit (`audit-redblue-v1.5.4.md`). Removes a supply-chain compromise, re-enables real-time ETW telemetry, hardens dynamic rule loading, and fixes kill-bypass vulnerabilities.
+
+### Removed (Sabotage Remediation)
+
+- **[CRITICAL] Removed GorstaksEDR.ps1 from HardeningResources** (SAB-1): This embedded script was a supply-chain compromise that installed a parallel "EDR" with Windows Defender exclusions, VPN auto-connect to public vpngate.net servers, and scheduled task persistence. It executed on every service start via `ApplyUserSetupScriptsHardening()`.
+
+- **[CRITICAL] Removed blanket PowerShell script execution** (SAB-1, RT-HIGH-3): `HardeningModule.ApplyUserSetupScriptsHardening()` no longer executes ANY `.ps1` files from embedded resources. Only `.reg` (registry) and `.inf` (LGPO policy) files are extracted and applied. The extraction directory now has SYSTEM+Admins-only ACL.
+
+- **[HIGH] Removed FIPS disable from HardeningModule** (RT-HIGH-1): Sentinel no longer weakens system-wide cryptographic posture by disabling the FIPS Algorithm Policy. If internal algorithms are non-compliant, they should be fixed at the source.
+
+### Fixed
+
+- **[CRITICAL] ETW session re-enabled with correct P/Invoke** (RT-CRIT-2, BT-HIGH-1): Rewrote `UnifiedEtwSession` using the buffer-offset approach (raw `Marshal.AllocHGlobal` with fields written at known offsets) instead of complex nested struct marshaling. The previous struct alignment issues caused native heap corruption on some Windows builds. Detection latency returns from 1-15s (WMI polling) to ~50ms (ETW real-time). The `ThreatIntelInjectionRule` (kernel injection detection) now fires again.
+
+- **[CRITICAL] DynamicRulesEvaluator now requires HMAC-signed rules** (RT-CRIT-1): Rule JSON files must include an `"hmac"` field containing HMAC-SHA256 computed over the rule content (minus the hmac field) using the installation entropy key. Unsigned/tampered rules are rejected with a warning log. Rules directory ACL is locked to SYSTEM+Admins write access.
+
+- **[HIGH] cmd.exe, powershell.exe, pwsh.exe removed from kill protection** (RT-HIGH-2, RT-HIGH-5): These processes are NOT BSOD-critical and are the most common LOLBin attack vectors. Previously, `SafeKillProcessTree` refused to terminate them from System32 paths — directly contradicting detection rules that authorize killing malicious PowerShell/cmd sessions. Kill protection now only covers true BSOD-critical processes (csrss, smss, services, wininit, lsass, winlogon, dwm, svchost) and the user shell (explorer).
+
+- **[MEDIUM] Late-binding wiring validation** (WIRE-2): Added `ValidateLateBoundWiring()` at service startup that checks all `SetXxx()` late-bound fields via reflection. Logs CRITICAL if any orchestrator/response-engine binding is null, which would cause silent fallback to degraded behavior.
+
+### Changed
+
+- `HardeningModule.IsCriticalProcessName()` — reduced to true BSOD-critical processes only
+- `HardeningModule.ApplyUserSetupScriptsHardening()` — only extracts .reg/.inf/.exe (LGPO only), ACL-locks extraction directory
+- `UnifiedEtwSession` — full rewrite with working P/Invoke implementation
+- `DynamicRulesEvaluator` — HMAC signature validation, ACL enforcement on rules directory
+- `SentinelService.ExecuteAsync()` — ETW session enabled, WMI disabled when ETW is active
+
+## [1.5.4] - 2026-07-18
+
+### Security — Audit Remediation (Blue/Red Team Audit v1.5.3)
+
+Addresses findings from the comprehensive security audit (`audit-v1.5.3.md`). Eliminates LOLBin dependencies, adds self-healing FIPS enforcement, hardens cryptographic key material, fixes memory leak in correlation engine, and improves supply-chain compromise detection.
+
+### Fixed
+
+- **[CRITICAL] FIPS Algorithm Policy keeps re-enabling itself** (`AntiTamperGuard`): Windows Group Policy Client (`gpsvc`) refreshes the local security database every 90-120 minutes. If FIPS was ever enabled in the security database (via `secedit`, domain GPO, or prior hardening), the GP refresh overwrites Sentinel's registry disable. Fix: `AntiTamperGuard` now checks the FIPS registry value every 10s (on the integrity tick cycle) and re-disables it when detected. On first re-enablement detection, it additionally runs `secedit /configure` to override the local security policy database itself, making the fix persist across GP refresh cycles. Registry-only enforcement as fallback if secedit fails.
+
+- **[HIGH] Service self-healing uses sc.exe LOLBin** (`AntiTamperGuard`): Previously, service re-registration and start-type enforcement used `Process.Start("sc.exe")`. An attacker who blocks/renames/hijacks sc.exe could prevent recovery. Fix: Replaced all sc.exe calls with native `advapi32.dll` P/Invoke (`OpenSCManager`, `CreateService`, `OpenService`, `ChangeServiceConfig`, `CloseServiceHandle`). Zero external process dependency for self-healing operations.
+
+- **[HIGH] Agent delayed relaunch uses cmd.exe** (`Agent/Program.cs`): The `ScheduleDelayedRelaunch` method previously spawned `cmd.exe /c ping -n 4 127.0.0.1 >nul & start` — a distinctive LOLBin artifact that attackers can target to prevent agent recovery. Fix: Replaced with direct `Process.Start` of the agent executable. The AgentWatchdog (10s cycle) provides the authoritative restart mechanism; the delayed self-relaunch is a best-effort secondary that no longer needs a shell intermediary.
+
+- **[HIGH] Entropy file ACL not verified at startup** (`StartupSelfTest`): The `.install_entropy` file (HMAC key material) could have corrupted permissions if the Secure directory ACL failed to apply during installation. Standard users reading this file can reconstruct the HMAC key and forge cache entries. Fix: `StartupSelfTest` now verifies the entropy file's ACL on every boot. If Users/Everyone have read access, the ACL is re-locked to SYSTEM+Administrators only and a warning is logged.
+
+- **[MEDIUM] BehavioralCorrelationEngine memory leak** (`BehavioralCorrelationEngine`): Signal buffers for dead PIDs were never removed from the `ConcurrentDictionary`. On systems with high process churn (build servers, CI/CD), this caused unbounded memory growth. Fix: Added periodic pruning (every 60s) that removes entries where all signals are older than the correlation window. Empty buffers are evicted from the dictionary.
+
+- **[MEDIUM] Allowlisted Electron app early evidence dropped** (`BehavioralCorrelationEngine`): When a signed Electron app (Discord, VS Code, etc.) emitted Tier2 signals with no existing buffer, the signals were silently dropped. If a Tier1 signal arrived later (supply-chain compromise), the early Tier2 evidence was unavailable for composite evaluation. Fix: Tier2 signals from allowlisted apps are now accumulated in a small buffer (max 5 signals). If a Tier1 signal arrives, this evidence is available for composite correlation. Buffer cap prevents memory growth from normal Electron noise.
+
+### Changed
+
+- **AntiTamperGuard** now imports `System.Runtime.InteropServices` and `System.Collections.Generic` for native SCM P/Invoke declarations.
+- **AntiTamperGuard** class docstring updated to include FIPS enforcement as responsibility #5.
+- **BehavioralCorrelationEngine** constants: added `MaxAllowlistedTier2Buffer = 5` and `PruneInterval = 60s`.
+
+### Architecture
+
+- All self-healing operations (service registration, start-type enforcement) now use direct Win32 API calls — zero LOLBin dependencies in the Critical monitor group.
+- FIPS enforcement follows the same self-healing pattern as IPSecIntegrityGuard: detect drift → fix in registry → fix in security database → log.
+- Signal buffer lifecycle is now bounded: signals expire after 60s, empty buffers are evicted after 60s. Memory usage is O(active PIDs with recent detections) instead of O(all PIDs ever seen).
+
+## [1.5.3] - 2026-07-18
+
+### Changed
+
+- **Project renaming**: Product name is `Sentinel` only (no prefixes/suffixes) across namespaces, assemblies, service name, install paths, config section, installer, worker, and docs.
+
+### Fixed
+
+- **[HIGH] Fix uninstaller Access Denied permissions error on unins000.dat**: Updated `ExcludeUninstallerFromDeny` in `HardeningModule.cs` to save the protected DACL (disabling inheritance and copying rules) to disk and immediately re-read it before removing the Deny rule. This works around a .NET `CommonObjectSecurity` design where in-memory rule lists are not automatically converted from inherited to explicit, which previously caused the Deny rule removal to be ignored.
+- **[HIGH] Fix EDR RouteTableMonitor sandboxing compatibility**: Excluded on-link persistent routes (gateway `0.0.0.0`) from the suspicious `/32` host route registry cleanup and runtime modification checks in `RouteTableMonitor.cs`. This prevents Sentinel from deleting sandboxed routing configurations used by local development agents like Antigravity, which previously caused them to freeze.
+- **[MEDIUM] Fix program installer FIPS algorithm policy**: Added registry configuration entries in `setup.iss` and programmatic registry writes in `HardeningModule.cs` at startup to ensure `SYSTEM\CurrentControlSet\Control\Lsa\FipsAlgorithmPolicy\Enabled` is set to `0` across the service, agent, and installer to prevent cryptographic validation exceptions.
+- **[MEDIUM] Fix uninstaller residues cleanup**: Added uninstaller steps in `setup.iss` to cleanly remove the `ShowAllTrayIcons` scheduled task, `GSecurity` IPSec policy, and the custom RPC dynamic port blocker firewall rules upon uninstallation.
+- **[LOW] Fix system explorer flashes and closed windows**: Commented out the `explorer.exe` restart step in `ShowAllTrayIcons.ps1` to prevent desktop flickering and closed explorer windows during EDR initialization.
+- **[LOW] Fix system tray icon recovery**: Implemented a hidden WinForms handle listener in `TrayIconService.cs` registering for the Win32 broadcast `"TaskbarCreated"` message. The agent now dynamically re-registers and restores its icon to the system tray if the shell/Explorer restarts.
+
+## [1.5.2] - 2026-07-18
+
+### Changed
+
+- **Custom Hardening Scripts integration**: Embedded setup hardening scripts as resources for standalone runtime delivery.
+
+## [1.5.1] - 2026-07-17
+
+### Fixed
+
+- **[HIGH] Fix silent DI deduplication of MonitorGroups**: Replaced `services.AddHostedService` with `services.AddSingleton<IHostedService>` for all 6 MonitorGroups in `Program.cs`. The previous usage of `AddHostedService` called `TryAddEnumerable` which silently discarded all groups after the first one (Critical) because they shared the same implementation type (`MonitorGroup`). This prevented CoreDetection, CredentialProtection, NetworkIntegrity, SystemIntegrity, and Peripheral groups from starting. This fix enables all EDR monitors (including hosts-file protection and DNS-over-HTTPS disabler) to run on service boot.
+
+## [1.5.0] - 2026-07-17
+
+### Security — Red Team Audit v2: EDR Survival & Anti-Scripting Maturity
+
+Threat-intel-driven release based on June–July 2026 active campaigns (GentleKiller, PoisonX, EDRSilencer, DeepLoad, TrapDoor). Addresses the top findings from the v1.5.0 red team audit: EDR network silencing, BYOVD driver attacks, WFP filter manipulation, and PowerShell anti-evasion maturity.
+
+### Added
+
+- **`ConnectivityCanaryMonitor`** (Critical Group): Periodically verifies Sentinel can reach its threat intelligence endpoints (proxy, CIRCL, MalwareBazaar, Cloudflare). Detects EDRSilencer WFP blocking, DNS poisoning of proxy domain, and firewall rules silencing Sentinel. Probes every 45s with HEAD requests; falls back to raw TCP on direct IP (bypasses DNS). 3 consecutive failures → Tier1 "Anti-Tamper: Network Silencing Detected" (0.90). Persistent silencing (>10 min) escalates to 0.95 confidence. Addresses the #1 red team finding: EDRSilencer can permanently blind all cloud intelligence with zero alerts.
+
+- **`WfpIntegrityMonitor`** (SystemIntegrity Group): Scans Windows Filtering Platform filters every 30s for BLOCK rules targeting Sentinel's executable paths. Exports filters via `netsh wfp show filters`, parses XML output for application-ID-based blocks. Three detection modes: (1) Direct Sentinel targeting → Tier1/0.97/KillProcessTree, (2) Bulk filter surge (+10) → Tier1/0.75-0.90, (3) Multiple EDR processes blocked → Tier1/0.85. Attempts WFP filter removal on detection. Maintains known-EDR target list covering 20+ security vendors (CrowdStrike, SentinelOne, Sophos, ESET, Elastic, etc.). Directly counters EDRSilencer, EDRKillShifter, and GentleKiller framework WFP manipulation.
+
+- **`DriverLoadMonitor`** (SystemIntegrity Group): Monitors for BYOVD (Bring Your Own Vulnerable Driver) attacks via three detection paths: (1) System Event Log Event ID 7045 (kernel service install), (2) Registry scan for new `SYSTEM\CurrentControlSet\Services` with Type=1/2, (3) .sys file creation in user-writable paths. Cross-references against embedded blocklist of 15+ SHA-256 hashes and 40+ filenames from the Microsoft Vulnerable Driver Blocklist and LOLDrivers project. Known-vulnerable hash match → Tier1/0.97/KillProcessTree + attempt `sc stop`/`sc delete`. Covers RTCore64, DBUtil, gdrv, WinRing0, ProcExp152, Truesight, iqvw64e, Capcom, KProcessHacker, nbwdv (Medusa), and more. Baselines existing drivers at startup to avoid FP on boot.
+
+- **`ScriptHardeningMonitor`** (CoreDetection Group): Comprehensive PowerShell/scripting anti-evasion maturity monitor covering 9 detection capabilities not addressed by existing `ScriptExecutionMonitor`:
+  1. **PowerShell History File Integrity** — Detects deletion/truncation of `ConsoleHost_history.txt` (anti-forensics). DeepLoad malware explicitly destroys PS history.
+  2. **ScriptBlock Logging Policy Enforcement** — Alerts if Event 4104 logging is disabled or explicitly set to 0 via registry. Checks Module Logging and Transcription status.
+  3. **PowerShell Downgrade Attack** — Detects `-version 2` invocation which disables AMSI, ScriptBlock Logging, and CLM entirely (T1059.001).
+  4. **Execution Policy Bypass + Evasion Flag Stacking** — Detects `-ep bypass` combined with 2+ evasion flags (hidden window, no profile, non-interactive, encoded command, download). Single `-ep bypass` is normal admin; stacking is malware signature.
+  5. **Profile Persistence Detection** — Monitors all 8 PowerShell profile paths for malicious content (download cradles, reverse shells, AMSI bypass, reflection loading). SHA-256 baseline + content analysis (T1546.013).
+  6. **Legacy Script Host Detection** — Alerts on wscript.exe/cscript.exe/mshta.exe execution (WSH bypasses all PS security controls: no AMSI, no CLM, no SBL).
+  7. **Encoded Command Analysis** — Decodes base64 `-EncodedCommand` payloads and runs obfuscation scoring + pattern matching (download cradles, reflection, CLM bypass).
+  8. **Constrained Language Mode Bypass** — Detects 32-bit PowerShell (SysWOW64) invocation when WDAC/AppLocker is configured (common CLM escape).
+  9. **Advanced Script Block Patterns** — Real-time Event 4104 analysis for download cradles (IEX+download pipeline), .NET Assembly.Load reflection, and obfuscation scoring (backticks, concat, char arrays, format strings, reverse indexing — scored 0-10, kill at ≥8).
+
+### Changed
+
+- **Critical Monitor Group**: Expanded from 4 to 5 monitors. Added ConnectivityCanaryMonitor — lightweight (no I/O at startup, 30s grace period). Restarts indefinitely on failure.
+- **SystemIntegrity Monitor Group**: Added WfpIntegrityMonitor and DriverLoadMonitor (moved from Critical — both perform heavy I/O at startup: full Services registry enumeration and `netsh` subprocess spawn, which delayed service heartbeat and caused Agent tray freeze).
+- **CoreDetection Monitor Group**: Added ScriptHardeningMonitor alongside existing ScriptExecutionMonitor. Together they provide enterprise-grade anti-scripting coverage.
+- **`TrayIconService`** (Agent): Removed all `ShowBalloonTip` calls — the Windows Push Notification Service (`WpnService`) is removed by Sentinel's own hardening scripts, causing `ShowBalloonTip` to silently deadlock the STA message pump. Replaced `WatchLogFileAsync` (async/await on STA sync context) with `WatchLogFileSync` running on a dedicated background `Thread`. The STA pump now runs clean with zero async continuations or Win32 notification API calls competing for the message loop.
+
+### Fixed
+
+- **[HIGH] Agent tray freeze on hardened systems** (`TrayIconService`): `ShowBalloonTip` silently deadlocks the WinForms STA message pump when `WpnService` (Windows Push Notification Service) is removed by hardening scripts. The call doesn't throw — it hangs internally waiting for the notification subsystem. Additionally, `WatchLogFileAsync` used `async/await` which posted continuations to the STA `SynchronizationContext`, starving the message loop during file I/O. Both issues caused the tray icon to appear frozen (no context menu response, no tooltip). Fix: removed all `ShowBalloonTip` calls; replaced async log watcher with a synchronous `Thread`-based implementation that never touches the STA pump.
+- **[MEDIUM] Service startup delay from Critical group I/O** (`Program.cs`): `DriverLoadMonitor.BaselineExistingDrivers()` enumerates the entire `HKLM\SYSTEM\CurrentControlSet\Services` registry hive synchronously, and `WfpIntegrityMonitor` spawns `netsh wfp show filters` (heavy disk I/O). Both in the Critical group (0ms start delay) delayed the service heartbeat, causing the Agent to stall waiting for the service to become responsive. Fix: moved both to SystemIntegrity group (10s start delay) where heavy-I/O monitors belong.
+
+### President's Law Additions
+
+| Behavior | Detector | Justification |
+|---|---|---|
+| WFP filter blocking Sentinel network traffic | `WfpIntegrityMonitor` | Self-protection tampering — falls under existing "Sentinel self-protection tampering" |
+| Known-vulnerable driver loaded (BYOVD) | `DriverLoadMonitor` | Precursor to EDR kill — extends "Sentinel self-protection tampering" |
+| Download cradle execution (IEX+Download pipeline) | `ScriptHardeningMonitor` | Falls under "Reverse shell / C2 callback" |
+| .NET Assembly reflection loading from PowerShell | `ScriptHardeningMonitor` | Falls under "Process injection / hollowing" (in-memory execution) |
+| PowerShell v2.0 downgrade attack | `ScriptHardeningMonitor` | Falls under "ETW / AMSI tampering" (disables all PS security) |
+
+### Architecture
+
+- New monitor files: `Monitors/ConnectivityCanaryMonitor.cs`, `Monitors/WfpIntegrityMonitor.cs`, `Monitors/DriverLoadMonitor.cs`, `Monitors/ScriptHardeningMonitor.cs`
+- All follow `BackgroundService` + DI pattern with `CancellationToken` threading
+- All file I/O uses `FileShare.ReadWrite | FileShare.Delete` per constraints
+- No kernel drivers, no direct syscalls — all detection is userland-compatible
+- WFP filter scanning uses `netsh` subprocess (validated output before use per constraints)
+- Driver hash blocklist embedded in binary (same approach as `CveShieldHardener` CVE feed)
+- `WfpIntegrityMonitor` and `DriverLoadMonitor` placed in SystemIntegrity group (10s delay) — not Critical — because they perform heavy I/O at startup (registry enumeration, subprocess spawn)
+- `TrayIconService` rewritten: log watcher is now a synchronous dedicated `Thread` (was async on STA context). All `ShowBalloonTip` calls removed (deadlocks without `WpnService`). STA pump is guaranteed clean.
+
+### Design Rules Added
+
+| Rule | Rationale |
+|------|-----------|
+| No async/await on Agent STA thread | Async continuations post to WinForms SynchronizationContext, starving the message pump. All background work on dedicated threads. |
+| No Win32 notification API calls | `WpnService` removed by hardening. `ShowBalloonTip` deadlocks silently without throwing. |
+| Critical group: no heavy I/O at startup | Monitors with registry enumeration or subprocess spawns delay service heartbeat, causing Agent tray freeze. Use SystemIntegrity (10s) or later. |
+
+---
+
+## [1.4.9] - 2026-07-17
+
+### Security — Service Self-Termination Vulnerability Fix
+
+**[CRITICAL] BackgroundService early return kills entire process** (`ApplicationIntegrityMonitor`): When no protected applications were configured, `ApplicationIntegrityMonitor.ExecuteAsync` returned immediately (completing its Task). In .NET 6+, a BackgroundService whose `ExecuteAsync` completes signals the Host to shut down — killing the entire Sentinel service. This caused a ~8-16 second crash-loop on every startup, leaving the system completely unprotected. SCM failure recovery restarted the service, but it died again immediately.
+
+### Fixed
+
+- **ApplicationIntegrityMonitor**: Early return replaced with `Task.Delay(Timeout.Infinite, ct)`. When disabled/unconfigured, the monitor now sleeps indefinitely instead of completing its task. The host remains alive.
+- **UnifiedEtwSession**: Disabled at service startup. The ETW P/Invoke struct layouts (`EVENT_TRACE_PROPERTIES`, `EVENT_TRACE_LOGFILEW`) had incorrect field sizes/alignment compared to actual Windows SDK `evntrace.h` headers, causing native heap corruption that terminated the process ~20 seconds after startup with no managed exception. Session architecture and dispatcher remain in the codebase for future re-enablement once P/Invoke structs are validated. Monitors fall back to WMI/polling (same detection coverage as v1.4.5).
+- **Program.cs Main()**: Changed from `host.Run()` to `host.StartAsync()` + `Thread.Sleep(Timeout.Infinite)`. The process cannot exit from managed code regardless of hosted service lifecycle events.
+- **Program.cs HostOptions**: Set `BackgroundServiceExceptionBehavior.Ignore` and `ServicesStartConcurrently = false` to prevent cascading shutdown from any hosted service failure.
+- **Program.cs diagnostics**: Added `AppDomain.UnhandledException` and `TaskScheduler.UnobservedTaskException` handlers writing to `fatal_crash.log`. Added `startup_trace.log` for startup lifecycle debugging.
+- **SentinelOrchestrator.Dispose()**: All component disposals wrapped in try/catch to prevent cascading ObjectDisposedException.
+- **ContextBus.Dispose()**: Added `_disposed` guard flag. Wrapped all CTS operations in try/catch.
+- **DetectionEngine.Stop()**: Added `_stopped` guard flag. Captured `_cts.Token` into local variable for fire-and-forget tasks. Added `catch (ObjectDisposedException)`.
+- **SentinelService.ExecuteAsync**: Monitors started with `CancellationToken.None` instead of `stoppingToken`. Entire method wrapped in try/catch with infinite-wait fallback.
+- **Result**: Service starts and stays running indefinitely. Confirmed stable through multiple restart cycles.
+
+---
+
+## [1.4.8] - 2026-07-16
+
+### Security — Double-Dispose Crash Fix
+
+**[HIGH] ContextBus double-dispose crash** (`ContextBus.Dispose()`): The DI container called `ContextBus.Dispose()` after `SentinelOrchestrator.Dispose()` had already disposed it. Calling `CancellationTokenSource.Cancel()` on an already-disposed CTS threw `ObjectDisposedException` — unhandled — crashing the process. Combined with SCM failure recovery, this created a crash-loop on any service shutdown.
+
+### Fixed
+
+- **ContextBus**: Added `_disposed` guard flag to `Dispose()`. Second call is a no-op. Wrapped `_cts.Cancel()` and `_cts.Dispose()` in `try/catch (ObjectDisposedException)` as defense-in-depth.
+- **DetectionEngine**: Added `_stopped` guard flag to `Stop()`. Wrapped `_cts.Cancel()` in `try/catch (ObjectDisposedException)`. Prevents crash when DI container disposes after explicit `Stop()` call.
+- **Result**: Service now survives double-disposal from DI container + orchestrator shutdown sequence. No crash-loop on any shutdown path.
+
+---
+
+## [1.4.7] - 2026-07-16
+
+### Security — Service Crash-Loop Vulnerability Fix
+
+**[HIGH] CancellationTokenSource disposal race condition** (`DetectionEngine`, `ContextBus`): The service crashed with `ObjectDisposedException` when background reputation-check tasks accessed `_cts.Token` after the CancellationTokenSource was disposed during shutdown. This created a crash-loop (service dies → SCM restarts → dies again in ~20s) that left the system unprotected. An attacker triggering a service stop could exploit this to keep Sentinel offline indefinitely.
+
+### Fixed
+
+- **DetectionEngine**: Fire-and-forget reputation tasks now capture `_cts.Token` into a local variable before spawning. The local copy is a value-type snapshot that remains valid after CTS disposal. Added `catch (ObjectDisposedException)` to both the main processing loop and reputation task error handlers.
+- **ContextBus**: Added `catch (ObjectDisposedException)` to the dispatch loop to prevent cascading crash on shutdown.
+- **Result**: Service now shuts down cleanly without crash-loop. SCM restart after a legitimate stop succeeds on first attempt.
+
+---
+
+## [1.4.6] - 2026-07-15
+
+### Architecture — Unified ETW Session & Event-Driven Telemetry
+
+Major architectural upgrade: replaces poll-based monitoring with a single unified ETW session subscribing to 9 kernel/system providers simultaneously. Detection latency drops from seconds to ~50ms across all monitored subsystems.
+
+### Added
+
+- **`UnifiedEtwSession`** (`UnifiedEtwSession.cs`): Single real-time ETW trace session consuming 9 providers through raw Win32 P/Invoke (no TraceEvent NuGet — AV-clean). Providers: Kernel-Process, Kernel-File, Kernel-Registry, DNS-Client, Threat-Intelligence, PowerShell, Windows Firewall, TaskScheduler, Kernel-Network. 64 buffers × 256KB, QPC timestamps, AboveNormal thread priority. Gracefully degrades to poll-based monitoring if session start fails (non-admin).
+
+- **`EtwEventDispatcher`** (`EtwEventDispatcher.cs`): Routes raw ETW events by provider GUID to typed telemetry objects. Converts kernel events into ProcessTelemetry, FileActivityTelemetry, RegistryTelemetry, DnsTelemetry, ThreatIntelTelemetry, NetworkTelemetry, FirewallTelemetry, and TaskSchedulerTelemetry. Feeds directly into TelemetryFusionEngine → DetectionEngine pipeline.
+
+- **New telemetry types**: `RegistryTelemetry`, `DnsTelemetry`, `FirewallTelemetry`, `TaskSchedulerTelemetry` — ETW-sourced event types with PID attribution that replace polled equivalents.
+
+- **VirusTotal proxy integration** (`FileReputationEngine`): VT lookups now route through the Cloudflare Worker proxy (`/lookup/vt` endpoint). Worker holds the VT API key server-side. Returns verdict (safe/suspicious/malicious/not_found), detection count, engine count, and detection rate. Hash consensus scoring rebalanced for 3-source model (CIRCL 25pts + MalwareBazaar 40pts + VT 35pts). Graceful degradation when proxy not configured.
+
+- **`/lookup/vt` endpoint** (`worker/src/index.js`): Cloudflare Worker endpoint that proxies SHA-256 hash lookups to VirusTotal v3 API. Server-side API key via `VIRUSTOTAL_KEY` secret. Returns structured verdict based on multi-engine detection rate thresholds (≥25% = malicious, ≥10% or 3+ engines = suspicious).
+
+- **`[RuleCategory]` attribute system** (`ScoringEngine.cs`): Compile-time-safe detection categorization. All rule classes declare their `DetectionCategory` via attribute. `RuleCategoryRegistry` scans the assembly at startup for O(1) lookup. `ScoringEngine.CategorizeDetection` uses registry-first, string-fallback for composite detections.
+
+- **59 new unit + integration tests** (240 → 299 total, all passing):
+  - 10 end-to-end integration pipeline tests (full Telemetry → Detection → Scoring → Correlation → Orchestrator → Response flow)
+  - 8 AdvancedResponseEngine tests (self-exclusion, active response disabled, network isolation, registry removal, kill paths, metrics)
+  - 8 BehavioralCorrelationEngine tests (composite fire/no-fire, different PIDs, highest confidence wins, Tier1 emission)
+  - 6 ChainTracer tests (trace result, active response disabled, logging, invalid PID, duration)
+  - 11 FileReputationEngine tests (scoring, caching, path risk, PE analysis, deduplication)
+  - 7 AntiTamperGuard tests (construction, timing alerts, binary deletion, service deletion, QoS tampering)
+  - 8 DetectionEngine tests (rule matching, deduplication, direct emission, consultant signals, scoring integration)
+  - 1 RuleCategoryRegistry verification test
+
+### Changed
+
+- **`EtwProcessMonitor`**: No longer manages its own ETW session. Delegates to `UnifiedEtwSession`. Role reduced to checking session status and disabling WMI fallback when ETW is active.
+- **Detection latency**: Process creation ~50ms (was ~1-2s via WMI), file operations instant (was FileSystemWatcher scope), registry changes instant (was polled 10-30s), DNS queries instant, network connections instant (was polled 5-15s), firewall changes instant (was polled 30s), scheduled tasks instant (was polled 30s).
+- **Hash reputation consensus**: Rebalanced from 2-source (CIRCL + MalwareBazaar only) to 3-source model with VirusTotal contributing 35 points when proxy is configured.
+
+### Architecture Decisions
+
+| Decision | Rationale |
+|----------|-----------|
+| Single ETW session for all providers | Minimizes kernel session count (Windows limits to 64 total), reduces context switches, single processing thread |
+| Raw P/Invoke instead of TraceEvent NuGet | TraceEvent embeds injection API name strings that trigger AV heuristic false positives (Kaspersky, DeepInstinct, Bitdefender) |
+| Handler registration pattern | Decouples session management from event interpretation. New providers added without modifying session code |
+| VT via proxy (not direct) | Open-source distribution can't embed API keys. Proxy holds key server-side with HMAC authentication |
+| Attribute-based categorization with string fallback | Compile-time safety for known rules, runtime flexibility for composite/dynamic detection names |
+
+---
+
+## [1.4.5] - 2026-07-15
+
+### Security — Credential Hardening & Detection Gaps
+
+Critical fixes for credential exposure and new detection coverage for script-based attacks that bypassed prior versions.
+
+### Fixed (Security)
+
+- **[CRITICAL] Auto-logon password stored in plaintext** (`PasswordRotationGuard`): Previously wrote the rotated password as `DefaultPassword` in `HKLM\...\Winlogon` — readable by any admin process via `reg query`. Now uses `LsaStorePrivateData` API to store as an LSA secret (encrypted with system boot key, only readable by SYSTEM). Plaintext `DefaultPassword` registry value is explicitly deleted on every rotation.
+- **[HIGH] Auto-logon requiring user interaction** (`PasswordRotationGuard`): Added `ForceAutoLogon=1`, `DisableCAD=1` (disables Ctrl+Alt+Del), and removes `AutoLogonCount`, `LegalNoticeCaption`, and `LegalNoticeText` values that blocked seamless login on Windows 10/11 builds. Boot/restart now logs in automatically without any user input.
+- **[HIGH] Behavioral correlation only receiving Tier2 signals** (`DetectionEngine`): Previously only `Tier2Indicator` detections were fed to `BehavioralCorrelationEngine`. Tier1 behavioral detections never entered correlation, meaning composite patterns like "Injected C2 Beacon" (injection + C2 on same PID) could never fire. Now both Tier1 and Tier2 detections feed into correlation.
+- **[MEDIUM] Agent running SYSTEM-only components** (`Agent/Program.cs`): Removed `ConsultantSignalIngestor` (duplicate of Service-side registration, caused double event processing) and `PseudoSandbox` (requires SYSTEM privileges for Job Objects, cannot function in user session) from the Agent. These now run exclusively in the Service.
+
+### Added
+
+- **`ScriptExecutionMonitor`** (`ScriptExecutionMonitor.cs`): New comprehensive monitor covering 5 previously undetected attack vectors:
+  1. **PowerShell Script Block Logging (Event ID 4104)** — catches deobfuscated script content even when command-line looks benign. Confidence scales with pattern count (1 pattern = 0.55, 5+ = 0.95). Tier1 kill on AMSI bypass, credential theft, or Sentinel-targeting patterns.
+  2. **Parent-child process anomaly detection** — Office→shells, wmiprvse/wmiadap→shells, taskeng/taskhostw→LOLBins, services→shells, explorer→LOLBins. All fire Tier1 + KillProcessTree.
+  3. **AMSI bypass detection** — checks if PowerShell processes have amsi.dll unloaded (FreeLibrary bypass). Tier1 kill on module absence.
+  4. **SAM hive extraction** — detects `reg.exe save HKLM\SAM/SECURITY/SYSTEM` commands. Tier1 kill.
+  5. **Suspicious script file drops** — monitors user-writable directories (Temp, Downloads, AppData) for .ps1/.vbs/.bat/.cmd/.hta/.js creation. Content-analyzed for malicious patterns. Tier1 quarantine if 3+ patterns match.
+
+- **`PhysicalAccessMonitor`** (`PhysicalAccessMonitor.cs`): Detects physical tampering by correlating idle periods with hardware changes. Monitors user idle time via `GetLastInputInfo`, and when the user returns from 2+ minutes idle, checks for new USB devices, new Bluetooth devices, and new logon sessions. Multiple anomalies raise confidence from 0.55 to 0.75. Registered in Group 6 (Peripheral).
+
+- **Credential Guard monitoring** (`HardwareSecurityGuard`): Added `CheckCredentialGuardAsync()` that detects if Windows Credential Guard (VBS-based LSA isolation) is disabled. Checks LsaIso.exe process presence and `LsaCfgFlags` registry value. Alerts if Credential Guard was expected but is no longer active.
+
+- **`ProxySharedSecret`** property on `ThreatReportingConfig`: Allows configuring the HMAC shared secret for proxy authentication via `appsettings.json` under `Sentinel:ThreatReporting:ProxySharedSecret`.
+
+### Changed
+
+- **wmiadap.exe** added to parent-child anomaly detection alongside wmiprvse.exe (WMI Performance Adapter can also be abused for execution).
+
+---
+ 
+## [1.4.4] - 2026-07-13
+
+### Security — Red Team Audit Remediation
+
+Internal red team audit identified 15 vulnerabilities across Critical/High/Medium severity. All actionable findings remediated in this release.
+
+### Fixed (Security)
+
+- **[CRITICAL] Hash reputation trust inversion** (`HashReputationService`): Previously returned `Safe` when a hash was absent from both CIRCL and MalwareBazaar — treating absence of evidence as evidence of safety. Novel malware (zero-day payloads, custom implants) was permanently cached as Safe and received trust score boosts in BeaconingDetector. Now returns `Unknown` for absent hashes; only CIRCL trust score > 60 can positively confirm Safe.
+- **[CRITICAL] User-level ActiveResponse disable** (`TrayIconService`): Removed the "Stop Protection" toggle from the Agent tray menu. Previously, any user-level process could automate this menu item to disable all Agent-side detection responses without elevation. The Service (SYSTEM) is now the sole authority on response mode.
+- **[CRITICAL] Command injection via PowerShell** (`IsolationResponseEngine`): Both ISO dismount and Hyper-V Stop-VM commands now use `-EncodedCommand` (Base64-encoded Unicode) instead of string interpolation into `-Command`. Eliminates command injection via crafted ISO filenames or VM names. Added single-quote escaping as defense-in-depth.
+- **[HIGH] Self-exclusion bypass via junction/symlink** (`AdvancedResponseEngine`, `HardeningModule`, `DetectionEngine`): All 3 self-exclusion path checks now normalize both paths with `Path.GetFullPath()` to resolve symlinks, junctions, and relative segments. Added trailing directory separator to prevent prefix collision attacks (e.g., `Sentinel2\evil.exe` matching `Sentinel`).
+- **[HIGH] Overprivileged process handle** (`DllUnloadEngine`): Reduced `OpenProcess` from `PROCESS_ALL_ACCESS` (0x1F0FFF) to `PROCESS_QUERY_INFORMATION` (0x0400). Thread handles already opened individually with `THREAD_SET_CONTEXT` — the process-level handle only needed query access for module enumeration.
+- **[HIGH] Unauthenticated threat telemetry** (`ThreatReportService`): All outbound reports to the Cloudflare Worker proxy are now HMAC-SHA256 signed using a key derived from the installation entropy. Signature covers timestamp + path + body via `X-Sentinel-Timestamp` and `X-Sentinel-Signature` headers. Prevents MITM telemetry inspection, replay attacks, and fake report injection.
+- **[HIGH] SecureCacheStore HMAC key partially predictable** (`SecureCacheStore`): Removed boot time ticks (publicly readable from PID 4) and process ID (visible in task manager) from key derivation. Key now derived solely from Machine GUID + SYSTEM-ACL-protected installation entropy + domain-specific label. Stable across reboots; requires SYSTEM/Admin access to reconstruct.
+- **[MEDIUM] Docker imageId injection** (`IsolationResponseEngine`): `imageId` from `docker inspect` output is now validated with `IsValidDockerIdentifier()` before passing to `docker rmi`. Prevents argument injection via crafted image references in malicious containers.
+- **[MEDIUM] Config overwrite on upgrade** (`setup.iss`): Changed `appsettings.json` installer flag from `ignoreversion` (always overwrite) to `onlyifdoesntexist` (preserve user config). Upgrades no longer silently destroy custom TrustedCastDevices, ProtectedApps, LogPath, or other user settings.
+- **[MEDIUM] FileReputationEngine memory DoS** (`FileReputationEngine`): `CountSuspiciousImports` now uses 64KB streaming chunks with 64-byte overlap instead of reading up to 10MB into a single byte[]. Memory usage drops from O(filesize) to O(64KB) per concurrent evaluation. Early exit when all imports found.
+- **[MEDIUM] Installer race condition** (`setup.iss`): Replaced `Sleep(3000)` after `sc stop` with a PowerShell polling loop that checks `sc queryex` for STOPPED state every 500ms for up to 10 seconds. Eliminates the race where AntiTamperGuard self-heals before installer finishes.
+- **[LOW] HttpClient socket exhaustion** (`HashReputationService`, `FileReputationEngine`): Replaced per-request `new HttpClient()` with shared static instances. Eliminates TIME_WAIT socket accumulation under sustained reputation lookup load.
+- **[LOW] VirusTotal dead code** (`FileReputationEngine`): Removed non-functional VT v3 query (always returns 401 without API key). Rebalanced consensus scoring: CIRCL weight 20→30, MalwareBazaar 40→50, VT neutral. Stub preserved for future proxy-based re-enablement.
+- **[LOW] Predictable self-test cache entry** (`StartupSelfTest`): Self-test now uses random key + random value instead of fixed `_check`/`ok`. Eliminates known-plaintext exposure in the DPAPI-encrypted cache file.
+
+### Architecture — Monitor Grouping & Non-Blocking File I/O
+
+Major internal refactor: monitors are now organized into priority groups with staggered startup and independent failure restart. All file operations updated to never block user file deletion.
+
+### Added
+
+- **`MonitorGroup`**: New infrastructure class (`MonitorGroup.cs`) that groups related `BackgroundService` monitors into managed units. Each group has configurable start delay, stagger between monitor starts, restart policy (max attempts or indefinite), health check interval, and graceful shutdown ordering. Replaces 60+ flat `AddHostedService` calls with 6 logical groups.
+
+### Changed
+
+- **Source code split**: Eliminated the 5,500-line `BackgroundMonitors.cs` monolith. All monitor classes now live in 6 group files under `src/Sentinel.Core/Monitors/`:
+  - `CriticalMonitors.cs` — SyscallStubMonitor, IPSecIntegrityGuard
+  - `CoreDetectionMonitors.cs` — DiskWideDllScanner, DllEntropyAnalyzer, DllLoadFailureMonitor, ModuleValidationMonitor, RuntimeModuleIntegrityMonitor, AdsDataStagingMonitor
+  - `CredentialProtectionMonitors.cs` — CanaryFileMonitor, BrowserCredentialGuard, MicrosoftAccountGuardMonitor, NullSessionGuard, BuiltinAdminGuard, PasswordRotationGuard
+  - `NetworkIntegrityMonitors.cs` — ArpSpoofMonitor, DnsResponseValidationMonitor, PublicIpMonitor, WifiSecurityMonitor, RemoteAccessMonitor, PhantomDeviceMonitor
+  - `SystemIntegrityMonitors.cs` — FirewallIntegrityMonitor, SecureBootIntegrityMonitor, ScheduledTaskMonitor, TlsCertificateMonitor, UacBypassSurfaceMonitor, WindowsUpdateIntegrityMonitor, WmiPersistenceMonitor, WorkFoldersExfilMonitor, BrowserDnsPolicyGuard, HostsFileGuard, BootIntegrityGuard
+  - `PeripheralMonitors.cs` — BluetoothMonitor, DeviceInstallMonitor, MtpTransferGuard
+- **Service startup**: Monitors now start in 6 priority groups instead of all at once:
+  - **Critical** (0s delay): AntiTamperGuard, IPSecIntegrityGuard, AgentWatchdog, SyscallStubMonitor — restarts indefinitely
+  - **CoreDetection** (2s delay): RansomwareIoMonitor, BeaconingDetector, FileVerdictScanner, GhostProcessMonitor, +11 more — 5 restart attempts
+  - **CredentialProtection** (4s delay): BrowserCredentialGuard, CanaryFileMonitor, NullSessionGuard, +3 more — 3 restart attempts
+  - **NetworkIntegrity** (6s delay): ArpSpoofMonitor, DnsResponseValidation, PublicIpMonitor, NetworkShareMonitor, +9 more — 3 restart attempts
+  - **SystemIntegrity** (10s delay): FirewallIntegrity, SecureBoot, RegistryMonitor, WmiPersistence, +13 more — 3 restart attempts
+  - **Peripheral** (30s delay): BluetoothMonitor, MtpTransferGuard, VolumeMountMonitor, CastDeviceGuard, +8 more — 2 restart attempts
+- **File I/O**: All file read operations across the codebase now use `FileShare.ReadWrite | FileShare.Delete`. Sentinel never holds file locks that prevent users from deleting their own files.
+
+### Design Rules Added
+
+- All file reads MUST use `FileShare.ReadWrite | FileShare.Delete` — Sentinel observes, never obstructs
+- Monitors MUST be registered in groups by function and priority — no flat `AddHostedService` for monitors
+
+## [1.4.3] - 2026-07-13
+
+### Security — Anti-TAO Hardware & Network Integrity Monitors
+
+5 new BackgroundService monitors targeting firmware-level implants, router-level DNS poisoning, BadUSB attacks, and covert exfiltration channels.
+
+### Added
+
+- **`HardwareSecurityGuard`**: Checks IOMMU/VT-d (VBS registry + bcdedit hypervisorlaunchtype), Secure Boot state, and BitLocker encryption on C: every 60 seconds. Alerts if hardware security features are disabled, leaving the system vulnerable to DMA and firmware attacks.
+- **`DnsCrossValidator`**: Resolves a test domain via the system resolver AND via a direct raw UDP DNS query to Cloudflare 1.1.1.1, comparing /16 subnets. Detects router-level DNS poisoning that redirects traffic to attacker infrastructure while bypassing hosts-file protections.
+- **`UsbHidWhitelist`**: Baselines connected HID devices at startup, checks every 15 seconds for new devices. If a new HID device is not in the trusted whitelist (VID:PID) and was not present at baseline, emits Tier1 alert and disables the device via registry ConfigFlags to prevent BadUSB/Rubber Ducky keystroke injection.
+- **`TrafficVolumeBaseline`**: Monitors raw NetworkInterface BytesSent statistics every 30 seconds. Baselines upload rate over the first 5 minutes, then alerts if upload volume exceeds 3x baseline — catching NIC-level implants and firmware exfiltration invisible to process-level monitoring.
+- **`OutboundConnectionWhitelist`**: Monitors (or enforces) outbound connections against a whitelist of allowed IP subnets. In monitor mode, scans netstat output and alerts on non-whitelisted connections. In enforcement mode, creates Windows Firewall rules blocking all outbound traffic except whitelisted subnets + localhost + LAN — the nuclear option that prevents all implant exfiltration regardless of protocol.
+
+## [1.4.2] - 2026-07-12
+
+### Security — OS Attack Surface Reduction (Red Team Probe Results)
+
+Live probing of the host OS identified 4 entry points that an attacker on the LAN could exploit. All closed.
+
+### Added
+
+- **`CastDeviceGuard` — Inbound Rule Deletion**: Deletes all Windows built-in "Cast to Device" and "Media Center Extenders" inbound firewall rules at every service start. These rules allow any LAN device to push RTSP/HTTP streams into the machine — the exact attack surface rogue Cast relays exploit.
+- **`HardeningModule.RegisterForSafeMode`**: Registers `Sentinel` service under both `SafeBoot\Minimal` and `SafeBoot\Network` registry keys. Sentinel now runs in Safe Mode, preventing attackers from rebooting into Safe Mode to operate without EDR.
+- **`HardeningModule.BlockRemoteRpcEphemeralPorts`**: Adds a Windows Firewall rule blocking inbound access to RPC dynamic endpoint ports (49664-49675) from the local subnet. Prevents lateral movement via DCOM/WMI/Task Scheduler RPC from other LAN machines.
+- **IPSec: Port 5040 (CDPUserSvc) blocked**: Connected Devices Platform port added to the GSecurity IPSec policy. No reason for CDP on a hardened workstation.
+- **Installer: Safe Mode registration** via `[Registry]` section — ensures Safe Mode entries survive reinstalls.
+
+### Changed
+
+- **IPSec policy re-apply**: Adding port 5040 means existing installs will get it on next policy re-application (triggered automatically if `IPSecIntegrityGuard` detects a mismatch, or on fresh install).
+
+## [1.4.1] - 2026-07-12
+
+### Security — Red Team Audit: 11 Gaps Closed
+
+Comprehensive red-team audit identified 11 potential bypass vectors. All addressed in this release.
+
+### Added
+
+- **`BuiltinAdminGuard`** (new BackgroundService): Monitors the built-in Administrator account (RID 500) every 15 seconds. If found active, immediately disables it via `net user Administrator /active:no` and emits a Tier1 alert. The built-in Admin account should never be enabled on a personal workstation — attackers enable it for backdoor access (no UAC, possibly blank password, survives user profile changes, visible on login screen).
+- **`IPSecIntegrityGuard`** (new BackgroundService): Verifies the GSecurity IPSec policy is active every 30 seconds. If an attacker deletes or unassigns the policy via `netsh ipsec static delete policy`, Sentinel automatically re-applies the full port block ruleset and emits a Tier1 anti-tamper alert.
+- **`NetworkShareMonitor` — Local Share Creation Detection**: Baselines local SMB shares at startup via `NetShareEnum`. Detects new shares created at runtime (e.g., `net share PWNED=C:\ /grant:everyone,full`), emits Tier1 alert with 0.95 confidence for full-drive exposure, and auto-deletes the unauthorized share.
+- **`FileActivityMonitor` — Junction/Symlink Detection**: Detects `FileAttributes.ReparsePoint` on newly created directories within monitored paths. Alerts on unauthorized junction/symlink creation that could redirect monitoring or exploit TOCTOU vulnerabilities.
+- **`LocalServerMonitor` — Localhost High-Port Logging**: Previously silently skipped localhost listeners on ephemeral ports (≥49152). Now emits Tier2 events at confidence 0.35 to close the local relay exfiltration blind spot.
+- **`VolumeMountMonitor` — WMI Subscription Persistence Removal**: `RemoveSubstPersistence` now also scans and deletes WMI `CommandLineEventConsumer` subscriptions containing `subst` or `DefineDosDevice` + the drive letter, including associated `__EventFilter` and `__FilterToConsumerBinding` objects.
+- **`VolumeMountMonitor` — Rapid SUBST Escalation**: If a SUBST drive reappears within 30 seconds of being killed, the process hunt escalates past Phase 4's signed-binary exemption to kill ALL recently-spawned non-system processes regardless of signature.
+
+### Changed
+
+- **`HardeningModule.ApplyIPSecPolicy`**: No longer uses `.ipsec_applied` flag file. Now calls `IsIPSecPolicyActive()` which queries actual IPSec engine state via `netsh ipsec static show policy`. Immune to flag-file race conditions and pre-creation attacks.
+- **`HardeningModule`**: Extracted `ReapplyIPSecPolicy()` and `IsIPSecPolicyActive()` as public static methods for use by `IPSecIntegrityGuard`.
+- **`FileActivityMonitor.IsUserToolWorkingPath`**: User tool exclusion paths (`\mount\`, `\scratch\`, `\extracted\`, etc.) now require `IsServicingProcessActive()` to return true. If no servicing tool (dism, ntlite, tiworker, trustedinstaller) is running, these paths are monitored normally — prevents attackers from creating directories matching exclusion patterns to evade monitoring.
+- **`ApplicationIntegrityMonitor.OnFileChanged`**: Replaced 1000ms fixed delay with a 100ms×5 retry loop. Shrinks the TOCTOU attack window from 1000ms to ~100ms. Hash is computed immediately on first attempt; retries only occur if the file is locked.
+
+### Fixed
+
+- **IPSec policy deletion bypass**: An admin-level attacker could run `netsh ipsec static delete policy name=GSecurity` and all port blocks would remain permanently removed until service restart. Now self-heals within 30 seconds.
+- **Local share creation blind spot**: `net share` exposing drives to the network generated zero telemetry. Now detected, alerted, and auto-remediated.
+- **Path exclusion exploitation**: Creating `C:\Users\Admin\mount\` as a payload staging directory bypassed `FileActivityMonitor` even without any servicing tool running.
+- **ApplicationIntegrity TOCTOU**: Binary could be replaced → executed → restored within the 1-second delay window before hash verification ran.
+
+## [1.4.0] - 2026-07-12
+
+### Fixed — svchost and powershell Quarantined (Critical False Positive)
+
+`HardeningModule.IsCriticalProcessName` — the final kill gate called by every response path — was missing `svchost` and `powershell`/`pwsh`. Both were present in `ChainTracer.CriticalSystemProcesses` and `SystemBinaries` respectively, but those lists only protect within ChainTracer's own walk logic. Anything that called `SafeKillProcessTree` directly (composite detections, `BehavioralCorrelationEngine` escalations, `VolumeMountMonitor`'s implant hunter, etc.) bypassed those lists entirely and went straight to `SafeKillProcessTree` — which had no protection for either process.
+
+**Root cause:** `IsCriticalProcessName` protected `csrss`, `wininit`, `services`, `smss`, `lsass`, `winlogon`, `dwm`, `explorer`, `System`, and `cmd` — but not `svchost` (hosts hundreds of critical Windows services; killing any instance can BSOD or leave the system unrecoverable) or `powershell`/`pwsh` (user shells; killing them destroys the interactive session).
+
+The existing path-verification guard (`IsInSystemDirectory`) still applies — a process named `svchost.exe` or `powershell.exe` running from `C:\Temp\` is **not** protected and will still be killed. Only binaries verified to reside under `C:\Windows\` are shielded.
+
+- **`HardeningModule.IsCriticalProcessName`**: Added `svchost`, `powershell`, and `pwsh`.
+
+### Fixed — NTLite/DISM Compatibility: File Locking and Feature-Disable Stalling
+
+Two distinct issues caused Sentinel to interfere with NTLite and DISM offline servicing:
+
+**Issue 1 — File locking inside mounted WIM images (unmount blocked)**
+
+NTLite mounts Windows images as a drive letter. `VolumeMountMonitor` detected the new volume and extended `FileActivityMonitor` to it via `AddWatchPath()`. Every file event inside the mounted image then triggered a Restart Manager (`RmStartSession` / `RmRegisterResources`) call that opened a competing handle — preventing NTLite from unmounting the image.
+
+- **`VolumeMountMonitor`**: `AddWatchPath` is now skipped for CDRom-type drives (how Windows exposes mounted WIM images) and any volume appearing while a known servicing process (`dism`, `dismhost`, `ntlite`, `tiworker`, `trustedinstaller`) is running. New `IsWimMountDrive()` helper implements both checks.
+- **`FileVerdictScanner`**: Added `\\windows\\winsxs\\`, `\\windows\\servicing\\`, `\\windows\\temp\\cab`, `\\windows\\temp\\dism`, `\\windows\\logs\\cbs\\`, `\\windows\\logs\\dism\\` to `ExcludedPaths`. New `ServicingProcesses` set + `IsWrittenByServicingProcess()` helper — `ScanNewFileAsync` returns immediately when a servicing process is active, avoiding `FileStream` opens that compete with exclusive write locks.
+- **`RawDiskAccessMonitor`**: Added `dismhost`, `ntlite`, `imagemounter`, `arsenalimager`, `aimdevice`, `aim_ll` to `AllowedProcesses` — these open virtual disk/volume handles during WIM mount/unmount and offline image servicing.
+
+**Issue 2 — Feature-disable stalling (minutes-long hangs)**
+
+NTLite's feature-disable operation writes hundreds of manifests, deltas, and catalogs into `WinSxS\`, `\Windows\servicing\`, and DISM scratch directories. Each write fired `FileActivityMonitor`'s Restart Manager scan, causing a handle-contention storm that stalled the feature operation for several minutes.
+
+- **`FileActivityMonitor`**: `IsUserToolWorkingPath()` extended with CBS/component-store paths (`\\windows\\winsxs\\`, `\\windows\\servicing\\`, `\\windows\\temp\\cab`, `\\windows\\temp\\dism`, `\\windows\\logs\\cbs\\`, `\\windows\\logs\\dism\\`). Events on these paths now skip the Restart Manager call entirely. `IsTrustedSystemWriter()` extended with `ntlite` so NTLite committing signed binaries into an offline image's System32 doesn't trigger the System Integrity detection rule.
+
+**Security note**: All excluded paths are still covered by process-level monitoring (WMI/ETW process starts) and `RawDiskAccessMonitor`. The only thing skipped is the per-file Restart Manager handle scan and hash-reputation lookup for files written exclusively by OS-servicing tools.
+
+## [1.3.9] - 2026-07-12
+ 
+### Fixed — Agent Process Dying (No Recovery Mechanism)
+ 
+**Root cause:** `Sentinel.Agent.exe` is a user-session process started via the HKLM Run key. Unlike the Service (which has `sc.exe` failure-restart configured: `restart/1000/restart/5000/restart/30000`), the Agent had zero recovery — if it crashed or was killed, it stayed dead until the next user login. The Service had no visibility into the Agent's liveness at all.
+ 
+**Three-layer fix:**
+ 
+- **`AgentWatchdog` (Service-side, primary)**: New `BackgroundService` in `Sentinel.Core` that polls for `Sentinel.Agent.exe` every 10 seconds. If absent, relaunches it in the active console user's session via `WTSQueryUserToken` → `CreateEnvironmentBlock` → `CreateProcessAsUser` (the standard Windows pattern for SYSTEM services spawning user-visible processes). Enforces a 15-second relaunch cooldown and a max of 5 relaunches per 5-minute window to prevent restart storms. Fires an `Anti-Tamper: Agent Process Repeatedly Killed` Tier1 detection if the Agent is absent 3+ times in the window — an attacker killing the agent to suppress tray notifications will now trigger an alert. A 20-second startup grace period prevents a double-launch race with the HKLM Run key on login.
+ 
+- **Agent self-restart (Agent-side, secondary)**: `Agent/Program.cs` now wraps `host.Run()` in a try/finally. On any exit — clean or crash — `TryImmediateRestart()` relaunches the process immediately (2-second cooldown). A restart counter passed via the `WS_AGENT_RESTART_COUNT` environment variable limits self-restarts to 5 before deferring to the `AgentWatchdog`. For terminal `IsTerminating` crashes (where the finally block may not run), `ScheduleDelayedRelaunch()` spawns a detached `cmd.exe` that waits ~3 seconds and then re-launches the agent.
+ 
+- **Orchestrator wiring fix (Agent-side, correctness)**: `Agent/Program.cs` now calls `detectionEngine.SetOrchestrator(orchestrator)` after `Build()` and before `Run()`, matching the pattern in `SentinelService.cs`. Previously, any detection emitted by Agent-side monitors (e.g., `ShellWatchdog`, `ClipboardSanitizer`, `ScreenCaptureMonitor`) bypassed the `SentinelOrchestrator` entirely — falling back to hitting `AdvancedResponseEngine` directly, skipping incident grouping, response deduplication, and the `ContextBus`.
+ 
+- **appsettings path fix**: Added `ConfigureAppConfiguration` to set `BasePath` to `AppContext.BaseDirectory`. Previously, if the Agent was launched by the `AgentWatchdog` (or any other non-Run-key path), its CWD could be `System32`, causing `appsettings.json` to not be found and all config values to fall back to defaults.
+ 
+- **`AgentWatchdog` registered** in `Sentinel.Service/Program.cs` as a hosted service.
+ 
+## [1.3.8] - 2026-07-12
+ 
+### Fixed & Hardened — Missing Core Rules and Monitors Integration
+- **Registered Missing Rules**: Registered `ChromeRemoteDebuggingRule` to inspect and block browsers spawned with `--remote-debugging-port` to steal cookie/session tokens.
+- **Registered Missing Background Services**: Activated `DeviceInstallMonitor` (detects new drivers/devices, blocking BYOVD) and `GatewayFingerprintMonitor` (detects Default Gateway changes and redirects).
+ 
+## [1.3.7] - 2026-07-12
+ 
+### Added & Hardened — Proactive DLL Sideload Scanning & Memory Unloading
+- **Proactive Module Validation**: Injected `DllUnloadEngine` into `MemoryBehaviorAnalyzer` to run proactive, system-wide scans of all running processes' loaded modules every 90 seconds.
+- **Active Memory Remediation**: Sideloaded DLLs detected during periodic scans are immediately unloaded in memory (via `QueueUserAPC` + `FreeLibrary`), with the process terminated, the DLL quarantined, and read-only lock files placed to prevent re-exploitation.
+ 
+## [1.3.6] - 2026-07-12
+ 
+### Added & Hardened — Proactive CVE Shield & Security Blind Spot Remediation
+- **Proactive CVE Shield**: Added `CveShieldHardener` to fetch CVE feeds (CISA KEV), map against local system assets (installed software registry keys, active TCP/UDP ports, running processes), dynamically generate block/hardening JSON rules, and register known bad PoC file hashes with `IoCScanner`.
+- **User-Store Certificate Monitoring**: Expanded `TlsCertificateMonitor` to audit and poll both `StoreLocation.LocalMachine` and `StoreLocation.CurrentUser` root trust stores.
+- **Generic Certificate Removal**: Updated `AdvancedResponseEngine` to support certificate removal from both current user and local machine stores.
+- **Browser Extension Policy Protection**: Added registry monitoring and active response (removal) for Chrome/Edge force-installed extension policies (`ExtensionInstallForcelist`).
+- **Proxy Hijack Protection**: Added registry monitoring and auto-restoration for internet settings proxy keys (`ProxyEnable`, `ProxyServer`, `AutoConfigURL`) back to safe baselines.
+ 
+## [1.3.5] - 2026-07-11
+ 
+### Fixed & Hardened — EDR Stability, False Positives, and IPSec Policy Configuration
+- Fixed ProcessAncestryCache's parent name resolution cache walk bug returning shifted child names.
+- Fixed `RawDiskAccessMonitor` access-denied bug (using `SecurityValidation.GetProcessImagePath` instead of `proc.MainModule?.FileName` for system processes) and allowed system processes (`services`, `svchost`, etc.) to prevent SCM tree-kills triggering system reboots / BSODs.
+- Fixed file locking/contention on UUP dump offline downloads by bypassing Restart Manager and reputation checks for files matching the `\uups\` folder structure.
+- Prevented false positive kills of browser auto-updaters (like `GoogleUpdate.exe` or `BraveUpdate.exe`) in `NetworkReinfectionDetector` by checking their digital signature (`SignerTrustService`).
+- Prevented browser process kills in `CastDeviceGuard` by changing default action from `KillProcessTree` to `LogOnly` (connections are already firewall-blocked).
+- Hardened all Windows directory checks (`.StartsWith(winDir)`) to enforce a trailing backslash to prevent folder path/namespace spoofing bypasses.
+- Ported the legacy IPSec policy creation into a self-contained C# initialization routine within `HardeningModule` to configure secure port blocks on first run without external script or registry dependencies.
+ 
+## [1.3.3] - 2026-07-10
+
+### Added — Phase 2: Context Bus + Cross-Monitor Enrichment + Response Coordinator
+
+Monitors now share intelligence with each other in real-time. The system is no longer a collection of detections — it's a unified intelligence network where each monitor enriches the others.
+
+- **ContextBus**: Thread-safe pub/sub bus for cross-monitor enrichment signals. Bounded channels (10K capacity) with backpressure monitoring, per-PID signal cache for synchronous queries, TTL-based expiry, and drop rate alerting. Monitors publish enrichment context (not detections) that other monitors consume to make better decisions.
+- **ResponseCoordinator**: Per-PID semaphore-based response serialization. Prevents duplicate kills (30s deduplication window), coordinates with ChainTracer (hold system defers kills during tree walks), supports response escalation (stronger action overrides weaker), and provides full response audit trail.
+- **Enrichment Signal Types**: 9 typed signals flow through the bus:
+  - `NetworkC2Signal` (BeaconingDetector → GhostProcessMonitor, ChainTracer)
+  - `GhostProcessSignal` (GhostProcessMonitor → BeaconingDetector, AppNetworkPolicyMonitor)
+  - `DnsAnomalySignal` (DnsQueryMonitor → GhostProcessMonitor, BeaconingDetector)
+  - `FileVerdictSignal` (FileReputationEngine → AppNetworkPolicyMonitor, BeaconingDetector)
+  - `InjectionSignal` (EtwThreatIntelMonitor → ChainTracer, CorrelationEngine)
+  - `EphemeralProcessSignal` (EphemeralProcessMonitor → ChainTracer, FileReputationEngine)
+  - `ExfiltrationSpikeSignal` (DataExfiltrationMonitor → BeaconingDetector, AppNetworkPolicyMonitor)
+  - `CredentialAccessSignal` (CredentialCanaryMonitor → CorrelationEngine, ChainTracer)
+  - `NetworkPolicyViolationSignal` (AppNetworkPolicyMonitor → BeaconingDetector, GhostProcessMonitor)
+- **Pipeline Backpressure Monitoring**: Orchestrator checks bus health every 10s. Alerts when signal drop rate exceeds 5%. Auto-prunes expired cache entries and stale response state.
+- **Cross-Monitor Intelligence Examples**:
+  - BeaconingDetector publishes C2 signal → GhostProcessMonitor queries it to confirm ghost PIDs are C2-connected
+  - GhostProcessMonitor publishes ghost signal → BeaconingDetector prioritizes analysis of ghost PIDs
+  - DnsQueryMonitor publishes DGA signal → GhostProcessMonitor correlates ghost connections with DGA domains
+  - FileReputationEngine publishes verdict → AppNetworkPolicyMonitor demotes alerts for known-good binaries
+
+## [1.3.2] - 2026-07-10
+
+### Added — SentinelOrchestrator (Phase 1: Unified Coordination Layer)
+
+Sentinel now operates as a coordinated unit rather than a collection of independent monitors.
+
+- **IncidentManager**: Detections are grouped into unified incidents by PID, parent process chain, or file hash (reinfection). Each incident has a lifecycle (Open → Active → Responded → Closed) with automatic severity escalation based on corroborating signals. Multiple detections on the same attack chain are presented as one incident, not 5 separate log entries.
+- **MonitorRegistry**: All monitors are now supervised with heartbeat tracking (60s warning, 3m critical). Crashed monitors are automatically restarted (up to 5 attempts). Monitor death fires an anti-tamper detection — if an attacker kills a monitor, the system notices and alerts.
+- **StartupSequencer**: Phased dependency-ordered boot sequence (Infrastructure → Engines → Monitors → Validators). Each phase runs components in parallel, waits for readiness before the next phase begins. Timeout enforcement prevents hung components from blocking startup. Startup report logged with per-component timing.
+- **SentinelOrchestrator**: Central coordination point that routes all detections through incident grouping before response. Per-PID response locks prevent duplicate kills and quarantine races. Unified system health status aggregates monitor, incident, and pipeline state.
+- **Response Coordination**: The response engine no longer fires independently — it's gated by the orchestrator which checks for in-progress responses on the same PID. No more race conditions where ChainTracer walks a chain while another thread is killing processes in it.
+
+## [1.3.1] - 2026-07-10
+
+### Added — Multi-Signal File Reputation Engine
+
+- **FileReputationEngine**: New composite file trust scoring system (0-100) that aggregates 4 independent signal sources:
+  - **Hash reputation consensus**: Parallel queries to CIRCL Hashlookup, MalwareBazaar, and VirusTotal (public/no-key) with weighted voting. Each source contributes independently — CIRCL validates known-good, MalwareBazaar confirms known-bad, VirusTotal provides multi-engine detection rates.
+  - **Static PE analysis**: Entropy calculation (detects packing/encryption >7.0), suspicious import scanning (VirtualAllocEx, WriteProcessMemory, CreateRemoteThread, etc.), packer section detection (UPX, Themida, VMP, ASPack), and compile timestamp analysis.
+  - **Signer trust**: Authenticode verification integrated as a trust signal (signed = -40 risk points, unsigned = +10).
+  - **Contextual risk**: File origin path (Temp/Downloads = high risk, Program Files = low risk), age on disk (new files = elevated risk), and prevalence tracking (widely-seen files = lower risk).
+
+- **On-disk scanning**: FileVerdictScanner now uses composite scoring instead of binary safe/unsafe. Files scoring 61+ are blocked (ACL deny-execute), 41-60 are logged for review.
+- **On-execute gating**: DetectionEngine fires Tier1 Kill detections for Malicious/HighRisk binaries at process start, Tier2 indicators for Suspicious files (feeds correlation engine).
+- **Smart rate limiting**: Per-source throttling (4 concurrent CIRCL, 2 MalwareBazaar, 1 VT at 4/min), in-flight deduplication prevents redundant API calls for the same hash.
+- **Intelligent caching**: 7-day TTL for Safe verdicts, 24h for Unknown (retry), permanent for Malicious. Results persisted to SecureCacheStore for cross-session retention.
+- **Prevalence tracking**: Tracks how many distinct file paths share the same hash — widely-deployed files receive lower risk scores.
+
+## [1.3.0] - 2026-07-10
+
+### Security Hardening (Red-Team Audit Pass 2 — 18 patches)
+
+#### CRITICAL
+
+- **AdvancedResponseEngine**: Removed blanket demotion of non-President's-Law Tier1 detections to LogOnly. ALL Tier1 detections now execute their AuthorizedResponse (Kill, Quarantine, NetworkIsolate). Previously, C2 Beaconing, Ghost Process, DLL Sideloading, Attack Tools, and System Integrity rules all fired but never killed anything.
+- **FileVerdictScanner**: Removed `temp`, `tmp`, `cache`, `localcache` from ExcludedPaths. These are primary malware staging areas that were previously invisible to hash reputation scanning.
+- **HashReputationService**: Fail-closed on API failure. Unknown results are no longer cached — files will be re-checked on next scan cycle. Only definitive Safe/Unsafe verdicts are persisted to disk.
+
+#### HIGH
+
+- **AppNetworkPolicyMonitor**: NetworkAllowlist now requires Authenticode signature verification (or system directory residence). Malware renamed to `chrome.exe` or `svchost.exe` will no longer bypass network policy monitoring.
+- **AppDnsExfilMonitor**: All DoH allowlist entries now require Authenticode publisher verification. Previously, DNS resolver tool names (`cloudflared`, `nextdns`, `stubby`, etc.) were allowed unconditionally without signature checks.
+- **DnsQueryMonitor**: TrustedBaseDomains reduced from ~30 to ~12 entries. Removed: `google.com`, `googleapis.com`, `youtube.com`, `cloudflare.com`, `cloudfront.net`, `amazonaws.com`, `github.com`, `steam`, `discord`, `spotify`, `akamai`, `azurefd`. C2 hosted on CDN/cloud platforms will now trigger DGA and rapid-query detection.
+- **BehavioralBaselineService**: EstablishedThreshold raised from 3 to 10 executions. Malware can no longer achieve "established" status after just 3 runs.
+- **AllowlistService**: No longer falls back to name-only matching when `imagePath` is null. Processes without resolvable paths cannot claim allowlist status.
+- **DetectionEngine**: Deduplication window reduced to 10s for Tier1 detections (was 60s). Tier2 indicators use 30s. Attackers can no longer trigger one alert and operate freely for a full minute.
+
+#### MEDIUM
+
+- **ScoringEngine**: Total baseline/trust reductions capped at -20 (was uncapped, could reach -70). Removed -30 "safe process consensus" reduction entirely.
+- **EphemeralProcessMonitor**: AllowedEphemeral list now verifies binary resides in Windows system directory. Malware named `runtimebroker.exe` in Temp no longer skips detection.
+- **NetworkMonitor**: `IsKnownBrowser` now verifies image path is in a legitimate browser installation directory.
+- **SignerTrustService**: Cache now tracks file modification time. Replacing a signed binary with malware invalidates the stale "signed" cache entry.
+- **TelemetryFusionEngine**: MaxEventsPerChain increased from 100 to 500. Prevents evidence erasure via event flooding.
+- **SecurityValidation**: Removed PowerShell fallback for Authenticode verification. Eliminates PATH poisoning attack vector on signature checks.
+
+#### LOW
+
+- **DataExfiltrationMonitor**: MinBaselineBytes lowered from 20MB to 5MB. Detects exfiltration spikes above 50MB/15s (was 200MB).
+- **PseudoSandbox**: Job object naming randomized (`WinSvc_<GUID>` instead of predictable `SentinelSandboxJob_` prefix).
+- **IsolationResponseEngine**: Input sanitization on Docker containerId and VM names prevents command injection in response actions.
+
+## [1.2.9] - 2026-07-09
+
+### Security Hardening (Red-Team Audit — 12 patches)
+
+- **WmiProcessMonitor**: Added 250ms fast-poll process gap coverage. Closes the 1-2s WMI latency blind spot where ephemeral payloads (credential dumpers, droppers) could execute and exit undetected.
+- **FileActivityMonitor**: Replaced blanket `\AppData\` exclusion with targeted noise suppression. Only browser caches, UWP sandboxed state, IDE extensions, and package manager caches are excluded. `\Temp\`, `\Roaming\Microsoft\`, and app install directories under AppData are now monitored.
+- **AppNetworkPolicyMonitor**: Learning phase now rejects unsigned binaries from suspicious staging paths (Temp, Downloads, Public, ProgramData). Malware activating during the 30-minute window can no longer have its C2 subnets baselined as "normal."
+- **HardeningModule.SafeKillProcessTree**: Kill protection now verifies image path resides in a Windows system directory, not just process name. Malware masquerading as `csrss.exe` or `explorer.exe` from a temp folder will be killed.
+- **BehavioralCorrelationEngine**: Tier1 signals now pass through composite correlation even for signed Electron/JIT apps. Supply-chain compromises of signed apps (Discord, VS Code, Slack) can no longer evade composite detection.
+- **BeaconingDetector**: Diversity trust signal revoked when total destinations ≤4 (trivially manufactured). DLL sideload indicators in the process directory force KillProcess regardless of Authenticode trust score.
+- **GhostProcessMonitor**: Immediate alert (first scan) for ghost PIDs connecting to high-confidence ports (4444, 5555, 1337, 31337, 9001, 9090) or blocked phantom devices. Closes the single-cycle exfiltration window.
+- **AntiTamperGuard**: Suspend detection threshold lowered from 10s to 4s. Added QueryPerformanceCounter as hardware-monotonic secondary time source immune to clock manipulation.
+- **SecureCacheStore**: HMAC key derivation now combines boot time, machine GUID, installation-specific random entropy (ACL-locked), and Sentinel's PID. Prevents baseline poisoning by attackers who can read System process start time.
+- **CredentialCanaryMonitor**: Now plants 3-5 canaries per boot with randomized names from 8 realistic service credential templates. Credential dumping tools can no longer skip a single known target name.
+- **DnsQueryMonitor**: Removed `timediff(@SystemTime) <= 30000` time filter from event log XPath query. Relies solely on `lastRecordId` for deduplication, ensuring short-lived C2 DNS resolutions between polls are never dropped.
+- **ProcessAncestryCache**: ETW/WMI-sourced entries are now authoritative and preserved across refresh cycles. Dead PIDs retained for 60 seconds post-exit, enabling ChainTracer to walk parent chains of killed processes.
+
+## [1.2.8] - 2026-07-07
+
+### Fixed
+- **AntiTamperGuard: Service name mismatch causing 10-second detection spam** — The `ServiceName` constant was set to `"Sentinel"` (no space) but the actual SCM registration uses `"Sentinel"` (with space). `ServiceController` lookup failed every 10 seconds, triggering a false "Service Registration Deleted" detection, flooding `events.jsonl` (~6 MB/day) and the Windows Application Event Log with ~8,640 warning entries per day. Fixed the constant to match the registered name and quoted it in `sc.exe` commands for space-safe operation.
+
+## [1.2.5] - 2026-07-05
+
+### Security Hardening
+- **ClickjackingGuard**: Fake UAC/credential prompt detection now uses Authenticode signature verification (`SignerTrustService`) instead of a hardcoded process-name allowlist. Previously, browsers like Chrome were killed when their window title contained "Windows Security" (e.g., viewing a GitHub repo about security policies). Now, any process signed by a trusted publisher (Google, Microsoft, Mozilla, Brave, etc.) is exempt. An attacker renaming malware to `chrome.exe` will still be caught — they can't forge Google's code-signing key.
+
+### Fixed
+- **ClickjackingGuard**: Chrome/Edge/Firefox no longer crash when viewing GitHub repos or web pages with "Windows Security" or "Group Policy" in the title.
+
+## [1.2.4] - 2026-07-04
+
+### Added
+- **AcousticThreatMonitor**: Real-time protection against harmful audio frequencies. Monitors system audio via WASAPI loopback and mutes the specific offending app within 30ms when detecting:
+  - Infrasound attacks (1-20Hz) — nausea, disorientation
+  - Fear frequency (18-19Hz) — dread, visual disturbances
+  - Nausea band (6.5-8Hz) — organ resonance, chest pressure
+  - Ultrasonic beacons (17-22kHz) — cross-device tracking, headaches
+  - Sustained narrow-band tones at unusual amplitudes
+  - Uses Goertzel algorithm for efficient frequency detection without full FFT
+  - **Surgical per-session muting**: Never mutes master volume. Uses Windows Audio Session API to identify and mute only the specific app producing harmful frequencies. Harmony, system sounds, and other apps continue playing unaffected.
+  - Whitelists solfeggio healing frequencies (174-963Hz) and Schumann (7.83Hz) so therapeutic tools like Harmony can coexist
+
+## [1.2.3] - 2026-07-04
+
+### Security Hardening
+- **AppDnsExfilMonitor**: DoH allowlist now verifies Authenticode signature publisher (e.g., "Valve", "Discord Inc.") instead of path. Prevents attackers from naming malware `steamwebhelper.exe` to bypass DoH detection. Results cached per PID for performance.
+- **RawDiskAccessMonitor**: Name-based allowlist (defrag, vds, diskpart, etc.) now verifies the binary is running from System32/Program Files. An attacker naming malware `defrag.exe` in C:\Temp no longer bypasses raw disk access detection.
+- **RansomwareIoMonitor**: Whitelist for high-IO apps (browsers, Steam, etc.) now verifies the binary path is from a legitimate install location. Rejects Temp/Downloads directories. Cached per PID for hot-path performance.
+- **ScreenCaptureMonitor**: AllowedCapture list now verifies path is from a trusted location. Game directory exclusions now reject Temp/Downloads even if the path contains "steam" or "epic games".
+- **VolumeMountMonitor**: Game directory exclusion for SUBST attack detection now rejects Temp/Downloads paths even if they contain known game directory names.
+
+### Fixed
+- **AppDnsExfilMonitor**: Steam/Discord/Spotify/etc. no longer killed for using embedded Chromium DoH resolver (allowlist with signature verification).
+
+## [1.2.2] - 2026-07-04
+
+### Added
+- **ReinfectionCorrelator**: Tracks all previously killed/quarantined file hashes across reboots. Scans running processes and persistence locations (Recycle Bin, System Volume Information, Temp, ProgramData) every 60 seconds for reappearance of known-bad hashes. Detects distributed self-healing malware that copies itself between pagefile, swap, secondary drives, and router. Kill-authorized on running process, quarantine on dormant copy.
+- **NetworkReinfectionDetector**: Monitors NIC state changes (interface up, DHCP lease, address change). Flags any new process that spawns within 15 seconds of network reconnection from a suspicious path (Temp, Recycle Bin, Downloads, Public) with no user-interactive parent chain (explorer, winlogon, etc.). Catches the pattern where an infected router or LAN device pushes malware back via SMB/UPnP immediately upon machine reconnect. Kill-authorized.
+- **AdvancedResponseEngine → ReinfectionCorrelator integration**: Every successful process kill now registers the binary's SHA256 hash with the correlator for cross-reboot tracking via a persistent kill log file.
+
+### Fixed
+- **Installer (setup.iss)**: All system tool calls now use `{sysnative}` instead of `{sys}` to bypass WOW64 redirection. Fixes "Access is denied" errors during upgrade when the 32-bit installer couldn't stop the 64-bit service. Added retry loop for Stop-Process.
+
+## [1.2.1] - 2026-07-04
+
+### Added
+- **ChromeRemoteDebuggingRule**: Detects browser processes launched with `--remote-debugging-port` by a non-browser parent process, which enables full session/cookie access via Chrome DevTools Protocol. Kill-authorized.
+- **IPSec Policy Bypass Detection (NetworkMonitor)**: Monitors all 21 ports blocked by `IPSecPolicy.ps1` (21, 22, 23, 111, 135, 137-139, 445, 666, 1337, 1433, 2049, 3306, 3389, 4444, 5432, 5900, 5985, 5986, 31337) for active connections. If any process has an established connection on these ports, it means the IPSec policy was disabled or bypassed — fires Tier1 with KillProcessTree within 200ms.
+
+### Fixed
+- **CanaryFileMonitor**: Fixed potential `InvalidOperationException` from mutating `_canaryPaths` list during iteration. Now iterates a snapshot and applies removals after the loop.
+- **DllLoadFailureMonitor**: Replaced O(N) `EventLog.Entries` full scan with `EventLogQuery` using time-bounded XPath filter. Eliminates CPU/disk overhead on machines with large Application logs.
+- **BrowserCredentialGuard**: Changed response from `KillProcessTree` to `LogOnly` when PID is 0 (accessor process already exited). The previous kill action was a no-op since the response engine requires PID > 4.
+- **MtpTransferGuard.GetCreatorProcess**: Replaced inaccurate start-time heuristic (which frequently misidentified the creator) with WPD module-based process identification.
+- **SyscallStubMonitor**: Replaced `File.ReadAllBytes(ntdll.dll)` with streaming `FileStream` + `SHA256.HashData` to eliminate ~4MB/min GC pressure from reading the full file into memory every 30 seconds.
+- **AttackToolsRule**: Short APT tool names (`fscan`, `kscan`, `searchall`, etc.) now require word-boundary or exact filename match to prevent false positives from substring matches (e.g., "fscan" matching inside "filesystem_scanner.exe").
+- **DeviceInstallMonitor**: Added startup baseline of all existing services. Only drivers registered AFTER startup now trigger alerts, eliminating continuous false positives from legitimate third-party drivers (NVIDIA, Logitech, etc.).
+- **BootIntegrityGuard**: Dynamic EFI drive letter selection — finds a free letter at runtime instead of hardcoding S–W. Prevents conflicts with existing volumes.
+- **AntiTamperGuard**: `_serviceAlertSuppressed` flag now resets on successful service re-registration, allowing detection of subsequent deletions instead of permanently silencing the check.
+- **NullSessionGuard**: Reduced security policy tamper alert dedup window from 1 hour to 5 minutes. Attackers can no longer silently revert null-session protections by waiting between attempts.
+- **PhantomDeviceMonitor**: Added startup cleanup of orphaned `Sentinel-Block-PhantomDevice-*` firewall rules from previous sessions. Previously, service restarts left blocked devices permanently blocked.
+- **AdvancedResponseEngine**: President's Law check now delegates to `ScoringEngine.IsPresidentsLawRule()` instead of maintaining a divergent parallel keyword list. Eliminates the risk of the two systems producing different results.
+- **DetectionEngine**: Background reputation check `Task.Run` now passes `_cts.Token` for proper cancellation on shutdown. Added `OperationCanceledException` catch to prevent log noise during normal shutdown.
+- **RemoteAccessMonitor**: Added per-PID deduplication. Once a remote access process is alerted on, it won't fire again until that PID exits. Eliminates per-minute alert spam for installed tools like TeamViewer.
+- **WmiPersistenceMonitor**: Replaced count-based baseline with name-based snapshot. Now detects specific new subscriptions even if the total count doesn't change (e.g., one removed and one added simultaneously).
+- **PublicIpMonitor**: Wired public IP changes to `DetectionEngine` as Tier2 detections instead of silently logging to internal logger. Now provides visibility into potential VPN/proxy/BGP changes.
+
+## [1.2.0] - 2026-07-03
+
+### Added
+- **Configurable Polling Intervals**: Exposed key polling intervals and timings (`DnsPollIntervalSeconds`, `RouteTableScanIntervalSeconds`, `RawDiskScanIntervalSeconds`, `AntiTamperTimingTickMs`, and `AntiTamperIntegrityTickMs`) under the `Sentinel` block in `appsettings.json` and bound them dynamically to `SentinelConfig` at runtime.
+
+### Fixed
+- **Supervised Background Task Lifetimes**: Wrapped the main telemetry queue processing loop in `DetectionEngine` in robust top-level `try-catch` blocks and assigned it to a tracked background `Task` property, ensuring unhandled exceptions are logged via `ILogger` rather than failing silently.
+- **Resource and Handle Leak Audits**:
+  - Updated `SentinelService.cs` shutdown sequence to recursively stop and call `Dispose()` on all constructor-injected singleton monitors (like `FileActivityMonitor`, `WmiProcessMonitor`, etc.) that implement `IDisposable`.
+  - Implemented `IDisposable` on `DnsQueryMonitor.cs`, `EtwThreatIntelMonitor.cs`, `PrintSpoolerMonitor.cs`, and `ProcessAncestryCache.cs` to cleanly cancel background loops, await task completion, and dispose of cancellation tokens and file system watchers.
+
+## [1.1.9] - 2026-07-03
+
+### Added
+- **QoS Registry Anti-Tamper Guard**: Implemented periodic checks on `HKLM\Software\Policies\Microsoft\Windows\QoS` in `AntiTamperGuard.cs` to prevent attackers from using Policy-based QoS rules to throttle or block Sentinel's network bandwidth. Unauthorized policies targeting Sentinel are automatically purged and reported.
+
+### Fixed
+- **Catalog Signature Verification Fallback**: Updated `SecurityValidation.VerifyAuthenticodeSignature` to support catalog-signed system files (like native DLLs in `System32` and `SysWOW64`) using a fast PowerShell fallback. This resolves high-frequency false positives and halts the 43MB log bloating.
+- **Removed Loose Process Exclusions**: Cleaned up the whitelist in `FileActivityMonitor.cs` by removing the insecure `Chrome` and `Kiro` process name exemptions to close potential EDR bypass loopholes.
+
+## [1.1.8] - 2026-07-01
+
+### Fixed - Event Log Performance, Handle Leaks, and False Positives
+
+**Fixed DnsQueryMonitor Handle Leak and CPU Usage:**
+- Replaced the slow, resource-heavy iteration of all historical `eventLog.Entries` in `DnsQueryMonitor.cs` with `EventLogReader` using a scoped XPath query targeting only event IDs `3006`/`3008` in the last 30 seconds.
+- Ensured proper disposal of `EventRecord` instances to resolve handle exhaustion.
+
+**Fixed BootIntegrityGuard False Positives:**
+- Removed unnecessary EFI partition mounting from `CaptureBaselineAsync()` in `BackgroundMonitors.cs`. This aligns the baseline BCD configuration path (`\Device\HarddiskVolume1`) with subsequent checks, eliminating false "BCD Entry Modified" alerts every minute.
+
+**Fixed HostsFileGuard Destructive File Deletion:**
+- Modified `DeleteUnauthorizedFilesAsync()` to preserve standard Windows network configuration files (`services`, `protocol`, `networks`, and `lmhosts.sam`) in `C:\Windows\System32\drivers\etc`, avoiding breakage of network APIs.
+
+**Fixed SignerTrustService and FileActivityMonitor False Positives:**
+- Changed `SignerTrustService.cs` to only cache successful/positive signature verification results (`isSigned == true`). This allows transient signature verification failures (caused by temporary file locks during write operations) to be retried and successfully verified once writing finishes.
+- Updated `IsTrustedSystemWriter()` in `FileActivityMonitor.cs` to query `_signerTrust.IsTrustedFile()` directly when `pid == 0`, allowing driver updates from all globally trusted publishers (like NVIDIA Corporation, Intel, Google, AMD) rather than only hardcoded Microsoft ones.
+
+**Fixed RawDiskAccessMonitor False Positives:**
+- Refactored `IsRawDiskPath()` in `RawDiskAccessMonitor.cs` to filter out standard file/directory handles that happen to use NT device paths (such as `\Device\HarddiskVolume3\Windows\System32\...`) using subpath exclusion, while retaining genuine alerts on direct raw volume/disk handles.
+
+**Documentation updated to v1.1.8:**
+- Synced version across README.md, design.md, requirements.md, constraints.md, architecture-council.md.
+- Updated version in `version.txt` and installer `setup.iss`.
+
+## [1.1.7] - 2026-07-01
+
+### Fixed — Full Codebase Audit & Shell Protection
+
+**cmd.exe / PowerShell / pwsh no longer killed by Sentinel:**
+- Added `cmd`, `powershell`, and `pwsh` to `HardeningModule.SafeKillProcessTree` protected process list. Sentinel will never terminate user shell processes regardless of detection trigger.
+- Added `cmd`, `powershell`, and `pwsh` to `HostsFileGuard.GetModifyingProcess` exclusion list. Editing the hosts file from a shell no longer kills the shell (file still reverts to trusted baseline).
+
+**Fixed `proc.MainModule` in AdvancedResponseEngine:**
+- Replaced unsafe `proc.MainModule?.FileName` (triggers Denuvo anti-tamper, fails on sandboxed processes) with safe `SecurityValidation.GetProcessImagePath()` using `PROCESS_QUERY_LIMITED_INFORMATION`.
+
+**Tightened President's Law rule matching:**
+- Removed overly broad keywords (`"dns"`, `"registry"`, `"attack"`, `"privilege"`, `"arp"`, `"neuro"`, `"tls"`) that caused over-promotion of Tier2 advisory rules to kill-authorized status.
+- Replaced with precise keyword set using a `HashSet<string>` for clarity and performance.
+- Added `"tls:"` and `"certificate"` to correctly catch TLS certificate tampering rules without false matching.
+
+**Fixed xUnit1031 warnings:**
+- Converted `PersistentConnectionMonitorTests` blocking `.Wait()` calls to proper `async Task` with `await`.
+
+**Documentation updated to v1.1.7:**
+- Synced version across README.md, design.md, requirements.md, constraints.md, architecture-council.md.
+- Fixed stale `net8.0-windows` reference in constraints.md → `net10.0-windows`.
+- Fixed README Quick Start installer filename and appsettings example to match actual config.
+
+## [1.1.6] - 2026-06-30
+
+### Fixed — System Integrity Write Log Noise Mitigation
+
+- Optimized the `System Integrity: Unauthorized Write to System Directory` rule in `FileActivityMonitor.cs` to only trigger alerts on executable/binary file extensions (`.dll`, `.exe`, `.sys`, etc.), completely eliminating false positives from benign system `.log`, `.txt`, `.tmp`, or `.xml` updates.
+- Added a 3-iteration signature check retry loop (with 50ms interval) for PID 0 (unknown) writes to gracefully handle transient sharing/write locks during Windows Updates or driver installations.
+- Corrected a spelling typo (`changedd` / `createdd` to `changed` / `created`) in file activity evidence logging.
+
+## [1.1.5] - 2026-06-30
+
+### Added — Behavioral Rules and Dynamic JSON Rules Engine
+
+- Added `ClickFixDetectionRule` in `Rules.cs` to intercept paste-and-run / CAPTCHA bypass exploits originating from explorer (Run dialog Win+R) or browser processes.
+- Added `DllSideloadingDetectionRule` in `Rules.cs` to block signed Microsoft utilities (such as `OneDrive.exe`, `msoju.exe`) executing from user-writeable paths (`AppData`, `Temp`, `Users\Public`).
+- Implemented `DynamicRulesEvaluator.cs`, a lightweight dynamic JSON rules engine that monitors a `/rules` subdirectory and evaluates incoming telemetry using reflection-based condition mapping without requiring re-compilation.
+
+## [1.1.4] - 2026-06-30
+
+### Added — Advanced Self-Protection and PPID Evasion Mitigations
+
+- Added automated Service StartType enforcement in `AntiTamperGuard.cs` to automatically configure the startup type back to `Automatic` if disabled or modified by administrative attackers.
+- Added strict Authenticode-validated PPID scanning exclusions in `ParentPidSpoofDetector.cs` utilizing `SignerTrustService`, closing path-containment spoofing bypasses (such as executing malware from subfolders containing browser or developer keyword names).
+
+## [1.1.3] - 2026-06-30
+
+### Added — Architectural Hardening against Advanced Evations
+
+- Hardened polling-based monitors (`NetworkMonitor.cs`, `AppNetworkPolicyMonitor.cs`, `AppDnsExfilMonitor.cs`) to run at ultra-fast 200ms/500ms intervals to eliminate Time-of-Check to Time-of-Use (TOCTOU) network connection gaps.
+- Implemented real-time Thread Win32 Start Address scanning in `EtwThreatIntelMonitor.cs` to detect code injection, thread hijacking, and direct syscall execution in unmapped memory.
+- Hardened the local `PseudoSandbox.cs` Job Object with `JOB_OBJECT_SECURITY_NO_ADMIN` and `JOB_OBJECT_SECURITY_FILTER_TOKENS` flags, stripping administrative group membership and dangerous privileges (like `SeLoadDriverPrivilege`) to prevent sandbox breakouts via BYOVD.
+- Enforced strict Authenticode code-signing verification in `AllowlistService.cs` via `SignerTrustService` to prevent attackers from masquerading as trusted development or browser processes.
+
+## [1.1.2] - 2026-06-29
+
+### Optimized — Remote DLL Unloading Response
+
+- Optimized remote DLL unloading mechanism in `DllUnloadEngine.cs`. Replaced the static, blocking 2000ms delay with a fast 10ms-interval polling loop (up to 200ms max) that dynamically exits when the DLL has finished unloading, providing up to a 100x speedup in responsive remediation.
+
+## [1.1.1] - 2026-06-29
+
+### Added — Defensive Hardening and Threat Mitigation
+
+- Added full dual-stack IPv4 and IPv6 socket connection polling in `NetworkMonitor.cs`, `AppDnsExfilMonitor.cs`, and `AppNetworkPolicyMonitor.cs` to prevent C2 network bypasses.
+- Added plane 14 invisible Unicode tag steganography (`U+E0001` - `U+E007F`) detection and stripping in `ClipboardSanitizer.cs`.
+- Added a local process sandbox isolation engine (`PseudoSandbox.cs`) utilizing Windows Job Objects to constrain suspicious processes (64MB memory caps, IDLE CPU, Active Process limits, and UI object blocking).
+- Added DI registrations for the new defensive containment engines inside both the Windows Service and Agent launchers.
+- Added a unit test suite to verify steganographic tag stripping behavior.
 
 ## [1.1.0] - 2026-06-28
 
@@ -272,10 +1149,10 @@ Comprehensive coverage for all previously unmonitored attack surfaces.
 
 ### Fixed — Agent Crash on Non-Debloated Windows (QuarantineManager ACL)
 
-**Root cause:** The Agent (running as the logged-in user) crashed immediately on startup with `System.UnauthorizedAccessException: Access to the path 'C:\ProgramData\WindowsSentinel\Quarantine' is denied`.
+**Root cause:** The Agent (running as the logged-in user) crashed immediately on startup with `System.UnauthorizedAccessException: Access to the path 'C:\ProgramData\Sentinel\Quarantine' is denied`.
 
 **Chain of events:**
-1. The Service (SYSTEM) creates `C:\ProgramData\WindowsSentinel\` and locks it with ACLs restricted to SYSTEM + Administrators only (via `JsonlEventLogger` directory hardening)
+1. The Service (SYSTEM) creates `C:\ProgramData\Sentinel\` and locks it with ACLs restricted to SYSTEM + Administrators only (via `JsonlEventLogger` directory hardening)
 2. The Agent launches as the logged-in user via HKLM Run key (`runasoriginaluser`)
 3. `QuarantineManager` constructor unconditionally called `Directory.CreateDirectory()` — threw `UnauthorizedAccessException` for non-elevated users
 4. Unhandled exception propagated through DI container → hosting startup failure → process termination
@@ -941,9 +1818,9 @@ An attacker reading this source code cannot exploit the trust demotion because:
 
 ### Fixed — Logging Robustness & Data Integrity
 - **`JsonlEventLogger`** — Fixed race conditions between `LogEventAsync` and `DisposeAsync` with a `_disposed` flag and safe semaphore handling. Added `CancellationToken` support for graceful shutdown. Protected `JsonSerializer.Serialize` with a try/catch fallback to prevent unhandled exceptions from leaking to callers. Added `DroppedEvents` counter for rate-limited events. Fixed `50 * 1024 * 1024` integer overflow risk with `50L` literal. Safe semaphore release now handles `ObjectDisposedException`.
-- **`SentinelHealthCheck`** — Fixed hardcoded `CommonApplicationData\WindowsSentinel` paths; now derives log/quarantine directories from `_eventLogger.LogFilePath`. Fixed integer division bug in `LogFileSizeMB` (files < 1 MB always reported `0` due to `long / (1024*1024)`). First health check now runs immediately (changed `while` to `do-while` with delay after). Exception handler upgraded from `LogDebug` to `LogError`.
+- **`SentinelHealthCheck`** — Fixed hardcoded `CommonApplicationData\Sentinel` paths; now derives log/quarantine directories from `_eventLogger.LogFilePath`. Fixed integer division bug in `LogFileSizeMB` (files < 1 MB always reported `0` due to `long / (1024*1024)`). First health check now runs immediately (changed `while` to `do-while` with delay after). Exception handler upgraded from `LogDebug` to `LogError`.
 - **`SentinelService`** — Fixed hardcoded log/quarantine directory paths in `RunStartupSelfTest`; now uses `_eventLogger.LogFilePath`. Passed `CancellationToken` to startup `LogEventAsync`. Updated logged version string to `6.7.0`.
-- **`StartupSelfTest`** — Fixed hardcoded `CommonApplicationData\WindowsSentinel` paths in log and quarantine directory checks; now derives from `_eventLogger.LogFilePath`.
+- **`StartupSelfTest`** — Fixed hardcoded `CommonApplicationData\Sentinel` paths in log and quarantine directory checks; now derives from `_eventLogger.LogFilePath`.
 - **`DetectionEngine`** — Fixed deduplication race condition that caused duplicate detection floods. Replaced non-atomic `TryGetValue` + indexer-assignment pattern with `ConcurrentDictionary.AddOrUpdate`, making the 60-second suppression window thread-safe.
 - **`AdvancedResponseEngine`** — Fixed missing `_metrics.RecordResponse()` call in the `LOG`-only `else` branch, so `ResponsesTotal` now correctly counts all response events (previously stayed at `0` for log-only detections).
 - **Installer** — Updated `setup.iss` and `build.ps1` version references to `6.7.0`.
@@ -1083,7 +1960,7 @@ An attacker reading this source code cannot exploit the trust demotion because:
 - **CampaignIocRule** — Known malicious filenames (typo-squatted system binaries) and C2 exfiltration endpoints (pastebin raw, Discord webhooks, tor2web). Tier1/Tier2.
 
 ### Added — Services
-- **IncidentResponseService** — Forensic evidence collection before kill: module inventory, network connections, process tree, binary quarantine. Evidence stored in `%ProgramData%\WindowsSentinel\Evidence\`.
+- **IncidentResponseService** — Forensic evidence collection before kill: module inventory, network connections, process tree, binary quarantine. Evidence stored in `%ProgramData%\Sentinel\Evidence\`.
 - **StartupSelfTest** — Pre-flight checks on startup: log directory, quarantine directory, DPAPI cache, rule loading, event logger.
 - **SentinelHealthCheck** — Periodic health reporting (every 5 min): memory, handles, threads, log size, quarantine count, thread pool, uptime, detection/response totals.
 
@@ -1200,7 +2077,7 @@ An attacker reading this source code cannot exploit the trust demotion because:
 ### Changed — Installer Hardening
 - **Upgrade handling** — `PrepareToInstall` stops existing service, kills Agent/Service processes, resets antitamper ACLs via `icacls /reset` before overwriting files.
 - **Uninstall cleanup** — Stops service, deletes SCM entry, removes `HKLM\...\Run` registry key, removes `Program Files (x86)` leftovers from legacy installs.
-- **ProgramData preserved** — `C:\ProgramData\WindowsSentinel` logs intentionally NOT deleted on uninstall for forensic retention.
+- **ProgramData preserved** — `C:\ProgramData\Sentinel` logs intentionally NOT deleted on uninstall for forensic retention.
 
 ### Changed — DI Wiring
 - Service `Program.cs` registers AllowlistService, ScoringEngine, ChainTracer, DllUnloadEngine as singletons; CampaignDetectionRule as IDetectionRule; BeaconingDetector and BehavioralBaselineService as hosted services.
@@ -1280,7 +2157,7 @@ An attacker reading this source code cannot exploit the trust demotion because:
 
 ### Changed — Codebase Rebuild
 - Complete rewrite of the Sentinel codebase from design specifications.
-- New flat namespace architecture (WindowsSentinel.Core instead of sub-namespaces).
+- New flat namespace architecture (Sentinel.Core instead of sub-namespaces).
 - Modernized DI, BackgroundService-based monitor pattern, unified DetectionEngine API.
 - FusedTelemetryContext-based detection rule interface.
 
@@ -1600,12 +2477,12 @@ Service working set reduced from ~3.4 GB to an expected ~300–600 MB on typical
 - **System tray NotifyIcon** in the Agent process, running on a dedicated STA thread with a WinForms message pump alongside the Generic Host.
 - **Context menu items:**
   - **Open Console** (bold, default double-click action) — Allocates a console window, live-tails `events.jsonl` with color-coded output (yellow for detections, red for kills). Updates in real time (1-second poll). Handles log rotation.
-  - **Open Quarantine Folder** — Opens `%ProgramData%\WindowsSentinel\Quarantine` in Explorer.
+  - **Open Quarantine Folder** — Opens `%ProgramData%\Sentinel\Quarantine` in Explorer.
   - **Open Event Log** — Opens `events.jsonl` in Notepad for quick inspection.
   - **Stop/Start Protection** (dynamic) — Shows "Stop Protection" (red) when service is running, "Start Protection" (green) when stopped. Stop requires balloon-click confirmation. Start uses ServiceController.
 - **Balloon tip notifications** for Agent-side detections: Tier1 kills show error balloon, Tier1 detections show warning balloon. Thread-safe `ShowBalloon()` API callable from any thread.
 - **Icon**: Extracts the embedded `Sentinel.ico` from the exe via `Icon.ExtractAssociatedIcon`. Falls back to `SystemIcons.Shield` if unavailable.
-- **Tooltip**: Shows "Windows Sentinel v0.4.3 — Protection Active".
+- **Tooltip**: Shows "Sentinel v0.4.3 — Protection Active".
 - **Graceful cleanup**: Removes the tray icon on shutdown (no ghost icons in the notification area).
 - **FreeConsole on startup**: Detaches from the console allocated by `CreateProcessAsUser` so the WinForms message pump works correctly.
 - **Auto-start via Registry Run key**: `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run` entry ensures Agent launches on user login without relying on `CreateProcessAsUser`.
@@ -1688,7 +2565,7 @@ Service working set reduced from ~3.4 GB to an expected ~300–600 MB on typical
 #### Agent Keeps Dying (Trend Micro killing SentinelAgent.exe)
 - **Root cause**: Trend Micro's AEGIS engine rates SentinelAgent.exe as "Suspicious" and terminates it on launch. The UserSessionLauncher retried every 30 seconds indefinitely, flooding the event log.
 - **Fix**: (1) Added consecutive failure counter. (2) After 10 failures, logs a CRITICAL alert explaining that an antivirus is blocking the Agent and listing which monitors are offline. (3) After 20 failures, backs off to 5-minute retry intervals instead of 30-second spam. (4) Logs recovery when Agent finally stays alive.
-- **User action required**: Add `C:\Program Files\WindowsSentinel\` to Trend Micro's exclusion list.
+- **User action required**: Add `C:\Program Files\Sentinel\` to Trend Micro's exclusion list.
 
 #### Ransomware I/O False Positive (msedge)
 - **Root cause**: Edge's cache writes, IndexedDB operations, and service workers produce 23K+ write ops / 130MB per minute continuously. This exceeds the ransomware threshold every 60 seconds.
@@ -1826,7 +2703,7 @@ Addresses the 2026-05-25 attack where an attacker silently removed Sentinel over
 
 ### Fixed — Installer Reboot Race Condition
 - **Root cause**: `restartreplace` flag in Inno Setup schedules a file swap on reboot when the service EXE is locked. But `PrepareToInstall` already deleted the service registration via `sc delete`. After reboot, the file is replaced but no service exists — Sentinel is gone.
-- **Fix**: Added boot guard scheduled tasks (`WindowsSentinelBootGuard` + `WindowsSentinelBootStart`) created in `[Code] CurStepChanged(ssPostInstall)`. These ONSTART tasks re-register and start the service on every boot, ensuring it survives the reboot regardless of install order.
+- **Fix**: Added boot guard scheduled tasks (`SentinelBootGuard` + `SentinelBootStart`) created in `[Code] CurStepChanged(ssPostInstall)`. These ONSTART tasks re-register and start the service on every boot, ensuring it survives the reboot regardless of install order.
 - Added `sc failure` recovery options (auto-restart on crash: 1s, 5s, 30s delays).
 - Tasks are cleaned up on uninstall.
 - Added `fix-service.ps1` script for manual recovery.
@@ -2536,7 +3413,7 @@ All monitors now feed raw telemetry through a central fusion layer before the de
 
 - **SelfProtectionService** — Monitors Sentinel's own process integrity. Detects AMSI/ETW tampering against Sentinel itself, DLL hijacking of Sentinel's load path, and config file tampering. Triggers Tier1 self-protection kill on confirmed attack.
 - **HardeningModule** — Applies process-level hardening on startup: `SetDefaultDllDirectories` (prevents DLL search-order hijacking), install-directory ACL enforcement, CIG (Code Integrity Guard) opt-in.
-- **SecureCacheStore** — DPAPI machine-scope encryption + HMAC integrity for all persisted cache files. ACL-hardened to SYSTEM + Admins under `%ProgramData%\WindowsSentinel\Secure\`. Rejects tampered or foreign cache files on load.
+- **SecureCacheStore** — DPAPI machine-scope encryption + HMAC integrity for all persisted cache files. ACL-hardened to SYSTEM + Admins under `%ProgramData%\Sentinel\Secure\`. Rejects tampered or foreign cache files on load.
 - **HeartbeatService** — Cross-process watchdog. Service writes HMAC-signed heartbeat file every 30s. Agent monitors it and restarts the service if heartbeat goes stale.
 - **UserSessionLauncher** — Launches the Agent process into the active user session from the SYSTEM service using `CreateProcessAsUser`. Monitors Agent liveness and restarts on exit.
 - **ProcessValidator** — Validates process names to prevent Unicode spoofing, homoglyph attacks, and path traversal in process identifiers.
@@ -2544,7 +3421,7 @@ All monitors now feed raw telemetry through a central fusion layer before the de
 - **ShadowProxyDetector** — Detects proxy manipulation: PAC file injection, WPAD poisoning, system proxy registry changes by non-trusted processes. Runs as a background service.
 - **HIDMacroGuard** — USB HID macro injection detection. Monitors for rapid automated keystroke sequences from HID devices that don't match user typing patterns.
 - **PseudoSandbox** — Lightweight behavioral sandbox for suspicious files: spawns in a restricted job object, monitors API calls and file/network activity for the first 5 seconds of execution.
-- **ConsultantSignalIngestor** — Tails `%ProgramData%\WindowsSentinel\consultants\*.jsonl` for signals from external PowerShell consultant scripts (Council of Elders architecture). Ingests Tier2 signals into the detection engine.
+- **ConsultantSignalIngestor** — Tails `%ProgramData%\Sentinel\consultants\*.jsonl` for signals from external PowerShell consultant scripts (Council of Elders architecture). Ingests Tier2 signals into the detection engine.
 
 ---
 
@@ -2599,7 +3476,7 @@ This release ports the core detection rules from the GIDR reference architecture
 
 ### Added — Logging & Event Model
 
-- **JsonlEventLogger** — JSONL output to `%ProgramData%\WindowsSentinel\events.jsonl`. Thread-safe via `SemaphoreSlim`. `System.Text.Json` only (no string-built JSON). `FileShare.ReadWrite` for concurrent readers. Size-based rotation at 50 MB, up to 5 rotated files. Rate-limited to 100 entries/second, burst of 200. Graceful degradation on file access failure. Self-healing writer (retries on each write). Stale file handling (renames locked files to `.stale.<timestamp>`).
+- **JsonlEventLogger** — JSONL output to `%ProgramData%\Sentinel\events.jsonl`. Thread-safe via `SemaphoreSlim`. `System.Text.Json` only (no string-built JSON). `FileShare.ReadWrite` for concurrent readers. Size-based rotation at 50 MB, up to 5 rotated files. Rate-limited to 100 entries/second, burst of 200. Graceful degradation on file access failure. Self-healing writer (retries on each write). Stale file handling (renames locked files to `.stale.<timestamp>`).
 - **StructuredLoggingExtensions** — `BeginScope` helpers for consistent operation context in all log entries.
 - **DetectionEvent model** — Structured event with `RuleName`, `Evidence`, `Reasoning`, `Confidence`, `Tier`, `ProcessName`, `ProcessId`, `Metadata`.
 - **DetectionTier** — `Tier1Behavioral` (kill-authorized) and `Tier2Indicator` (log-only). Tier2 enforcement is unconditional in `AdvancedResponseEngine` — no config override possible.

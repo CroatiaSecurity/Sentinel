@@ -1,167 +1,124 @@
-# 🛡️ Windows Sentinel
+# Sentinel
 
-**Userland IDS/EDR for Windows — Behavioral Threat Detection & Automated Response**
+Real-time endpoint detection and response for Windows. Runs as a background service, monitors system behavior, and kills threats automatically when multiple signals correlate.
 
-> Version: 1.1.0 | Author: [Gorstak](https://gorstak.eu) | License: MIT
-
-[![Release](https://img.shields.io/github/v/release/CroatiaSecurity/Sentinel?style=flat-square)](https://github.com/CroatiaSecurity/Sentinel/releases/latest)
-[![License](https://img.shields.io/github/license/CroatiaSecurity/Sentinel?style=flat-square)](LICENSE)
+**Current version: 1.5.9**
 
 ---
 
-## 📖 What Is This
+## What does it protect against?
 
-Windows Sentinel is a runtime behavioral EDR that monitors what processes **do** — not what they are. It detects malicious behavior at runtime and responds by killing threat chains, quarantining binaries, removing persistence, and blocking attacker infrastructure.
+Sentinel is effective against:
 
-No signatures. No blocklists. No name-based detection. Pure behavioral analysis.
+- **Script kiddies and commodity malware** — Ransomware, infostealers, RATs, cryptominers. Behavioral detection means it doesn't matter what the malware is named or where it came from. If it deletes shadow copies, encrypts files in bulk, dumps credentials, or injects into processes — it dies.
 
-**Philosophy:** Allow anything to run until it proves itself malicious. Then kill it, quarantine it, trace its installer, and remove every trace of persistence.
+- **Living-off-the-land attacks (LOLBins)** — PowerShell abuse, WMI lateral movement, MSHTA/rundll32 proxy execution, scheduled task persistence, UAC bypasses. Sentinel watches what trusted binaries *do*, not just that they exist.
 
----
+- **Credential theft** — LSASS dumps (dbghelp.dll sideloading, direct syscall variants), browser credential store access (Chrome/Edge/Firefox), honeypot credential tripwires, Credential Guard disablement monitoring.
 
-## ⚡ Quick Start
+- **Physical access attacks** — BadUSB/Rubber Ducky devices (HID whitelist), post-idle hardware change detection, new Bluetooth devices, rogue USB drives.
 
-```powershell
-# Run as Administrator
-.\WindowsSentinelSetup-0.9.6.exe
-```
+- **Network attacks** — ARP spoofing, DNS poisoning, rogue Wi-Fi, unauthorized Cast/screen-share devices, C2 beaconing (statistical), DNS tunneling/exfiltration, phantom network devices.
 
-Installs a Windows Service (SYSTEM) + user Agent (tray icon). Active response is enabled by default.
+- **Persistence mechanisms** — Scheduled tasks, WMI subscriptions, registry run keys, DLL sideloading, boot config tampering.
 
----
+- **Hardware security downgrade** — Detects if someone disables TPM, Secure Boot, BitLocker, or Credential Guard.
 
-## 🔍 How Detection Works
+## What it does NOT protect against
 
-```
-Telemetry → Fusion → Rules → Scoring → Response → Chain Trace
-```
+Sentinel is honest about its limits:
 
-1. **Telemetry** — ETW kernel events, network connections (GetExtendedTcpTable), file system watchers, ARP table polling, DNS queries, registry changes
-2. **Fusion** — Events are grouped per-process with behavioral flags (has network? wrote to temp? called injection APIs?)
-3. **Rules** — 10+ detection rules evaluate fused context: LSASS access, ransomware patterns, reverse shells, LOLBin abuse, DLL sideloading, privilege escalation, attack tools
-4. **Scoring** — Multi-signal scoring with corroboration boosts. Only fires when confidence crosses threshold
-5. **Response** — Tier1 (proven malicious) → kill + quarantine. Tier2 (suspicious) → log only, feed correlation engine
-6. **Chain Trace** — Walk parent process tree, find the dropper, quarantine it, remove Run keys / scheduled tasks / services
+- **Kernel-level attacks** — If the attacker loads a driver, it's game over. Sentinel runs in userland.
+- **Nation-state tooling** — Custom kernel implants, zero-days, hardware backdoors are out of scope.
+- **Attacker already running as SYSTEM** — They can kill the service. A watchdog adds seconds of delay, not real protection.
+- **Pre-boot attacks** — Sentinel starts after Windows. It detects boot config changes after the fact.
+
+Full transparency in [THREAT_MODEL.md](THREAT_MODEL.md).
 
 ---
 
-## 🎯 What It Detects
+## Is this for you?
 
-| Category | Technique | Detection Method |
-|----------|-----------|-----------------|
-| 💀 **Credential Theft** | LSASS dump, token theft | Sysmon/Security event log monitoring |
-| 🔐 **Ransomware** | Shadow copy deletion, mass rename | VSS event + FileActivityMonitor rename counter |
-| 🌐 **C2 Beaconing** | Regular interval callbacks | Statistical coefficient of variation (CV < 0.40) |
-| 💉 **Process Injection** | Hollowing, reflective DLL, thread injection | VirtualQueryEx memory layout + ETW ThreatIntel |
-| 🔑 **Privilege Escalation** | UAC bypass, token manipulation | Command-line pattern matching (fodhelper, sdclt, etc.) |
-| 🛠️ **LOLBin Abuse** | certutil, mshta, regsvr32, rundll32, etc. | 60+ behavioral patterns (binary + suspicious arguments) |
-| 📡 **Network Attacks** | ARP spoofing, phantom devices, route injection | GetIpNetTable, GetIpForwardTable, ARP polling |
-| 📜 **Persistence** | Run keys, services, scheduled tasks, COM hijack | Registry polling + WMI watchers |
-| 🔒 **Certificate Attacks** | MitM root CA, BYOVD driver signing | Root + TrustedPublisher store monitoring |
-| 🖥️ **DLL Sideloading** | System DLL in app directory | Module enumeration + in-memory FreeLibrary unload + quarantine + lock file |
-| 🛑 **Anti-Tamper** | Process suspend, binary deletion, service removal | 2s timing tick, binary integrity, SCM monitoring |
-| 🔒 **Null Session** | Blank-password network auth, SMB null-session | Registry policy enforcement + FCM push block |
-| 🥾 **Boot Persistence** | Bootkits, EFI rootkits, driver load hijack | BCD monitoring, EFI partition scan, boot driver baseline |
-| 🔗 **Multi-Signal Correlation** | Attack chains (inject+C2, cred+exfil, evasion+persist) | 10 composite detections from independent signal sources |
+**Yes, if:**
+- You want a second layer alongside Windows Defender (Sentinel doesn't replace it)
+- You run Windows 10/11 and want behavioral detection that works even against unknown threats
+- You're a power user, developer, or small team that wants endpoint visibility without paying for enterprise EDR
+- You want open-source security you can audit yourself
+
+**Probably not, if:**
+- You need enterprise-grade management console, centralized reporting, or fleet deployment
+- You expect kernel-level protection (that requires signed drivers and Microsoft certification)
+- You want set-and-forget antivirus — Sentinel is opinionated and may kill processes aggressively
 
 ---
 
-## 🛡️ Response Actions
+## How it works
 
-| Response | What It Does |
-|----------|-------------|
-| **KillProcessTree** | Terminate entire process tree + quarantine binary + remove persistence |
-| **NetworkIsolate** | Block IP via Windows Firewall COM API + flush DNS |
-| **RemoveCert** | Remove malicious certificate from Root/TrustedPublisher store |
-| **QuarantineAndKill** | Unload DLL from memory (FreeLibrary) + kill if unload fails + quarantine file + lock path |
-| **RemoveRegistryEntry** | Delete malicious Run key / service / CLSID |
-| **BYOVD Chain** | Remove cert + stop driver service + delete registry + quarantine .sys |
+1. **Unified ETW Session** — A single real-time kernel trace session subscribes to 9 Windows providers (Kernel-Process, Kernel-File, Kernel-Registry, DNS-Client, Threat-Intelligence, PowerShell, Firewall, TaskScheduler, Kernel-Network). Detection latency is ~50ms — fast enough to catch droppers that execute and exit in under a second.
 
----
+2. **Monitors** — 50+ background monitors consume ETW telemetry and perform additional analysis (behavioral baselines, statistical beaconing detection, memory scanning, hardware state checks). Monitors that previously polled every 5-30 seconds now react instantly via ETW events.
 
-## 🏗️ Architecture
+3. **Detection engine** — Events are scored by the multi-factor ScoringEngine and classified into tiers. Tier 1 (behavioral) signals are high-confidence. Tier 2 (indicator) signals are corroborating evidence. Rules declare their detection category at compile time via attributes.
 
-**Service (SYSTEM session):** ETW monitors, network scanning, registry monitoring, beaconing detection, route table protection, certificate monitoring, file activity, 50+ background monitors.
+4. **Correlation** — The BehavioralCorrelationEngine evaluates multi-signal composites on the same process within 60 seconds. 10 composite patterns (Injected C2 Beacon, Active Ransomware Chain, Credential Dump + Exfiltration, etc.) produce kill-authorized detections with 0.90-0.99 confidence.
 
-**Agent (user session):** Tray icon, clipboard sanitizer, screen capture detection, overlay phishing detection, shell watchdog, browser extension monitor.
+5. **Response** — Authorized responses range from log-only to process termination, quarantine, network isolation, certificate removal, and persistence cleanup. The ChainTracer walks the parent process tree, quarantines attack-root binaries, and removes persistence (Run keys, scheduled tasks). Only corroborated threats get killed.
 
-Both communicate through shared detection/response pipeline via the `DetectionEngine` → `AdvancedResponseEngine` → `ChainTracer` chain.
+6. **Reputation** — The FileReputationEngine queries 3 sources (CIRCL, MalwareBazaar, VirusTotal via Cloudflare Worker proxy) and combines hash reputation with static PE analysis, signer trust, and contextual risk into a composite 0-100 score.
 
 ---
 
-## 🔒 Security Design
+## Test Suite
 
-- **No name-based trust** — process names are trivially spoofed. All exemptions require verified install paths
-- **No built-in allowlists** — only user-managed allowlist can suppress (and never for President's Law rules)
-- **President's Law** — LSASS, ransomware, injection, credential theft ALWAYS fire regardless of any allowlist
-- **Authenticode-based trust** — C2 beaconing detector uses WinVerifyTrust (multi-factor: signature + path + diversity + baseline) to demote responses for legitimate signed software. Unforgeable without the publisher's private key
-- **AV-clean** — no CreateRemoteThread, no ReadProcessMemory, no netsh shell-outs. Uses COM APIs and event logs
-- **Graceful degradation** — works on custom/debloated Windows without WMI (falls back to registry polling)
-- **Open source** — attackers can read the code, but behavioral detection can't be bypassed by renaming
+299 automated tests (xUnit), all passing in < 5 seconds:
+- End-to-end integration tests (full pipeline: telemetry → detection → scoring → correlation → response)
+- Unit tests for all critical engines (Response, Correlation, ChainTracer, FileReputation, AntiTamper, Detection)
+- Run with `dotnet test`
 
 ---
 
-## 📋 Documentation
+## Installation
+
+Download the latest installer from [releases/](releases/) and run it. Sentinel installs as a Windows Service and starts automatically.
+
+Requirements:
+- Windows 10 or 11 (x64)
+- .NET 8 Runtime
+- Administrator privileges for installation
+- Runs as SYSTEM after install
+
+---
+
+## Documentation
 
 | Document | Description |
 |----------|-------------|
-| [CHANGELOG.md](CHANGELOG.md) | Full version history with every fix and feature |
-| [THREAT_MODEL.md](THREAT_MODEL.md) | Threat model and detection confidence scores |
-| [design.md](design.md) | Architecture, component inventory, data flow |
-| [requirements.md](requirements.md) | Functional and non-functional requirements |
-| [constraints.md](constraints.md) | Hard rules that are never violated |
+| [CHANGELOG.md](CHANGELOG.md) | Full version history and security fixes |
+| [THREAT_MODEL.md](THREAT_MODEL.md) | What Sentinel can and cannot detect, bypass scenarios, confidence levels |
+| [SECURITY.md](SECURITY.md) | Vulnerability reporting and responsible disclosure |
+| [design.md](design.md) | Architecture and technical design |
+| [architecture-council.md](architecture-council.md) | Detailed architecture specification |
+| [constraints.md](constraints.md) | Hard rules and design constraints |
+| [requirements.md](requirements.md) | Functional requirements |
 
 ---
 
-## ⚙️ Configuration
+## Legal Disclaimer
 
-`appsettings.json` in the install directory:
+**Sentinel is provided "as is", without warranty of any kind.** See [LICENSE](LICENSE) for the full MIT license.
 
-```json
-{
-  "Sentinel": {
-    "ActiveResponse": true,
-    "LogPath": null,
-    "WatchPath": null
-  },
-  "ThreatReporting": {
-    "Enabled": true,
-    "AbuseIPDbApiKey": "",
-    "MalwareBazaarApiKey": ""
-  }
-}
-```
+- Sentinel may terminate processes it identifies as threats. This includes false positives. The authors are not responsible for data loss, service interruption, or any damages resulting from automated response actions.
+- Sentinel is a supplementary security tool. It does not replace antivirus software, firewalls, or proper security practices.
+- You are responsible for configuring allowlists and reviewing detection logs in your environment.
+- Sentinel modifies system state (firewall rules, registry values, device configurations) as part of its response actions. Understand what it does before deploying in production.
+- This software is not certified by Microsoft or any security authority. It does not use kernel drivers and has no special OS-level protections.
 
-- `ActiveResponse: true` — kill/quarantine/block enabled (default)
-- `ActiveResponse: false` — log-only mode, no active response
-- `LogPath` — custom path for events.jsonl (default: `%ProgramData%\WindowsSentinel\`)
-- `WatchPath` — custom directory for FileActivityMonitor (default: all user profiles)
+**Use at your own risk. Test in a non-production environment first.**
 
 ---
 
-## 📊 Logs
+## License
 
-All events logged to `%ProgramData%\WindowsSentinel\events.jsonl` in structured JSONL format:
+MIT License. See [LICENSE](LICENSE).
 
-```json
-{"type":"detection","timestamp":"...","data":{"RuleName":"...","Evidence":"...","Confidence":0.95,...}}
-{"type":"response","timestamp":"...","data":{"ActionTaken":"KILL","Reason":"...",...}}
-{"type":"health","timestamp":"...","data":{"WorkingSetMB":128,"DetectionsTotal":12345,...}}
-```
-
----
-
-## ⚠️ Limitations
-
-- Userland only — no kernel driver, can't prevent kernel-level attacks
-- Windows only — no cross-platform support
-- Single-machine scope — no central management or fleet telemetry
-- Not a replacement for commercial EDR — designed for personal use, education, and research
-
----
-
-## 📜 License & Disclaimer
-
-MIT License — see [LICENSE](LICENSE).
-
-**This software kills processes, quarantines files, modifies firewall rules, and removes certificates automatically.** You are responsible for understanding what it does before deploying it. The author accepts no liability for false positives, data loss, or system instability. Use only on systems you own or have explicit authorization to protect.
+Copyright (c) 2026 Gorstak

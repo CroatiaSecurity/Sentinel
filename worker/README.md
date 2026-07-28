@@ -1,6 +1,6 @@
 # Sentinel Threat Report Proxy
 
-Cloudflare Worker that receives threat reports from Windows Sentinel agents and forwards them to threat intelligence platforms (MalwareBazaar, URLhaus, AbuseIPDB) using server-side API keys.
+Cloudflare Worker that receives threat reports from Sentinel agents and forwards them to threat intelligence platforms (MalwareBazaar, URLhaus, AbuseIPDB) using server-side API keys.
 
 Users never need to configure API keys — the Worker holds them as encrypted secrets.
 

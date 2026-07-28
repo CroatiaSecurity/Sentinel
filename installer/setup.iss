@@ -1,145 +1,144 @@
 [Setup]
-AppName=Windows Sentinel
-AppVersion=1.1.0
+AppName=Sentinel
+AppVersion=1.5.9
 AppPublisher=Gorstak
 AppPublisherURL=https://gorstak.eu
 SourceDir=.
-DefaultDirName={autopf}\WindowsSentinel
-DefaultGroupName=Windows Sentinel
-SetupIconFile=assets\sentinel.ico
+DefaultDirName={autopf}\Sentinel
+DefaultGroupName=Sentinel
+SetupIconFile=assets\Sentinel.ico
 UninstallDisplayIcon={app}\Sentinel.ico
 Compression=lzma2
 SolidCompression=yes
 OutputDir=.
-OutputBaseFilename=WindowsSentinelSetup-1.1.0
+OutputBaseFilename=SentinelSetup-1.5.9
 PrivilegesRequired=admin
-; Allow upgrading over existing install — but always use new path (migrate from x86)
-UsePreviousAppDir=no
+; Allow upgrading over existing install
+UsePreviousAppDir=yes
+CloseApplications=no
+RestartApplications=no
+
 
 [Files]
 Source: "assets\Sentinel.ico"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\publish\service\WindowsSentinel.Service.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\publish\agent\WindowsSentinel.Agent.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\publish\service\appsettings.json"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\publish\service\Sentinel.Service.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\publish\agent\Sentinel.Agent.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\publish\service\appsettings.json"; DestDir: "{app}"; Flags: onlyifdoesntexist
 Source: "..\publish\service\version.txt"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\Windows Sentinel Agent"; Filename: "{app}\WindowsSentinel.Agent.exe"; IconFilename: "{app}\Sentinel.ico"
+Name: "{group}\Sentinel Agent"; Filename: "{app}\Sentinel.Agent.exe"; IconFilename: "{app}\Sentinel.ico"
 
 [Registry]
 ; Auto-start agent on user login
-Root: HKLM; Subkey: "SOFTWARE\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "WindowsSentinelAgent"; ValueData: """{app}\WindowsSentinel.Agent.exe"""; Flags: uninsdeletevalue
+Root: HKLM; Subkey: "SOFTWARE\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "SentinelAgent"; ValueData: """{app}\Sentinel.Agent.exe"""; Flags: uninsdeletevalue
+; v1.4.2: Register service for Safe Mode (both Minimal and Network)
+Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Control\SafeBoot\Minimal\Sentinel"; ValueType: string; ValueName: ""; ValueData: "Service"; Flags: uninsdeletekey
+Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Control\SafeBoot\Network\Sentinel"; ValueType: string; ValueName: ""; ValueData: "Service"; Flags: uninsdeletekey
+; Disable FIPS Algorithm Policy
+Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Control\Lsa\FipsAlgorithmPolicy"; ValueType: dword; ValueName: "Enabled"; ValueData: 0
+Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Control\Lsa"; ValueType: dword; ValueName: "FipsAlgorithmPolicy"; ValueData: 0
 
 [Run]
 ; Restore root certificates from backup
+; Clean up .old files from rename-on-upgrade fallback
+Filename: "{sys}\cmd.exe"; Parameters: "/c del /f /q ""{app}\*.old"""; Flags: runhidden
 ; Filename: "{sys}\reg.exe"; Parameters: "import ""d:\Gorstak\Registry\Certs.reg"""; Flags: runhidden; StatusMsg: "Restoring root certificates..."
 ; Install the service using SCM
-Filename: "{sys}\sc.exe"; Parameters: "create ""Windows Sentinel"" start= auto binPath= ""{app}\WindowsSentinel.Service.exe"""
-Filename: "{sys}\sc.exe"; Parameters: "description ""Windows Sentinel"" ""Userland Endpoint Detection & Response (EDR) Service"""
+Filename: "{sys}\sc.exe"; Parameters: "create ""Sentinel"" start= auto binPath= ""{app}\Sentinel.Service.exe"""
+Filename: "{sys}\sc.exe"; Parameters: "description ""Sentinel"" ""Userland Endpoint Detection & Response (EDR) Service"""
 ; Configure failure restart
-Filename: "{sys}\sc.exe"; Parameters: "failure ""Windows Sentinel"" reset= 86400 actions= restart/1000/restart/5000/restart/30000"
+Filename: "{sys}\sc.exe"; Parameters: "failure ""Sentinel"" reset= 86400 actions= restart/1000/restart/5000/restart/30000"
 ; Start the service
-Filename: "{sys}\sc.exe"; Parameters: "start ""Windows Sentinel"""
+Filename: "{sys}\sc.exe"; Parameters: "start ""Sentinel"""
 ; Launch the Agent in user session
-Filename: "{app}\WindowsSentinel.Agent.exe"; Flags: nowait postinstall runasoriginaluser
+Filename: "{app}\Sentinel.Agent.exe"; Flags: nowait postinstall runasoriginaluser
 
 [UninstallRun]
 ; Stop and delete the service
-Filename: "{sys}\sc.exe"; Parameters: "stop ""Windows Sentinel"""; Flags: runhidden
-Filename: "{sys}\sc.exe"; Parameters: "delete ""Windows Sentinel"""; Flags: runhidden
+Filename: "{sys}\sc.exe"; Parameters: "stop ""Sentinel"""; Flags: runhidden; RunOnceId: "StopService"
+Filename: "{sys}\sc.exe"; Parameters: "delete ""Sentinel"""; Flags: runhidden; RunOnceId: "DeleteService"
 
 [UninstallDelete]
 ; Remove application directory (but NOT ProgramData logs)
 Type: filesandordirs; Name: "{app}"
 ; Remove Program Files (x86) leftovers if previous install was there
-Type: filesandordirs; Name: "{commonpf32}\WindowsSentinel"
+Type: filesandordirs; Name: "{commonpf32}\Sentinel"
 
 [Code]
 // Pascal Script for upgrade/uninstall logic
 
+procedure StopServiceByName(const ServiceName: String);
+var
+  ResultCode: Integer;
+  PsPath: String;
+  Cmd: String;
+begin
+  PsPath := ExpandConstant('{sysnative}\WindowsPowerShell\v1.0\powershell.exe');
+
+  // CRITICAL: Disable failure recovery first so sc stop does not auto-restart.
+  Exec(ExpandConstant('{sysnative}\sc.exe'), 'failure "' + ServiceName + '" reset= 86400 actions= ""', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{sysnative}\sc.exe'), 'stop "' + ServiceName + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+  // Poll until STOPPED (or timeout ~10s)
+  Cmd := '-ExecutionPolicy Bypass -Command "for ($i = 0; $i -lt 20; $i++) { $out = & sc.exe queryex ''' + ServiceName + ''' 2>&1; if ($out -match ''STOPPED'') { break }; Start-Sleep -Milliseconds 500 }"';
+  Exec(PsPath, Cmd, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
+procedure ResetInstallDirAcls(const DirPath: String);
+var
+  ResultCode: Integer;
+begin
+  if not DirExists(DirPath) then
+    Exit;
+
+  Exec(ExpandConstant('{sysnative}\takeown.exe'), '/F "' + DirPath + '" /R /A /D Y', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{sysnative}\icacls.exe'), '"' + DirPath + '" /grant Administrators:F /T /C /Q', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{sysnative}\icacls.exe'), '"' + DirPath + '" /grant SYSTEM:F /T /C /Q', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{sysnative}\icacls.exe'), '"' + DirPath + '" /remove:d Users /T /C /Q', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{sysnative}\icacls.exe'), '"' + DirPath + '" /remove:d *S-1-5-32-545 /T /C /Q', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{sysnative}\icacls.exe'), '"' + DirPath + '" /remove:d Everyone /T /C /Q', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{sysnative}\icacls.exe'), '"' + DirPath + '" /reset /T /C /Q', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
 procedure StopExistingService();
 var
   ResultCode: Integer;
+  PsPath: String;
 begin
-  // Stop the service before upgrading — handles antitamper ACL-locked files
-  Exec(ExpandConstant('{sys}\sc.exe'), 'stop "Windows Sentinel"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  // Wait for service to stop
-  Sleep(2000);
-  // Kill any remaining agent processes
-  Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM WindowsSentinel.Agent.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM WindowsSentinel.Service.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  // Use {sysnative} to bypass WOW64 redirection — ensures we reach the real 64-bit
+  // PowerShell and sc.exe even when the installer runs as a 32-bit process.
+  PsPath := ExpandConstant('{sysnative}\WindowsPowerShell\v1.0\powershell.exe');
+
+  StopServiceByName('Sentinel');
+
+  // Kill any remaining Sentinel processes
+  Exec(PsPath, '-ExecutionPolicy Bypass -Command "foreach ($i in 1..5) { $procs = Get-Process -Name ''Sentinel.Service'',''Sentinel.Agent'' -ErrorAction SilentlyContinue; if (-not $procs) { break }; $procs | Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 500 }"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Sleep(1000);
-  // Reset directory ACLs so installer can overwrite files (antitamper hardens ACLs)
-  Exec(ExpandConstant('{sys}\icacls.exe'),
-    ExpandConstant('"{app}" /reset /T /C /Q'),
-    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  // Also reset ACLs on legacy Program Files (x86) path if it exists
-  if DirExists(ExpandConstant('{commonpf32}\WindowsSentinel')) then
-  begin
-    Exec(ExpandConstant('{sys}\icacls.exe'),
-      ExpandConstant('"{commonpf32}\WindowsSentinel" /reset /T /C /Q'),
-      '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  end;
-  // Take ownership first if icacls reset fails (SYSTEM-owned files)
-  Exec(ExpandConstant('{sys}\takeown.exe'),
-    ExpandConstant('/F "{app}" /R /A /D Y'),
-    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Exec(ExpandConstant('{sys}\icacls.exe'),
-    ExpandConstant('"{app}" /grant Administrators:F /T /C /Q'),
-    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Exec(ExpandConstant('{sys}\icacls.exe'),
-    ExpandConstant('"{app}" /grant SYSTEM:F /T /C /Q'),
-    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(PsPath, '-ExecutionPolicy Bypass -Command "Get-Process -Name ''Sentinel.Service'',''Sentinel.Agent'' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Sleep(500);
+
+  // Reset ACLs on install directories
+  ResetInstallDirAcls(ExpandConstant('{app}'));
+  ResetInstallDirAcls(ExpandConstant('{commonpf32}\Sentinel'));
+
+  // NOW try rename as final fallback (ACLs are reset, file should be writable)
+  if FileExists(ExpandConstant('{app}\Sentinel.Service.exe')) then
+    RenameFile(ExpandConstant('{app}\Sentinel.Service.exe'), ExpandConstant('{app}\Sentinel.Service.exe.old'));
+  if FileExists(ExpandConstant('{app}\Sentinel.Agent.exe')) then
+    RenameFile(ExpandConstant('{app}\Sentinel.Agent.exe'), ExpandConstant('{app}\Sentinel.Agent.exe.old'));
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
-var
-  ResultCode: Integer;
-  OldUninstaller: String;
 begin
   Result := '';
-  // If upgrading (service exists, run key exists, or folder exists), stop existing service and reset ACLs
-  if RegValueExists(HKLM, 'SOFTWARE\Microsoft\Windows\CurrentVersion\Run', 'WindowsSentinelAgent') or
-     RegKeyExists(HKLM, 'SYSTEM\CurrentControlSet\Services\Windows Sentinel') or
+  // If upgrading (existing install present), stop service and reset ACLs
+  if RegValueExists(HKLM, 'SOFTWARE\Microsoft\Windows\CurrentVersion\Run', 'SentinelAgent') or
+     RegKeyExists(HKLM, 'SYSTEM\CurrentControlSet\Services\Sentinel') or
      DirExists(ExpandConstant('{app}')) or
-     DirExists(ExpandConstant('{commonpf32}\WindowsSentinel')) then
+     DirExists(ExpandConstant('{commonpf32}\Sentinel')) then
   begin
     StopExistingService();
-  end;
-
-  // Run the old uninstaller silently to clean up the previous installation
-  // (handles migration from Program Files (x86) to Program Files)
-  if RegQueryStringValue(HKLM, 'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Windows Sentinel_is1',
-     'UninstallString', OldUninstaller) then
-  begin
-    // Strip quotes from the uninstall path
-    StringChangeEx(OldUninstaller, '"', '', True);
-    if FileExists(OldUninstaller) then
-    begin
-      // Reset ACLs on the old uninstaller directory so it can actually execute
-      Exec(ExpandConstant('{sys}\takeown.exe'),
-        '/F "' + ExtractFileDir(OldUninstaller) + '" /R /A /D Y',
-        '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-      Exec(ExpandConstant('{sys}\icacls.exe'),
-        '"' + ExtractFileDir(OldUninstaller) + '" /grant Administrators:F /T /C /Q',
-        '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-      // Run uninstaller silently
-      Exec(OldUninstaller, '/VERYSILENT /NORESTART /SUPPRESSMSGBOXES', '',
-        SW_HIDE, ewWaitUntilTerminated, ResultCode);
-      Sleep(2000);
-    end;
-  end;
-
-  // Final cleanup: forcefully remove the old x86 directory if it still exists
-  if DirExists(ExpandConstant('{commonpf32}\WindowsSentinel')) then
-  begin
-    Exec(ExpandConstant('{sys}\takeown.exe'),
-      ExpandConstant('/F "{commonpf32}\WindowsSentinel" /R /A /D Y'),
-      '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-    Exec(ExpandConstant('{sys}\icacls.exe'),
-      ExpandConstant('"{commonpf32}\WindowsSentinel" /grant Administrators:F /T /C /Q'),
-      '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-    DelTree(ExpandConstant('{commonpf32}\WindowsSentinel'), True, True, True);
   end;
 end;
 
@@ -153,15 +152,24 @@ begin
     StopExistingService();
 
     // Remove Sentinel registry keys
-    RegDeleteValue(HKLM, 'SOFTWARE\Microsoft\Windows\CurrentVersion\Run', 'WindowsSentinelAgent');
+    RegDeleteValue(HKLM, 'SOFTWARE\Microsoft\Windows\CurrentVersion\Run', 'SentinelAgent');
 
     // Delete service via SCM
-    Exec(ExpandConstant('{sys}\sc.exe'), 'delete "Windows Sentinel"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec(ExpandConstant('{sys}\sc.exe'), 'delete "Sentinel"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
-    // Remove Program Files (x86) folder if exists (legacy installs)
-    DelTree(ExpandConstant('{commonpf32}\WindowsSentinel'), True, True, True);
+    // Remove Program Files leftovers
+    DelTree(ExpandConstant('{pf32}\Sentinel'), True, True, True);
 
-    // NOTE: ProgramData\WindowsSentinel logs are intentionally PRESERVED
+    // Clean up persistent items created by the app
+    // 1. Delete ShowAllTrayIcons scheduled task
+    Exec(ExpandConstant('{sys}\schtasks.exe'), '/Delete /TN "ShowAllTrayIcons" /F', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+    // 2. Delete GSecurity IPSec policy
+    Exec(ExpandConstant('{sys}\netsh.exe'), 'ipsec static delete policy name=GSecurity', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+    // 3. Delete RPC dynamic ports blocker firewall rule
+    Exec(ExpandConstant('{sys}\netsh.exe'), 'advfirewall firewall delete rule name="Sentinel-Block-Remote-RPC-Ephemeral"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+    // NOTE: ProgramData\Sentinel logs are intentionally PRESERVED
   end;
 end;
-

@@ -1,9 +1,9 @@
 # Sentinel â€” Council of Elders Architecture
 
 **Status:** Architecture spec. Extends, does not replace, `requirements.md`,
-`design.md`, `constraints.md` (all v0.8.4).
+`design.md`, `constraints.md` (all v1.2.0).
 
-**Last updated:** v0.8.4 (June 2026) — Implemented static Gateway ARP lock to prevent ARP spoofing, a new NetworkInterfaceGuard to detect/remove network bridges and re-enable disabled interfaces, active Wi-Fi reconnect / adapter toggling to mitigate deauth floods, and DNS registry integrity monitoring/restoration.
+**Last updated:** v1.2.0 (July 2026) — Comprehensive supervised task lifetimes and resource cleanup: resolved handle leaks and stopped tasks on service shutdown.
 
 ---
 
@@ -70,6 +70,9 @@ Nothing else kills.
 | Honeypot decoy access | `HoneypotMonitor` |
 | ADS verdict = `unsafe` from 3-API consensus | `VerdictGateRule` (E1) |
 | Sentinel self-protection tampering | `SelfProtection` |
+| WFP filter blocking Sentinel's network traffic | `WfpIntegrityMonitor` |
+| BYOVD vulnerable driver loaded (hash/name match) | `DriverLoadMonitor` |
+| Network silencing of Sentinel (EDRSilencer) | `ConnectivityCanaryMonitor` |
 
 **Adding to this list requires explicit user sign-off and a doc update.** This
 is the most dangerous edit possible to Sentinel.
@@ -147,7 +150,7 @@ Composite-grade detection â†’ kill via the v2.0 composite path.
 | `DiskWideDllScanner` | Disk-wide scan: all drives for unsigned/suspicious DLLs not yet loaded. Feeds HashReputationService for live threat intel. Active unload on IoC match. |
 
 ### Detection consultants (PowerShell â†’ JSONL drop)
-Each drops `%ProgramData%\WindowsSentinel\consultants\<name>.jsonl`, ingested by
+Each drops `%ProgramData%\Sentinel\consultants\<name>.jsonl`, ingested by
 `ConsultantSignalIngestor` (new component). All emit **Tier2 only** unless
 correlated via `BehavioralCorrelationEngine`.
 

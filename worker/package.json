@@ -1,7 +1,7 @@
 {
   "name": "sentinel-threat-proxy",
   "version": "1.0.0",
-  "description": "Cloudflare Worker that proxies threat reports from Windows Sentinel to abuse.ch APIs",
+  "description": "Cloudflare Worker that proxies threat reports from Sentinel to abuse.ch APIs",
   "private": true,
   "scripts": {
     "dev": "wrangler dev",
