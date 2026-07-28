@@ -323,7 +323,11 @@ namespace Sentinel.Core
             {
                 "java", "javaw", "node", "python", "python3", "dotnet", "pwsh",
                 "powershell", "chrome", "msedge", "firefox", "brave", "teams",
-                "discord", "spotify", "code", "cursor", "rider64", "idea64"
+                "discord", "spotify", "code", "Code - Insiders", "cursor",
+                "kiro", "windsurf", "positron", "Devin", "Antigravity IDE",
+                "rider64", "idea64", "phpstorm64", "webstorm64", "goland64",
+                "pycharm64", "clion64", "electron", "msedgewebview2",
+                "slack", "steamwebhelper"
             };
             return jitProcesses.Contains(name);
         }

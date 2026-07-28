@@ -69,6 +69,26 @@ namespace Sentinel.Core
                 _baseline.Add(d.DeviceId);
             }
 
+            // v1.6.9: Scan baseline devices for failed-enumeration state.
+            // If a hostile device was plugged in before Sentinel started (or persists across
+            // reboots in error state), it would be silently baselined and never processed.
+            // This ensures the Windows "USB device not recognized" notification icon is
+            // cleared even for pre-existing failed devices.
+            if (_config.AutoDisableFailedUsbEnumeration)
+            {
+                foreach (var d in devices)
+                {
+                    if (IsFailedEnumerationDevice(d))
+                    {
+                        _logger?.LogWarning(
+                            "[UsbDeviceFingerprinter] Baseline device in failed-enumeration state — ejecting: {Id} ({Name})",
+                            d.DeviceId, d.Name);
+                        DisableUsbDevice(d.DeviceId);
+                        EjectUsbDevice(d.DeviceId);
+                    }
+                }
+            }
+
             _logger?.LogInformation(
                 "[UsbDeviceFingerprinter] Baseline {Count} USB devices; {Trusted} trusted VID:PID; AutoDisableFailedEnum={Auto}",
                 _baseline.Count, _trustedVidPid.Count, _config.AutoDisableFailedUsbEnumeration);
@@ -125,6 +145,20 @@ namespace Sentinel.Core
             }
         }
 
+        /// <summary>
+        /// v1.6.9: Determines whether a device is in failed-enumeration state based on
+        /// its VID, name, and the IsFailedEnumeration flag. Used both in startup baseline
+        /// scanning and in ProcessNewDevice to identify hostile/broken USB devices.
+        /// </summary>
+        private static bool IsFailedEnumerationDevice(UsbDevice dev)
+        {
+            if (dev.IsFailedEnumeration) return true;
+            if (dev.Vid.Equals("0000", StringComparison.OrdinalIgnoreCase)) return true;
+            if (dev.Name?.Contains("Device Descriptor Request Failed", StringComparison.OrdinalIgnoreCase) ?? false) return true;
+            if (dev.Name?.Contains("Unknown USB Device", StringComparison.OrdinalIgnoreCase) ?? false) return true;
+            return false;
+        }
+
         private void ProcessNewDevice(UsbDevice dev)
         {
             string ruleName = "USB: New Device Connected";
@@ -136,10 +170,7 @@ namespace Sentinel.Core
             var vidPid = $"{dev.Vid}:{dev.Pid}";
 
             // v1.6.3: Failed enumeration / VID_0000 — high interest, auto-disable
-            if (dev.IsFailedEnumeration ||
-                dev.Vid.Equals("0000", StringComparison.OrdinalIgnoreCase) ||
-                (dev.Name?.Contains("Device Descriptor Request Failed", StringComparison.OrdinalIgnoreCase) ?? false) ||
-                (dev.Name?.Contains("Unknown USB Device", StringComparison.OrdinalIgnoreCase) ?? false))
+            if (IsFailedEnumerationDevice(dev))
             {
                 ruleName = "USB: Failed Device Enumeration";
                 evidence = $"USB device failed descriptor enumeration: '{dev.Name}' " +

@@ -75,7 +75,7 @@ namespace Sentinel.Core
 
         private static readonly HashSet<string> DevelopmentProcesses = new(StringComparer.OrdinalIgnoreCase)
         {
-            "devenv", "code", "Windsurf", "cursor",
+            "devenv", "code", "Windsurf", "cursor", "kiro", "positron", "Devin",
             "msbuild", "dotnet", "node", "npm", "python", "py",
             "git", "git-remote-https",
             "cargo", "rustc", "go", "java", "javac",
