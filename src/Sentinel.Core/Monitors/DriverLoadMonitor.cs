@@ -1,5 +1,7 @@
 // Driver Load Monitor — detects BYOVD (Bring Your Own Vulnerable Driver) attacks
 // v1.5.0: New monitor. Critical Group — restarts indefinitely.
+// v1.7.0: Added cert-tracing — extracts Authenticode cert from detected drivers,
+//         revokes planted TrustedPublisher/Root certs, quarantines signed drivers.
 
 using System;
 using System.Collections.Generic;
@@ -8,6 +10,7 @@ using System.Diagnostics.Eventing.Reader;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Hosting;
@@ -473,6 +476,316 @@ namespace Sentinel.Core
             {
                 await AttemptDriverDisableAsync(serviceName, ct);
             }
+
+            // v1.7.0: Cert-tracing — if the driver is signed by a non-public cert that was
+            // planted in TrustedPublisher or Root store, revoke it to prevent re-loading.
+            // This closes the attack chain: attacker plants cert → loads driver → Sentinel
+            // removes cert + quarantines driver → re-load is impossible without repeating entire chain.
+            if (confidence >= 0.70 && File.Exists(resolvedPath))
+            {
+                await TracAndRevokeDriverCertAsync(resolvedPath, serviceName, confidence, ct);
+            }
+        }
+
+        /// <summary>
+        /// v1.7.0: Cert-tracing for BYOVD drivers.
+        /// Extracts the Authenticode signing certificate from the driver binary, checks if
+        /// that cert (or its root/intermediate) was planted in TrustedPublisher or Root stores
+        /// (not a well-known public CA), and if so fires RemoveCertAndKillAdder to revoke it.
+        ///
+        /// Attack chain this closes:
+        ///   1. Attacker plants fake code-signing cert in TrustedPublisher
+        ///   2. Attacker signs their own .sys driver with that cert
+        ///   3. Windows DSE passes because TrustedPublisher trusts the signer
+        ///   4. Sentinel detects the driver load → extracts cert → revokes it
+        ///   5. Without the TrustedPublisher entry, Windows will refuse to load the driver again
+        ///
+        /// Also handles the case where the attacker planted a root CA cert to chain-validate
+        /// their driver cert (fake Chromecast / IoT device CA pattern).
+        /// </summary>
+        private async Task TracAndRevokeDriverCertAsync(string driverPath, string serviceName, double baseConfidence, CancellationToken ct)
+        {
+            try
+            {
+                var signerCert = GetDriverAuthenticodeCert(driverPath);
+                if (signerCert == null) return;
+
+                var thumbprint = signerCert.Thumbprint;
+                var subject = signerCert.Subject;
+                var issuer = signerCert.Issuer;
+
+                // Skip well-known public CAs — these are legitimate even on vulnerable drivers
+                // (e.g., RTCore64.sys was signed by a real MSI certificate)
+                if (IsKnownPublicCa(subject) || IsKnownPublicCa(issuer))
+                {
+                    signerCert.Dispose();
+                    return;
+                }
+
+                // Check TrustedPublisher store (most common BYOVD cert-planting vector)
+                var (foundInTrustedPublisher, trustedPubThumbprint) = FindCertInStore(
+                    StoreName.TrustedPublisher, StoreLocation.LocalMachine, thumbprint, subject);
+
+                // Check Root store (fake CA pattern — e.g., "Chromecast IoT Root CA")
+                var (foundInRoot, rootThumbprint) = FindCertInStore(
+                    StoreName.Root, StoreLocation.LocalMachine, thumbprint, issuer);
+
+                // Also check CurrentUser stores (less common but possible)
+                var (foundInUserTrustedPublisher, userTpThumbprint) = FindCertInStore(
+                    StoreName.TrustedPublisher, StoreLocation.CurrentUser, thumbprint, subject);
+                var (foundInUserRoot, userRootThumbprint) = FindCertInStore(
+                    StoreName.Root, StoreLocation.CurrentUser, thumbprint, issuer);
+
+                bool certPlanted = foundInTrustedPublisher || foundInRoot ||
+                                   foundInUserTrustedPublisher || foundInUserRoot;
+
+                if (!certPlanted)
+                {
+                    signerCert.Dispose();
+                    return;
+                }
+
+                // Determine which thumbprint to revoke (prefer TrustedPublisher, then Root)
+                var revokeThumbprint = trustedPubThumbprint ?? rootThumbprint ??
+                                       userTpThumbprint ?? userRootThumbprint ?? thumbprint;
+
+                var storeLabel = foundInTrustedPublisher ? "LocalMachine\\TrustedPublisher" :
+                                 foundInRoot ? "LocalMachine\\Root" :
+                                 foundInUserTrustedPublisher ? "CurrentUser\\TrustedPublisher" :
+                                 "CurrentUser\\Root";
+
+                _logger.LogWarning("[DriverLoadMonitor] BYOVD cert-trace: driver '{Driver}' signed by " +
+                    "non-public cert '{Subject}' found in {Store}. Firing RemoveCertAndKillAdder.",
+                    serviceName, subject, storeLabel);
+
+                // Confidence boost: planted cert + BYOVD driver = very high confidence attack
+                double certTraceConfidence = Math.Max(baseConfidence, 0.95);
+
+                // Emit RemoveCertAndKillAdder detection — the response engine handles actual removal
+                await _detectionEngine.EmitAsync(new DetectionEvent
+                {
+                    RuleName = "BYOVD: Planted Signing Certificate Revocation",
+                    Evidence = $"Driver '{serviceName}' at '{driverPath}' is signed by cert '{subject}' " +
+                               $"(Thumbprint: {thumbprint[..16]}...) which was found in {storeLabel}. " +
+                               $"This is NOT a well-known public CA — it was planted to enable driver signature validation bypass.",
+                    Reasoning = "BYOVD attack chain detected: a non-public code-signing certificate was planted " +
+                                $"in the {storeLabel} store, enabling the attacker's driver to pass Windows Driver " +
+                                "Signature Enforcement. By revoking this certificate, the driver cannot be reloaded " +
+                                "after removal — closing the attack chain permanently. " +
+                                "This pattern matches known attacks (fake Chromecast CA, rogue IoT device certs) " +
+                                "that bypass DSE by establishing trust at the certificate level.",
+                    Confidence = certTraceConfidence,
+                    Tier = DetectionTier.Tier1Behavioral,
+                    AuthorizedResponse = ResponseAction.RemoveCertAndKillAdder,
+                    ProcessName = serviceName,
+                    ProcessId = 0,
+                    SignalType = SignalType.SecurityEvasion,
+                    Metadata = new Dictionary<string, string>
+                    {
+                        ["CertThumbprint"] = revokeThumbprint,
+                        ["CertSubject"] = subject,
+                        ["CertIssuer"] = issuer,
+                        ["CertStore"] = storeLabel,
+                        ["DriverPath"] = driverPath,
+                        ["ServiceName"] = serviceName,
+                        ["AdderProcessId"] = "0", // Unknown — cert may have been planted earlier
+                        ["Technique"] = "T1553.004/T1068/BYOVD"
+                    }
+                });
+
+                // Additionally: scan for OTHER drivers signed by the same cert and quarantine them.
+                // The attacker may have loaded multiple drivers with the same planted cert.
+                await ScanForOtherDriversSignedByCertAsync(signerCert, thumbprint, subject, serviceName, ct);
+
+                signerCert.Dispose();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "[DriverLoadMonitor] Cert-trace failed for driver '{Service}'", serviceName);
+            }
+        }
+
+        /// <summary>
+        /// Scans System32\drivers for other .sys files signed by the same planted cert.
+        /// Quarantines any found — the attacker may have loaded multiple BYOVD drivers.
+        /// </summary>
+        private async Task ScanForOtherDriversSignedByCertAsync(
+            X509Certificate2 maliciousCert, string thumbprint, string certSubject,
+            string excludeService, CancellationToken ct)
+        {
+            try
+            {
+                var driversDir = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.Windows), "System32", "drivers");
+                if (!Directory.Exists(driversDir)) return;
+
+                var cn = ExtractCN(certSubject);
+                int quarantined = 0;
+
+                foreach (var driverPath in Directory.EnumerateFiles(driversDir, "*.sys"))
+                {
+                    if (ct.IsCancellationRequested) break;
+                    if (quarantined >= 10) break; // Safety limit
+
+                    try
+                    {
+                        var driverCert = GetDriverAuthenticodeCert(driverPath);
+                        if (driverCert == null) continue;
+
+                        bool matchesThumbprint = string.Equals(driverCert.Thumbprint, thumbprint, StringComparison.OrdinalIgnoreCase);
+                        bool matchesCN = !string.IsNullOrEmpty(cn) &&
+                            (driverCert.Subject?.Contains(cn, StringComparison.OrdinalIgnoreCase) == true);
+
+                        driverCert.Dispose();
+
+                        if (!matchesThumbprint && !matchesCN) continue;
+
+                        var driverName = Path.GetFileNameWithoutExtension(driverPath);
+                        if (string.Equals(driverName, excludeService, StringComparison.OrdinalIgnoreCase)) continue;
+
+                        _logger.LogWarning("[DriverLoadMonitor] Cert-trace: additional driver '{Driver}' " +
+                            "signed by revoked cert. Disabling service.", driverName);
+
+                        // Stop and disable the driver
+                        try
+                        {
+                            using var sc = new System.ServiceProcess.ServiceController(driverName);
+                            if (sc.Status != System.ServiceProcess.ServiceControllerStatus.Stopped)
+                                sc.Stop();
+                        }
+                        catch { }
+
+                        DisableAndDeleteServiceNative(driverName);
+
+                        await _detectionEngine.EmitAsync(new DetectionEvent
+                        {
+                            RuleName = "BYOVD: Additional Driver Signed by Revoked Cert",
+                            Evidence = $"Driver '{driverName}.sys' in System32\\drivers is signed by the same " +
+                                       $"cert '{certSubject}' that was revoked from TrustedPublisher. " +
+                                       "Service disabled and deleted.",
+                            Reasoning = "After revoking a planted code-signing cert, all drivers signed by " +
+                                        "that cert are neutralized. This driver was found using the same " +
+                                        "signing identity and has been disabled to prevent kernel-level attacks.",
+                            Confidence = 0.93,
+                            Tier = DetectionTier.Tier1Behavioral,
+                            AuthorizedResponse = ResponseAction.LogOnly, // Already handled by service disable
+                            ProcessName = driverName,
+                            ProcessId = 0,
+                            SignalType = SignalType.SecurityEvasion,
+                            Metadata = new Dictionary<string, string>
+                            {
+                                ["DriverPath"] = driverPath,
+                                ["CertSubject"] = certSubject,
+                                ["CertThumbprint"] = thumbprint,
+                                ["Technique"] = "T1553.004/T1068/BYOVD"
+                            }
+                        });
+
+                        quarantined++;
+                    }
+                    catch { }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "[DriverLoadMonitor] Cert-trace driver scan failed");
+            }
+        }
+
+        /// <summary>
+        /// Extracts the Authenticode signing certificate from a file.
+        /// Returns null if the file is unsigned or the cert cannot be extracted.
+        /// </summary>
+        private static X509Certificate2? GetDriverAuthenticodeCert(string filePath)
+        {
+            try
+            {
+#pragma warning disable SYSLIB0057 // CreateFromSignedFile is obsolete but has no X509CertificateLoader equivalent for Authenticode
+                var cert = new X509Certificate2(
+                    X509Certificate.CreateFromSignedFile(filePath));
+#pragma warning restore SYSLIB0057
+                return cert;
+            }
+            catch { return null; }
+        }
+
+        /// <summary>
+        /// Checks if a certificate (by thumbprint or subject match) exists in the specified store.
+        /// Returns (found, thumbprint_of_match).
+        /// </summary>
+        private static (bool Found, string? Thumbprint) FindCertInStore(
+            StoreName storeName, StoreLocation location, string thumbprint, string subjectOrIssuer)
+        {
+            try
+            {
+                using var store = new X509Store(storeName, location);
+                store.Open(OpenFlags.ReadOnly);
+
+                // Direct thumbprint match
+                var found = store.Certificates.Find(X509FindType.FindByThumbprint, thumbprint, false);
+                if (found.Count > 0)
+                    return (true, thumbprint);
+
+                // Subject/issuer CN match (for root CA certs where the driver cert chains to a planted root)
+                var cn = ExtractCN(subjectOrIssuer);
+                if (!string.IsNullOrEmpty(cn))
+                {
+                    foreach (var cert in store.Certificates)
+                    {
+                        if (cert.Subject?.Contains(cn, StringComparison.OrdinalIgnoreCase) == true)
+                        {
+                            var matchThumb = cert.Thumbprint;
+                            return (true, matchThumb);
+                        }
+                    }
+                }
+
+                return (false, null);
+            }
+            catch { return (false, null); }
+        }
+
+        /// <summary>
+        /// Checks if a certificate subject/issuer belongs to a known public CA.
+        /// These are legitimate even on vulnerable drivers (legitimate vendors sign with real certs).
+        /// </summary>
+        private static bool IsKnownPublicCa(string distinguishedName)
+        {
+            if (string.IsNullOrEmpty(distinguishedName)) return false;
+
+            // Major public CAs and well-known vendors whose certs should not be revoked
+            string[] knownPublicCas =
+            {
+                "DigiCert", "GlobalSign", "VeriSign", "Entrust", "GeoTrust", "GoDaddy",
+                "Thawte", "Comodo", "Sectigo", "Starfield", "Let's Encrypt", "ISRG Root",
+                "IdenTrust", "Baltimore", "CyberTrust", "QuoVadis", "Trustwave",
+                "GTS Root", "SwissSign", "Certum", "AffirmTrust", "Amazon Root",
+                "Apple Root", "Microsoft Root", "Microsoft Corporation", "Microsoft Code",
+                "Microsoft Windows", "Symantec", "VeriSign", "WoSign", "Buypass",
+                "D-TRUST", "USERTrust", "AddTrust", "SECOM", "Network Solutions",
+                // Major driver/hardware vendors
+                "NVIDIA", "AMD", "Intel", "Realtek", "Broadcom", "Qualcomm",
+                "MSI", "ASUS", "Gigabyte", "ASRock", "Lenovo", "Dell", "HP",
+                "Samsung", "Logitech", "Razer", "Corsair", "EVGA", "Micro-Star",
+                "Western Digital", "Seagate", "Kingston", "SanDisk"
+            };
+
+            return knownPublicCas.Any(ca =>
+                distinguishedName.Contains(ca, StringComparison.OrdinalIgnoreCase));
+        }
+
+        /// <summary>
+        /// Extracts the CN value from a distinguished name string.
+        /// </summary>
+        private static string ExtractCN(string distinguishedName)
+        {
+            if (string.IsNullOrEmpty(distinguishedName)) return "";
+            var cnPrefix = "CN=";
+            var idx = distinguishedName.IndexOf(cnPrefix, StringComparison.OrdinalIgnoreCase);
+            if (idx < 0) return "";
+            var start = idx + cnPrefix.Length;
+            var end = distinguishedName.IndexOf(',', start);
+            return end < 0 ? distinguishedName[start..].Trim() : distinguishedName[start..end].Trim();
         }
 
         /// <summary>

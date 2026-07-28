@@ -1,6 +1,6 @@
 # Sentinel — Design Document
 
-**Version: 1.6.8**
+**Version: 1.7.0**
 
 ---
 
@@ -148,7 +148,7 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 | `PseudoSandbox` | Lightweight behavioral sandbox via restricted Job Objects | on-demand |
 | `AcousticThreatMonitor` | Detects harmful audio frequencies via WASAPI loopback + Goertzel algorithm | continuous |
 | `WfpIntegrityMonitor` | Scans WFP filters for BLOCK rules targeting Sentinel/EDR processes | 30s |
-| `DriverLoadMonitor` | Monitors for BYOVD attacks via Event 7045, registry, .sys file creation | 15s |
+| `DriverLoadMonitor` | Monitors for BYOVD attacks via Event 7045, registry, .sys file creation; cert-tracing revokes planted signing certs | 15s |
 
 #### Group 6: Peripheral (30s start delay, max 2 restarts)
 
@@ -256,7 +256,7 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 | `HardeningModule` | Native C# hardening: service disabling, registry security settings, LGPO policy, ACL enforcement. |
 | `UnifiedEtwSession` | Single real-time ETW session subscribing to 9 kernel/system providers via raw P/Invoke. |
 | `EtwEventDispatcher` | Routes raw ETW events by provider GUID to typed telemetry objects. |
-| `ConfigIntegrityMonitor` | Runtime detection of config/executable tampering (SHA-256 baseline, 5-min checks). |
+| `ConfigIntegrityMonitor` | Runtime detection of config/executable tampering (SHA-256 baseline, 5-min checks). Integrated into `AntiTamperGuard`. |
 | `ProxyAuthHelper` | HMAC-SHA256 signing for all proxy requests using installation entropy key. |
 
 ---
@@ -437,6 +437,35 @@ Full browser-based C2 detection expanding `ChromeRemoteDebuggingRule`:
 |---------|-----------------|-------------|
 | `NamedPipeMonitor` | `NamedPipeSignal` | BehavioralCorrelationEngine, ChainTracer |
 | `TokenTheftMonitor` | `TokenTheftSignal` | BehavioralCorrelationEngine, ChainTracer |
+
+---
+
+## v1.7.0 Additions
+
+### Enhanced Monitor: DriverLoadMonitor — BYOVD Certificate Tracing
+
+Full cert-revocation chain for BYOVD attacks. When a vulnerable/suspicious driver is detected, Sentinel now traces back to the signing certificate and revokes it if planted.
+
+| Capability | Description | Confidence | Response |
+|------------|-------------|-----------|----------|
+| Cert extraction | Authenticode cert extracted from detected .sys binary | — | — |
+| TrustedPublisher plant detection | Checks if signing cert is in TrustedPublisher store (not a known public CA) | 0.95 | RemoveCertAndKillAdder |
+| Root CA plant detection | Checks if cert issuer is a planted Root CA (fake Chromecast/IoT CA pattern) | 0.95 | RemoveCertAndKillAdder |
+| Cross-driver scan | After cert revocation, scans System32\drivers for other .sys files signed by same cert | 0.93 | Disable+Delete service |
+| CurrentUser store coverage | Also checks CurrentUser\TrustedPublisher and CurrentUser\Root | 0.95 | RemoveCertAndKillAdder |
+
+**Attack chain closed:**
+```
+1. Attacker plants fake cert in TrustedPublisher
+2. Attacker signs driver with that cert → Windows DSE validates
+3. Sentinel DriverLoadMonitor detects new kernel driver (Event 7045 / registry / .sys drop)
+4. Cert-trace: extracts Authenticode cert → finds it in TrustedPublisher → NOT a public CA
+5. Fires RemoveCertAndKillAdder → cert removed from store
+6. Scans System32\drivers → disables all services using that cert
+7. Driver cannot be reloaded (DSE will now reject it)
+```
+
+**Public CA protection:** Well-known vendor and CA certs (DigiCert, Microsoft, NVIDIA, Intel, Realtek, etc.) are never revoked — only non-public planted certs trigger revocation.
 
 ---
 
