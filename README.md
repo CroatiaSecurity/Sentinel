@@ -37,7 +37,7 @@ Sentinel is effective against:
 Sentinel is honest about its limits:
 
 - **Kernel implants already loaded and active** — Sentinel runs in userland. A kernel driver that is already executing can suppress any user-mode process. However, Sentinel detects the *entire attack chain leading up to driver load* (privilege escalation, driver file drop, service creation, cert planting) and can neutralize attacks before they reach kernel. See "BYOVD Defense" below.
-- **Nation-state zero-days** — Custom kernel implants, hardware backdoors, and zero-day exploits targeting unknown vulnerabilities are out of scope for any signature-less behavioral tool.
+- **Nation-state zero-days with novel kernel implants** — Custom kernel exploits targeting unknown vulnerabilities are difficult for any behavioral tool to catch at the moment of exploitation. However, Sentinel significantly reduces the attack surface that nation-state tools depend on: it disables WinRM, RDP, SMB, remote WMI, Remote Registry, SSH, and 50+ inbound ports via self-healing IPSec policy; disables discovery protocols (SSDP, UPnP, LLMNR, mDNS); enforces DEP AlwaysOn, SEHOP, and Spectre/Meltdown mitigations; strips AlwaysInstallElevated; and kills lateral movement services at the kernel level. Even APT tooling that relies on WMI lateral movement, WinRM, or SMB will find those services disabled and re-disabled every 30 seconds if re-enabled.
 - **Pre-boot attacks** — Sentinel starts after Windows. It detects boot config changes (BCD, EFI, boot drivers) after the fact via `BootIntegrityGuard`.
 
 ---
