@@ -289,6 +289,10 @@ namespace Sentinel.Agent
                     services.AddHostedService<ClickjackingGuard>();
                     services.AddHostedService<WebcamHijackMonitor>();
                     services.AddHostedService<ShellWatchdog>();
+                    // Ported from PowerShell Detection/ + Grok.ps1 (user-session UI monitors)
+                    services.AddHostedService<ScarewareWindowMonitor>();
+                    services.AddHostedService<CursorTakeoverMonitor>();
+                    services.AddHostedService<CookieIntegrityMonitor>();
                     services.AddSingleton<IsolationResponseEngine>();
                 });
     }

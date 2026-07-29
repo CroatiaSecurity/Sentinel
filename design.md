@@ -1,6 +1,6 @@
 # Sentinel — Design Document
 
-**Version: 1.7.2**
+**Version: 1.7.4**
 
 ---
 
@@ -476,8 +476,42 @@ Full cert-revocation chain for BYOVD attacks. When a vulnerable/suspicious drive
 
 ---
 
+## v1.7.4 Additions
+
+### ThreatIntelFeedBlocker (Service · NetworkIntegrity)
+
+| Item | Value |
+|------|--------|
+| Feeds | Spamhaus DROP, Feodo Tracker recommended, EmergingThreats block list |
+| Refresh | Startup (+45s delay) then every 4h |
+| Firewall | COM `HNetCfg.FwPolicy2` batch rules (100 IPs/rule, IN+OUT), max 5000 rules / 2000 IPs per feed |
+| Connection check | Every 30s against active established TCP remotes; Tier1 + `NetworkIsolate` on hit |
+| CIDR policy | Prefix /8–/32 only (rejects /0–/7) |
+
+### LnkShortcutMonitor (Service · CoreDetection)
+
+| Item | Value |
+|------|--------|
+| Mechanism | FileSystemWatcher `*.lnk` + full initial scan |
+| Paths | All `C:\Users\*\Desktop|Start Menu|Taskbar|Startup` + Common Desktop/Programs/Startup |
+| Resolution | COM `IShellLink` + binary UNC fallback |
+| Detections | UNC target, `search-ms:`/`ms-msdt:`/`http(s):`, LOLBin+remote args |
+| Response | Tier1 + Quarantine (delete fallback) |
+| Note | Sole LNK guard — poll-based `LnkUncGuard` heuristics folded in; not dual-registered |
+
+### Agent user-session ports (from PowerShell Detection/)
+
+| Monitor | Interval | Response |
+|---------|----------|----------|
+| `ScarewareWindowMonitor` | 10s | Tier1 + KillProcessTree (scareware ≥2 keywords / fake system title) |
+| `CursorTakeoverMonitor` | 3s sample | Tier2 LogOnly (low velocity variance + motion) |
+| `CookieIntegrityMonitor` | 5 min | Tier2 LogOnly (Chrome/Edge/Brave cookie DB hash change) |
+
+---
+
 ## Remaining Backlog
 
-- [ ] **Agent-side monitor documentation** — Agent monitors are functional but not covered in design.md audit tables.
+- [ ] **Agent-side monitor documentation** — Partial as of 1.7.4; expand inventory tables for all Agent monitors.
 - [ ] **BrowserCredentialTheftRule** — Detection rule designed but never implemented as a standalone rule class (detection covered by BrowserCredentialGuard monitor).
 - [ ] **Test coverage for v1.6.7+ monitors** — NamedPipeMonitor, RpcLateralMonitor, TokenTheftMonitor, CloudSyncExfilMonitor, EtwProviderTamperMonitor, BrowserC2Guard need unit tests.
+- [ ] **ThreatIntelFeedBlocker PID attribution** — `IPGlobalProperties` lacks PID; connection hits currently alert without owning process kill.

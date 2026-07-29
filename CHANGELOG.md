@@ -2,6 +2,54 @@
  
 All notable changes to Sentinel are documented in this file.
 
+## [1.7.4] - 2026-07-29
+
+### Added — Proactive Threat Intel, Real-Time LNK Guard, User-Session PS Ports
+
+Monitors ported from `D:\Gorstak\Powershell` (`IPBlock.ps1`, `LNKProtection.ps1`,
+`Detection/*`, unified `Grok.ps1` v3.0.0).
+
+#### Service (`NetworkIntegrity` group)
+- **`ThreatIntelFeedBlocker`** — proactive IP blocking from public threat intelligence
+  feeds. Pulls known-bad IPs from Spamhaus DROP, Feodo Tracker, and EmergingThreats
+  on startup and every 4 hours. Batches IPs into Windows Firewall block rules (100 IPs
+  per rule via COM `HNetCfg.FwPolicy2`). Also monitors active connections every 30s —
+  if a connection hits a feed-listed IP (firewall bypass or pre-rule connection),
+  emits Tier1 + `NetworkIsolate`. Max 5000 rules / 2000 IPs per feed to prevent
+  resource exhaustion.
+
+#### Service (`CoreDetection` group)
+- **`LnkShortcutMonitor`** — real-time FileSystemWatcher on Desktop, Start Menu,
+  Taskbar, and Startup folders for **all user profiles** (SYSTEM-safe enumeration under
+  `C:\Users\*`) plus common folders. Resolves targets via COM `IShellLink` with binary
+  UNC-scan fallback. Detects:
+  - UNC paths (`\\server\share`) — initial access broker delivery (CVE-2024-21412 / T1566.002)
+  - Suspicious protocol handlers (`search-ms:`, `ms-msdt:`, `http(s):`)
+  - Remote launchers — `powershell`/`cmd`/`mshta`/`wscript`/`rundll32` with UNC or URL in args
+
+  Emits Tier1 + Quarantine with automatic shortcut removal. Full initial scan on startup.
+  **Consolidates** the earlier poll-based `LnkUncGuard` heuristics (not dual-registered)
+  so only one LNK monitor runs.
+
+#### Agent (user-session UI) — from 1.7.3 merge
+- **`ScarewareWindowMonitor`** — ransomware/scareware + fake UAC/Defender window titles
+  (≥2 scareware keyword hits or fake system dialog). Tier1 + `KillProcessTree`.
+- **`CursorTakeoverMonitor`** — low velocity-variance continuous cursor motion
+  (bot/RDP-takeover style). Tier2 log-only; complements ClickjackingGuard.
+- **`CookieIntegrityMonitor`** — alert-only SHA-256 integrity on Chrome/Edge/Brave cookie
+  DBs (no Chrome kill / force-restore).
+
+### Tests
+- `PsPortedMonitorsTests` — LNK classification (UNC / protocol / remote launcher), cursor
+  takeover pattern math, scareware lifecycle, cookie monitor smoke.
+- `ThreatIntelAndLnkTests` — feed parse (Spamhaus / Feodo / ET), CIDR validation bounds,
+  LNK attack-vector tags.
+
+## [1.7.3] - 2026-07-29
+
+Internal merge of PowerShell Detection ports into C# (Agent monitors + LNK heuristics).
+Shipped as part of **1.7.4** — see above. No separate installer for 1.7.3.
+
 ## [1.7.2] - 2026-07-29
 
 ### Fixed — USB "Not Recognized" Tray Icon (Disabled Zombie Nodes)

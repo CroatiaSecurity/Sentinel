@@ -315,6 +315,7 @@ namespace Sentinel.Service
                             sp.GetRequiredService<RpcLateralMonitor>(),
                             sp.GetRequiredService<TokenTheftMonitor>(),
                             sp.GetRequiredService<CloudSyncExfilMonitor>(),
+                            sp.GetRequiredService<LnkShortcutMonitor>(),
                         };
                         return new MonitorGroup(
                             new MonitorGroupConfig
@@ -346,6 +347,7 @@ namespace Sentinel.Service
                     services.AddSingleton<RpcLateralMonitor>();
                     services.AddSingleton<TokenTheftMonitor>();
                     services.AddSingleton<CloudSyncExfilMonitor>();
+                    services.AddSingleton<LnkShortcutMonitor>();
 
                     // ── Group 3: Credential Protection ────────────────────────────────
                     // Starts after core detection (4s). Protects credentials and sessions.
@@ -401,6 +403,7 @@ namespace Sentinel.Service
                             sp.GetRequiredService<TrafficVolumeBaseline>(),
                             sp.GetRequiredService<OutboundConnectionWhitelist>(),
                             sp.GetRequiredService<RemoteAccessMonitor>(),
+                            sp.GetRequiredService<ThreatIntelFeedBlocker>(),
                         };
                         return new MonitorGroup(
                             new MonitorGroupConfig
@@ -427,6 +430,7 @@ namespace Sentinel.Service
                     services.AddSingleton<TrafficVolumeBaseline>();
                     services.AddSingleton<OutboundConnectionWhitelist>();
                     services.AddSingleton<RemoteAccessMonitor>();
+                    services.AddSingleton<ThreatIntelFeedBlocker>();
 
                     // ── Group 5: System Integrity ─────────────────────────────────────
                     // Starts delayed (10s). Monitors OS-level configuration drift.

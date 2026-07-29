@@ -2,7 +2,7 @@
 
 Real-time endpoint detection and response for Windows. Runs as a background service, monitors system behavior, and kills threats automatically when multiple signals correlate.
 
-**Current version: 1.7.2**
+**Current version: 1.7.4**
 
 ---
 
@@ -20,7 +20,9 @@ Sentinel is effective against:
 
 - **Physical access attacks** — BadUSB/Rubber Ducky devices (HID whitelist), post-idle hardware change detection, new Bluetooth devices, rogue USB drives.
 
-- **Network attacks** — ARP spoofing, DNS poisoning, rogue Wi-Fi, unauthorized Cast/screen-share devices, C2 beaconing (statistical), DNS tunneling/exfiltration, phantom network devices.
+- **Network attacks** — ARP spoofing, DNS poisoning, rogue Wi-Fi, unauthorized Cast/screen-share devices, C2 beaconing (statistical), DNS tunneling/exfiltration, phantom network devices, proactive block of Spamhaus/Feodo/EmergingThreats IPs (`ThreatIntelFeedBlocker`).
+
+- **Malicious shortcuts** — Real-time `.lnk` monitoring on Desktop/Start Menu/Taskbar/Startup (all user profiles). Quarantines UNC targets, `search-ms:`/`ms-msdt:` protocol abuse, and LOLBin+remote URL/UNC argument patterns (CVE-2024-21412 / T1566.002).
 
 - **Persistence mechanisms** — Scheduled tasks, WMI subscriptions, registry run keys, DLL sideloading, boot config tampering, PrintNightmare-class spooler exploitation (driver DLL planting + child process detection).
 
@@ -93,9 +95,10 @@ Full transparency in [THREAT_MODEL.md](THREAT_MODEL.md).
 
 ## Test Suite
 
-689 automated tests (xUnit), all passing in < 5 seconds:
+836 automated tests (xUnit), all passing:
 - End-to-end integration tests (full pipeline: telemetry → detection → scoring → correlation → response)
 - Unit tests for all critical engines (Response, Correlation, ChainTracer, FileReputation, AntiTamper, Detection)
+- Monitor unit tests including LNK classification, threat-intel feed parsing, USB failed-enumeration, PS-ported guards
 - Run with `dotnet test`
 
 ---
