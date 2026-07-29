@@ -584,6 +584,25 @@ namespace Sentinel.Core
                 //    This is the only remaining shell-out — LGPO.exe has no .NET equivalent.
                 // ═══════════════════════════════════════════════════════════════
                 ApplyLgpoSecurityPolicy();
+
+                // ═══════════════════════════════════════════════════════════════
+                // 5. DEFENDER ASR RULES (GEDR_ASR_Rules.ps1 → native registry)
+                //    Block mode via Policy hive. Self-healed by AsrPolicyGuard.
+                // ═══════════════════════════════════════════════════════════════
+                ApplyAsrRules();
+
+                // ═══════════════════════════════════════════════════════════════
+                // 6. CREDENTIAL HARDENING (Creds.ps1 residual)
+                //    LSASS PPL, disable domain-cred caching, shrink cached logons.
+                // ═══════════════════════════════════════════════════════════════
+                ApplyCredentialHardening();
+
+                // ═══════════════════════════════════════════════════════════════
+                // 7. BROWSER HARDENING (Browsers.ps1 residual, AV-safe)
+                //    Policy registry only — no Preferences JSON rewrites, no browser kills.
+                //    Disables Chrome Remote Desktop host + WebRTC local-IP leakage policies.
+                // ═══════════════════════════════════════════════════════════════
+                ApplyBrowserHardening();
             }
             catch { /* Non-fatal: hardening is best-effort */ }
         }
@@ -725,6 +744,7 @@ namespace Sentinel.Core
             // Disable QUIC protocol in browsers (can bypass network inspection)
             SetRegistryDword(@"Software\Policies\Google\Chrome", "QuicAllowed", 0);
             SetRegistryDword(@"Software\Policies\Microsoft\Edge", "QuicAllowed", 0);
+            SetRegistryDword(@"Software\Policies\BraveSoftware\Brave", "QuicAllowed", 0);
 
             // --- Firewall Enforcement ---
             // Ensure Windows Firewall is enabled on all profiles
@@ -894,6 +914,139 @@ namespace Sentinel.Core
                 return destPath;
             }
             catch { return null; }
+        }
+
+        #endregion
+
+        #region Hardening: Defender ASR Rules
+
+        /// <summary>
+        /// Microsoft Defender Attack Surface Reduction rules enforced in Block mode (value 1).
+        /// Written to the Policy hive so they survive Defender UI toggles and re-apply via AsrPolicyGuard.
+        /// Sourced from GEDR_ASR_Rules.ps1 + high-value workstation rules; avoids prevalence-based
+        /// "block unknown executables" which false-positives installers (including Sentinel's).
+        /// </summary>
+        internal static readonly (string Guid, string Name)[] AsrRules =
+        {
+            ("9e6c4e1f-7d60-472f-ba1a-a39ef669e4b2", "Block credential stealing from lsass"),
+            ("d4f940ab-401b-4efc-aadc-ad5f3c50688a", "Block Office apps from creating child processes"),
+            ("3b576869-a4ec-4529-8536-b80a7769e899", "Block Office apps from creating executable content"),
+            ("75668c1f-73b5-4cf0-bb93-3ecf5cb7cc84", "Block Office apps from injecting code into other processes"),
+            ("92e97fa1-2edf-4476-bdd6-9dd0b4dddc7b", "Block Win32 API calls from Office macros"),
+            ("be9ba2d9-53ea-4cdc-84e5-9b1eeee46550", "Block executable content from email client and webmail"),
+            ("d3e037e1-3eb8-44c8-a917-57927947596d", "Block JS/VBS from launching downloaded executables"),
+            ("5beb7efe-fd9a-4556-801d-275e5ffc04cc", "Block execution of potentially obfuscated scripts"),
+            ("b2b3f03d-6a65-4f7b-a9c7-1c7ef74a9ba4", "Block untrusted/unsigned processes from USB"),
+            ("d1e49aac-8f56-4280-b9ba-993a6d77406c", "Block process creations from PSExec and WMI"),
+            ("e6db77e5-3df2-4cf1-b95a-636979351e5b", "Block persistence through WMI event subscription"),
+            ("56a863a9-875e-4185-98a7-b882c64b5ce5", "Block abuse of exploited vulnerable signed drivers"),
+            ("c1db55ab-c21a-4637-bb3f-a12568109d35", "Use advanced protection against ransomware"),
+            ("26190899-1602-49e8-8b27-eb1d0a1ce869", "Block Office communication apps from creating child processes"),
+        };
+
+        private const string AsrPolicyRulesKey =
+            @"SOFTWARE\Policies\Microsoft\Windows Defender\Windows Defender Exploit Guard\ASR\Rules";
+
+        /// <summary>Apply all ASR rules in Block mode (1). Idempotent.</summary>
+        public static void ApplyAsrRules()
+        {
+            try
+            {
+                // Ensure policy tree exists
+                SetRegistryDword(
+                    @"SOFTWARE\Policies\Microsoft\Windows Defender\Windows Defender Exploit Guard\ASR",
+                    "ExploitGuard_ASR_Rules", 1);
+
+                using var key = Microsoft.Win32.Registry.LocalMachine.CreateSubKey(AsrPolicyRulesKey, writable: true);
+                if (key == null) return;
+
+                foreach (var (guid, _) in AsrRules)
+                {
+                    key.SetValue(guid, "1", Microsoft.Win32.RegistryValueKind.String);
+                }
+            }
+            catch { /* Non-fatal */ }
+        }
+
+        /// <summary>
+        /// Returns true when every required ASR rule is present and set to Block ("1").
+        /// Missing key or any non-block value = not intact.
+        /// </summary>
+        public static bool IsAsrPolicyIntact()
+        {
+            try
+            {
+                using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(AsrPolicyRulesKey, writable: false);
+                if (key == null) return false;
+
+                foreach (var (guid, _) in AsrRules)
+                {
+                    var val = key.GetValue(guid)?.ToString();
+                    if (val != "1") return false;
+                }
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        /// <summary>Re-apply ASR rules (called by AsrPolicyGuard on drift/tamper).</summary>
+        public static void ReapplyAsrRules() => ApplyAsrRules();
+
+        #endregion
+
+        #region Hardening: Credential residual (Creds.ps1)
+
+        /// <summary>
+        /// LSASS PPL + reduce credential caching. RunAsPPL requires reboot to fully activate.
+        /// </summary>
+        public static void ApplyCredentialHardening()
+        {
+            // RunAsPPL = 1 enables LSASS as a Protected Process Light (MITRE T1003.001 mitigation)
+            SetRegistryDword(@"SYSTEM\CurrentControlSet\Control\Lsa", "RunAsPPL", 1);
+            // Do not allow storage of passwords/credentials for network authentication
+            SetRegistryDword(@"SYSTEM\CurrentControlSet\Control\Lsa", "DisableDomainCreds", 1);
+            // Limit cached domain logons (workstations still need a few for offline logon)
+            SetRegistryDword(@"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon", "CachedLogonsCount", 2);
+            // WDigest cleartext passwords off (legacy)
+            SetRegistryDword(@"SYSTEM\CurrentControlSet\Control\SecurityProviders\WDigest", "UseLogonCredential", 0);
+        }
+
+        #endregion
+
+        #region Hardening: Browser residual (Browsers.ps1)
+
+        /// <summary>
+        /// Policy-only browser hardening. No Preferences JSON mutation (corrupts profiles),
+        /// no mass browser process kills (AV/heuristic + UX risk).
+        /// </summary>
+        public static void ApplyBrowserHardening()
+        {
+            // WebRTC: prevent local-IP leakage via enterprise policies
+            // Edge policy WebRtcLocalhostIpHandling = disable_non_proxied_udp
+            SetRegistryString(
+                @"SOFTWARE\Policies\Microsoft\Edge",
+                "WebRtcLocalhostIpHandling",
+                "disable_non_proxied_udp");
+            SetRegistryString(
+                @"SOFTWARE\Policies\Google\Chrome",
+                "WebRtcLocalhostIpHandling",
+                "disable_non_proxied_udp");
+            SetRegistryString(
+                @"SOFTWARE\Policies\BraveSoftware\Brave",
+                "WebRtcLocalhostIpHandling",
+                "disable_non_proxied_udp");
+
+            // Disable Chrome Remote Desktop relay / firewall traversal policies when CRD is installed
+            SetRegistryDword(@"SOFTWARE\Policies\Google\Chrome", "RemoteAccessHostFirewallTraversal", 0);
+            SetRegistryDword(@"SOFTWARE\Policies\Google\Chrome", "RemoteAccessHostAllowRelayedConnection", 0);
+            SetRegistryDword(@"SOFTWARE\Policies\Google\Chrome", "RemoteAccessHostAllowRemoteAccessConnections", 0);
+
+            // Stop and disable Chrome Remote Desktop host service if present
+            DisableServiceSafe("chrome-remote-desktop-host");
+            DisableServiceSafe("chromoting");
         }
 
         #endregion

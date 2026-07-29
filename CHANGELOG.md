@@ -2,6 +2,50 @@
  
 All notable changes to Sentinel are documented in this file.
 
+## [1.7.5] - 2026-07-29
+
+### Added — AV-Safe PowerShell Residuals + Documentation Parity
+
+Ports from `D:\Gorstak\Powershell` that stay clear of patterns AVs have flagged
+on the installer (no keyboard injection, no FocusLock, no Preferences JSON rewrite,
+no mass browser kills, no DenyExecute reputation ACLs).
+
+#### Hardening (`HardeningModule`)
+- **Defender ASR Block rules (14 GUIDs)** — Policy hive under
+  `Windows Defender Exploit Guard\ASR\Rules`. Covers LSASS credential theft, Office
+  child/inject/macro abuse, email executables, obfuscated scripts, USB untrusted
+  execution, PSExec/WMI process creation, WMI persistence, vulnerable signed drivers,
+  ransomware advanced protection. **Excludes** prevalence-based “block unknown
+  executables” (GUID `01443614-…`) which false-positives new installers.
+- **Credential residual** (`Creds.ps1`) — `RunAsPPL=1`, `DisableDomainCreds=1`,
+  `CachedLogonsCount=2`, WDigest `UseLogonCredential=0`.
+- **Browser residual** (`Browsers.ps1`) — WebRTC localhost IP handling policy for
+  Chrome/Edge/Brave; Chrome Remote Desktop host policies off; disable
+  `chrome-remote-desktop-host` / `chromoting` services. Policy registry only.
+
+#### Service monitors
+- **`AsrPolicyGuard`** (Critical group) — every 60s verifies all ASR Block rules;
+  re-applies on drift; Tier1 LogOnly anti-tamper on repair.
+- **`RemoteSessionGuard`** (CredentialProtection) — from `Credentials/ES.ps1`.
+  `WTSEnumerateSessions` + `WTSLogoffSession` every 5s. Force-logs-off non-console
+  remote sessions (RDP). Never touches session 0, console session, or listener stubs.
+
+#### Docs (1:1 with code)
+- `design.md` inventory: added missing `LnkShortcutMonitor`, `ThreatIntelFeedBlocker`,
+  Agent 1.7.4 ports, `AsrPolicyGuard`, `RemoteSessionGuard`; corrected tray balloon /
+  clipboard intervals; full v1.7.5 + install hardening sections.
+- `README.md`, `THREAT_MODEL.md`, `requirements.md`, `constraints.md`, `SECURITY.md`
+  version/support lines aligned to **1.7.5**.
+
+### Tests
+- `V175FeatureTests` — remote session classification matrix, ASR GUID set invariants,
+  hardening methods never throw.
+
+### Intentionally not ported
+- `KeyScrambler` (LL keyboard hook + keystroke injection — AV magnet)
+- `FocusLock` / `NetworkLock` (aggressive default-deny network — high FP)
+- `Unhooker`, `Stripper`, `Corrupt`, retaliate share-flood
+
 ## [1.7.4] - 2026-07-29
 
 ### Added — Proactive Threat Intel, Real-Time LNK Guard, User-Session PS Ports

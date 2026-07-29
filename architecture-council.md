@@ -1,9 +1,8 @@
-# Sentinel â€” Council of Elders Architecture
+# Sentinel — Council of Elders Architecture
 
-**Status:** Architecture spec. Extends, does not replace, `requirements.md`,
-`design.md`, `constraints.md` (all v1.2.0).
+**Status:** Historical architecture rationale. **Runtime inventory and versions are authoritative in `design.md` (v1.7.5).** This document explains the President/Council mental model; do not treat monitor tables here as the live registration list.
 
-**Last updated:** v1.2.0 (July 2026) — Comprehensive supervised task lifetimes and resource cleanup: resolved handle leaks and stopped tasks on service shutdown.
+**Last updated note:** v1.7.5 — Header aligned; live component inventory lives only in `design.md`.
 
 ---
 

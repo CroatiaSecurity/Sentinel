@@ -4,10 +4,10 @@
 
 | Version | Supported |
 |---------|-----------|
-| 1.6.x   | Yes (current: 1.6.8) |
+| 1.7.x   | Yes (current: 1.7.5) |
+| 1.6.x   | Security fixes only |
 | 1.5.x   | Security fixes only |
-| 1.4.x   | Security fixes only |
-| < 1.4   | No        |
+| < 1.5   | No        |
 
 ## Reporting a Vulnerability
 

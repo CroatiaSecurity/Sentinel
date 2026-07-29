@@ -2,7 +2,7 @@
 
 Real-time endpoint detection and response for Windows. Runs as a background service, monitors system behavior, and kills threats automatically when multiple signals correlate.
 
-**Current version: 1.7.4**
+**Current version: 1.7.5**
 
 ---
 
@@ -14,13 +14,13 @@ Sentinel is effective against:
 
 - **Living-off-the-land attacks (LOLBins)** — PowerShell abuse, WMI lateral movement, MSHTA/rundll32 proxy execution, scheduled task persistence, UAC bypasses. Sentinel watches what trusted binaries *do*, not just that they exist.
 
-- **Credential theft** — LSASS dumps (dbghelp.dll sideloading, direct syscall variants), browser credential store access (Chrome/Edge/Firefox), honeypot credential tripwires, Credential Guard disablement monitoring, token theft / impersonation (SYSTEM token from user process, SeImpersonatePrivilege abuse).
+- **Credential theft** — LSASS dumps (dbghelp.dll sideloading, direct syscall variants), browser credential store access (Chrome/Edge/Firefox), honeypot credential tripwires, Credential Guard disablement monitoring, token theft / impersonation (SYSTEM token from user process, SeImpersonatePrivilege abuse). Install-time LSASS PPL (`RunAsPPL`) + password rotation + UAC credential-only elevation.
 
 - **Browser-based C2** — Headless Chrome used as a proxy, Chrome DevTools Protocol session hijacking, malicious extensions with debugger/nativeMessaging/proxy permissions. Correlates with beaconing for high-confidence composite kills.
 
 - **Physical access attacks** — BadUSB/Rubber Ducky devices (HID whitelist), post-idle hardware change detection, new Bluetooth devices, rogue USB drives.
 
-- **Network attacks** — ARP spoofing, DNS poisoning, rogue Wi-Fi, unauthorized Cast/screen-share devices, C2 beaconing (statistical), DNS tunneling/exfiltration, phantom network devices, proactive block of Spamhaus/Feodo/EmergingThreats IPs (`ThreatIntelFeedBlocker`).
+- **Network attacks** — ARP spoofing, DNS poisoning, rogue Wi-Fi, unauthorized Cast/screen-share devices, C2 beaconing (statistical), DNS tunneling/exfiltration, phantom network devices, proactive block of Spamhaus/Feodo/EmergingThreats IPs (`ThreatIntelFeedBlocker`). Unauthorized RDP/remote sessions are force-logged-off (`RemoteSessionGuard`).
 
 - **Malicious shortcuts** — Real-time `.lnk` monitoring on Desktop/Start Menu/Taskbar/Startup (all user profiles). Quarantines UNC targets, `search-ms:`/`ms-msdt:` protocol abuse, and LOLBin+remote URL/UNC argument patterns (CVE-2024-21412 / T1566.002).
 
@@ -33,6 +33,8 @@ Sentinel is effective against:
 - **Advanced evasion** — Indirect syscalls / Hell's Gate pattern detection (scans process memory for syscall stubs in non-image regions), process injection via unbacked RWX memory detection, named pipe C2 enumeration with known-bad pattern matching.
 
 - **Hardware security downgrade** — Detects if someone disables TPM, Secure Boot, BitLocker, or Credential Guard.
+
+- **Attack surface reduction** — Self-healing Defender ASR Block rules (Office macro/child abuse, LSASS steal, USB untrusted exec, WMI persistence, vulnerable drivers, and more). Drift is re-applied by `AsrPolicyGuard`. Chrome Remote Desktop host and WebRTC local-IP leak policies are hardened at install.
 
 ## What it does NOT protect against
 
@@ -95,10 +97,10 @@ Full transparency in [THREAT_MODEL.md](THREAT_MODEL.md).
 
 ## Test Suite
 
-836 automated tests (xUnit), all passing:
+**848** automated tests (xUnit), all passing:
 - End-to-end integration tests (full pipeline: telemetry → detection → scoring → correlation → response)
 - Unit tests for all critical engines (Response, Correlation, ChainTracer, FileReputation, AntiTamper, Detection)
-- Monitor unit tests including LNK classification, threat-intel feed parsing, USB failed-enumeration, PS-ported guards
+- Monitor unit tests including LNK classification, threat-intel feed parsing, USB failed-enumeration, PS-ported guards, v1.7.5 ASR/session classification
 - Run with `dotnet test`
 
 ---

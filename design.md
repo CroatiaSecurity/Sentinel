@@ -1,6 +1,6 @@
 # Sentinel — Design Document
 
-**Version: 1.7.4**
+**Version: 1.7.5**
 
 ---
 
@@ -8,7 +8,7 @@
 
 - .NET 10, Windows only (`net10.0-windows`)
 - Self-contained single-file publish for distribution
-- Targets x64 and arm64
+- Targets win-x64 self-contained single-file (installer ships x64)
 
 ---
 
@@ -63,6 +63,7 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 |-----------|-----------|----------|
 | `AntiTamperGuard` | Service self-reinstall, anti-suspend timing, binary integrity, FIPS enforcement | 2s timing / 10s integrity |
 | `IPSecIntegrityGuard` | Verifies GSecurity IPSec policy is active; re-applies if deleted | 30s |
+| `AsrPolicyGuard` | Verifies Defender ASR Block rules (Policy hive); re-applies on drift/tamper | 60s |
 | `AgentWatchdog` | Polls for Agent process; relaunches via CreateProcessAsUser if absent | 10s |
 | `SyscallStubMonitor` | Compares ntdll/amsi function prologues against startup baseline; indirect syscall pattern detection | 30s |
 | `ConnectivityCanaryMonitor` | Verifies Sentinel can reach threat intel endpoints; detects EDRSilencer | 45s |
@@ -94,6 +95,7 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 | `RpcLateralMonitor` | Detects outbound lateral movement via RPC/DCOM/WMI/WinRM (ports 135/445/5985/5986) | 10s |
 | `TokenTheftMonitor` | Detects non-service SYSTEM tokens and SeImpersonatePrivilege from user-writable paths | 20s |
 | `CloudSyncExfilMonitor` | Monitors cloud sync directories for burst file staging; detects rclone/megasync | 15s |
+| `LnkShortcutMonitor` | Real-time FileSystemWatcher on Desktop/Start Menu/Taskbar/Startup (all profiles); UNC/protocol/LOLBin remote launch | FSW + startup scan |
 
 #### Group 3: CredentialProtection (4s start delay, max 3 restarts)
 
@@ -105,7 +107,8 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 | `MicrosoftAccountGuardMonitor` | TokenBroker cache, PRT extraction, Azure AD token theft tool detection | 30s |
 | `NullSessionGuard` | Enforces LimitBlankPasswordUse, RestrictAnonymous, EveryoneIncludesAnonymous | 60s |
 | `BuiltinAdminGuard` | Monitors built-in Administrator account (RID 500); disables if found active | 15s |
-| `PasswordRotationGuard` | Auto-logon password rotation via LsaStorePrivateData | periodic |
+| `PasswordRotationGuard` | Rotates local account passwords every 10 min; UAC=5; auto-logon via LSA secret | 10 min |
+| `RemoteSessionGuard` | WTSEnumerateSessions; force-logoff non-console remote sessions (RDP etc.); never session 0 / console | 5s |
 
 #### Group 4: NetworkIntegrity (6s start delay, max 3 restarts)
 
@@ -115,7 +118,7 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 | `DnsResponseValidationMonitor` | Resolves canary domains; validates against expected CIDR ranges | 1min |
 | `PublicIpMonitor` | Checks public IP via Cloudflare/ipify/icanhazip; detects geo/ASN shift | 5min |
 | `WifiSecurityMonitor` | Polls Wi-Fi state via netsh; detects deauth flood, open network, encryption downgrade | 15s |
-| `NetworkInterfaceGuard` | Removes bridges via SetupAPI, restores disabled adapters, locks DNS, enforces DoH | 15s |
+| `NetworkInterfaceGuard` | Removes bridges via SetupAPI, restores disabled adapters, locks DNS | 15s |
 | `AppDnsExfilMonitor` | Detects non-browser processes connecting to known DoH resolvers on port 443 | 500ms |
 | `NetworkShareMonitor` | Monitors SMB shares, admin share access (C$/ADMIN$/IPC$), inbound sessions | 15s |
 | `NetworkReinfectionDetector` | Monitors NIC state changes; flags new suspicious processes after network reconnection | on NIC event |
@@ -123,7 +126,8 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 | `DnsCrossValidator` | Resolves test domain via system + direct Cloudflare; detects router DNS poisoning | periodic |
 | `TrafficVolumeBaseline` | Monitors raw NetworkInterface BytesSent; alerts on 3x baseline upload volume | 30s |
 | `OutboundConnectionWhitelist` | Monitors/enforces outbound connections against allowed IP subnets | periodic |
-| `RemoteAccessMonitor` | Scans for 35+ remote access tools; detects RDP state changes | 60s |
+| `RemoteAccessMonitor` | Scans for 35+ remote access tools; Tier2 presence / Tier1 tunnels from staging paths | 60s |
+| `ThreatIntelFeedBlocker` | Spamhaus DROP + Feodo + EmergingThreats IP blocklists → firewall rules; active-conn check | 4h refresh / 30s conn |
 
 #### Group 5: SystemIntegrity (10s start delay, max 3 restarts)
 
@@ -191,18 +195,21 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 
 | Component | Mechanism | Notes |
 |-----------|-----------|-------|
-| `TrayIconService` | System tray NotifyIcon; context menu (console, quarantine, log); balloon notifications | WinForms STA |
-| `ClipboardSanitizer` | Strips zero-width chars, RTL overrides, Cyrillic homoglyphs, Unicode tags every 2s | STA thread |
+| `TrayIconService` | System tray NotifyIcon; context menu (console, quarantine, log). **No** `ShowBalloonTip` (WpnService removed by hardening deadlocks STA) | WinForms STA |
+| `ClipboardSanitizer` | Strips zero-width chars, RTL overrides, Cyrillic homoglyphs, Unicode tags; ClickFix paste-run clear | 10s poll |
 | `ScreenCaptureMonitor` | Detects DXGI desktop duplication + transparent overlay phishing windows | 15–25s |
 | `WebcamMicMonitor` | Detects background camera/mic access via DLL analysis (Media Foundation, WASAPI) | 20s |
 | `AudioHijackMonitor` | Module-based detection of output-to-mic redirection (virtual audio cables) | periodic |
 | `MicSessionMonitor` | Standalone microphone session monitoring (defense-in-depth with WebcamMicMonitor) | periodic |
-| `NeuroBehaviorVisualMonitor` | Detects transparent overlay phishing windows; anomaly scoring (focus/cursor) | periodic |
+| `NeuroBehaviorVisualMonitor` | Focus steals, cursor jumps, brightness oscillations, large transparent topmost overlays | 1s sample |
 | `BrowserExtensionMonitor` | Baselines extensions; detects new extensions with dangerous permissions | 30s |
 | `PhantomKeystrokeGuard` | WH_KEYBOARD_LL hook; blocks software-injected keystrokes | continuous |
-| `ClickjackingGuard` | Mouse hook; detects injected clicks, cursor teleport, fake UAC/credential prompts | continuous |
+| `ClickjackingGuard` | Mouse hook; detects injected clicks, cursor teleport, fake UAC/credential prompts, clipboard crypto swap | continuous |
 | `WebcamHijackMonitor` | Monitors ConsentStore for webcam/microphone access by new apps | periodic |
 | `ShellWatchdog` | Monitors explorer.exe responsiveness via SendMessageTimeout; auto-restarts shell | 5s |
+| `ScarewareWindowMonitor` | Window-title scareware / fake UAC / fake Defender dialogs (≥2 keywords) | 10s |
+| `CursorTakeoverMonitor` | Low velocity-variance continuous cursor motion (bot/RDP-takeover style) | 3s sample |
+| `CookieIntegrityMonitor` | SHA-256 integrity on Chrome/Edge/Brave cookie DBs (alert-only; no force-restore) | 5 min |
 
 ### Engines
 
@@ -509,9 +516,59 @@ Full cert-revocation chain for BYOVD attacks. When a vulnerable/suspicious drive
 
 ---
 
+## v1.7.5 Additions
+
+AV-safe PowerShell residual ports. **Not** included (high AV heuristic risk): KeyScrambler keyboard injection, FocusLock network lockdown, Preferences JSON mutation, mass browser kills.
+
+### HardeningModule (install / ApplyOrFail)
+
+| Capability | Source | Mechanism |
+|------------|--------|-----------|
+| Defender ASR Block rules (14 GUIDs) | `GEDR_ASR_Rules.ps1` + expanded set | Policy hive `...\ASR\Rules` value `"1"`; excludes prevalence-based unknown-exe rule (installer FP) |
+| Credential residual | `Creds.ps1` | `RunAsPPL=1`, `DisableDomainCreds=1`, `CachedLogonsCount=2`, WDigest off |
+| Browser residual | `Browsers.ps1` | WebRTC localhost IP handling policy (Chrome/Edge/Brave); CRD remote-access host policies off; disable `chrome-remote-desktop-host` / `chromoting` |
+
+### AsrPolicyGuard (Service · Critical)
+
+| Item | Value |
+|------|--------|
+| Interval | 60s (20s initial delay) |
+| Check | `HardeningModule.IsAsrPolicyIntact()` — every required GUID present and Block |
+| Response | Re-apply + Tier1 LogOnly Anti-Tamper detection on drift |
+
+### RemoteSessionGuard (Service · CredentialProtection)
+
+| Item | Value |
+|------|--------|
+| Source | `Credentials/ES.ps1` |
+| Mechanism | `WTSEnumerateSessions` + `WTSLogoffSession` (no qwinsta/rwinsta shell) |
+| Interval | 5s |
+| Terminate | Non-console Active/Connected/Disconnected remote sessions |
+| Never | Session 0, active console session id, WTSListen/Init/Down/Reset stubs |
+| Response | Force logoff + Tier1 LogOnly (0.92) |
+
+---
+
+## Hardening at install (HardeningModule.ApplyOrFail)
+
+Applied once at service start (best-effort, non-fatal failures):
+
+1. DLL search path restriction (`SetDllDirectory` / `SetDefaultDllDirectories`)
+2. IPSec GSecurity policy (50+ dangerous ports) + Safe Mode registration + RPC ephemeral block
+3. Remote access service disablement (TermService, WinRM, RemoteRegistry, sshd, discovery, third-party RATs)
+4. Registry security (LSA, TLS 1.3, SEHOP, Spectre/Meltdown, AlwaysInstallElevated, firewall profiles, QUIC off)
+5. DEP AlwaysOn (`bcdedit /set nx AlwaysOn`)
+6. LGPO import of embedded `GSecurity.inf` (only remaining intentional shell-out for policy template)
+7. **v1.7.5:** ASR Block rules, credential hardening residual, browser/CRD policy hardening
+
+Self-heal loops: `IPSecIntegrityGuard` (30s), `AsrPolicyGuard` (60s), plus various integrity monitors.
+
+---
+
 ## Remaining Backlog
 
-- [ ] **Agent-side monitor documentation** — Partial as of 1.7.4; expand inventory tables for all Agent monitors.
+- [x] **Agent-side monitor documentation** — Inventory complete as of 1.7.5 (includes 1.7.4 PS ports).
 - [ ] **BrowserCredentialTheftRule** — Detection rule designed but never implemented as a standalone rule class (detection covered by BrowserCredentialGuard monitor).
-- [ ] **Test coverage for v1.6.7+ monitors** — NamedPipeMonitor, RpcLateralMonitor, TokenTheftMonitor, CloudSyncExfilMonitor, EtwProviderTamperMonitor, BrowserC2Guard need unit tests.
+- [ ] **Test coverage for v1.6.7+ monitors** — NamedPipeMonitor, RpcLateralMonitor, TokenTheftMonitor, CloudSyncExfilMonitor, EtwProviderTamperMonitor, BrowserC2Guard need more unit tests.
 - [ ] **ThreatIntelFeedBlocker PID attribution** — `IPGlobalProperties` lacks PID; connection hits currently alert without owning process kill.
+- [ ] **KeyScrambler / FocusLock** — Intentionally not ported (AV heuristics / high operational cost).

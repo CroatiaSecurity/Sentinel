@@ -258,6 +258,7 @@ namespace Sentinel.Service
                         {
                             sp.GetRequiredService<AntiTamperGuard>(),
                             sp.GetRequiredService<IPSecIntegrityGuard>(),
+                            sp.GetRequiredService<AsrPolicyGuard>(),
                             sp.GetRequiredService<AgentWatchdog>(),
                             sp.GetRequiredService<SyscallStubMonitor>(),
                             sp.GetRequiredService<ConnectivityCanaryMonitor>(),
@@ -279,6 +280,7 @@ namespace Sentinel.Service
                     });
                     services.AddSingleton<AntiTamperGuard>();
                     services.AddSingleton<IPSecIntegrityGuard>();
+                    services.AddSingleton<AsrPolicyGuard>();
                     services.AddSingleton<AgentWatchdog>();
                     services.AddSingleton<SyscallStubMonitor>();
                     services.AddSingleton<ConnectivityCanaryMonitor>();
@@ -362,6 +364,7 @@ namespace Sentinel.Service
                             sp.GetRequiredService<NullSessionGuard>(),
                             sp.GetRequiredService<BuiltinAdminGuard>(),
                             sp.GetRequiredService<PasswordRotationGuard>(),
+                            sp.GetRequiredService<RemoteSessionGuard>(),
                         };
                         return new MonitorGroup(
                             new MonitorGroupConfig
@@ -383,6 +386,7 @@ namespace Sentinel.Service
                     services.AddSingleton<NullSessionGuard>();
                     services.AddSingleton<BuiltinAdminGuard>();
                     services.AddSingleton<PasswordRotationGuard>();
+                    services.AddSingleton<RemoteSessionGuard>();
 
                     // ── Group 4: Network Integrity ────────────────────────────────────
                     // Starts after credential group (6s). Monitors network-layer attacks.

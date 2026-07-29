@@ -408,4 +408,82 @@ namespace Sentinel.Core
             }
         }
     }
+
+    /// <summary>
+    /// Self-heals Microsoft Defender ASR policy rules (Block mode) every 60s.
+    /// Ported from GEDR_ASR_Rules.ps1 install-once behavior into continuous integrity.
+    /// </summary>
+    public sealed class AsrPolicyGuard : BackgroundService
+    {
+        private readonly DetectionEngine _detectionEngine;
+        private readonly ILogger<AsrPolicyGuard> _logger;
+        private int _consecutiveFailures;
+
+        public AsrPolicyGuard(DetectionEngine de, ILogger<AsrPolicyGuard> l)
+        {
+            _detectionEngine = de;
+            _logger = l;
+        }
+
+        protected override async Task ExecuteAsync(CancellationToken ct)
+        {
+            _logger.LogInformation("[AsrPolicyGuard] Started — verifying Defender ASR Block rules every 60s");
+
+            // Allow HardeningModule to apply first
+            try { await Task.Delay(20000, ct); } catch (OperationCanceledException) { return; }
+
+            while (!ct.IsCancellationRequested)
+            {
+                try
+                {
+                    if (!HardeningModule.IsAsrPolicyIntact())
+                    {
+                        _consecutiveFailures++;
+                        _logger.LogWarning(
+                            "[AsrPolicyGuard] ASR policy incomplete or demoted — re-applying (failure #{Count})",
+                            _consecutiveFailures);
+
+                        HardeningModule.ReapplyAsrRules();
+                        await Task.Delay(1500, ct);
+                        bool ok = HardeningModule.IsAsrPolicyIntact();
+
+                        await _detectionEngine.EmitAsync(new DetectionEvent
+                        {
+                            RuleName = "Anti-Tamper: ASR Policy Drift Re-Applied",
+                            Evidence = $"One or more Defender ASR Block rules were missing or not set to Block. " +
+                                       $"Re-application {(ok ? "SUCCEEDED" : "FAILED")}. " +
+                                       $"Consecutive failures: {_consecutiveFailures}",
+                            Reasoning = "Attack Surface Reduction rules block Office child processes, " +
+                                        "LSASS credential theft, USB execution, WMI persistence, and related " +
+                                        "attack surfaces. An attacker or misconfiguration demoted these rules; " +
+                                        "Sentinel restored them.",
+                            Confidence = 0.90,
+                            Tier = DetectionTier.Tier1Behavioral,
+                            AuthorizedResponse = ResponseAction.LogOnly,
+                            ProcessName = "SYSTEM",
+                            ProcessId = 0,
+                            SignalType = SignalType.AntiTamper,
+                            Metadata = new Dictionary<string, string>
+                            {
+                                ["Reapplied"] = ok.ToString(),
+                                ["ConsecutiveFailures"] = _consecutiveFailures.ToString(),
+                                ["RuleCount"] = HardeningModule.AsrRules.Length.ToString()
+                            }
+                        });
+
+                        if (ok) _consecutiveFailures = 0;
+                    }
+                    else
+                    {
+                        _consecutiveFailures = 0;
+                    }
+                }
+                catch (OperationCanceledException) { break; }
+                catch (Exception ex) { _logger.LogDebug(ex, "[AsrPolicyGuard] Error"); }
+
+                try { await Task.Delay(60000, ct); }
+                catch (OperationCanceledException) { break; }
+            }
+        }
+    }
 }

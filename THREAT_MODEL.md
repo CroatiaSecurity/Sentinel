@@ -1,6 +1,6 @@
 # Sentinel — Threat Model
 
-**Version: 1.7.0**
+**Version: 1.7.5**
 
 This document assumes the attacker has read the source code.
 
@@ -42,9 +42,9 @@ This document assumes the attacker has read the source code.
 
 ---
 
-## Monitor Coverage Summary (v1.7.0)
+## Monitor Coverage Summary (v1.7.5)
 
-See design.md for the full 80+ monitor inventory. Key additions since v1.4.5:
+See [design.md](design.md) for the full component inventory (all MonitorGroups + Agent). Key additions since v1.4.5:
 
 - **DriverLoadMonitor** (v1.5.0) — BYOVD detection + cert-tracing (v1.7.0)
 - **BrowserC2Guard** (v1.6.8) — Headless Chrome proxy, CDP hijacking, extension integrity
@@ -57,12 +57,17 @@ See design.md for the full 80+ monitor inventory. Key additions since v1.4.5:
 - **ConnectivityCanaryMonitor** — EDRSilencer detection
 - **EtwSessionGuard** (v1.6.1) — Self-healing ETW session
 - **EtwProviderTamperMonitor** — EtwEventWrite patch detection
+- **ThreatIntelFeedBlocker** (v1.7.4) — Spamhaus/Feodo/ET IP blocklists
+- **LnkShortcutMonitor** (v1.7.4) — Real-time malicious shortcut guard
+- **AsrPolicyGuard** (v1.7.5) — Self-healing Defender ASR Block rules
+- **RemoteSessionGuard** (v1.7.5) — Force-logoff unauthorized RDP/remote sessions
 
 ### Group 1: Critical (Self-Protection)
 | Monitor | Purpose |
 |---------|---------|
 | SyscallStubMonitor | Detects ntdll unhooking/tampering |
 | IPSecIntegrityGuard | Detects IPSec policy tampering |
+| AsrPolicyGuard | Detects/re-applies demoted ASR Block rules |
 
 ### Group 2: Core Detection
 | Monitor | Purpose |
@@ -453,6 +458,8 @@ Hard-to-bypass detections (require kernel access to evade):
 
 See CHANGELOG.md for full history. Key fixes:
 
+- **v1.7.5:** ASR Block self-heal (`AsrPolicyGuard`), remote session force-logoff (`RemoteSessionGuard`), install-time credential/browser residual hardening. Documentation inventory parity with runtime registration.
+- **v1.7.4:** ThreatIntelFeedBlocker (Spamhaus/Feodo/ET), real-time `LnkShortcutMonitor`, Agent scareware/cursor/cookie ports.
 - **v1.7.0:** BYOVD cert-tracing: `DriverLoadMonitor` now extracts Authenticode cert from detected drivers, checks TrustedPublisher/Root stores, revokes planted non-public certs via `RemoveCertAndKillAdder`, scans System32\drivers for other drivers signed by same identity. Closes the fake-Chromecast-CA / planted-cert BYOVD attack chain.
 - **v1.6.9:** IDE false-positive kill prevention: V8 JIT code matching syscall-stub patterns no longer kills Electron IDEs; ChainTracer preserves IDE host ancestors; AdvancedResponseEngine IDE host protection demotes to LogOnly for non-President's-Law rules.
 - **v1.6.8:** BrowserC2Guard (headless Chrome proxy + CDP hijack + extension integrity), EtwThreatIntelMonitor RWX detection, SyscallStubMonitor Hell's Gate patterns, PrintSpoolerMonitor PrintNightmare exploitation, WslMonitor container-to-host lateral movement, Named Pipe + Beaconing and Token + Lateral composite detections.
