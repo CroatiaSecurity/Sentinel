@@ -4,6 +4,14 @@ All notable changes to Sentinel are documented in this file.
 
 ## [1.7.1] - 2026-07-29
 
+### Fixed — Installer Self-Kill
+
+- **TokenTheftMonitor exempts installer extractors** — Inno Setup's elevated temp process (`SentinelSetup-*.tmp`) runs from `AppData\Local\Temp\is-XXXXX\` with `SeImpersonatePrivilege` (normal UAC elevation). `TokenTheftMonitor` was flagging this as a potato-class privilege escalation tool and killing the installer before it could stop the service. Added `InstallerHeuristics.IsInstallerExtractor` + `LooksLikeInstallerName` check before the suspicious-path detection fires.
+
+### Fixed — USB "Not Recognized" Notification Icon Persisting
+
+- **Handle CM_PROB_HELD_FOR_EJECT zombie state** — `CM_Request_Device_Eject` returns `CR_SUCCESS` but the device can remain with problem code 47 (`HELD_FOR_EJECT`) because the parent USB hub port is still powered. The notification icon stays visible indefinitely. Fix: after eject, re-check device status via `CM_Get_DevNode_Status`; if `HELD_FOR_EJECT`, disable the parent hub port and device node via `CM_Disable_DevNode` to force full removal.
+
 ### Fixed — design.md Full Accuracy Audit
 
 Comprehensive cross-validation of design.md against actual codebase (triggered by independent AI audits). Every monitor interval, mechanism description, rate limit, and component inventory entry was verified against source code and corrected where stale.
