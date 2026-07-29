@@ -2,7 +2,7 @@
 
 Real-time endpoint detection and response for Windows. Runs as a background service, monitors system behavior, and kills threats automatically when multiple signals correlate.
 
-**Current version: 1.7.5**
+**Current version: 1.7.6**
 
 ---
 
@@ -100,7 +100,7 @@ Full transparency in [THREAT_MODEL.md](THREAT_MODEL.md).
 **848** automated tests (xUnit), all passing:
 - End-to-end integration tests (full pipeline: telemetry → detection → scoring → correlation → response)
 - Unit tests for all critical engines (Response, Correlation, ChainTracer, FileReputation, AntiTamper, Detection)
-- Monitor unit tests including LNK classification, threat-intel feed parsing, USB failed-enumeration, PS-ported guards, v1.7.5 ASR/session classification
+- Monitor unit tests including LNK classification, threat-intel feed parsing, USB failed-enumeration, PS-ported guards, v1.7.5 ASR/session classification, v1.7.6 forum.hr watch
 - Run with `dotnet test`
 
 ---

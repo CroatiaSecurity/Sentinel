@@ -24,9 +24,11 @@ namespace Sentinel.Core
     ///    - System shutdown/restart initiation (crash-to-reboot defense)
     ///    - Rapid connection cycling to alternate endpoints (failover C2)
     /// 
-    /// Attack model: Rootkit/implant maintains a persistent WebSocket or long-poll to a C2 relay
-    /// (e.g., forum.hr). When the connection is severed (hosts block, firewall rule), the implant
-    /// panics and executes a defensive routine to survive the disruption.
+    /// Attack model: Rootkit/implant maintains a persistent WebSocket or long-poll to a C2 relay.
+    /// When the connection is severed (hosts block, firewall rule), the implant panics and
+    /// executes a defensive routine to survive the disruption.
+    /// Note: forum.hr-specific abuse is handled by ForumHrWatchMonitor (v1.7.6+); this monitor
+    /// remains the general post-drop behavioral correlator for any long-lived endpoint.
     /// </summary>
     public sealed class PersistentConnectionMonitor : BackgroundService
     {

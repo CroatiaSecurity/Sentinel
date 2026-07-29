@@ -1,6 +1,6 @@
 # Sentinel — Threat Model
 
-**Version: 1.7.5**
+**Version: 1.7.6**
 
 This document assumes the attacker has read the source code.
 
@@ -42,7 +42,7 @@ This document assumes the attacker has read the source code.
 
 ---
 
-## Monitor Coverage Summary (v1.7.5)
+## Monitor Coverage Summary (v1.7.6)
 
 See [design.md](design.md) for the full component inventory (all MonitorGroups + Agent). Key additions since v1.4.5:
 
@@ -61,6 +61,7 @@ See [design.md](design.md) for the full component inventory (all MonitorGroups +
 - **LnkShortcutMonitor** (v1.7.4) — Real-time malicious shortcut guard
 - **AsrPolicyGuard** (v1.7.5) — Self-healing Defender ASR Block rules
 - **RemoteSessionGuard** (v1.7.5) — Force-logoff unauthorized RDP/remote sessions
+- **ForumHrWatchMonitor** (v1.7.6) — Dedicated forum.hr abuse watch (site no longer hosts-blocked)
 
 ### Group 1: Critical (Self-Protection)
 | Monitor | Purpose |
@@ -458,6 +459,7 @@ Hard-to-bypass detections (require kernel access to evade):
 
 See CHANGELOG.md for full history. Key fixes:
 
+- **v1.7.6:** Removed opinionated forum.hr hosts block; added `ForumHrWatchMonitor` for non-browser C2/relay abuse of that site alone.
 - **v1.7.5:** ASR Block self-heal (`AsrPolicyGuard`), remote session force-logoff (`RemoteSessionGuard`), install-time credential/browser residual hardening. Documentation inventory parity with runtime registration.
 - **v1.7.4:** ThreatIntelFeedBlocker (Spamhaus/Feodo/ET), real-time `LnkShortcutMonitor`, Agent scareware/cursor/cookie ports.
 - **v1.7.0:** BYOVD cert-tracing: `DriverLoadMonitor` now extracts Authenticode cert from detected drivers, checks TrustedPublisher/Root stores, revokes planted non-public certs via `RemoveCertAndKillAdder`, scans System32\drivers for other drivers signed by same identity. Closes the fake-Chromecast-CA / planted-cert BYOVD attack chain.

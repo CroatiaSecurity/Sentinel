@@ -11,60 +11,54 @@ namespace Sentinel.Tests
 {
     public class HostsFileGuardTests
     {
-        [Fact]
-        public void TrustedHostsContent_ContainsForumHrBare()
+        private static string? FindCoreSourceFile(string fileName)
         {
-            // Access the embedded hosts content via the guard's behavior:
-            // We verify by checking the source string contains expected entries.
-            // Since TrustedHostsContent is private, we test indirectly through the SHA hash.
-            // Instead, verify the source file contains the expected entries.
-            // This is a compile-time guarantee test — if the entries are removed, it fails.
-            var sourceFile = Path.Combine(
-                AppContext.BaseDirectory, "..", "..", "..", "..", "..",
-                "src", "Sentinel.Core", "BackgroundMonitors.cs");
-
-            // Skip if source not available (CI without source tree)
-            if (!File.Exists(sourceFile)) return;
-
-            var content = File.ReadAllText(sourceFile);
-            Assert.Contains("0.0.0.0 forum.hr", content);
-        }
-
-        [Fact]
-        public void TrustedHostsContent_ContainsWwwForumHr()
-        {
-            var sourceFile = Path.Combine(
-                AppContext.BaseDirectory, "..", "..", "..", "..", "..",
-                "src", "Sentinel.Core", "BackgroundMonitors.cs");
-
-            if (!File.Exists(sourceFile)) return;
-
-            var content = File.ReadAllText(sourceFile);
-            Assert.Contains("0.0.0.0 www.forum.hr", content);
-        }
-
-        [Fact]
-        public void TrustedHostsContent_ContainsAllForumHrSubdomains()
-        {
-            var sourceFile = Path.Combine(
-                AppContext.BaseDirectory, "..", "..", "..", "..", "..",
-                "src", "Sentinel.Core", "BackgroundMonitors.cs");
-
-            if (!File.Exists(sourceFile)) return;
-
-            var content = File.ReadAllText(sourceFile);
-
-            var expectedSubdomains = new[]
+            // tests/Sentinel.Tests/bin/{Config}/net*/ → five levels up to repo root
+            var candidates = new[]
             {
-                "forum.hr", "www.forum.hr", "m.forum.hr", "cdn.forum.hr",
-                "static.forum.hr", "api.forum.hr", "img.forum.hr",
-                "mail.forum.hr", "ads.forum.hr", "tracker.forum.hr"
+                Path.GetFullPath(Path.Combine(
+                    AppContext.BaseDirectory, "..", "..", "..", "..", "..",
+                    "src", "Sentinel.Core", "Monitors", fileName)),
+                Path.GetFullPath(Path.Combine(
+                    AppContext.BaseDirectory, "..", "..", "..", "..", "..",
+                    "src", "Sentinel.Core", fileName)),
             };
+            foreach (var c in candidates)
+                if (File.Exists(c)) return c;
+            return null;
+        }
 
-            foreach (var domain in expectedSubdomains)
-            {
-                Assert.Contains($"0.0.0.0 {domain}", content);
-            }
+        [Fact]
+        public void TrustedHostsContent_DoesNotBlockForumHr()
+        {
+            // v1.7.6: forum.hr hosts block removed as opinionated — ForumHrWatchMonitor watches instead.
+            var sourceFile = FindCoreSourceFile("SystemIntegrityMonitors.cs");
+            if (sourceFile == null) return; // CI without source tree
+
+            var content = File.ReadAllText(sourceFile);
+
+            // Must not contain active hosts block lines for forum.hr
+            Assert.DoesNotContain("0.0.0.0 forum.hr", content);
+            Assert.DoesNotContain("0.0.0.0 www.forum.hr", content);
+            Assert.DoesNotContain("0.0.0.0 m.forum.hr", content);
+            Assert.DoesNotContain("0.0.0.0 cdn.forum.hr", content);
+            Assert.DoesNotContain("0.0.0.0 static.forum.hr", content);
+            Assert.DoesNotContain("0.0.0.0 api.forum.hr", content);
+            Assert.DoesNotContain("0.0.0.0 img.forum.hr", content);
+            Assert.DoesNotContain("0.0.0.0 mail.forum.hr", content);
+            Assert.DoesNotContain("0.0.0.0 ads.forum.hr", content);
+            Assert.DoesNotContain("0.0.0.0 tracker.forum.hr", content);
+        }
+
+        [Fact]
+        public void TrustedHostsContent_StillBlocksAdTrackers()
+        {
+            var sourceFile = FindCoreSourceFile("SystemIntegrityMonitors.cs");
+            if (sourceFile == null) return;
+
+            var content = File.ReadAllText(sourceFile);
+            Assert.Contains("0.0.0.0 doubleclick.net", content);
+            Assert.Contains("0.0.0.0 google-analytics.com", content);
         }
 
         [Fact]

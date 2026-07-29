@@ -1,6 +1,6 @@
 # Sentinel — Design Document
 
-**Version: 1.7.5**
+**Version: 1.7.6**
 
 ---
 
@@ -128,6 +128,7 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 | `OutboundConnectionWhitelist` | Monitors/enforces outbound connections against allowed IP subnets | periodic |
 | `RemoteAccessMonitor` | Scans for 35+ remote access tools; Tier2 presence / Tier1 tunnels from staging paths | 60s |
 | `ThreatIntelFeedBlocker` | Spamhaus DROP + Feodo + EmergingThreats IP blocklists → firewall rules; active-conn check | 4h refresh / 30s conn |
+| `ForumHrWatchMonitor` | Dedicated forum.hr watch (site not blocked): non-browser DNS/TCP + persistent sessions → kill; browsers allowed | 10s / 15m DNS refresh |
 
 #### Group 5: SystemIntegrity (10s start delay, max 3 restarts)
 
@@ -515,6 +516,19 @@ Full cert-revocation chain for BYOVD attacks. When a vulnerable/suspicious drive
 | `CookieIntegrityMonitor` | 5 min | Tier2 LogOnly (Chrome/Edge/Brave cookie DB hash change) |
 
 ---
+
+## v1.7.6 Additions
+
+### Forum.hr policy: watch, don't block
+
+| Item | Value |
+|------|--------|
+| Hosts block | **Removed** from `HostsFileGuard` trusted content (was opinionated) |
+| Monitor | `ForumHrWatchMonitor` (NetworkIntegrity) |
+| Allowed | Browser processes browsing forum.hr |
+| Enforced | Non-browser DNS/TCP to forum.hr IPs; persistent non-browser sessions ≥5 min |
+| Response | Unsigned → Tier1 KillProcessTree; signed → Tier2 LogOnly |
+| DNS feed | `DnsQueryMonitor` → `RecordDnsQuery` |
 
 ## v1.7.5 Additions
 

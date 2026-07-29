@@ -29,6 +29,7 @@ namespace Sentinel.Core
         private readonly SentinelConfig _config;
         private readonly ILogger<DnsQueryMonitor> _logger;
         private readonly PersistentConnectionMonitor? _persistentConnMon;
+        private readonly ForumHrWatchMonitor? _forumHrWatch;
         private readonly ContextBus? _contextBus;
         private readonly TimeSpan _pollInterval;
         private CancellationTokenSource? _cts;
@@ -75,13 +76,15 @@ namespace Sentinel.Core
             SentinelConfig config,
             ILogger<DnsQueryMonitor> logger,
             PersistentConnectionMonitor? persistentConnMon = null,
-            ContextBus? contextBus = null)
+            ContextBus? contextBus = null,
+            ForumHrWatchMonitor? forumHrWatch = null)
         {
             _detectionEngine = detectionEngine;
             _config = config;
             _logger = logger;
             _persistentConnMon = persistentConnMon;
             _contextBus = contextBus;
+            _forumHrWatch = forumHrWatch;
             _pollInterval = TimeSpan.FromSeconds(config.DnsPollIntervalSeconds > 0 ? config.DnsPollIntervalSeconds : 15);
         }
 
@@ -159,6 +162,7 @@ namespace Sentinel.Core
             if (TrustedBaseDomains.Contains(baseDomain)) return;
 
             _persistentConnMon?.RecordDnsQuery(pid, domain);
+            _forumHrWatch?.RecordDnsQuery(pid, domain);
 
             var stats = _domainStats.GetOrAdd(baseDomain, _ => new DomainStats());
             stats.QueryCount++;

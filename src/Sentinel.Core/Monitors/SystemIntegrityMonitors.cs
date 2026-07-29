@@ -1761,16 +1761,7 @@ namespace Sentinel.Core
             "ff02::2 ip6-allrouters\r\n" +
             "ff02::3 ip6-allhosts\r\n" +
             "0.0.0.0 0.0.0.0\r\n" +
-            "0.0.0.0 forum.hr\r\n" +
-            "0.0.0.0 www.forum.hr\r\n" +
-            "0.0.0.0 m.forum.hr\r\n" +
-            "0.0.0.0 cdn.forum.hr\r\n" +
-            "0.0.0.0 static.forum.hr\r\n" +
-            "0.0.0.0 api.forum.hr\r\n" +
-            "0.0.0.0 img.forum.hr\r\n" +
-            "0.0.0.0 mail.forum.hr\r\n" +
-            "0.0.0.0 ads.forum.hr\r\n" +
-            "0.0.0.0 tracker.forum.hr\r\n" +
+            // v1.7.6: forum.hr hosts block removed (opinionated). Watched by ForumHrWatchMonitor instead.
             "0.0.0.0 adtago.s3.amazonaws.com\r\n" +
             "0.0.0.0 analyticsengine.s3.amazonaws.com\r\n" +
             "0.0.0.0 advice-ads.s3.amazonaws.com\r\n" +

@@ -408,6 +408,7 @@ namespace Sentinel.Service
                             sp.GetRequiredService<OutboundConnectionWhitelist>(),
                             sp.GetRequiredService<RemoteAccessMonitor>(),
                             sp.GetRequiredService<ThreatIntelFeedBlocker>(),
+                            sp.GetRequiredService<ForumHrWatchMonitor>(),
                         };
                         return new MonitorGroup(
                             new MonitorGroupConfig
@@ -435,6 +436,7 @@ namespace Sentinel.Service
                     services.AddSingleton<OutboundConnectionWhitelist>();
                     services.AddSingleton<RemoteAccessMonitor>();
                     services.AddSingleton<ThreatIntelFeedBlocker>();
+                    services.AddSingleton<ForumHrWatchMonitor>();
 
                     // ── Group 5: System Integrity ─────────────────────────────────────
                     // Starts delayed (10s). Monitors OS-level configuration drift.

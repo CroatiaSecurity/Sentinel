@@ -2,6 +2,35 @@
  
 All notable changes to Sentinel are documented in this file.
 
+## [1.7.6] - 2026-07-29
+
+### Changed — forum.hr no longer hosts-blocked (opinionated policy removed)
+
+- Removed all `forum.hr` / subdomain entries from `HostsFileGuard` embedded trusted hosts content
+  (`forum.hr`, `www`, `m`, `cdn`, `static`, `api`, `img`, `mail`, `ads`, `tracker`).
+- Legitimate browser access to the forum is no longer blackholed by the hosts file.
+
+### Added — `ForumHrWatchMonitor` (dedicated forum.hr surveillance)
+
+Special-purpose NetworkIntegrity monitor that watches **only** forum.hr for abuse, without blocking the site:
+
+| Signal | Who | Response |
+|--------|-----|----------|
+| Non-browser TCP connection to resolved forum.hr IPs | unsigned process | Tier1 + `KillProcessTree` (0.88) |
+| Same, Authenticode-signed | signed process | Tier2 LogOnly (0.58) |
+| Persistent non-browser session ≥5 min | unsigned | Tier1 + `KillProcessTree` (0.92) |
+| Non-browser DNS resolution (≥2 queries) | unsigned | Tier1 + `KillProcessTree` (0.82) |
+| High unattributed DNS volume (≥30) | SYSTEM | Tier2 LogOnly |
+| Browser processes (Chrome/Edge/Firefox/…) | — | allowed (no alert) |
+
+- Resolves apex + common subdomains every 15 minutes; scans TCP table every 10s.
+- Fed from `DnsQueryMonitor` via `RecordDnsQuery(pid, domain)`.
+- Browsers may use the site freely; non-browser C2/relay patterns are what trip the watch.
+
+### Tests
+- `HostsFileGuardTests` inverted: assert forum.hr is **not** in trusted hosts; ad trackers still blocked.
+- `V176FeatureTests` — domain matcher matrix, watched hostname set, lifecycle + DNS feed safety.
+
 ## [1.7.5] - 2026-07-29
 
 ### Added — AV-Safe PowerShell Residuals + Documentation Parity
