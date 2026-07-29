@@ -2,6 +2,41 @@
  
 All notable changes to Sentinel are documented in this file.
 
+## [1.7.2] - 2026-07-29
+
+### Fixed — USB "Not Recognized" Tray Icon (Disabled Zombie Nodes)
+
+Production machine still showed the Windows tray icon on 1.7.1 with node
+`USB\VID_0000&PID_0002\...` in **Disabled** state (`ConfigFlags=1`). Root cause:
+`CM_Request_Device_Eject` returned `CR_SUCCESS` while the device node remained
+present, so `EjectUsbDevice` returned early and never ran `pnputil /remove-device`.
+
+- **Verify removal after every strategy** — `EjectUsbDevice` now checks
+  `DeviceNodePresent` (live + phantom) after each step; success means the node is
+  actually gone, not merely that eject returned CR_SUCCESS.
+- **Always fall through to `pnputil /remove-device`** when the node survives CM eject
+  — this is the path that clears ConfigFlags-disabled zombies and the sticky tray icon.
+- **Periodic re-sweep** — every 30s poll re-attempts removal of baselined failed-enum
+  devices that are still present (startup-only cleanup was not enough).
+- **Safer HELD_FOR_EJECT handling** — disable the failed device node first; parent hub
+  port disable is last-resort only (avoids breaking healthy sibling devices on the hub).
+
+### Fixed — False-Positive Disable of Healthy USB Devices
+
+- **Stop inventing `"Unknown USB Device"` for blank names** — empty friendly/device
+  description no longer becomes a synthetic failure name.
+- **Tighten failed-enumeration classification** — only `VID_0000` or real Windows
+  failure strings (`Device Descriptor Request Failed`, `Port Reset Failed`,
+  `Set Address Failed`, or `Unknown USB Device (...reason...)` with parentheses).
+  Bare `"Unknown USB Device"` without a parenthetical reason is no longer treated as failed.
+- **Drop standalone `PID_0000` as failure** — too broad; real failures use `VID_0000`
+  and/or the Windows descriptor-failure description.
+
+### Tests
+
+- `V172UsbFailedEnumerationTests` — production zombie instance, Windows failure strings,
+  and blank-name / bare-Unknown false-positive guards.
+
 ## [1.7.1] - 2026-07-29
 
 ### Fixed — Installer Self-Kill

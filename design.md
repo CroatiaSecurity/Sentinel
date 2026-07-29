@@ -1,6 +1,6 @@
 # Sentinel — Design Document
 
-**Version: 1.7.1**
+**Version: 1.7.2**
 
 ---
 
@@ -185,7 +185,7 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 | `CredentialCanaryMonitor` | Plants/monitors honeypot credentials in Windows Credential Manager | periodic |
 | `LocalServerMonitor` | Detects suspicious processes listening on localhost (mounted ISO/VHD origins) | 20s |
 | `AppNetworkPolicyMonitor` | Per-app network destination learning and enforcement (30-min learning phase) | 15s |
-| `UsbDeviceFingerprinter` | USB device baseline via VID:PID:Serial; BadUSB detection | 30s |
+| `UsbDeviceFingerprinter` | USB device baseline via VID:PID:Serial; BadUSB detection; failed-enum disable + verified PnP removal (pnputil fallback, periodic zombie re-sweep) | 30s |
 
 ### Agent-Side Monitors (user session)
 

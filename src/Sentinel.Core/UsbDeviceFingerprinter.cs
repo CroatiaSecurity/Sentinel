@@ -69,25 +69,10 @@ namespace Sentinel.Core
                 _baseline.Add(d.DeviceId);
             }
 
-            // v1.6.9: Scan baseline devices for failed-enumeration state.
-            // If a hostile device was plugged in before Sentinel started (or persists across
-            // reboots in error state), it would be silently baselined and never processed.
-            // This ensures the Windows "USB device not recognized" notification icon is
-            // cleared even for pre-existing failed devices.
+            // v1.6.9 / v1.7.2: Scan baseline for failed-enumeration zombies and fully remove them.
+            // Disable alone leaves ConfigFlags=1 nodes present → sticky Windows tray icon.
             if (_config.AutoDisableFailedUsbEnumeration)
-            {
-                foreach (var d in devices)
-                {
-                    if (IsFailedEnumerationDevice(d))
-                    {
-                        _logger?.LogWarning(
-                            "[UsbDeviceFingerprinter] Baseline device in failed-enumeration state — ejecting: {Id} ({Name})",
-                            d.DeviceId, d.Name);
-                        DisableUsbDevice(d.DeviceId);
-                        EjectUsbDevice(d.DeviceId);
-                    }
-                }
-            }
+                SweepAndRemoveFailedEnumerationDevices(devices, isBaseline: true);
 
             _logger?.LogInformation(
                 "[UsbDeviceFingerprinter] Baseline {Count} USB devices; {Trusted} trusted VID:PID; AutoDisableFailedEnum={Auto}",
@@ -135,9 +120,18 @@ namespace Sentinel.Core
                     if (!_baseline.Contains(dev.DeviceId))
                     {
                         ProcessNewDevice(dev);
-                        _baseline.Add(dev.DeviceId);
+                        // Only baseline if still present — successful failed-enum removal
+                        // clears the node; re-adding would hide future re-plugs incorrectly
+                        // and would undo ProcessNewDevice's _baseline.Remove on success.
+                        if (DeviceNodePresent(dev.DeviceId))
+                            _baseline.Add(dev.DeviceId);
                     }
                 }
+
+                // v1.7.2: Re-sweep baselined failed-enum zombies. Earlier eject can return
+                // CR_SUCCESS while the node stays Disabled (ConfigFlags=1), leaving the tray icon.
+                if (_config.AutoDisableFailedUsbEnumeration)
+                    SweepAndRemoveFailedEnumerationDevices(currentDevices, isBaseline: false);
             }
             catch (Exception ex)
             {
@@ -146,16 +140,65 @@ namespace Sentinel.Core
         }
 
         /// <summary>
-        /// v1.6.9: Determines whether a device is in failed-enumeration state based on
-        /// its VID, name, and the IsFailedEnumeration flag. Used both in startup baseline
-        /// scanning and in ProcessNewDevice to identify hostile/broken USB devices.
+        /// v1.7.2: Disable + fully remove every failed-enumeration device still present.
+        /// Removes instance IDs from baseline when the node is gone so a re-plug is re-detected.
         /// </summary>
-        private static bool IsFailedEnumerationDevice(UsbDevice dev)
+        private void SweepAndRemoveFailedEnumerationDevices(IEnumerable<UsbDevice> devices, bool isBaseline)
+        {
+            foreach (var d in devices)
+            {
+                if (!IsFailedEnumerationDevice(d)) continue;
+
+                _logger?.LogWarning(
+                    "[UsbDeviceFingerprinter] {Phase} failed-enumeration device — removing: {Id} ({Name})",
+                    isBaseline ? "Baseline" : "Periodic",
+                    d.DeviceId, d.Name);
+
+                DisableUsbDevice(d.DeviceId);
+                bool removed = EjectUsbDevice(d.DeviceId);
+                if (removed)
+                    _baseline.Remove(d.DeviceId);
+            }
+        }
+
+        /// <summary>
+        /// v1.6.9 / v1.7.2: True failed-enumeration only — VID_0000 or real Windows failure
+        /// descriptions. Never treats blank friendly names as failed (that caused disable FPs).
+        /// </summary>
+        internal static bool IsFailedEnumerationDevice(UsbDevice dev)
         {
             if (dev.IsFailedEnumeration) return true;
-            if (dev.Vid.Equals("0000", StringComparison.OrdinalIgnoreCase)) return true;
-            if (dev.Name?.Contains("Device Descriptor Request Failed", StringComparison.OrdinalIgnoreCase) ?? false) return true;
-            if (dev.Name?.Contains("Unknown USB Device", StringComparison.OrdinalIgnoreCase) ?? false) return true;
+            return IsFailedEnumerationSignals(dev.Vid, dev.Name);
+        }
+
+        /// <summary>
+        /// Pure classification used by enumeration and tests.
+        /// Windows labels real failures as e.g. "Unknown USB Device (Device Descriptor Request Failed)".
+        /// A bare blank name is NOT a failure.
+        /// </summary>
+        internal static bool IsFailedEnumerationSignals(string? vid, string? name)
+        {
+            if (vid != null && vid.Equals("0000", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            if (string.IsNullOrWhiteSpace(name))
+                return false;
+
+            // Exact Windows USB failure substrings (usb.inf device_descriptor_failure etc.)
+            if (name.Contains("Device Descriptor Request Failed", StringComparison.OrdinalIgnoreCase))
+                return true;
+            if (name.Contains("Device Descriptor Failure", StringComparison.OrdinalIgnoreCase))
+                return true;
+            if (name.Contains("Port Reset Failed", StringComparison.OrdinalIgnoreCase))
+                return true;
+            if (name.Contains("Set Address Failed", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            // Windows always appends a parenthetical reason for unknown/failed USB devices.
+            // Require the parenthesis so we never match an invented bare "Unknown USB Device".
+            if (name.StartsWith("Unknown USB Device (", StringComparison.OrdinalIgnoreCase))
+                return true;
+
             return false;
         }
 
@@ -188,11 +231,13 @@ namespace Sentinel.Core
                         ? " Device disabled via registry ConfigFlags."
                         : " Auto-disable attempted but registry write failed.";
 
-                    // v1.6.4: Full PnP ejection — remove device node to clear Windows notification icon
+                    // v1.6.4 / v1.7.2: Full PnP removal — verify node gone (not just eject CR_SUCCESS)
                     bool ejected = EjectUsbDevice(dev.DeviceId);
                     evidence += ejected
-                        ? " Device ejected from PnP tree."
-                        : " PnP ejection attempted but failed (device may still show in tray).";
+                        ? " Device removed from PnP tree."
+                        : " PnP removal attempted but device node still present (tray icon may linger).";
+                    if (ejected)
+                        _baseline.Remove(dev.DeviceId);
                 }
             }
             else if (_trustedVidPid.Contains(vidPid))
@@ -215,10 +260,13 @@ namespace Sentinel.Core
                 if (disabled)
                     evidence += " Device disabled via registry ConfigFlags.";
 
-                // v1.6.4: Full PnP ejection — remove device node to clear Windows notification icon
+                // v1.6.4 / v1.7.2: Full PnP removal — verify node gone
                 bool ejected = EjectUsbDevice(dev.DeviceId);
                 if (ejected)
-                    evidence += " Device ejected from PnP tree.";
+                {
+                    evidence += " Device removed from PnP tree.";
+                    _baseline.Remove(dev.DeviceId);
+                }
             }
             else if (dev.IsComposite)
             {
@@ -246,7 +294,7 @@ namespace Sentinel.Core
                 Evidence = evidence,
                 Reasoning = $"New unbaselined USB device detected at runtime. Action tier resolved to {tier}." +
                             (disabled ? " Auto-disabled." : "") +
-                            (evidence.Contains("ejected from PnP tree", StringComparison.OrdinalIgnoreCase) ? " Ejected." : ""),
+                            (evidence.Contains("removed from PnP tree", StringComparison.OrdinalIgnoreCase) ? " Removed." : ""),
                 Metadata = new Dictionary<string, string>
                 {
                     { "VID", dev.Vid },
@@ -254,9 +302,9 @@ namespace Sentinel.Core
                     { "DeviceName", dev.Name ?? "" },
                     { "Serial", dev.SerialNumber ?? "" },
                     { "DeviceId", dev.DeviceId ?? "" },
-                    { "FailedEnumeration", dev.IsFailedEnumeration.ToString() },
+                    { "FailedEnumeration", IsFailedEnumerationDevice(dev).ToString() },
                     { "Disabled", disabled.ToString() },
-                    { "Ejected", evidence.Contains("ejected from PnP tree", StringComparison.OrdinalIgnoreCase).ToString() },
+                    { "Ejected", evidence.Contains("removed from PnP tree", StringComparison.OrdinalIgnoreCase).ToString() },
                     { "Trusted", _trustedVidPid.Contains(vidPid).ToString() }
                 }
             };
@@ -294,41 +342,101 @@ namespace Sentinel.Core
         }
 
         /// <summary>
-        /// v1.6.4: Fully ejects a USB device from the PnP tree, removing the Windows
-        /// notification icon. Uses CM_Request_Device_Eject on the device or its parent
-        /// hub port. Falls back to pnputil /remove-device if CM_ APIs fail.
-        /// Must be called AFTER DisableUsbDevice to ensure the device cannot re-enumerate.
+        /// v1.6.4 / v1.7.2: Fully removes a USB device from the PnP tree so the Windows
+        /// "USB device not recognized" tray icon clears.
+        ///
+        /// Critical v1.7.2 change: each strategy is verified with <see cref="DeviceNodePresent"/>.
+        /// CM_Request_Device_Eject can return CR_SUCCESS while leaving a ConfigFlags-disabled
+        /// zombie node (the production sticky-icon case). Previous code treated CR_SUCCESS as
+        /// done and skipped pnputil.
+        ///
+        /// Call AFTER DisableUsbDevice when auto-disabling hostile/failed devices.
         /// </summary>
         internal bool EjectUsbDevice(string deviceInstanceId)
         {
             if (string.IsNullOrWhiteSpace(deviceInstanceId)) return false;
 
-            // Strategy 1: CM_Request_Device_Eject on the device itself
-            bool ejected = TryEjectViaCfgMgr(deviceInstanceId);
-            if (ejected)
+            if (!DeviceNodePresent(deviceInstanceId))
             {
-                _logger?.LogWarning("[UsbDeviceFingerprinter] Ejected USB device via CM_Request_Device_Eject: {Id}", deviceInstanceId);
+                _logger?.LogDebug("[UsbDeviceFingerprinter] Device already absent: {Id}", deviceInstanceId);
                 return true;
             }
 
-            // Strategy 2: Eject the parent (USB hub port) — works when device node is in error state
-            ejected = TryEjectParentViaCfgMgr(deviceInstanceId);
-            if (ejected)
+            // Strategy 1: CM_Request_Device_Eject on the device (+ HELD_FOR_EJECT handling)
+            TryEjectViaCfgMgr(deviceInstanceId);
+            Thread.Sleep(150);
+            if (!DeviceNodePresent(deviceInstanceId))
             {
-                _logger?.LogWarning("[UsbDeviceFingerprinter] Ejected USB device via parent hub eject: {Id}", deviceInstanceId);
+                _logger?.LogWarning("[UsbDeviceFingerprinter] Removed USB device via CM_Request_Device_Eject: {Id}", deviceInstanceId);
                 return true;
             }
 
-            // Strategy 3: pnputil /remove-device — forceful removal via OS utility
-            ejected = TryEjectViaPnputil(deviceInstanceId);
-            if (ejected)
+            // Strategy 2: Eject parent hub port (error-state child nodes often need this)
+            TryEjectParentViaCfgMgr(deviceInstanceId);
+            Thread.Sleep(150);
+            if (!DeviceNodePresent(deviceInstanceId))
             {
-                _logger?.LogWarning("[UsbDeviceFingerprinter] Ejected USB device via pnputil: {Id}", deviceInstanceId);
+                _logger?.LogWarning("[UsbDeviceFingerprinter] Removed USB device via parent hub eject: {Id}", deviceInstanceId);
                 return true;
             }
 
-            _logger?.LogDebug("[UsbDeviceFingerprinter] All ejection strategies failed for: {Id}", deviceInstanceId);
+            // Strategy 3: pnputil /remove-device — required for ConfigFlags=1 disabled zombies
+            if (TryEjectViaPnputil(deviceInstanceId))
+            {
+                Thread.Sleep(200);
+                if (!DeviceNodePresent(deviceInstanceId))
+                {
+                    _logger?.LogWarning("[UsbDeviceFingerprinter] Removed USB device via pnputil: {Id}", deviceInstanceId);
+                    return true;
+                }
+            }
+
+            // Strategy 4: CM_Disable_DevNode on the device (not parent hub) then pnputil again
+            TryDisableDevNodeOnly(deviceInstanceId);
+            if (TryEjectViaPnputil(deviceInstanceId))
+            {
+                Thread.Sleep(200);
+                if (!DeviceNodePresent(deviceInstanceId))
+                {
+                    _logger?.LogWarning("[UsbDeviceFingerprinter] Removed USB device via disable+pnputil: {Id}", deviceInstanceId);
+                    return true;
+                }
+            }
+
+            // Strategy 5 (last resort): disable parent port only if still HELD_FOR_EJECT, then pnputil.
+            // Avoids taking down healthy siblings on the hub unless the OS is stuck on eject.
+            if (TryDisableParentIfHeldForEject(deviceInstanceId) && TryEjectViaPnputil(deviceInstanceId))
+            {
+                Thread.Sleep(200);
+                if (!DeviceNodePresent(deviceInstanceId))
+                {
+                    _logger?.LogWarning("[UsbDeviceFingerprinter] Removed USB device after parent HELD_FOR_EJECT disable: {Id}", deviceInstanceId);
+                    return true;
+                }
+            }
+
+            _logger?.LogWarning("[UsbDeviceFingerprinter] All removal strategies failed — node still present: {Id}", deviceInstanceId);
             return false;
+        }
+
+        /// <summary>
+        /// True if the device instance still exists as a live or phantom PnP node.
+        /// </summary>
+        internal bool DeviceNodePresent(string deviceInstanceId)
+        {
+            if (string.IsNullOrWhiteSpace(deviceInstanceId)) return false;
+            try
+            {
+                int result = CM_Locate_DevNode(out _, deviceInstanceId, CM_LOCATE_DEVNODE_NORMAL);
+                if (result == CR_SUCCESS) return true;
+                // Phantom: still in the enum tree after disable — tray icon can remain
+                result = CM_Locate_DevNode(out _, deviceInstanceId, CM_LOCATE_DEVNODE_PHANTOM);
+                return result == CR_SUCCESS;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private bool TryEjectViaCfgMgr(string deviceInstanceId)
@@ -350,27 +458,23 @@ namespace Sentinel.Core
                 result = CM_Request_Device_Eject(devInst, out int vetoType, IntPtr.Zero, 0, 0);
                 if (result == CR_SUCCESS)
                 {
-                    // v1.7.1: Check if device is stuck in HELD_FOR_EJECT zombie state.
-                    // Windows sometimes "holds" the device for eject but cannot complete removal
-                    // because the parent hub port is still powered. This leaves the "USB device
-                    // not recognized" notification icon visible. Fix: disable parent port.
-                    Thread.Sleep(200); // brief delay for PnP state to settle
+                    // v1.7.1 / v1.7.2: If stuck in HELD_FOR_EJECT, disable the device node itself
+                    // (not the whole parent hub — that can break healthy siblings). Parent disable
+                    // is deferred to the last-resort path in EjectUsbDevice.
+                    Thread.Sleep(200);
                     int relocResult = CM_Locate_DevNode(out int checkInst, deviceInstanceId, CM_LOCATE_DEVNODE_NORMAL);
                     if (relocResult == CR_SUCCESS)
                     {
                         CM_Get_DevNode_Status(out _, out int problemNumber, checkInst, 0);
                         if (problemNumber == CM_PROB_HELD_FOR_EJECT)
                         {
-                            _logger?.LogWarning("[UsbDeviceFingerprinter] Device stuck in HELD_FOR_EJECT — disabling parent port: {Id}", deviceInstanceId);
-                            int parentResult = CM_Get_Parent(out int parentInst, checkInst, 0);
-                            if (parentResult == CR_SUCCESS)
-                            {
-                                CM_Disable_DevNode(parentInst, 0);
-                            }
-                            // Also try disabling the device node itself
+                            _logger?.LogWarning(
+                                "[UsbDeviceFingerprinter] Device stuck in HELD_FOR_EJECT — disabling device node: {Id}",
+                                deviceInstanceId);
                             CM_Disable_DevNode(checkInst, 0);
                         }
                     }
+                    // CR_SUCCESS does NOT mean the node is gone — caller must verify.
                     return true;
                 }
 
@@ -381,6 +485,53 @@ namespace Sentinel.Core
             catch (Exception ex)
             {
                 _logger?.LogDebug(ex, "[UsbDeviceFingerprinter] CfgMgr eject exception for: {Id}", deviceInstanceId);
+                return false;
+            }
+        }
+
+        private bool TryDisableDevNodeOnly(string deviceInstanceId)
+        {
+            try
+            {
+                int result = CM_Locate_DevNode(out int devInst, deviceInstanceId, CM_LOCATE_DEVNODE_NORMAL);
+                if (result != CR_SUCCESS)
+                    result = CM_Locate_DevNode(out devInst, deviceInstanceId, CM_LOCATE_DEVNODE_PHANTOM);
+                if (result != CR_SUCCESS) return false;
+
+                result = CM_Disable_DevNode(devInst, 0);
+                return result == CR_SUCCESS;
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogDebug(ex, "[UsbDeviceFingerprinter] CM_Disable_DevNode exception for: {Id}", deviceInstanceId);
+                return false;
+            }
+        }
+
+        private bool TryDisableParentIfHeldForEject(string deviceInstanceId)
+        {
+            try
+            {
+                int result = CM_Locate_DevNode(out int devInst, deviceInstanceId, CM_LOCATE_DEVNODE_NORMAL);
+                if (result != CR_SUCCESS)
+                    result = CM_Locate_DevNode(out devInst, deviceInstanceId, CM_LOCATE_DEVNODE_PHANTOM);
+                if (result != CR_SUCCESS) return false;
+
+                CM_Get_DevNode_Status(out _, out int problemNumber, devInst, 0);
+                if (problemNumber != CM_PROB_HELD_FOR_EJECT)
+                    return false;
+
+                result = CM_Get_Parent(out int parentInst, devInst, 0);
+                if (result != CR_SUCCESS) return false;
+
+                _logger?.LogWarning(
+                    "[UsbDeviceFingerprinter] Last resort: disabling parent hub port for HELD_FOR_EJECT: {Id}",
+                    deviceInstanceId);
+                return CM_Disable_DevNode(parentInst, 0) == CR_SUCCESS;
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogDebug(ex, "[UsbDeviceFingerprinter] Parent HELD_FOR_EJECT disable exception for: {Id}", deviceInstanceId);
                 return false;
             }
         }
@@ -630,10 +781,9 @@ namespace Sentinel.Core
                     {
                         name = GetDeviceProperty(deviceInfoSet, ref deviceInfoData, SPDRP_DEVICEDESC);
                     }
-                    if (string.IsNullOrEmpty(name))
-                    {
-                        name = "Unknown USB Device";
-                    }
+                    // v1.7.2: Do NOT invent "Unknown USB Device" for blank descriptions.
+                    // That string was previously treated as failed-enumeration and caused
+                    // legitimate devices with empty friendly/device names to be disabled.
 
                     string classGuidStr = GetDeviceProperty(deviceInfoSet, ref deviceInfoData, SPDRP_CLASSGUID);
                     string service = GetDeviceProperty(deviceInfoSet, ref deviceInfoData, SPDRP_SERVICE);
@@ -644,12 +794,7 @@ namespace Sentinel.Core
                     bool isMassStorage = service.Equals("USBSTOR", StringComparison.OrdinalIgnoreCase);
                     bool isComposite = service.Equals("usbccgp", StringComparison.OrdinalIgnoreCase);
 
-                    bool isFailedEnum =
-                        vid.Equals("0000", StringComparison.OrdinalIgnoreCase) ||
-                        pid.Equals("0000", StringComparison.OrdinalIgnoreCase) ||
-                        name.Contains("Device Descriptor Request Failed", StringComparison.OrdinalIgnoreCase) ||
-                        name.Contains("Device Descriptor Failure", StringComparison.OrdinalIgnoreCase) ||
-                        name.Contains("Unknown USB Device", StringComparison.OrdinalIgnoreCase);
+                    bool isFailedEnum = IsFailedEnumerationSignals(vid, name);
 
                     list.Add(new UsbDevice
                     {
