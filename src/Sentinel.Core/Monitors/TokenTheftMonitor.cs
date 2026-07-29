@@ -208,6 +208,16 @@ namespace Sentinel.Core
                     if (tokenInfo.Value.HasImpersonatePrivilege && !LegitimateImpersonators.Contains(processName))
                     {
                         string imagePath = SecurityValidation.GetProcessImagePath(pid) ?? "";
+
+                        // v1.7.1: Exempt installer extractors (Inno Setup .tmp, NSIS) — elevated installers
+                        // legitimately have SeImpersonatePrivilege from UAC elevation. Without this,
+                        // Sentinel kills its own installer (SentinelSetup-*.tmp from Temp\is-XXXXX\).
+                        if (InstallerHeuristics.IsInstallerExtractor(processName, imagePath) ||
+                            InstallerHeuristics.LooksLikeInstallerName(processName, imagePath))
+                        {
+                            continue;
+                        }
+
                         if (IsSuspiciousPath(imagePath))
                         {
                             await _detectionEngine.EmitAsync(new DetectionEvent
