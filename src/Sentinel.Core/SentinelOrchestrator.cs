@@ -36,6 +36,7 @@ namespace Sentinel.Core
         private readonly ResponseCoordinator _responseCoordinator;
         private readonly ContextBus _contextBus;
         private readonly JsonlEventLogger _eventLogger;
+        private readonly AutoIncidentReporter? _autoIncidentReporter;
         private readonly ILogger<SentinelOrchestrator> _logger;
 
         // Pipeline backpressure monitoring
@@ -56,7 +57,8 @@ namespace Sentinel.Core
             ResponseCoordinator responseCoordinator,
             ContextBus contextBus,
             JsonlEventLogger eventLogger,
-            ILogger<SentinelOrchestrator> logger)
+            ILogger<SentinelOrchestrator> logger,
+            AutoIncidentReporter? autoIncidentReporter = null)
         {
             _incidentManager = incidentManager;
             _monitorRegistry = monitorRegistry;
@@ -66,6 +68,7 @@ namespace Sentinel.Core
             _contextBus = contextBus;
             _eventLogger = eventLogger;
             _logger = logger;
+            _autoIncidentReporter = autoIncidentReporter;
 
             _backpressureTimer = new System.Threading.Timer(
                 CheckBackpressure, null, BackpressureCheckInterval, BackpressureCheckInterval);
@@ -109,6 +112,23 @@ namespace Sentinel.Core
             else if (result.Outcome == ResponseOutcome.Deduplicated)
             {
                 _logger.LogDebug("[Orchestrator] Response deduplicated for PID {Pid}", detection.ProcessId);
+            }
+
+            // 3. v1.7.7: Auto evidence pack + optional TI share for attack detections
+            // Fire-and-forget so reporting latency never blocks kill/quarantine path.
+            if (_autoIncidentReporter != null)
+            {
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await _autoIncidentReporter.HandleDetectionAsync(detection, incident).ConfigureAwait(false);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug(ex, "[Orchestrator] AutoIncidentReporter failed for {Rule}", detection.RuleName);
+                    }
+                });
             }
         }
 

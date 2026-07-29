@@ -46,6 +46,21 @@ namespace Sentinel.Tests
         }
 
         [Fact]
+        public void AutoIncidentReportingConfig_Defaults_Correct()
+        {
+            var config = new AutoIncidentReportingConfig();
+            Assert.True(config.Enabled);
+            Assert.True(config.GenerateLocalEvidencePack);
+            Assert.True(config.ReportThreatIntel);
+            Assert.True(config.ReportableGradeOnly);
+            Assert.Equal(0.85, config.MinConfidence);
+            Assert.Equal(0.80, config.KillAuthorizedMinConfidence);
+            Assert.True(config.IncludeIntegrityManifest);
+            Assert.True(config.IncludeVictimAffidavit);
+            Assert.Equal(20, config.MaxPacksPerHour);
+        }
+
+        [Fact]
         public void CveShieldConfig_Defaults_Correct()
         {
             var config = new CveShieldConfig();

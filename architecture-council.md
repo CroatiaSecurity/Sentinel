@@ -1,8 +1,8 @@
 # Sentinel — Council of Elders Architecture
 
-**Status:** Historical architecture rationale. **Runtime inventory and versions are authoritative in `design.md` (v1.7.6).** This document explains the President/Council mental model; do not treat monitor tables here as the live registration list.
+**Status:** Historical architecture rationale. **Runtime inventory and versions are authoritative in `design.md` (v1.7.8).** This document explains the President/Council mental model; do not treat monitor tables here as the live registration list.
 
-**Last updated note:** v1.7.6 — Header aligned; live component inventory lives only in `design.md`.
+**Last updated note:** v1.7.8 — Header aligned; live component inventory lives only in `design.md`.
 
 ---
 

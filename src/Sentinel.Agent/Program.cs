@@ -231,9 +231,15 @@ namespace Sentinel.Agent
                     hostContext.Configuration.GetSection("ThreatReporting").Bind(threatReportingConfig);
                     services.AddSingleton(threatReportingConfig);
 
+                    var autoIncidentReportingConfig = new AutoIncidentReportingConfig();
+                    hostContext.Configuration.GetSection("AutoIncidentReporting").Bind(autoIncidentReportingConfig);
+                    services.AddSingleton(autoIncidentReportingConfig);
+
                     // Infrastructure required by monitors
                     services.AddSingleton<SentinelMetrics>();
                     services.AddSingleton<ThreatReportService>();
+                    services.AddSingleton<ToastService>();
+                    services.AddSingleton<AutoIncidentReporter>();
                     services.AddSingleton<JsonlEventLogger>(_ => new JsonlEventLogger(config.LogPath));
                     services.AddSingleton<EventGraph>();
                     services.AddSingleton<ProcessAncestryCache>();

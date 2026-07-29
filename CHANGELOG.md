@@ -2,6 +2,85 @@
  
 All notable changes to Sentinel are documented in this file.
 
+## [1.7.8] - 2026-07-29
+
+### Improved — Reportable-grade evidence packs (trust for human LE filing)
+
+Makes auto-generated packs more suitable as **evidence you take to police** (not automatic LE filing).
+
+#### Stricter pack policy (`ReportableGradeOnly`, default true)
+- Default `MinConfidence` raised **0.75 → 0.85**
+- Kill path floor: `KillAuthorizedMinConfidence` **0.80**
+- NetworkIsolate only when C2/attack character (not every isolate)
+- Max packs/hour **30 → 20**
+- Set `ReportableGradeOnly: false` to restore broader 1.7.7 capture
+
+#### Integrity seal
+- `MANIFEST.sha256` — SHA-256 of sealed evidence files
+- `MANIFEST.hmac` — machine-bound HMAC-SHA256 of the manifest
+- `evidence_manifest.json` — machine-readable seal metadata
+- `VERIFY.txt` — how to verify
+- `AutoIncidentReporter.VerifyPackIntegrity(path)` for automated checks
+- **Excluded from seal** (fill after): `victim_affidavit.txt`, `chain_of_custody.txt`
+
+#### Victim affidavit + custody
+- `victim_affidavit.txt` — complainant identity, facts, consent, signature blocks  
+  (optional prefill: `VictimFullName`, `VictimEmail`, `VictimPhone`, `VictimAddress`)
+- `chain_of_custody.txt` — detection/response/seal timeline + handoff table
+
+#### Export
+- `.zip` of pack + sibling `.zip.sha256` when `CreateZipExport` is true (default)
+
+### Tests
+- `V178FeatureTests` — policy matrix, seal verify, affidavit edit does not break seal, zip present
+
+## [1.7.7] - 2026-07-29
+
+### Added — Automatic attack incident reporting (honest worldwide path)
+
+Closest practical implementation of “auto-report hacking against users”:
+
+| Automatic action | Destination | Notes |
+|------------------|-------------|--------|
+| Local evidence pack | `%ProgramData%\Sentinel\IncidentReports\AUTO_*` | Police-ready text pack + indicators + network snapshot |
+| National portal guidance | Country-specific cybercrime URLs | From Windows region or `CountryCode` override |
+| TI indicator share | MalwareBazaar / URLhaus / AbuseIPDB via existing Worker | When `ThreatReporting` proxy secret is set — **not** police |
+| User toast | Critical notification | Pack path + which portal to file with |
+
+**Explicitly does not** file complaints with INTERPOL, IC3, or any police API (none exist for consumer EDR). Packs state INTERPOL’s official rule: individuals report to **local** LE; LE escalates internationally.
+
+#### Components
+- **`AutoIncidentReporter`** — pipeline hook after incident grouping + response; fire-and-forget so kills never wait on disk/network.
+- **`LawEnforcementPortals`** — curated national portal directory (US IC3, UK Action Fraud, HR MUP, AU ReportCyber, …) + Europol country directory + INTERPOL info-only entry.
+- **`AutoIncidentReportingConfig`** — `appsettings.json` section `AutoIncidentReporting`.
+
+#### Trigger policy (defaults)
+- Kill-authorized detections (confidence floor ~0.70)
+- NetworkIsolate with confidence ≥ `MinConfidence` (0.75)
+- Tier1 attack `SignalType`s (ransomware, C2, injection, credential theft, LSASS, reverse shell, anti-tamper, …)
+- Rule-name attack keywords (cuckoo, beacon, exfil, dump, …)
+- Cooldown 300s per rule+pid; max 30 packs/hour
+
+#### Config (`AutoIncidentReporting`)
+```json
+{
+  "Enabled": true,
+  "GenerateLocalEvidencePack": true,
+  "ReportThreatIntel": true,
+  "NotifyUser": true,
+  "MinConfidence": 0.75,
+  "IncludeKillAuthorized": true,
+  "IncludeNetworkIsolate": true,
+  "CountryCode": null,
+  "CooldownSeconds": 300,
+  "MaxPacksPerHour": 30
+}
+```
+
+### Tests
+- `V177FeatureTests` — policy matrix, indicator extraction, portal resolution, pack write/disable paths.
+- `ModelAndInfraTests` — config defaults.
+
 ## [1.7.6] - 2026-07-29
 
 ### Changed — forum.hr no longer hosts-blocked (opinionated policy removed)

@@ -4,7 +4,7 @@
 
 | Version | Supported |
 |---------|-----------|
-| 1.7.x   | Yes (current: 1.7.6) |
+| 1.7.x   | Yes (current: 1.7.8) |
 | 1.6.x   | Security fixes only |
 | 1.5.x   | Security fixes only |
 | < 1.5   | No        |

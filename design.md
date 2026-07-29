@@ -1,6 +1,6 @@
 # Sentinel — Design Document
 
-**Version: 1.7.6**
+**Version: 1.7.8**
 
 ---
 
@@ -260,6 +260,8 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 | `SentinelHealthCheck` | Structured health checks: process, memory, handles, log file, quarantine, thread pool. |
 | `StartupSelfTest` | Verifies ETW, DPAPI, quarantine, log file, and rule loading before activating monitors. |
 | `ThreatReportService` | Reports threats to MalwareBazaar/URLhaus/AbuseIPDB via Cloudflare Worker proxy. |
+| `AutoIncidentReporter` | v1.7.7/1.7.8: Reportable-grade evidence packs, integrity seal (SHA-256+HMAC), victim affidavit, zip export, TI share, national portals. Does not file police reports. |
+| `LawEnforcementPortals` | Country → cybercrime portal directory (IC3, Action Fraud, MUP, …); INTERPOL info-only. |
 | `IoCScanner` | Loads threat intel indicators from DPAPI-encrypted external cache. |
 | `InstallerHeuristics` | Shared utility for installer name/Inno extractor/benign prefetch pattern recognition. |
 | `HardeningModule` | Native C# hardening: service disabling, registry security settings, LGPO policy, ACL enforcement. |
@@ -516,6 +518,33 @@ Full cert-revocation chain for BYOVD attacks. When a vulnerable/suspicious drive
 | `CookieIntegrityMonitor` | 5 min | Tier2 LogOnly (Chrome/Edge/Brave cookie DB hash change) |
 
 ---
+
+## v1.7.8 Additions
+
+### Reportable-grade evidence quality
+
+| Item | Value |
+|------|--------|
+| Policy | `ReportableGradeOnly` (default true); MinConfidence 0.85; kill floor 0.80 |
+| Seal | `MANIFEST.sha256` + machine-bound `MANIFEST.hmac` + `evidence_manifest.json` |
+| Affidavit | `victim_affidavit.txt` (post-seal fill; excluded from hash list) |
+| Custody | `chain_of_custody.txt` (timeline + handoff table; excluded from hash list) |
+| Export | `.zip` + `.zip.sha256` |
+| Verify | `AutoIncidentReporter.VerifyPackIntegrity` |
+
+## v1.7.7 Additions
+
+### Automatic attack incident reporting
+
+| Item | Value |
+|------|--------|
+| Hook | `SentinelOrchestrator.ProcessDetectionAsync` after response (async, non-blocking) |
+| Pack root | `%ProgramData%\Sentinel\IncidentReports\AUTO_*` |
+| TI share | Existing `ThreatReportService` / Worker (hash, URL, IP) when secret configured |
+| LE filing | Human: national portal URL embedded in pack + toast |
+| Not supported | Direct INTERPOL / police API auto-file (does not exist for consumers) |
+
+Config section: `AutoIncidentReporting` (see CHANGELOG 1.7.7 / 1.7.8).
 
 ## v1.7.6 Additions
 

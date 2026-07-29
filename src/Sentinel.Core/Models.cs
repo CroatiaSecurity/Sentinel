@@ -129,6 +129,84 @@ namespace Sentinel.Core
         public string? ProxySharedSecret { get; set; }
     }
 
+    /// <summary>
+    /// v1.7.7+ — Automatic local evidence packs + optional TI indicator share
+    /// for high-confidence hacking / attack detections.
+    /// Does not file police reports (no public LE API); prepares packs and portal links.
+    /// v1.7.8: reportable-grade policy, integrity manifest/HMAC, victim affidavit.
+    /// </summary>
+    public class AutoIncidentReportingConfig
+    {
+        /// <summary>Master switch. Default on.</summary>
+        public bool Enabled { get; set; } = true;
+
+        /// <summary>Write police-ready packs under ProgramData\Sentinel\IncidentReports.</summary>
+        public bool GenerateLocalEvidencePack { get; set; } = true;
+
+        /// <summary>
+        /// Submit hashes/URLs/IPs via ThreatReportService (MalwareBazaar/URLhaus/AbuseIPDB).
+        /// Requires ThreatReporting proxy secret. Community intel — not law enforcement.
+        /// </summary>
+        public bool ReportThreatIntel { get; set; } = true;
+
+        /// <summary>Show a critical toast when a pack is written.</summary>
+        public bool NotifyUser { get; set; } = true;
+
+        /// <summary>
+        /// v1.7.8: When true (default), only reportable-grade events produce packs:
+        /// kill-authorized at high confidence, NetworkIsolate for C2-class signals,
+        /// or Tier1 attack signals at MinConfidence — no low-signal noise.
+        /// </summary>
+        public bool ReportableGradeOnly { get; set; } = true;
+
+        /// <summary>Minimum confidence for reportable-grade Tier1 / isolate paths (default 0.85).</summary>
+        public double MinConfidence { get; set; } = 0.85;
+
+        /// <summary>
+        /// Floor confidence for kill-authorized packs when ReportableGradeOnly is true (default 0.80).
+        /// When ReportableGradeOnly is false, uses min(MinConfidence, 0.70) for broader capture.
+        /// </summary>
+        public double KillAuthorizedMinConfidence { get; set; } = 0.80;
+
+        /// <summary>Report kill-authorized detections (above KillAuthorizedMinConfidence).</summary>
+        public bool IncludeKillAuthorized { get; set; } = true;
+
+        /// <summary>Include NetworkIsolate when signal looks like C2 / attack (not every isolate).</summary>
+        public bool IncludeNetworkIsolate { get; set; } = true;
+
+        /// <summary>
+        /// v1.7.8: Write MANIFEST.sha256, evidence_manifest.json, MANIFEST.hmac, chain_of_custody.txt.
+        /// </summary>
+        public bool IncludeIntegrityManifest { get; set; } = true;
+
+        /// <summary>v1.7.8: Write victim_affidavit.txt fill-in template for the complainant.</summary>
+        public bool IncludeVictimAffidavit { get; set; } = true;
+
+        /// <summary>v1.7.8: Also create a .zip of the pack after integrity sealing.</summary>
+        public bool CreateZipExport { get; set; } = true;
+
+        /// <summary>Optional pre-fill for affidavit (user may complete remaining fields by hand).</summary>
+        public string? VictimFullName { get; set; }
+        public string? VictimEmail { get; set; }
+        public string? VictimPhone { get; set; }
+        public string? VictimAddress { get; set; }
+
+        /// <summary>
+        /// ISO 3166-1 alpha-2 override for filing portal (e.g. "HR", "US").
+        /// Null = detect from Windows region.
+        /// </summary>
+        public string? CountryCode { get; set; }
+
+        /// <summary>Override pack output directory. Null = ProgramData\Sentinel\IncidentReports.</summary>
+        public string? ReportDirectory { get; set; }
+
+        /// <summary>Per rule+pid cooldown in seconds (default 5 minutes).</summary>
+        public int CooldownSeconds { get; set; } = 300;
+
+        /// <summary>Hard cap on packs written per rolling hour (default 20).</summary>
+        public int MaxPacksPerHour { get; set; } = 20;
+    }
+
     public class TelemetryEvent
     {
         public string Type { get; set; } = string.Empty;

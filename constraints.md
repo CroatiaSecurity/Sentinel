@@ -1,6 +1,6 @@
 # Sentinel — Constraints
 
-**Version: 1.7.6**
+**Version: 1.7.8**
 
 ---
 

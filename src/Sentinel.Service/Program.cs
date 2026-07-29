@@ -121,6 +121,10 @@ namespace Sentinel.Service
                     var threatReportingConfig = new ThreatReportingConfig();
                     hostContext.Configuration.GetSection("ThreatReporting").Bind(threatReportingConfig);
 
+                    var autoIncidentReportingConfig = new AutoIncidentReportingConfig();
+                    hostContext.Configuration.GetSection("AutoIncidentReporting").Bind(autoIncidentReportingConfig);
+                    services.AddSingleton(autoIncidentReportingConfig);
+
                     var appIntegrityConfig = new ApplicationIntegrityConfig();
                     hostContext.Configuration.GetSection("ApplicationIntegrity").Bind(appIntegrityConfig);
                     services.AddSingleton(appIntegrityConfig);
@@ -147,6 +151,7 @@ namespace Sentinel.Service
                     // Infrastructure & Utilities
                     services.AddSingleton<SentinelMetrics>();
                     services.AddSingleton<ThreatReportService>();
+                    services.AddSingleton<AutoIncidentReporter>();
                     services.AddSingleton<JsonlEventLogger>(_ => new JsonlEventLogger(config.LogPath));
                     services.AddSingleton<EventGraph>();
                     services.AddSingleton<ProcessAncestryCache>();

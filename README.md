@@ -2,7 +2,7 @@
 
 Real-time endpoint detection and response for Windows. Runs as a background service, monitors system behavior, and kills threats automatically when multiple signals correlate.
 
-**Current version: 1.7.6**
+**Current version: 1.7.8**
 
 ---
 
@@ -93,14 +93,16 @@ Full transparency in [THREAT_MODEL.md](THREAT_MODEL.md).
 
 6. **Reputation** — The FileReputationEngine queries 3 sources (CIRCL, MalwareBazaar, VirusTotal via Cloudflare Worker proxy) and combines hash reputation with static PE analysis, signer trust, and contextual risk into a composite 0-100 score.
 
+7. **Reportable-grade evidence (v1.7.7/1.7.8)** — High-confidence attacks produce integrity-sealed packs under `%ProgramData%\Sentinel\IncidentReports\` (SHA-256 manifest + machine-bound HMAC, victim affidavit template, chain of custody, national cybercrime portal links, optional TI share). Sentinel prepares evidence for **you** to file; it does not auto-submit to police or INTERPOL.
+
 ---
 
 ## Test Suite
 
-**848** automated tests (xUnit), all passing:
+**886+** automated tests (xUnit), all passing:
 - End-to-end integration tests (full pipeline: telemetry → detection → scoring → correlation → response)
 - Unit tests for all critical engines (Response, Correlation, ChainTracer, FileReputation, AntiTamper, Detection)
-- Monitor unit tests including LNK classification, threat-intel feed parsing, USB failed-enumeration, PS-ported guards, v1.7.5 ASR/session classification, v1.7.6 forum.hr watch
+- Monitor unit tests including LNK classification, threat-intel feed parsing, USB failed-enumeration, PS-ported guards, v1.7.5–1.7.6 features, auto incident evidence packs (v1.7.7/1.7.8)
 - Run with `dotnet test`
 
 ---
