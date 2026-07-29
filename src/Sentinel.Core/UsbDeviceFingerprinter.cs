@@ -349,7 +349,30 @@ namespace Sentinel.Core
 
                 result = CM_Request_Device_Eject(devInst, out int vetoType, IntPtr.Zero, 0, 0);
                 if (result == CR_SUCCESS)
+                {
+                    // v1.7.1: Check if device is stuck in HELD_FOR_EJECT zombie state.
+                    // Windows sometimes "holds" the device for eject but cannot complete removal
+                    // because the parent hub port is still powered. This leaves the "USB device
+                    // not recognized" notification icon visible. Fix: disable parent port.
+                    Thread.Sleep(200); // brief delay for PnP state to settle
+                    int relocResult = CM_Locate_DevNode(out int checkInst, deviceInstanceId, CM_LOCATE_DEVNODE_NORMAL);
+                    if (relocResult == CR_SUCCESS)
+                    {
+                        CM_Get_DevNode_Status(out _, out int problemNumber, checkInst, 0);
+                        if (problemNumber == CM_PROB_HELD_FOR_EJECT)
+                        {
+                            _logger?.LogWarning("[UsbDeviceFingerprinter] Device stuck in HELD_FOR_EJECT — disabling parent port: {Id}", deviceInstanceId);
+                            int parentResult = CM_Get_Parent(out int parentInst, checkInst, 0);
+                            if (parentResult == CR_SUCCESS)
+                            {
+                                CM_Disable_DevNode(parentInst, 0);
+                            }
+                            // Also try disabling the device node itself
+                            CM_Disable_DevNode(checkInst, 0);
+                        }
+                    }
                     return true;
+                }
 
                 _logger?.LogDebug("[UsbDeviceFingerprinter] CM_Request_Device_Eject failed ({Err}, veto={Veto}) for: {Id}",
                     result, vetoType, deviceInstanceId);
@@ -501,9 +524,22 @@ namespace Sentinel.Core
             int dnDevInst,
             int ulFlags);
 
+        [DllImport("cfgmgr32.dll")]
+        private static extern int CM_Get_DevNode_Status(
+            out int pulStatus,
+            out int pulProblemNumber,
+            int dnDevInst,
+            int ulFlags);
+
+        [DllImport("cfgmgr32.dll")]
+        private static extern int CM_Disable_DevNode(
+            int dnDevInst,
+            int ulFlags);
+
         private const int CR_SUCCESS = 0;
         private const int CM_LOCATE_DEVNODE_NORMAL = 0x00000000;
         private const int CM_LOCATE_DEVNODE_PHANTOM = 0x00000001;
+        private const int CM_PROB_HELD_FOR_EJECT = 47;
 
         private const int DIGCF_PRESENT = 0x00000002;
         private const int DIGCF_ALLCLASSES = 0x00000004;
