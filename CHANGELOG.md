@@ -2,6 +2,87 @@
  
 All notable changes to Sentinel are documented in this file.
 
+## [1.7.1] - 2026-07-29
+
+### Fixed — design.md Full Accuracy Audit
+
+Comprehensive cross-validation of design.md against actual codebase (triggered by independent AI audits). Every monitor interval, mechanism description, rate limit, and component inventory entry was verified against source code and corrected where stale.
+
+#### Intervals corrected (17 mismatches)
+
+| Component | Was | Now (matches code) |
+|-----------|-----|---------------------|
+| `SyscallStubMonitor` | 10s | 30s |
+| `EtwSessionGuard` | 2–5s | 3s |
+| `ScriptExecutionMonitor` | 8s | 10s |
+| `BrowserCredentialGuard` | 10s | 30s |
+| `MicrosoftAccountGuardMonitor` | 12s | 30s |
+| `CanaryFileMonitor` | continuous (FSW) | 10s (polling) |
+| `PublicIpMonitor` | 2min | 5min |
+| `WifiSecurityMonitor` | 10s | 15s |
+| `RemoteAccessMonitor` | 30s | 60s |
+| `FirewallIntegrityMonitor` | 30s | 60s |
+| `ScheduledTaskMonitor` | 30s | 60s |
+| `TokenIntegrityMonitor` | 20s | 45s |
+| `LsassDumpCanaryMonitor` | 45s | 30s |
+| `LocalServerMonitor` | 30s | 20s |
+| `MemoryBehaviorAnalyzer` | 45s | 90s |
+| `ModuleValidationMonitor` | 60s–5min tiered | 30s |
+| `AppDnsExfilMonitor` | 10s | 500ms |
+
+#### Mechanism descriptions corrected
+
+- **`MemoryBehaviorAnalyzer`** — Was documented as "VirtualQueryEx + module scanning; RWX/unbacked detection". Actually uses `Process.Modules` enumeration + module count tracking. VirtualQueryEx/ReadProcessMemory are intentionally avoided to prevent AV heuristic triggers. RWX/unbacked detection lives in `EtwThreatIntelMonitor` (v1.6.8).
+- **`EtwThreatIntelMonitor`** — Updated standalone monitor table to mention VirtualQueryEx-based unbacked RWX detection (every 3rd cycle).
+- **`DetectionEngine` deduplication** — Was documented as "60s window". Actually uses tiered dedup: 10s for Tier1 (hardened in v1.3.0 to prevent 60s blind spots) and 30s for Tier2.
+
+#### Rate limits corrected
+
+- **JSONL rate limiter** — Was "100/s, burst 200". Actually `BurstRateLimiter(1000, 5000)` — 1000 events/second sustained, 5000 burst capacity.
+
+#### Removed stale references
+
+- **`BeaconingTelemetry`** type — Never existed as a class. `BeaconingDetector` emits `DetectionEvent` objects directly via `EmitAsync`.
+- **`PersistenceRule`** — Listed as consumer of `RegistryTelemetry` but never implemented as a standalone rule class. Persistence detection is handled by monitors (`WmiPersistenceMonitor`, `RegistryMonitor`).
+- **3 composite detections** — Originally noted as "consolidated into Dropped Payload Active." Now implemented as distinct composites in `BehavioralCorrelationEngine` per original design: **Covert RAT: Unsigned + Hidden + Network** (0.88–0.92), **Confirmed C2 Beacon: Unsigned Process** (0.88–0.93), **Covert C2: Unsigned + Sustained Connection** (0.90). These fire before the "Dropped Payload Active" catch-all when their specific trigger conditions match.
+
+#### Added — Missing Composite Detections (BehavioralCorrelationEngine)
+
+Three composite rules that were designed in v0.3.5 but never separately implemented are now live:
+
+| Composite | Confidence | Trigger Combination |
+|-----------|-----------|---------------------|
+| Covert RAT: Unsigned + Hidden + Network | 0.88 (0.92 w/ recon) | Unsigned from staging path (Temp/AppData) + C2 network |
+| Confirmed C2 Beacon: Unsigned Process | 0.88 (0.93 from staging path) | Unsigned binary + periodic beaconing pattern |
+| Covert C2: Unsigned + Sustained Connection | 0.90 | Unsigned binary + 60s+ sustained outbound connection |
+
+These are more specific than "Dropped Payload Active" (which remains as the catch-all for any unsigned + NetworkC2). Evaluation order: specific composites first → Dropped Payload Active as fallback.
+
+#### Added previously undocumented components
+
+- **`IncidentResponseService`** — Automated incident resolution: persistence removal, quarantine orchestration. Integrates with ChainTracer.
+- **`ParentPidSpoofDetector`** — PPID spoofing detection via CreateToolhelp32Snapshot.
+- **`SafeProcessExemptionRegistry`** — Tracks VerdictGateRule-confirmed safe processes.
+- **`FileVerdictAds`** — ADS-based verdict tags to avoid redundant file scanning.
+- **`ToastService`** — System toast notification delivery.
+- **`RemoveCertAndKillAdder`** — Added to Response Actions table (was only in v1.7.0 section).
+- **Named Pipe C2 + Network Beaconing** and **Token Theft + Lateral Movement** composites added to main composite table (were only in v1.6.8 addendum).
+
+#### ETW provider GUIDs verified
+
+All 9 provider GUIDs confirmed correct against Microsoft official documentation:
+- Kernel-Process: `{22FB2CD6-0E7B-422B-A0C7-2FAD1FD0E716}`
+- Kernel-File: `{EDD08927-9CC4-4E65-B970-C2560FB5C289}`
+- Kernel-Registry: `{70EB4F03-C1DE-4F73-A051-33D13D5413BD}`
+- DNS-Client: `{1C95126E-7EEA-49A9-A3FE-A378B03DDB4D}`
+- Threat-Intelligence: `{F4E1897C-BB5D-5668-F1D8-040F4D8DD344}`
+- PowerShell: `{A0C1853B-5C40-4B15-8766-3CF1C58F985A}`
+- Firewall: `{D1BC9AFF-2ABF-4D71-9146-ECB2A986EB85}`
+- TaskScheduler: `{DE7B24EA-73C8-4A09-985D-5BDADCFA9017}`
+- Kernel-Network: `{7DD42A49-5329-4832-8DFD-43D979153A88}`
+
+---
+
 ## [1.7.0] - 2026-07-29
 
 ### Added — BYOVD Certificate Tracing (DriverLoadMonitor)

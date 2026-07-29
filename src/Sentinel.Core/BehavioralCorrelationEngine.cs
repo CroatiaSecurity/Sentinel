@@ -207,13 +207,62 @@ namespace Sentinel.Core
                 return;
             }
 
-            // Dropped Payload Phoning Home (0.93)
-            // Unsigned/suspicious binary + C2 network
+            // ═══ v1.7.1: Covert RAT — Unsigned + Hidden + Network (0.88–0.92) ═══
+            // Unsigned binary from staging path + sustained network + no visible window or recon activity
             var hasUnsignedOrSuspicious = currentSignals.Any(s =>
                 s.SignalType == SignalType.SuspiciousProcess ||
                 s.RuleName.Contains("Unsigned", StringComparison.OrdinalIgnoreCase) ||
                 s.RuleName.Contains("Suspicious Path", StringComparison.OrdinalIgnoreCase) ||
                 s.RuleName.Contains("Attack Tool", StringComparison.OrdinalIgnoreCase));
+            var hasStagingPath = currentSignals.Any(s =>
+                s.RuleName.Contains("Staging", StringComparison.OrdinalIgnoreCase) ||
+                s.Evidence?.Contains("\\Temp\\", StringComparison.OrdinalIgnoreCase) == true ||
+                s.Evidence?.Contains("\\AppData\\", StringComparison.OrdinalIgnoreCase) == true);
+            var hasRecon = currentSignals.Any(s =>
+                s.RuleName.Contains("Recon", StringComparison.OrdinalIgnoreCase) ||
+                s.RuleName.Contains("Enumeration", StringComparison.OrdinalIgnoreCase) ||
+                s.RuleName.Contains("Discovery", StringComparison.OrdinalIgnoreCase));
+            if (hasUnsignedOrSuspicious && hasStagingPath && types.Contains(SignalType.NetworkC2))
+            {
+                double covertRatConfidence = hasRecon ? 0.92 : 0.88;
+                await EmitCompositeAsync(pid, "Covert RAT: Unsigned + Hidden + Network", covertRatConfidence,
+                    "Unsigned binary from staging path with sustained network activity.",
+                    "A binary from a staging directory (Temp/AppData) initiated C2 networking — behavioral RAT pattern detected without campaign IOCs.");
+                return;
+            }
+
+            // ═══ v1.7.1: Confirmed C2 Beacon — Unsigned Process (0.88–0.93) ═══
+            // Unsigned binary exhibiting periodic beaconing (statistical CV < threshold)
+            var hasBeaconing = currentSignals.Any(s =>
+                s.RuleName.Contains("Beaconing", StringComparison.OrdinalIgnoreCase) ||
+                s.RuleName.Contains("Beacon", StringComparison.OrdinalIgnoreCase));
+            if (hasUnsignedOrSuspicious && hasBeaconing)
+            {
+                double beaconConfidence = hasStagingPath ? 0.93 : 0.88;
+                await EmitCompositeAsync(pid, "Confirmed C2 Beacon: Unsigned Process", beaconConfidence,
+                    "Unsigned binary exhibiting periodic beaconing pattern.",
+                    "An unsigned process maintains regular-interval callbacks characteristic of C2 beaconing — confirms active command-and-control regardless of framework.");
+                return;
+            }
+
+            // ═══ v1.7.1: Covert C2 — Unsigned + Sustained Connection (0.90) ═══
+            // Unsigned binary maintaining a long-lived outbound connection (60s+)
+            var hasSustainedConnection = currentSignals.Any(s =>
+                s.RuleName.Contains("Sustained", StringComparison.OrdinalIgnoreCase) ||
+                s.RuleName.Contains("Long-lived", StringComparison.OrdinalIgnoreCase) ||
+                s.RuleName.Contains("Persistent Connection", StringComparison.OrdinalIgnoreCase) ||
+                (s.SignalType == SignalType.NetworkC2 &&
+                 s.Evidence?.Contains("60s", StringComparison.OrdinalIgnoreCase) == true));
+            if (hasUnsignedOrSuspicious && hasSustainedConnection)
+            {
+                await EmitCompositeAsync(pid, "Covert C2: Unsigned + Sustained Connection", 0.90,
+                    "Unsigned binary maintaining a 60s+ outbound connection.",
+                    "An unsigned binary holds a persistent outbound connection — matches PlugX/RAT pattern of fake updater from temp path holding HTTPS to C2.");
+                return;
+            }
+
+            // Dropped Payload Phoning Home (0.93)
+            // Unsigned/suspicious binary + C2 network (catch-all for unsigned + any network C2)
             if (hasUnsignedOrSuspicious && types.Contains(SignalType.NetworkC2))
             {
                 await EmitCompositeAsync(pid, "Dropped Payload Active", 0.93,

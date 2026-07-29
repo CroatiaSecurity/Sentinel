@@ -1,6 +1,6 @@
 # Sentinel — Design Document
 
-**Version: 1.7.0**
+**Version: 1.7.1**
 
 ---
 
@@ -64,9 +64,9 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 | `AntiTamperGuard` | Service self-reinstall, anti-suspend timing, binary integrity, FIPS enforcement | 2s timing / 10s integrity |
 | `IPSecIntegrityGuard` | Verifies GSecurity IPSec policy is active; re-applies if deleted | 30s |
 | `AgentWatchdog` | Polls for Agent process; relaunches via CreateProcessAsUser if absent | 10s |
-| `SyscallStubMonitor` | Compares ntdll/amsi function prologues against startup baseline | 10s |
+| `SyscallStubMonitor` | Compares ntdll/amsi function prologues against startup baseline; indirect syscall pattern detection | 30s |
 | `ConnectivityCanaryMonitor` | Verifies Sentinel can reach threat intel endpoints; detects EDRSilencer | 45s |
-| `EtwSessionGuard` | Checks UnifiedEtwSession IsActive + events/sec floor; auto-recreates | 2–5s |
+| `EtwSessionGuard` | Checks UnifiedEtwSession IsActive + events/sec floor; auto-recreates | 3s |
 | `EtwProviderTamperMonitor` | Checks EtwEventWrite patches in critical processes; detects logman/wevtutil manipulation | 30s |
 
 #### Group 2: CoreDetection (2s start delay, max 5 restarts)
@@ -80,15 +80,15 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 | `ConsultantSignalIngestor` | Tails external consultant signal JSONL files | continuous |
 | `GhostProcessMonitor` | Detects PIDs with network connections but empty/unresolvable process names | 15s |
 | `EphemeralProcessMonitor` | Catches short-lived processes via Prefetch + Event 4688 polling | 5s |
-| `ModuleValidationMonitor` | Scans critical process modules for unsigned/tampered DLLs (baseline + detect) | 60s–5min tiered |
-| `RuntimeModuleIntegrityMonitor` | Per-process module baseline; detects new suspicious DLLs appearing post-baseline | 60s–5min tiered |
+| `ModuleValidationMonitor` | Scans critical process modules for unsigned/tampered DLLs (baseline + detect) | 30s |
+| `RuntimeModuleIntegrityMonitor` | Per-process module baseline; detects new suspicious DLLs appearing post-baseline | 60s |
 | `DllEntropyAnalyzer` | Shannon entropy analysis on loaded DLLs; flags packed/encrypted (≥7.2) | periodic |
 | `DllLoadFailureMonitor` | Event Log ID 7 + SideBySide errors for failed DLL hijack attempts | periodic |
 | `DiskWideDllScanner` | Scans all drives for unsigned/suspicious DLLs at relaxed intervals | periodic |
 | `PersistentConnectionMonitor` | Detects long-lived connections (webhooks, C2 pairing) and failover on drop | 10s |
 | `DataExfiltrationMonitor` | Monitors outbound network volume, sensitive file access, USB writes | 15s |
 | `AdsDataStagingMonitor` | Detects non-standard NTFS Alternate Data Streams (>1KB) in Temp/Downloads | periodic |
-| `ScriptExecutionMonitor` | PowerShell Event 4104, parent-child anomalies, AMSI bypass, SAM extraction, script drops | 8s |
+| `ScriptExecutionMonitor` | PowerShell Event 4104, parent-child anomalies, AMSI bypass, SAM extraction, script drops | 10s |
 | `ScriptHardeningMonitor` | PS history integrity, SBL enforcement, downgrade, obfuscation scoring, profile persistence | 8s |
 | `NamedPipeMonitor` | Polls `\\.\pipe\` for C2/lateral movement patterns; GetNamedPipeServerProcessId attribution | 15s |
 | `RpcLateralMonitor` | Detects outbound lateral movement via RPC/DCOM/WMI/WinRM (ports 135/445/5985/5986) | 10s |
@@ -99,10 +99,10 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 
 | Component | Mechanism | Interval |
 |-----------|-----------|----------|
-| `CanaryFileMonitor` | Deploys decoy files in ransomware-target directories; any access triggers alert | continuous (FSW) |
-| `BrowserCredentialGuard` | Monitors Chromium + Firefox credential files (Login Data, Cookies, key4.db, logins.json) | 10s |
+| `CanaryFileMonitor` | Deploys decoy files in ransomware-target directories; any access triggers alert | 10s |
+| `BrowserCredentialGuard` | Monitors Chromium + Firefox credential files (Login Data, Cookies, key4.db, logins.json) | 30s |
 | `BrowserC2Guard` | Headless chrome-as-proxy detection, CDP session hijacking, extension manifest integrity scanning | 30s |
-| `MicrosoftAccountGuardMonitor` | TokenBroker cache, PRT extraction, Azure AD token theft tool detection | 12s |
+| `MicrosoftAccountGuardMonitor` | TokenBroker cache, PRT extraction, Azure AD token theft tool detection | 30s |
 | `NullSessionGuard` | Enforces LimitBlankPasswordUse, RestrictAnonymous, EveryoneIncludesAnonymous | 60s |
 | `BuiltinAdminGuard` | Monitors built-in Administrator account (RID 500); disables if found active | 15s |
 | `PasswordRotationGuard` | Auto-logon password rotation via LsaStorePrivateData | periodic |
@@ -113,26 +113,26 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 |-----------|-----------|----------|
 | `ArpSpoofMonitor` | GetIpNetTable P/Invoke; detects gateway MAC change, ARP poisoning, virtual OUI | 15s |
 | `DnsResponseValidationMonitor` | Resolves canary domains; validates against expected CIDR ranges | 1min |
-| `PublicIpMonitor` | Checks public IP via Cloudflare/ipify/icanhazip; detects geo/ASN shift | 2min |
-| `WifiSecurityMonitor` | Polls Wi-Fi state via netsh; detects deauth flood, open network, encryption downgrade | 10s |
+| `PublicIpMonitor` | Checks public IP via Cloudflare/ipify/icanhazip; detects geo/ASN shift | 5min |
+| `WifiSecurityMonitor` | Polls Wi-Fi state via netsh; detects deauth flood, open network, encryption downgrade | 15s |
 | `NetworkInterfaceGuard` | Removes bridges via SetupAPI, restores disabled adapters, locks DNS, enforces DoH | 15s |
-| `AppDnsExfilMonitor` | Detects non-browser processes connecting to known DoH resolvers on port 443 | 10s |
+| `AppDnsExfilMonitor` | Detects non-browser processes connecting to known DoH resolvers on port 443 | 500ms |
 | `NetworkShareMonitor` | Monitors SMB shares, admin share access (C$/ADMIN$/IPC$), inbound sessions | 15s |
 | `NetworkReinfectionDetector` | Monitors NIC state changes; flags new suspicious processes after network reconnection | on NIC event |
 | `ReinfectionCorrelator` | Tracks killed/quarantined hashes across reboots; scans for reappearance | 60s |
 | `DnsCrossValidator` | Resolves test domain via system + direct Cloudflare; detects router DNS poisoning | periodic |
 | `TrafficVolumeBaseline` | Monitors raw NetworkInterface BytesSent; alerts on 3x baseline upload volume | 30s |
 | `OutboundConnectionWhitelist` | Monitors/enforces outbound connections against allowed IP subnets | periodic |
-| `RemoteAccessMonitor` | Scans for 35+ remote access tools; detects RDP state changes | 30s |
+| `RemoteAccessMonitor` | Scans for 35+ remote access tools; detects RDP state changes | 60s |
 
 #### Group 5: SystemIntegrity (10s start delay, max 3 restarts)
 
 | Component | Mechanism | Interval |
 |-----------|-----------|----------|
-| `FirewallIntegrityMonitor` | Polls firewall profiles via netsh advfirewall; detects disable/bulk rules | 30s |
+| `FirewallIntegrityMonitor` | Polls firewall profiles via netsh advfirewall; detects disable/bulk rules | 60s |
 | `SecureBootIntegrityMonitor` | Checks Secure Boot, test signing, kernel debug via registry+bcdedit | 5min |
 | `WindowsUpdateIntegrityMonitor` | Monitors WU/BITS services and auto-update registry | 2min |
-| `ScheduledTaskMonitor` | Polls scheduled tasks via schtasks; multi-indicator suspicious task analysis | 30s |
+| `ScheduledTaskMonitor` | Polls scheduled tasks via schtasks; multi-indicator suspicious task analysis | 60s |
 | `CriticalServiceGuard` | Monitors 15 critical services for crash storms via SCM events (7034/7031) | 10s |
 | `RegistryMonitor` | WMI-based monitoring of Run keys, Services, CLSID COM hijacking | continuous |
 | `WmiPersistenceMonitor` | Periodic scan for __EventFilter/__EventConsumer persistence (T1546.003) | 5min |
@@ -173,17 +173,17 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 | Component | Mechanism | Notes |
 |-----------|-----------|-------|
 | `EtwProcessMonitor` | ETW kernel provider (Kernel-Process); IMonitor interface | Falls back to WMI |
-| `EtwThreatIntelMonitor` | Microsoft-Windows-Threat-Intelligence ETW provider; IMonitor | Requires elevation |
+| `EtwThreatIntelMonitor` | Microsoft-Windows-Threat-Intelligence ETW provider; VirtualQueryEx-based unbacked RWX detection every 3rd cycle | Requires elevation |
 | `DnsQueryMonitor` | Microsoft-Windows-DNS-Client ETW provider; IMonitor | Requires elevation |
 | `WmiProcessMonitor` | Win32_ProcessStartTrace WMI event subscription | Disabled when ETW active |
 | `FileActivityMonitor` | FileSystemWatcher on user profile + dynamic paths | Singleton |
 | `NetworkMonitor` | GetExtendedTcpTable/UdpTable P/Invoke, IPv4+IPv6 | Singleton |
-| `LsassDumpCanaryMonitor` | Scans system-wide process handles for unauthorized lsass.exe read access | 45s |
+| `LsassDumpCanaryMonitor` | Scans system-wide process handles for unauthorized lsass.exe read access | 30s |
 | `RouteTableMonitor` | GetIpForwardTable P/Invoke; detects route injection, default route hijack | 15s |
-| `MemoryBehaviorAnalyzer` | VirtualQueryEx + module scanning; DLL sideloading detection | 45s |
-| `TokenIntegrityMonitor` | GetTokenInformation(TokenIntegrityLevel); detects Medium→High without UAC | 20s |
+| `MemoryBehaviorAnalyzer` | Process.Modules enumeration + module count tracking; process hollowing and DLL sideloading detection | 90s |
+| `TokenIntegrityMonitor` | GetTokenInformation(TokenIntegrityLevel); detects Medium→High without UAC | 45s |
 | `CredentialCanaryMonitor` | Plants/monitors honeypot credentials in Windows Credential Manager | periodic |
-| `LocalServerMonitor` | Detects suspicious processes listening on localhost (mounted ISO/VHD origins) | 30s |
+| `LocalServerMonitor` | Detects suspicious processes listening on localhost (mounted ISO/VHD origins) | 20s |
 | `AppNetworkPolicyMonitor` | Per-app network destination learning and enforcement (30-min learning phase) | 15s |
 | `UsbDeviceFingerprinter` | USB device baseline via VID:PID:Serial; BadUSB detection | 30s |
 
@@ -208,11 +208,11 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 
 | Component | Role |
 |-----------|------|
-| `DetectionEngine` | Runs all `IDetectionRule` instances against incoming telemetry. Channel-based async stream. 60s deduplication window. Records metrics via `SentinelMetrics`. |
+| `DetectionEngine` | Runs all `IDetectionRule` instances against incoming telemetry. Channel-based async stream. Tiered deduplication (10s Tier1, 30s Tier2). Records metrics via `SentinelMetrics`. |
 | `AdvancedResponseEngine` | Single point of action enforcement. Tier2 is always log-only. Tier1 may kill process when `--active-response` is set. President's Law closed kill list. |
 | `TelemetryFusionEngine` | Correlates raw telemetry across all sources into per-process event chains. Produces `FusedTelemetryContext` with behavioral metrics. |
 | `EventGraph` | In-memory graph of processes, files, and network endpoints with temporal/causal edges. Supports incident timeline queries. |
-| `MemoryBehaviorAnalyzer` | Scans process memory regions every 45s for RWX, unbacked executables, module growth, and DLL sideloading. |
+| `MemoryBehaviorAnalyzer` | Scans process modules every 90s via .NET Process.Modules. Detects process hollowing (missing MainModule), DLL injection (module count growth ≥3), and DLL sideloading via DllUnloadEngine. |
 | `ProcessAncestryCache` | `CreateToolhelp32Snapshot` refreshed every 5s (WMI fallback for Server Core/IoT). Provides parent name resolution. |
 | `BehavioralCorrelationEngine` | Time-windowed (60s) multi-signal correlator. Fires composite `DetectionEvent`s via `IDetectionEngine.EmitAsync`. |
 | `BeaconingDetector` | Statistical C2 beacon detection. Tracks inter-connection intervals. Fires when CV < 0.40 with 5+ observations. Multi-factor Authenticode trust verification. |
@@ -220,6 +220,7 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 | `FileReputationEngine` | Composite file trust scoring (0-100) aggregating CIRCL, MalwareBazaar, VirusTotal (via proxy), static PE analysis, signer trust. |
 | `DllUnloadEngine` | Detects DLL sideloading; unloads malicious DLLs via QueueUserAPC+FreeLibrary or kills host process. |
 | `ChainTracer` | Attack chain walker: kills non-critical processes in chain, quarantines binaries, removes persistence. |
+| `IncidentResponseService` | Automated incident resolution: persistence removal, quarantine orchestration. Integrates with ChainTracer. |
 | `IsolationResponseEngine` | Handles threats from isolated environments: ISO dismount, Docker stop+rm+rmi, Hyper-V/VM stop. |
 | `DynamicRulesEvaluator` | Loads HMAC-signed JSON rule files from `/rules` directory at runtime. |
 | `ResponseCoordinator` | Per-PID semaphore-based response serialization. Prevents duplicate kills, supports escalation. |
@@ -258,6 +259,10 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 | `EtwEventDispatcher` | Routes raw ETW events by provider GUID to typed telemetry objects. |
 | `ConfigIntegrityMonitor` | Runtime detection of config/executable tampering (SHA-256 baseline, 5-min checks). Integrated into `AntiTamperGuard`. |
 | `ProxyAuthHelper` | HMAC-SHA256 signing for all proxy requests using installation entropy key. |
+| `ParentPidSpoofDetector` | Detects PPID spoofing via CreateToolhelp32Snapshot parent-child validation. |
+| `SafeProcessExemptionRegistry` | Tracks processes confirmed safe by VerdictGateRule to prevent redundant scanning. |
+| `FileVerdictAds` | Reads/writes ADS-based verdict tags on scanned files to avoid re-scanning. |
+| `ToastService` | System toast notification delivery for user-visible alerts (Agent-side). |
 
 ---
 
@@ -298,15 +303,17 @@ Emitted as Tier1 `DetectionEvent`s directly via `EmitAsync`. Requires signals fr
 | Injected C2 Beacon | 0.98 | Kernel-observed injection + C2 network |
 | Credential Dump + Exfiltration | 0.96 | LSASS/credential access + outbound network |
 | In-Memory Implant Active | 0.96 | Memory anomaly (injection/RWX) + network callback |
+| Named Pipe C2 + Network Beaconing | 0.95 | Suspicious named pipe + C2 network beaconing on same PID |
 | Fileless Attack Chain | 0.95 | AMSI/ETW/security evasion + shell or C2 |
 | DGA + C2 Beaconing | 0.94 | High-entropy/rapid DNS + periodic beacon |
-| Dropped Payload Active | 0.93 | Unsigned/staged binary + C2 communication |
+| Token Theft + Lateral Movement | 0.93 | Token manipulation + RPC/SMB/pipe lateral movement on same PID |
+| Dropped Payload Active | 0.93 | Unsigned/staged binary + C2 communication (catch-all) |
+| Confirmed C2 Beacon: Unsigned Process | 0.88–0.93 | Unsigned binary + periodic beaconing pattern (staging path boost) |
 | Spoofed Process Phoning Home | 0.92 | PPID spoofing + network communication |
 | Evasion + Persistence Install | 0.91 | Security evasion + persistence mechanism |
+| Covert C2: Unsigned + Sustained Connection | 0.90 | Unsigned binary maintaining 60s+ outbound connection |
 | Escalation + C2 Channel | 0.90 | Privilege escalation + outbound C2 |
-| Covert RAT: Unsigned + Network | 0.88–0.92 | Unsigned binary from staging path + sustained network |
-| Confirmed C2 Beacon: Unsigned | 0.88–0.93 | Unsigned binary + periodic beaconing pattern |
-| Covert C2: Sustained Connection | 0.90 | Unsigned binary + 60s+ outbound connection |
+| Covert RAT: Unsigned + Hidden + Network | 0.88–0.92 | Unsigned from staging path + C2 network (recon activity boost) |
 
 ---
 
@@ -318,8 +325,7 @@ Emitted as Tier1 `DetectionEvent`s directly via `EmitAsync`. Requires signals fr
 | `NetworkTelemetry` | `NetworkMonitor`, `UnifiedEtwSession` (Kernel-Network) | `ReverseShellRule`, `BeaconingDetector` |
 | `FileActivityTelemetry` | `FileActivityMonitor`, `UnifiedEtwSession` (Kernel-File) | `RansomwareDetectionRule` |
 | `ThreatIntelTelemetry` | `EtwThreatIntelMonitor` | `ThreatIntelInjectionRule` |
-| `BeaconingTelemetry` | `BeaconingDetector` | Composite correlation |
-| `RegistryTelemetry` | `UnifiedEtwSession` (Kernel-Registry) | `RegistryMonitor`, `PersistenceRule` |
+| `RegistryTelemetry` | `UnifiedEtwSession` (Kernel-Registry) | `RegistryMonitor` |
 | `DnsTelemetry` | `UnifiedEtwSession` (DNS-Client) | `DnsQueryMonitor` |
 | `FirewallTelemetry` | `UnifiedEtwSession` (Firewall) | `FirewallIntegrityMonitor` |
 | `TaskSchedulerTelemetry` | `UnifiedEtwSession` (TaskScheduler) | `ScheduledTaskMonitor` |
@@ -340,6 +346,7 @@ Emitted as Tier1 `DetectionEvent`s directly via `EmitAsync`. Requires signals fr
 | `RemoveRegistryEntry` | Removes malicious autorun/service/COM entries |
 | `DismountVolume` | Dismounts ISO/VHD/SUBST drives hosting threats |
 | `RemoveCert` | Removes suspicious root certificates from store |
+| `RemoveCertAndKillAdder` | Removes planted certificate + kills the process that installed it (BYOVD cert-trace) |
 
 ---
 
@@ -352,7 +359,7 @@ Emitted as Tier1 `DetectionEvent`s directly via `EmitAsync`. Requires signals fr
 - **Graceful degradation** — ETW → WMI fallback; ThreatIntel ETW unavailable → continue without
 - **Startup self-test** — Verifies ETW, DPAPI, quarantine, log file, and rule loading before activating monitors
 - **Tier2 enforcement** — `AdvancedResponseEngine` hard-codes `LogOnly` for all `Tier2Indicator` events regardless of configuration
-- **Deduplication** — `DetectionEngine` suppresses identical `(RuleName, ProcessId)` pairs within 60s
+- **Deduplication** — `DetectionEngine` suppresses identical `(RuleName, ProcessId)` pairs within 10s (Tier1) / 30s (Tier2)
 - **All file reads use `FileShare.ReadWrite | FileShare.Delete`** — Sentinel observes, never obstructs
 - **Monitors are grouped by function and priority** — critical self-protection first, peripheral last
 - **No LOLBin dependencies** — all response actions use native C# APIs / P/Invoke (no sc.exe, cmd.exe, powershell.exe)
@@ -367,7 +374,7 @@ Emitted as Tier1 `DetectionEvent`s directly via `EmitAsync`. Requires signals fr
 - Thread-safe via `SemaphoreSlim`
 - `System.Text.Json` only — no string-built JSON
 - Size-based rotation at 50 MB, up to 5 rotated files
-- Rate-limited: max 100 entries/second, burst of 200
+- Rate-limited: max 1000 entries/second, burst of 5000
 - `FileShare.ReadWrite` — concurrent readers never blocked
 - Self-healing: retries on write failure; renames stale locked files
 
