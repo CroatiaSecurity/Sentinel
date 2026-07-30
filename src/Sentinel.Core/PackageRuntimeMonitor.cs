@@ -12,7 +12,7 @@ using Microsoft.Extensions.Logging;
 namespace Sentinel.Core
 {
     /// <summary>
-    /// v1.9.0: Supply-chain runtime — package managers spawning LOLBins / writing
+    /// v1.8.2: Supply-chain runtime — package managers spawning LOLBins / writing
     /// executables under package trees (postinstall, slopsquatting, TrapDoor-class).
     /// </summary>
     public sealed class PackageRuntimeMonitor : BackgroundService

@@ -12,7 +12,7 @@ using Microsoft.Extensions.Logging;
 namespace Sentinel.Core
 {
     /// <summary>
-    /// v1.9.0: Detects AI coding agents / MCP toolchains abused as autonomous attackers
+    /// v1.8.2: Detects AI coding agents / MCP toolchains abused as autonomous attackers
     /// (agentic recon, credential harvest, package install, LOLBin spawn).
     /// LogOnly by default; KillProcessTree only when agent + credential path + network tool.
     /// </summary>

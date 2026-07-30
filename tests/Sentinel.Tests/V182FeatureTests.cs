@@ -10,18 +10,18 @@ using Sentinel.Core;
 namespace Sentinel.Tests
 {
     /// <summary>
-    /// v1.9.0 — Agentic AI + package supply-chain runtime monitors.
+    /// v1.8.2 — Agentic AI + package supply-chain runtime monitors.
     /// </summary>
-    public class V190FeatureTests : IDisposable
+    public class V182FeatureTests : IDisposable
     {
         private readonly string _tempDir;
         private readonly DetectionEngine _detectionEngine;
         private readonly JsonlEventLogger _eventLogger;
         private readonly ProcessAncestryCache _ancestryCache;
 
-        public V190FeatureTests()
+        public V182FeatureTests()
         {
-            _tempDir = Path.Combine(Path.GetTempPath(), "sentinel_v190_" + Guid.NewGuid().ToString("N")[..8]);
+            _tempDir = Path.Combine(Path.GetTempPath(), "sentinel_V182_" + Guid.NewGuid().ToString("N")[..8]);
             Directory.CreateDirectory(_tempDir);
             _eventLogger = new JsonlEventLogger(Path.Combine(_tempDir, "events.jsonl"));
             var metrics = new SentinelMetrics();

@@ -2,13 +2,13 @@
  
 All notable changes to Sentinel are documented in this file.
 
-## [1.9.0] - 2026-07-30
+## [1.8.2] - 2026-07-30
 
 ### Protection lift — AI agent + supply-chain runtime
 
 - **`AgenticProcessMonitor`** — detects AI coding agents / MCP toolchains (Claude, Cursor, Codex, etc.) spawning high-risk children (shells, LOLBins, credential tools). KillProcessTree only on credential-path tool spawn; LogOnly for burst/recon patterns.
 - **`PackageRuntimeMonitor`** — package-manager postinstall abuse (npm/pip/cargo/dotnet/… → LOLBin), executables under package trees, and **dev-config poison** watches (`CLAUDE.md`, `.cursorrules`, MCP configs) for TrapDoor-class attacks.
-- Wired into CoreDetection MonitorGroup; unit tests in `V190FeatureTests`.
+- Wired into CoreDetection MonitorGroup; unit tests in `V182FeatureTests`.
 - Docs: design inventory, threat model, README capabilities.
 
 ## [1.8.1] - 2026-07-30

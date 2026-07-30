@@ -1,6 +1,6 @@
 # Sentinel — Threat Model
 
-**Version: 1.9.0**
+**Version: 1.8.2**
 
 This document assumes the attacker has read the source code.
 
@@ -59,8 +59,8 @@ See [design.md](design.md) for the full component inventory (all MonitorGroups +
 - **EtwProviderTamperMonitor** — EtwEventWrite patch detection
 - **ThreatIntelFeedBlocker** (v1.7.4) — Spamhaus/Feodo/ET IP blocklists
 - **LnkShortcutMonitor** (v1.7.4) — Real-time malicious shortcut guard
-- **AgenticProcessMonitor** (v1.9.0) — AI coding agent / MCP toolchain abuse
-- **PackageRuntimeMonitor** (v1.9.0) — Package-manager runtime + AI config poison
+- **AgenticProcessMonitor** (v1.8.2) — AI coding agent / MCP toolchain abuse
+- **PackageRuntimeMonitor** (v1.8.2) — Package-manager runtime + AI config poison
 - **AsrPolicyGuard** (v1.7.5) — Self-healing Defender ASR Block rules
 - **RemoteSessionGuard** (v1.7.5) — Force-logoff unauthorized RDP/remote sessions
 - **ForumHrWatchMonitor** (v1.7.6) — Dedicated forum.hr abuse watch (site no longer hosts-blocked)
