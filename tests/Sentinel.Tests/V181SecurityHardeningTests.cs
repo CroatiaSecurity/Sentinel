@@ -137,5 +137,14 @@ namespace Sentinel.Tests
             Assert.Equal(128L * 1024 * 1024, QuarantineManager.MaxQuarantineFileBytes);
             Assert.True(QuarantineManager.MaxQuarantineFileBytes < 512L * 1024 * 1024);
         }
+
+        [Fact]
+        public void NetworkIsolate_PrivateIpStillClassified_EvenIfArpFlushExists()
+        {
+            // Guardrail: ARP/firewall path must not run for private IPs (RT-NEW-3).
+            // FlushArpEntry is only invoked after public-IP validation in AdvancedResponseEngine.
+            Assert.True(SecurityValidation.IsPrivateIpAddress("192.168.0.1"));
+            Assert.False(SecurityValidation.IsPrivateIpAddress("203.0.113.10"));
+        }
     }
 }

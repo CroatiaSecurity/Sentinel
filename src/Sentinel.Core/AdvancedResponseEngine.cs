@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -537,6 +538,9 @@ namespace Sentinel.Core
                     else
                     {
                         IsolateNetworkTarget(targetIp, detection.RuleName);
+                        // v1.8.1: restore ARP entry purge (lost in LOLBin-free rewrite).
+                        // Was `arp -d` shell-out (v5.9.0); now DeleteIpNetEntry P/Invoke only.
+                        FlushArpEntry(targetIp);
                     }
                 }
 
@@ -833,8 +837,51 @@ namespace Sentinel.Core
             catch { }
         }
 
-        [System.Runtime.InteropServices.DllImport("dnsapi.dll", EntryPoint = "DnsFlushResolverCache")]
+        /// <summary>
+        /// v1.8.1: Drop a single IPv4 ARP cache entry without shelling to <c>arp.exe</c>.
+        /// Restores NetworkIsolate parity with v5.9.0 (firewall + ARP + DNS flush).
+        /// </summary>
+        private static void FlushArpEntry(string ip)
+        {
+            try
+            {
+                if (!IPAddress.TryParse(ip, out var addr) ||
+                    addr.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork)
+                    return;
+
+                var ipBytes = addr.GetAddressBytes();
+                uint ipInt = BitConverter.ToUInt32(ipBytes, 0);
+                if (GetBestInterface(ipInt, out int ifIndex) != 0)
+                    return;
+
+                var row = new MibIpNetRow
+                {
+                    dwIndex = ifIndex,
+                    dwAddr = unchecked((int)ipInt)
+                };
+                DeleteIpNetEntry(ref row);
+            }
+            catch { }
+        }
+
+        [DllImport("dnsapi.dll", EntryPoint = "DnsFlushResolverCache")]
         private static extern uint DnsFlushResolverCache();
+
+        [DllImport("iphlpapi.dll", SetLastError = true)]
+        private static extern int GetBestInterface(uint dwDestAddr, out int pdwBestIfIndex);
+
+        [DllImport("iphlpapi.dll", SetLastError = true)]
+        private static extern int DeleteIpNetEntry(ref MibIpNetRow pArpEntry);
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct MibIpNetRow
+        {
+            public int dwIndex;
+            public int dwPhysAddrLen;
+            public byte mac0, mac1, mac2, mac3, mac4, mac5, mac6, mac7;
+            public int dwAddr;
+            public int dwType;
+        }
 
         /// <summary>
         /// v1.6.1: Avoid firewall-blocking major public resolvers / well-known CDN anycast

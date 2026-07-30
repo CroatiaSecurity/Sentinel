@@ -78,7 +78,7 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 | `BeaconingDetector` | Statistical CV analysis of connection intervals per (PID, Remote, Port) | 30s |
 | `BehavioralBaselineService` | Learns normal processes, paths, parent-child, network destinations | continuous |
 | `FileVerdictScanner` | Lazy background hash reputation scanning + ADS tagging (CIRCL/MalwareBazaar/VT) | background walk |
-| `ConsultantSignalIngestor` | Tails external consultant signal JSONL files | continuous |
+| `ConsultantSignalIngestor` | Tails external consultant signal JSONL under ProgramData; owner-checked. Emits via `SubmitConsultantSignalAsync` (sticky **Tier2 + LogOnly** — never kill/isolate) | continuous |
 | `GhostProcessMonitor` | Detects PIDs with network connections but empty/unresolvable process names | 15s |
 | `EphemeralProcessMonitor` | Catches short-lived processes via Prefetch + Event 4688 polling | 5s |
 | `ModuleValidationMonitor` | Scans critical process modules for unsigned/tampered DLLs (baseline + detect) | 30s |
@@ -143,7 +143,7 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 | `WmiPersistenceMonitor` | Periodic scan for __EventFilter/__EventConsumer persistence (T1546.003) | 5min |
 | `WmiProviderIntegrityMonitor` | Enumerates __Win32Provider objects; validates Authenticode on provider DLLs | 5min |
 | `WorkFoldersExfilMonitor` | Detects unauthorized Work Folders activation; active response: kills service | 15s |
-| `TlsCertificateMonitor` | Monitors LocalMachine\Root certificate store; baselines at startup | 60s |
+| `TlsCertificateMonitor` | Monitors LocalMachine\Root + TrustedPublisher; baselines at startup. BYOVD follow-up: exact cert **thumbprint** match only → stop service + delete SCM key (does **not** delete `System32\drivers\*.sys`) | 60s |
 | `UacBypassSurfaceMonitor` | Detects COM AutoElevation vectors and manifest autoElevate + copy-drop | periodic |
 | `HostsFileGuard` | Enforces embedded hosts file content (SHA-256 verified); deletes other files in drivers\etc | FSW + 30s |
 | `BrowserDnsPolicyGuard` | Disables DoH system-wide across all browsers; 15s self-healing | 15s |
@@ -217,8 +217,8 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 
 | Component | Role |
 |-----------|------|
-| `DetectionEngine` | Runs all `IDetectionRule` instances against incoming telemetry. Channel-based async stream. Tiered deduplication (10s Tier1, 30s Tier2). Records metrics via `SentinelMetrics`. |
-| `AdvancedResponseEngine` | Single point of action enforcement. Tier2 is always log-only. Tier1 may kill process when `--active-response` is set. President's Law closed kill list. |
+| `DetectionEngine` | Runs all `IDetectionRule` instances against incoming telemetry. **Bounded** channel (10k, DropOldest). Tiered deduplication (10s Tier1, 30s Tier2). Consultant signals sticky Tier2/LogOnly. Records metrics via `SentinelMetrics`. |
+| `AdvancedResponseEngine` | Single point of action enforcement. Tier2 is always log-only. Tier1 executes `AuthorizedResponse` when `ActiveResponse=true` (default; `EnforceActiveResponse` re-enables if tampered). CLI `--active-response` can force-enable. President's Law closed kill list. Private/LAN IPs never firewall-isolated. |
 | `TelemetryFusionEngine` | Correlates raw telemetry across all sources into per-process event chains. Produces `FusedTelemetryContext` with behavioral metrics. |
 | `EventGraph` | In-memory graph of processes, files, and network endpoints with temporal/causal edges. Supports incident timeline queries. |
 | `MemoryBehaviorAnalyzer` | Scans process modules every 90s via .NET Process.Modules. Detects process hollowing (missing MainModule), DLL injection (module count growth ≥3), and DLL sideloading via DllUnloadEngine. |
@@ -231,7 +231,7 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 | `ChainTracer` | Attack chain walker: kills non-critical processes in chain, quarantines binaries, removes persistence. |
 | `IncidentResponseService` | Automated incident resolution: persistence removal, quarantine orchestration. Integrates with ChainTracer. |
 | `IsolationResponseEngine` | Handles threats from isolated environments: ISO dismount, Docker stop+rm+rmi, Hyper-V/VM stop. |
-| `DynamicRulesEvaluator` | Loads HMAC-signed JSON rule files from `/rules` directory at runtime. |
+| `DynamicRulesEvaluator` | Loads HMAC-signed JSON rules from `{BaseDirectory}/rules`. Install-entropy signing key; fail-closed if missing. Property allowlist + SecureCompare. |
 | `ResponseCoordinator` | Per-PID semaphore-based response serialization. Prevents duplicate kills, supports escalation. |
 | `ReinfectionCorrelator` | Tracks killed/quarantined hashes across reboots. Scans for reappearance of known-bad. |
 
@@ -253,23 +253,23 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 | `JsonlEventLogger` | JSONL output to events.jsonl. Thread-safe, rate-limited, size-rotated, self-healing. |
 | `SecureCacheStore` | DPAPI machine-scope encryption + HMAC integrity for persisted cache files. |
 | `HashReputationService` | Two-tier caching (memory + DPAPI disk). 3-API lookup: CIRCL, MalwareBazaar, VT proxy. |
-| `QuarantineManager` | DPAPI-encrypted quarantine with SYSTEM+Admins-only ACL. Atomic encrypt→move→delete. |
+| `QuarantineManager` | DPAPI machine-scope quarantine under `%ProgramData%\Sentinel\Quarantine`. Production path: SYSTEM+Admins ACL (Users denied). Max 128 MB/file. Restore path-validated (no OS-critical write). Agent never creates the folder. |
 | `SignerTrustService` | Centralized Authenticode verification (WinVerifyTrust + catalog fallback). Trusted publisher cache. |
 | `AllowlistService` | User/dev/gaming/publisher allowlists. President's Law rules never suppressed. |
-| `SecurityValidation` | Input validation, Authenticode verification (embedded + catalog), process image path resolution. |
+| `SecurityValidation` | Input validation, Authenticode (embedded + catalog), process image path, OS-critical paths, private IP classification, constant-time `SecureCompare`. |
 | `SentinelMetrics` | Performance counters with histograms (P50/P90/P95/P99) for detection and response. |
 | `SentinelHealthCheck` | Structured health checks: process, memory, handles, log file, quarantine, thread pool. |
 | `StartupSelfTest` | Verifies ETW, DPAPI, quarantine, log file, and rule loading before activating monitors. |
-| `ThreatReportService` | Reports threats to MalwareBazaar/URLhaus/AbuseIPDB via Cloudflare Worker proxy. |
+| `ThreatReportService` | Reports threats to MalwareBazaar/URLhaus/AbuseIPDB via Cloudflare Worker proxy (HMAC-auth). |
 | `AutoIncidentReporter` | v1.7.7/1.7.8: Reportable-grade evidence packs, integrity seal (SHA-256+HMAC), victim affidavit, zip export, TI share, national portals. Does not file police reports. |
 | `LawEnforcementPortals` | Country → cybercrime portal directory (IC3, Action Fraud, MUP, …); INTERPOL info-only. |
 | `IoCScanner` | Loads threat intel indicators from DPAPI-encrypted external cache. |
-| `InstallerHeuristics` | Shared utility for installer name/Inno extractor/benign prefetch pattern recognition. |
+| `InstallerHeuristics` | Installer name / Inno extractor / benign prefetch + **`IsLikelyInstallerPath`** (Downloads/Desktop/Program Files; not AppData\Roaming or bare Temp). Used for HighRisk demotion. |
 | `HardeningModule` | Native C# hardening: service disabling, registry security settings, LGPO policy, ACL enforcement. |
 | `UnifiedEtwSession` | Single real-time ETW session subscribing to 9 kernel/system providers via raw P/Invoke. |
 | `EtwEventDispatcher` | Routes raw ETW events by provider GUID to typed telemetry objects. |
-| `ConfigIntegrityMonitor` | Runtime detection of config/executable tampering (SHA-256 baseline, 5-min checks). Integrated into `AntiTamperGuard`. |
-| `ProxyAuthHelper` | HMAC-SHA256 signing for all proxy requests using installation entropy key. |
+| Config integrity | **Not a separate type.** Runtime SHA-256 of `appsettings.json` + executable integrity live inside `AntiTamperGuard` (`CheckAppsettingsIntegrity` / binary checks). |
+| `ProxyAuthHelper` | HMAC-SHA256 of `{timestamp}.{path}.{body}` with `ThreatReporting:ProxySharedSecret` (server-side secret; **not** install entropy). Headers: `X-Sentinel-Timestamp`, `X-Sentinel-Signature` only — never send the secret. |
 | `ParentPidSpoofDetector` | Detects PPID spoofing via CreateToolhelp32Snapshot parent-child validation. |
 | `SafeProcessExemptionRegistry` | Tracks processes confirmed safe by VerdictGateRule to prevent redundant scanning. |
 | `FileVerdictAds` | Reads/writes ADS-based verdict tags on scanned files to avoid re-scanning. |
@@ -302,7 +302,7 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 | Rule | Key Signals | Confidence Range |
 |------|-------------|-----------------|
 | `UnsignedBinaryRule` | Unsigned binary outside system paths, staging path boost | 0.50–0.68 |
-| `DynamicRulesEvaluator` | HMAC-signed JSON rules loaded from `/rules` directory | varies |
+| `DynamicRulesEvaluator` | HMAC-signed JSON rules from install `rules/`; allowlisted fields only | varies (rule-defined; still Tier2-enforced at response) |
 
 ### Composite Detections (BehavioralCorrelationEngine)
 
@@ -348,16 +348,24 @@ Emitted as Tier1 `DetectionEvent`s directly via `EmitAsync`. Requires signals fr
 
 | Kind | When |
 |------|------|
-| `LogOnly` | Always for Tier2; Tier1 when `--active-response` is not set; non-President's-Law rules |
-| `NetworkIsolate` | Firewall block of C2 IP; DNS flush; ARP cache flush |
-| `KillProcess` | Tier1 President's Law rules, confidence ≥ 0.85, via ChainTracer |
+| `LogOnly` | Always for Tier2; consultant signals; Tier1 when `ActiveResponse=false` (lab/observe); allowlist demotion; IDE host protection |
+| `NetworkIsolate` | Tier1: firewall block of **public** C2 IP (COM `INetFwPolicy2`); DNS flush (`DnsFlushResolverCache`); ARP entry purge (`DeleteIpNetEntry`). Skips private/LAN/link-local/multicast/CDN resolvers. Rate-limited (`MaxNetworkIsolatesPerMinute`, default 10). |
+| `KillProcess` | Tier1 with kill authority, confidence gate, via ChainTracer / direct kill; budgets (`MaxKillsPerMinute`, default 15) |
 | `KillProcessTree` | Same as above but walks and kills entire process tree |
-| `Quarantine` | DPAPI-encrypted file quarantine to `%ProgramData%\Sentinel\Quarantine` |
+| `Quarantine` | DPAPI-encrypted file quarantine to `%ProgramData%\Sentinel\Quarantine` (≤128 MB; OS-critical paths refused) |
 | `QuarantineAndKill` | Kill process + quarantine binary + place lock file |
 | `RemoveRegistryEntry` | Removes malicious autorun/service/COM entries |
 | `DismountVolume` | Dismounts ISO/VHD/SUBST drives hosting threats |
 | `RemoveCert` | Removes suspicious root certificates from store |
 | `RemoveCertAndKillAdder` | Removes planted certificate + kills the process that installed it (BYOVD cert-trace) |
+
+### ActiveResponse model (current)
+
+| Source | Behavior |
+|--------|----------|
+| `Sentinel:ActiveResponse` (default **true**) | Master switch for destructive Tier1 actions |
+| `Sentinel:EnforceActiveResponse` (default **true**) | `AntiTamperGuard` force-re-enables if config is flipped to false |
+| CLI `--active-response` | Optional force-enable at process start (legacy; not required in normal install) |
 
 ---
 
@@ -365,15 +373,17 @@ Emitted as Tier1 `DetectionEvent`s directly via `EmitAsync`. Requires signals fr
 
 - **Dependency Injection** — all components receive dependencies via constructor injection
 - **No static mutable state** — `ConcurrentDictionary`, `Channel<T>`, `SemaphoreSlim` for shared state
-- **CancellationToken everywhere** — no `Thread.Sleep`, no blocking waits without cancellation
+- **Cancellation preferred** — prefer `Task.Delay(ct)` / async loops. Some short `Thread.Sleep` remain in Agent STA paths, USB PnP settle delays, and Service main keep-alive (`Timeout.Infinite`)
 - **No silent failures** — all exceptions caught and logged; monitors fail independently
 - **Graceful degradation** — ETW → WMI fallback; ThreatIntel ETW unavailable → continue without
 - **Startup self-test** — Verifies ETW, DPAPI, quarantine, log file, and rule loading before activating monitors
 - **Tier2 enforcement** — `AdvancedResponseEngine` hard-codes `LogOnly` for all `Tier2Indicator` events regardless of configuration
+- **Consultant signals never escalate** — `DetectionEngine` refuses Critical re-promotion when `Metadata.ConsultantSignal=true`
 - **Deduplication** — `DetectionEngine` suppresses identical `(RuleName, ProcessId)` pairs within 10s (Tier1) / 30s (Tier2)
+- **Bounded telemetry** — detection queue capacity 10_000, `DropOldest` under flood
 - **All file reads use `FileShare.ReadWrite | FileShare.Delete`** — Sentinel observes, never obstructs
 - **Monitors are grouped by function and priority** — critical self-protection first, peripheral last
-- **No LOLBin dependencies** — all response actions use native C# APIs / P/Invoke (no sc.exe, cmd.exe, powershell.exe)
+- **Response path: prefer native APIs** — kill/firewall/DNS/ARP use COM/P-Invoke. **Exceptions still present:** installer `sc.exe`/`takeown`/`icacls`; hardening/LGPO/`secedit`; some monitors still call `netsh` (WFP export, IPSec show, Cast allow rules). Goal is no LOLBins on the kill hot path
 - **No offensive deception tactics** — removed to avoid AV heuristic false positives on the Sentinel binary
 
 ---
@@ -520,6 +530,39 @@ Full cert-revocation chain for BYOVD attacks. When a vulnerable/suspicious drive
 
 ---
 
+## v1.8.1 Additions
+
+### Security audit remediations + doc/code parity
+
+| Item | Value |
+|------|--------|
+| Proxy auth | `ProxyAuthHelper` / Worker: HMAC only; **no** cleartext `X-Sentinel-Auth` |
+| Telemetry queue | `Channel.CreateBounded` 10k DropOldest |
+| Dynamic rules | Property allowlist; SecureCompare HMAC; async reload debounce |
+| Consultant | Sticky Tier2 + LogOnly (no scoring kill escalation) |
+| BYOVD neutralize | Exact thumbprint only; stop service + SCM key; **no** `System32\drivers` file delete |
+| NetworkIsolate | Private/LAN/multicast denied; ARP entry flush restored via `DeleteIpNetEntry` (native) |
+| Quarantine | Production ACL SYSTEM+Admins; Agent never mkdir; 128 MB cap; restore path guards |
+| Diagnostics | ProgramData\Sentinel ACL locked before early service traces |
+| Installer demotion | `IsLikelyInstallerPath` required for HighRisk→Tier2 demotion |
+| Tests | `V181SecurityHardeningTests`; full suite ~945 |
+
+### Restored capability (ARP flush)
+
+| Item | Detail |
+|------|--------|
+| Original | v5.9.0 (`4e92102`, **Gorstak**): NetworkIsolate = firewall + `arp -d` + DNS flush |
+| Dropped | During LOLBin-free rewrite of `AdvancedResponseEngine` (`8d47e14` chore:update / COM firewall era) — shell `arp.exe` removed, native replacement not added |
+| Restored | v1.8.1: `FlushArpEntry` via `iphlpapi!DeleteIpNetEntry` (no process spawn) |
+
+### Not missing (clarifications)
+
+| Design name | Reality | Who |
+|-------------|---------|-----|
+| `ConfigIntegrityMonitor` | Never a standalone class; logic in `AntiTamperGuard` | Doc naming only (clarified v1.7.0, Gorstak) |
+| Tray `ShowBalloonTip` | Intentionally removed — WpnService hardening deadlocks STA | Gorstak (v1.4.x / tray rewrite); use Settings UI + event log |
+| `BrowserCredentialTheftRule` | Never implemented as `IDetectionRule`; covered by `BrowserCredentialGuard` | Backlog only |
+
 ## v1.8.0 Additions
 
 ### TokenTheft false-positive hardening
@@ -637,7 +680,13 @@ Self-heal loops: `IPSecIntegrityGuard` (30s), `AsrPolicyGuard` (60s), plus vario
 ## Remaining Backlog
 
 - [x] **Agent-side monitor documentation** — Inventory complete as of 1.7.5 (includes 1.7.4 PS ports).
-- [ ] **BrowserCredentialTheftRule** — Detection rule designed but never implemented as a standalone rule class (detection covered by BrowserCredentialGuard monitor).
-- [ ] **Test coverage for v1.6.7+ monitors** — NamedPipeMonitor, RpcLateralMonitor, TokenTheftMonitor, CloudSyncExfilMonitor, EtwProviderTamperMonitor, BrowserC2Guard need more unit tests.
+- [x] **design.md ↔ code parity (1.8.1)** — ActiveResponse model, proxy auth, NetworkIsolate ARP, quarantine ACL, BYOVD neutralize, consultant sticky LogOnly.
+- [x] **NetworkIsolate ARP flush** — Restored as native P/Invoke (was shell `arp -d` in v5.9.0).
+- [ ] **BrowserCredentialTheftRule** — Never a removed type; optional standalone rule (monitor already covers).
+- [ ] **Authenticated Service↔Agent IPC** — Processes remain independent; no named-pipe auth yet.
+- [ ] **Installer per-file ACL race** — Upgrade still broad `takeown`/`icacls` window.
+- [ ] **LSA/TPM third factor for entropy** — Cache/rule HMAC still MachineGuid + `.install_entropy`.
 - [ ] **ThreatIntelFeedBlocker PID attribution** — `IPGlobalProperties` lacks PID; connection hits currently alert without owning process kill.
+- [ ] **Threat intel cert pinning** — CIRCL/MB HTTPS use default system trust (Worker path is HMAC-auth).
 - [ ] **KeyScrambler / FocusLock** — Intentionally not ported (AV heuristics / high operational cost).
+- [ ] **Further unit tests** — More coverage still welcome for NamedPipe/RpcLateral/CloudSync/EtwProvider/BrowserC2 (partial coverage exists in V16x–V18x suites).

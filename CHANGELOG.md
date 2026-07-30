@@ -4,6 +4,11 @@ All notable changes to Sentinel are documented in this file.
 
 ## [1.8.1] - 2026-07-30
 
+### Docs — design.md parity
+
+- Corrected ActiveResponse defaults, ProxyAuthHelper (shared secret, not entropy), NetworkIsolate behavior, quarantine ACL, BYOVD neutralize, consultant LogOnly, design rules (Thread.Sleep / netsh exceptions).
+- Documented **restored** ARP cache purge on NetworkIsolate (`DeleteIpNetEntry`) — dropped when shell `arp -d` was removed in the LOLBin-free response rewrite; not a third-party deletion.
+
 ### Security — Independent red/blue team audit + remediations
 
 Full adversarial review of Core, Service, Agent, installer, worker, and config. Ship-blockers fixed before release.
