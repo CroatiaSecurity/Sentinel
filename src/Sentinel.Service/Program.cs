@@ -345,6 +345,8 @@ namespace Sentinel.Service
                             sp.GetRequiredService<TokenTheftMonitor>(),
                             sp.GetRequiredService<CloudSyncExfilMonitor>(),
                             sp.GetRequiredService<LnkShortcutMonitor>(),
+                            sp.GetRequiredService<AgenticProcessMonitor>(),
+                            sp.GetRequiredService<PackageRuntimeMonitor>(),
                         };
                         return new MonitorGroup(
                             new MonitorGroupConfig
@@ -377,6 +379,8 @@ namespace Sentinel.Service
                     services.AddSingleton<TokenTheftMonitor>();
                     services.AddSingleton<CloudSyncExfilMonitor>();
                     services.AddSingleton<LnkShortcutMonitor>();
+                    services.AddSingleton<AgenticProcessMonitor>();
+                    services.AddSingleton<PackageRuntimeMonitor>();
 
                     // ── Group 3: Credential Protection ────────────────────────────────
                     // Starts after core detection (4s). Protects credentials and sessions.

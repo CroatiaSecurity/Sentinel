@@ -1,6 +1,6 @@
 # Sentinel — Design Document
 
-**Version: 1.8.1**
+**Version: 1.9.0**
 
 ---
 
@@ -96,6 +96,8 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 | `TokenTheftMonitor` | Detects non-service SYSTEM tokens and SeImpersonatePrivilege from user-writable paths | 20s |
 | `CloudSyncExfilMonitor` | Monitors cloud sync directories for burst file staging; detects rclone/megasync | 15s |
 | `LnkShortcutMonitor` | Real-time FileSystemWatcher on Desktop/Start Menu/Taskbar/Startup (all profiles); UNC/protocol/LOLBin remote launch | FSW + startup scan |
+| `AgenticProcessMonitor` | AI coding agents / MCP toolchains spawning shells, LOLBins, credential tools; burst recon patterns | 8s |
+| `PackageRuntimeMonitor` | Package-manager postinstall LOLBins, exe under package trees, AI agent config poison (CLAUDE.md/Cursor/MCP) | 10s + FSW |
 
 #### Group 3: CredentialProtection (4s start delay, max 3 restarts)
 

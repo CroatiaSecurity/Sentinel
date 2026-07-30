@@ -2,7 +2,7 @@
 
 Real-time endpoint detection and response for Windows. Runs as a background service, monitors system behavior, and kills threats automatically when multiple signals correlate.
 
-**Current version: 1.8.1**
+**Current version: 1.9.0**
 
 ---
 
@@ -23,6 +23,10 @@ Sentinel is effective against:
 - **Network attacks** — ARP spoofing, DNS poisoning, rogue Wi-Fi, unauthorized Cast/screen-share devices, C2 beaconing (statistical), DNS tunneling/exfiltration, phantom network devices, proactive block of Spamhaus/Feodo/EmergingThreats IPs (`ThreatIntelFeedBlocker`). Unauthorized RDP/remote sessions are force-logged-off (`RemoteSessionGuard`).
 
 - **Malicious shortcuts** — Real-time `.lnk` monitoring on Desktop/Start Menu/Taskbar/Startup (all user profiles). Quarantines UNC targets, `search-ms:`/`ms-msdt:` protocol abuse, and LOLBin+remote URL/UNC argument patterns (CVE-2024-21412 / T1566.002).
+
+- **AI agent / MCP abuse (v1.9.0)** — Coding agents (Claude, Cursor, Codex, …) treated as high-privilege automation: high-risk child processes, burst spawn (recon), credential-path tool spawn.
+
+- **Package supply-chain runtime (v1.9.0)** — Package managers spawning LOLBins, binaries under `node_modules`/site-packages, and AI instruction-file poison (`CLAUDE.md`, Cursor/MCP configs).
 
 - **Persistence mechanisms** — Scheduled tasks, WMI subscriptions, registry run keys, DLL sideloading, boot config tampering, PrintNightmare-class spooler exploitation (driver DLL planting + child process detection).
 
