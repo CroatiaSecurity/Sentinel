@@ -137,5 +137,32 @@ namespace Sentinel.Tests
         }
 
         #endregion
+
+        #region IsLikelyInstallerPath (v1.8.1 RT-LOW-2)
+
+        [Theory]
+        [InlineData(@"C:\Users\Alice\Downloads\ChromeSetup.exe")]
+        [InlineData(@"C:\Users\Alice\Desktop\Git-2.47.0-64-bit.exe")]
+        [InlineData(@"C:\Program Files\Git\bin\git.exe")]
+        [InlineData(@"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe")]
+        [InlineData(@"C:\Windows\Installer\foo.msi")]
+        [InlineData(@"C:\Users\Alice\AppData\Local\Temp\is-ABCDE\innosetup-7.0.2-x64.tmp")]
+        public void IsLikelyInstallerPath_True(string path)
+        {
+            Assert.True(InstallerHeuristics.IsLikelyInstallerPath(path));
+        }
+
+        [Theory]
+        [InlineData(@"C:\Users\Alice\AppData\Roaming\ChromeSetup.exe")]
+        [InlineData(@"C:\Users\Alice\AppData\Local\Temp\ChromeSetup.exe")]
+        [InlineData(@"C:\Users\Alice\AppData\Local\Programs\evil\setup.exe")]
+        [InlineData(null)]
+        [InlineData("")]
+        public void IsLikelyInstallerPath_False(string? path)
+        {
+            Assert.False(InstallerHeuristics.IsLikelyInstallerPath(path));
+        }
+
+        #endregion
     }
 }

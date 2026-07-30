@@ -2,6 +2,46 @@
  
 All notable changes to Sentinel are documented in this file.
 
+## [1.8.1] - 2026-07-30
+
+### Security — Independent red/blue team audit + remediations
+
+Full adversarial review of Core, Service, Agent, installer, worker, and config. Ship-blockers fixed before release.
+
+#### Critical / High (new findings)
+
+| ID | Severity | Fix |
+|----|----------|-----|
+| RT-NEW-1 | **Critical** | BYOVD driver neutralization: **exact thumbprint only** (empty CN `Contains("")` could match every driver). No longer deletes `System32\drivers\*.sys` (WRP-safe: stop service + remove SCM key only). Cap 5 drivers/cert. |
+| RT-NEW-2 | **High** | Consultant signals sticky **Tier2 + LogOnly**; scoring never re-escalates `ConsultantSignal` to KillProcessTree |
+| RT-NEW-3 | **High** | NetworkIsolate refuses private/LAN/link-local/multicast/unspecified IPs |
+| RT-NEW-4 | **High** | Quarantine dir ACL locked SYSTEM+Admins; Agent never `mkdir` quarantine |
+| RT-NEW-5 | Medium | Quarantine file size hard cap 128 MB (anti-OOM) |
+| RT-NEW-7 | Low | Dynamic rule HMAC uses constant-time `SecureCompare` |
+| RT-NEW-8 | Medium | `RestoreAsync` validates quarantine root, safe filename, OS-critical deny |
+
+#### From prior audit (also in 1.8.1)
+
+| ID | Severity | Fix |
+|----|----------|-----|
+| RT-CRIT-1 | Critical | Stop sending `ProxySharedSecret` as `X-Sentinel-Auth`. HMAC + timestamp only. |
+| RT-CRIT-2 | Medium | Dynamic rule reflection limited to documented telemetry property allowlist |
+| RT-MED-1 | Medium | Telemetry queue bounded (10k, DropOldest) |
+| RT-MED-2 | Medium | Rules reload debounce uses cancellable `Task.Delay` |
+| RT-MED-3 | Medium | `%ProgramData%\Sentinel` ACL locked before early diagnostic writes |
+| RT-LOW-1 | Low | Kill/isolate budget queues capped at `limit * 2` |
+| RT-LOW-2 | Low | HighRisk installer demotion requires `IsLikelyInstallerPath` |
+
+#### Tracked / deferred
+- RT-CRIT-3: LSA/TPM third key-derivation factor
+- RT-HIGH-2: hardlink self-exclusion baseline
+- RT-HIGH-3: installer per-file ACL window
+- RT-HIGH-4: authenticated Service↔Agent IPC
+- RT-MED-4/5/6, RT-NEW-6/9/10: signer pin, secedit API, cert pin, worker nonce, Authenticode-only demotion
+
+### Tests
+- `V181SecurityHardeningTests` + extended ProxyAuth / InstallerHeuristics tests
+
 ## [1.8.0] - 2026-07-30
 
 ### Fixed — Token Theft false-positive storm (Memory Compression / Registry)

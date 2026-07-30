@@ -18,7 +18,16 @@ namespace Sentinel.Core
     {
         private readonly List<IDetectionRule> _rules = new();
         public int RuleCount => _rules.Count;
-        private readonly Channel<FusedTelemetryContext> _telemetryChannel = Channel.CreateUnbounded<FusedTelemetryContext>();
+        // v1.8.1 RT-MED-1: Bound the queue to prevent memory exhaustion under adversarial
+        // process-creation storms. DropOldest keeps the newest telemetry for scoring.
+        private const int TelemetryChannelCapacity = 10_000;
+        private readonly Channel<FusedTelemetryContext> _telemetryChannel =
+            Channel.CreateBounded<FusedTelemetryContext>(new BoundedChannelOptions(TelemetryChannelCapacity)
+            {
+                FullMode = BoundedChannelFullMode.DropOldest,
+                SingleReader = true,
+                SingleWriter = false
+            });
         private readonly ConcurrentDictionary<(string, int), DateTime> _dedupCache = new();
         private readonly SentinelMetrics _metrics;
         private readonly JsonlEventLogger _eventLogger;
@@ -83,11 +92,13 @@ namespace Sentinel.Core
         public async Task SubmitConsultantSignalAsync(DetectionEvent detectionEvent)
         {
             if (detectionEvent == null) return;
+            // v1.8.1 RT-NEW-2: consultant signals are observational only — never kill authority.
+            // Previously ProcessDetectionAsync re-promoted Verdict.Critical → KillProcessTree.
             detectionEvent.Tier = DetectionTier.Tier2Indicator;
+            detectionEvent.AuthorizedResponse = ResponseAction.LogOnly;
             if (detectionEvent.Metadata == null)
-            {
                 detectionEvent.Metadata = new Dictionary<string, string>();
-            }
+            detectionEvent.Metadata["ConsultantSignal"] = "true";
             await ProcessDetectionAsync(detectionEvent);
         }
 
@@ -174,7 +185,9 @@ namespace Sentinel.Core
                                                 // demote to Tier2/LogOnly. Let it run; behavioral monitors will catch
                                                 // actual malicious activity. This prevents killing our own installer
                                                 // and other legitimate unsigned software (Git, Python, etc.).
-                                                var isInstallerLike = InstallerHeuristics.LooksLikeInstallerName(pt.ProcessName, imagePath);
+                                                // v1.8.1 RT-LOW-2: require name match AND benign install path
+                                                var isInstallerLike = InstallerHeuristics.LooksLikeInstallerName(pt.ProcessName, imagePath)
+                                                    && InstallerHeuristics.IsLikelyInstallerPath(imagePath);
                                                 var hasPositiveMaliciousSignal =
                                                     repoResult.HashReputation.MalwareBazaarVerdict.Status == VerdictStatus.Malicious ||
                                                     (repoResult.HashReputation.VirusTotalVerdict.Status == VerdictStatus.Malicious) ||
@@ -320,15 +333,24 @@ namespace Sentinel.Core
             var scoreProfile = _scoringEngine.Score(detection);
             detection.Metadata["ThreatScore"] = scoreProfile.Score.ToString();
             detection.Metadata["ThreatVerdict"] = scoreProfile.Verdict.ToString();
-            
-            // Adjust tier if verdict is Critical
-            if (scoreProfile.Verdict == Verdict.Critical)
+
+            bool isConsultant = detection.Metadata.TryGetValue("ConsultantSignal", out var csFlag)
+                && string.Equals(csFlag, "true", StringComparison.OrdinalIgnoreCase);
+
+            // Adjust tier if verdict is Critical — never escalate consultant / external signals
+            // (v1.8.1 RT-NEW-2: admin-writable consultant JSONL must not become a kill RPC)
+            if (scoreProfile.Verdict == Verdict.Critical && !isConsultant)
             {
                 detection.Tier = DetectionTier.Tier1Behavioral;
                 if (detection.AuthorizedResponse < ResponseAction.KillProcessTree)
                 {
                     detection.AuthorizedResponse = ResponseAction.KillProcessTree;
                 }
+            }
+            else if (isConsultant)
+            {
+                detection.Tier = DetectionTier.Tier2Indicator;
+                detection.AuthorizedResponse = ResponseAction.LogOnly;
             }
 
             await HandleDetectionEventAsync(detection);

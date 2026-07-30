@@ -7,6 +7,8 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 
 namespace Sentinel.Core
@@ -17,9 +19,32 @@ namespace Sentinel.Core
         public string Operator { get; set; } = "Equals"; // Equals, Contains, StartsWith, EndsWith, NotEquals, NotContains
         public string Value { get; set; } = string.Empty;
 
+        /// <summary>
+        /// v1.8.1 RT-CRIT-2: Only documented telemetry model properties may be resolved via
+        /// reflection. Blocks arbitrary .NET property inspection if a signed rule is ever forged.
+        /// </summary>
+        private static readonly HashSet<string> AllowedPropertyNames = new(StringComparer.OrdinalIgnoreCase)
+        {
+            // TelemetryEvent
+            "Type", "Timestamp", "ProcessId", "ProcessName",
+            // ProcessTelemetry
+            "ImagePath", "ParentProcessId", "ParentProcessName", "CommandLine",
+            // NetworkTelemetry
+            "LocalAddress", "LocalPort", "RemoteAddress", "RemotePort", "Protocol", "State",
+            // FileActivityTelemetry
+            "FilePath", "OperationType", "TargetPath",
+            // ThreatIntelTelemetry
+            "TargetProcessId", "ApiName", "Protection"
+        };
+
+        internal static bool IsAllowedPropertyName(string? name) =>
+            !string.IsNullOrWhiteSpace(name) && AllowedPropertyNames.Contains(name);
+
         public bool Evaluate(object target)
         {
             if (target == null) return false;
+            if (!IsAllowedPropertyName(Field))
+                return false;
 
             var prop = target.GetType().GetProperty(Field, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
             if (prop == null) return false;
@@ -65,7 +90,7 @@ namespace Sentinel.Core
             var responseParsed = Enum.TryParse<Core.ResponseAction>(ResponseAction, true, out var r) ? r : Core.ResponseAction.LogOnly;
             var signalParsed = Enum.TryParse<SignalType>(SignalType, true, out var s) ? s : Core.SignalType.SuspiciousProcess;
 
-            // Simple token replacements in the description fields
+            // Simple token replacements in the description fields (allowlisted properties only)
             string finalEvidence = ReplaceTokens(Evidence, triggeringEvent);
             string finalReasoning = ReplaceTokens(Reasoning, triggeringEvent);
 
@@ -91,6 +116,9 @@ namespace Sentinel.Core
             var result = template;
             foreach (var prop in source.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance))
             {
+                // v1.8.1: only substitute documented telemetry fields (same allowlist as Evaluate)
+                if (!DynamicCondition.IsAllowedPropertyName(prop.Name))
+                    continue;
                 var val = prop.GetValue(source)?.ToString() ?? string.Empty;
                 result = result.Replace("{" + prop.Name + "}", val, StringComparison.OrdinalIgnoreCase);
             }
@@ -109,6 +137,8 @@ namespace Sentinel.Core
         private readonly ILogger<DynamicRulesEvaluator> _logger;
         private readonly byte[]? _hmacKey;
         private readonly bool _isTestMode; // v1.5.9: bypasses fail-closed HMAC check in unit tests
+        private int _reloadScheduled; // 0/1 debounce flag for FileSystemWatcher
+        private CancellationTokenSource? _reloadCts;
 
         public DynamicRulesEvaluator(ILogger<DynamicRulesEvaluator> logger)
         {
@@ -305,9 +335,21 @@ namespace Sentinel.Core
                 var contentToSign = RemoveHmacField(fileContent);
                 using var hmac = new HMACSHA256(_hmacKey);
                 var expectedHash = hmac.ComputeHash(Encoding.UTF8.GetBytes(contentToSign));
-                var expectedHmac = Convert.ToHexString(expectedHash).ToLowerInvariant();
 
-                if (!string.Equals(providedHmac, expectedHmac, StringComparison.OrdinalIgnoreCase))
+                // v1.8.1: constant-time compare (reject odd-length / non-hex provided HMAC)
+                byte[]? providedBytes;
+                try
+                {
+                    providedBytes = Convert.FromHexString(providedHmac);
+                }
+                catch
+                {
+                    _logger.LogWarning("[DynamicRulesEvaluator] REJECTED rule {File} — HMAC signature not valid hex",
+                        Path.GetFileName(filePath));
+                    return false;
+                }
+
+                if (!SecurityValidation.SecureCompare(providedBytes, expectedHash))
                 {
                     _logger.LogWarning("[DynamicRulesEvaluator] REJECTED rule {File} — HMAC signature INVALID. " +
                         "Rule file may have been tampered with.", Path.GetFileName(filePath));
@@ -350,9 +392,38 @@ namespace Sentinel.Core
 
         private void OnRulesChanged(object sender, FileSystemEventArgs e)
         {
-            // Simple debounce to let file writes complete
-            System.Threading.Thread.Sleep(100);
-            LoadRules();
+            // v1.8.1 RT-MED-2 / RT-HIGH-1: non-blocking debounce (no Thread.Sleep).
+            // Coalesce burst of watcher events; single read+HMAC happens inside LoadRules.
+            var cts = new CancellationTokenSource();
+            var previous = Interlocked.Exchange(ref _reloadCts, cts);
+            try { previous?.Cancel(); } catch { }
+            previous?.Dispose();
+
+            if (Interlocked.Exchange(ref _reloadScheduled, 1) == 1 && previous != null)
+            {
+                // A reload task is already scheduled; the exchanged CTS will cancel the old delay.
+            }
+
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await Task.Delay(150, cts.Token).ConfigureAwait(false);
+                    LoadRules();
+                }
+                catch (OperationCanceledException)
+                {
+                    // Superseded by a newer change event
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "[DynamicRulesEvaluator] Debounced rule reload failed");
+                }
+                finally
+                {
+                    Interlocked.Exchange(ref _reloadScheduled, 0);
+                }
+            }, CancellationToken.None);
         }
 
         private void LoadRules()
@@ -454,6 +525,13 @@ namespace Sentinel.Core
                 _watcher.EnableRaisingEvents = false;
                 _watcher.Dispose();
             }
+            try
+            {
+                var cts = Interlocked.Exchange(ref _reloadCts, null);
+                cts?.Cancel();
+                cts?.Dispose();
+            }
+            catch { }
             GC.SuppressFinalize(this);
         }
     }

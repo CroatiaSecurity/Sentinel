@@ -30,6 +30,9 @@ namespace Sentinel.Core
         private long _lastIsolateRateLimitLogMs;
         private DetectionEngine? _detectionEngine;
 
+        // v1.8.1 RT-LOW-1: hard cap on timestamp queues (limit * 2) under pathological load
+        private static int BudgetQueueCap(int limit) => Math.Max(limit * 2, 32);
+
         /// <summary>Set after DI construction to avoid circular dependency.</summary>
         public void SetReinfectionCorrelator(ReinfectionCorrelator correlator) => _reinfectionCorrelator = correlator;
 
@@ -83,6 +86,7 @@ namespace Sentinel.Core
             }
 
             _killTimestampsMs.Enqueue(now);
+            TrimBudgetQueue(_killTimestampsMs, BudgetQueueCap(limit));
             return true;
         }
 
@@ -119,7 +123,13 @@ namespace Sentinel.Core
             }
 
             _isolateTimestampsMs.Enqueue(now);
+            TrimBudgetQueue(_isolateTimestampsMs, BudgetQueueCap(limit));
             return true;
+        }
+
+        private static void TrimBudgetQueue(ConcurrentQueue<long> queue, int maxCount)
+        {
+            while (queue.Count > maxCount && queue.TryDequeue(out _)) { }
         }
 
         private void EmitBudgetExhaustedAlert(string budgetType, int limit)
@@ -514,12 +524,15 @@ namespace Sentinel.Core
                 if (!string.IsNullOrEmpty(targetIp))
                 {
                     // Validate IP before creating firewall rules
+                    // v1.8.1 RT-NEW-3: never firewall-block private/LAN/gateway (decoy beaconing)
                     if (!System.Net.IPAddress.TryParse(targetIp, out var parsedIp) ||
                         System.Net.IPAddress.IsLoopback(parsedIp) ||
                         targetIp == "0.0.0.0" || targetIp == "255.255.255.255" ||
+                        SecurityValidation.IsPrivateIpAddress(targetIp) ||
+                        IsMulticastOrUnspecified(parsedIp) ||
                         IsLikelyCdnOrPublicResolver(parsedIp))
                     {
-                        // Skip invalid/loopback/broadcast/major CDN-or-resolver IPs (collateral)
+                        // Skip invalid/loopback/private/broadcast/CDN-or-resolver IPs (collateral)
                     }
                     else
                     {
@@ -840,6 +853,18 @@ namespace Sentinel.Core
                 // Quad9 9.9.9.0/24
                 if (bytes[0] == 9 && bytes[1] == 9 && bytes[2] == 9) return true;
             }
+            return false;
+        }
+
+        private static bool IsMulticastOrUnspecified(IPAddress ip)
+        {
+            if (IPAddress.Any.Equals(ip) || IPAddress.IPv6Any.Equals(ip)) return true;
+            if (ip.IsIPv6Multicast) return true;
+            var bytes = ip.GetAddressBytes();
+            // IPv4 multicast 224.0.0.0/4
+            if (ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork && bytes.Length == 4
+                && bytes[0] >= 224 && bytes[0] <= 239)
+                return true;
             return false;
         }
     }

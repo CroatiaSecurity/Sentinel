@@ -35,13 +35,11 @@ namespace Sentinel.Tests
 
             Assert.True(request.Headers.Contains("X-Sentinel-Timestamp"));
             Assert.True(request.Headers.Contains("X-Sentinel-Signature"));
-            Assert.True(request.Headers.Contains("X-Sentinel-Auth"));
+            // v1.8.1 RT-CRIT-1: shared secret must never leave the process as a header
+            Assert.False(request.Headers.Contains("X-Sentinel-Auth"));
 
             var ts = request.Headers.GetValues("X-Sentinel-Timestamp").First();
             var sig = request.Headers.GetValues("X-Sentinel-Signature").First();
-            var auth = request.Headers.GetValues("X-Sentinel-Auth").First();
-
-            Assert.Equal(secret, auth);
 
             var payload = $"{ts}.{path}.{body}";
             using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secret));

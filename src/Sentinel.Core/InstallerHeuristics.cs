@@ -101,6 +101,49 @@ namespace Sentinel.Core
         }
 
         /// <summary>
+        /// v1.8.1 RT-LOW-2: Path must look like a real install/download location before
+        /// HighRisk→Tier2 demotion applies. Blocks evasion via ChromeSetup.exe in
+        /// AppData\Roaming or arbitrary Temp without installer-extractor context.
+        /// </summary>
+        public static bool IsLikelyInstallerPath(string? imagePath)
+        {
+            if (string.IsNullOrWhiteSpace(imagePath))
+                return false;
+
+            string full;
+            try { full = Path.GetFullPath(imagePath); }
+            catch { return false; }
+
+            var lower = full.ToLowerInvariant();
+
+            // Explicit deny: classic malware staging locations (name-only installer spoof)
+            if (lower.Contains(@"\appdata\roaming\") ||
+                lower.Contains(@"\appdata\local\programs\") ||
+                lower.Contains(@"\appdata\local\microsoft\windows\inetcache\") ||
+                lower.Contains(@"\appdata\local\microsoft\windows\inetcookies\"))
+                return false;
+
+            // Trusted install roots
+            if (lower.Contains(@"\program files\") ||
+                lower.Contains(@"\program files (x86)\") ||
+                lower.Contains(@"\windows\installer\") ||
+                lower.Contains(@"\package cache\") ||
+                lower.Contains(@"\programdata\package cache\"))
+                return true;
+
+            // User download / desktop drop of official installers
+            if (lower.Contains(@"\downloads\") ||
+                lower.Contains(@"\desktop\"))
+                return true;
+
+            // Temp only when path matches known extractor layout (Inno/NSIS/7z/WiX)
+            if (IsInstallerExtractor(null, full))
+                return true;
+
+            return false;
+        }
+
+        /// <summary>
         /// Prefetch basenames that are normal short-lived install activity, not droppers.
         /// </summary>
         public static bool IsBenignEphemeralPrefetchName(string? exeOrPrefetchStem)

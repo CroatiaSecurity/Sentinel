@@ -195,8 +195,14 @@ namespace Sentinel.Agent
             {
                 var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
                 var qDir = Path.Combine(programData, "Sentinel", "Quarantine");
+                // v1.8.1 RT-NEW-4: never create quarantine as interactive user (weak ACL race)
                 if (!Directory.Exists(qDir))
-                    Directory.CreateDirectory(qDir);
+                {
+                    MessageBox.Show(
+                        "Quarantine folder does not exist yet. It is created by the Sentinel service when the first file is quarantined.",
+                        "Sentinel", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
 
                 var psi = new ProcessStartInfo
                 {

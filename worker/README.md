@@ -10,9 +10,10 @@ Cloudflare Worker that receives threat reports from Sentinel agents and forwards
 |--------|----------|---------|
 | `X-Sentinel-Timestamp` | Yes | Unix seconds; must be within ±5 minutes |
 | `X-Sentinel-Signature` | Yes | Hex HMAC-SHA256 of `{timestamp}.{path}.{rawBody}` |
-| `X-Sentinel-Auth` | Optional | If present, must equal shared secret |
 
 Signing key is the **server-side** `SENTINEL_SHARED_SECRET` (also configured on agents as `ThreatReporting:ProxySharedSecret`).  
+The secret is used **only** as the HMAC key and is **never** sent in a request header.  
+**v1.8.1:** Agents no longer send `X-Sentinel-Auth` (it previously leaked the secret). The Worker ignores that header if present.  
 **There is no client-supplied signing key.** Missing secret → Worker returns 503.
 
 ## Free Tier Limits

@@ -1,6 +1,6 @@
 [Setup]
 AppName=Sentinel
-AppVersion=1.8.0
+AppVersion=1.8.1
 AppPublisher=Gorstak
 AppPublisherURL=https://gorstak.eu
 SourceDir=.
@@ -11,7 +11,7 @@ UninstallDisplayIcon={app}\Sentinel.ico
 Compression=lzma2
 SolidCompression=yes
 OutputDir=.
-OutputBaseFilename=SentinelSetup-1.8.0
+OutputBaseFilename=SentinelSetup-1.8.1
 PrivilegesRequired=admin
 ; Allow upgrading over existing install
 UsePreviousAppDir=yes

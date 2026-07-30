@@ -1,4 +1,7 @@
 using System;
+using System.IO;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.Threading;
 using System.Collections.Generic;
 using System.Threading.Tasks;
@@ -14,15 +17,11 @@ namespace Sentinel.Service
     {
         public static async Task Main(string[] args)
         {
-            // DIAGNOSTIC: Write immediately on process start, before anything else
-            try
-            {
-                System.IO.File.AppendAllText(
-                    System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-                        "Sentinel", "startup_trace.log"),
-                    $"[{DateTime.UtcNow:O}] Main() entered. Args: {string.Join(" ", args)}\n");
-            }
-            catch { }
+            // DIAGNOSTIC: Write immediately on process start, before anything else.
+            // v1.8.1 RT-MED-3: ensure ProgramData\Sentinel exists with restricted ACLs
+            // before any world-readable inherited default can apply to diagnostic files.
+            AppendDiagnostic("startup_trace.log",
+                $"[{DateTime.UtcNow:O}] Main() entered. Args: {string.Join(" ", args)}\n");
 
             // Apply DLL search path hardening early
             HardeningModule.ApplyOrFail();
@@ -44,58 +43,81 @@ namespace Sentinel.Service
             AppDomain.CurrentDomain.UnhandledException += (_, e) =>
             {
                 var ex = e.ExceptionObject as Exception;
-                try
-                {
-                    var msg = $"[FATAL] UnhandledException in AppDomain: {ex?.GetType().Name}: {ex?.Message}\n{ex?.StackTrace}";
-                    System.IO.File.AppendAllText(
-                        System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-                            "Sentinel", "fatal_crash.log"),
-                        $"[{DateTime.UtcNow:O}] {msg}\n\n");
-                }
-                catch { }
+                var msg = $"[FATAL] UnhandledException in AppDomain: {ex?.GetType().Name}: {ex?.Message}\n{ex?.StackTrace}";
+                AppendDiagnostic("fatal_crash.log", $"[{DateTime.UtcNow:O}] {msg}\n\n");
             };
 
             TaskScheduler.UnobservedTaskException += (_, e) =>
             {
-                try
-                {
-                    var msg = $"[UNOBSERVED] {e.Exception?.GetType().Name}: {e.Exception?.InnerException?.Message ?? e.Exception?.Message}\n{e.Exception?.InnerException?.StackTrace ?? e.Exception?.StackTrace}";
-                    System.IO.File.AppendAllText(
-                        System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-                            "Sentinel", "fatal_crash.log"),
-                        $"[{DateTime.UtcNow:O}] {msg}\n\n");
-                }
-                catch { }
+                var msg = $"[UNOBSERVED] {e.Exception?.GetType().Name}: {e.Exception?.InnerException?.Message ?? e.Exception?.Message}\n{e.Exception?.InnerException?.StackTrace ?? e.Exception?.StackTrace}";
+                AppendDiagnostic("fatal_crash.log", $"[{DateTime.UtcNow:O}] {msg}\n\n");
                 e.SetObserved(); // Prevent process crash from unobserved tasks
             };
 
             // STABILITY v1.4.9: Use host.StartAsync() + manual infinite wait instead of host.Run().
             // host.Run() returns when ANY hosted service task completes, killing the process.
             // We start the host and then block Main forever — only SCM stop signal exits.
-            try
-            {
-                System.IO.File.AppendAllText(
-                    System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-                        "Sentinel", "startup_trace.log"),
-                    $"[{DateTime.UtcNow:O}] Calling host.StartAsync()...\n");
-            }
-            catch { }
+            AppendDiagnostic("startup_trace.log",
+                $"[{DateTime.UtcNow:O}] Calling host.StartAsync()...\n");
 
             await host.StartAsync();
 
-            try
-            {
-                System.IO.File.AppendAllText(
-                    System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-                        "Sentinel", "startup_trace.log"),
-                    $"[{DateTime.UtcNow:O}] host.StartAsync() completed. Blocking Main forever (ManualResetEvent)...\n");
-            }
-            catch { }
+            AppendDiagnostic("startup_trace.log",
+                $"[{DateTime.UtcNow:O}] host.StartAsync() completed. Blocking Main forever (ManualResetEvent)...\n");
 
             // Block Main() forever. NOTHING can make this return except process termination.
             // This prevents the .NET Host's "BackgroundService completed → shutdown" behavior
             // from propagating to a process exit.
             Thread.Sleep(Timeout.Infinite);
+        }
+
+        /// <summary>
+        /// v1.8.1 RT-MED-3: Create %ProgramData%\Sentinel with SYSTEM+Admins-only ACL
+        /// before writing early diagnostic files (prevents world-readable startup traces).
+        /// </summary>
+        private static void AppendDiagnostic(string fileName, string content)
+        {
+            try
+            {
+                var dir = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                    "Sentinel");
+                EnsureRestrictedProgramDataDir(dir);
+                File.AppendAllText(Path.Combine(dir, fileName), content);
+            }
+            catch { }
+        }
+
+        private static void EnsureRestrictedProgramDataDir(string dirPath)
+        {
+            if (!Directory.Exists(dirPath))
+                Directory.CreateDirectory(dirPath);
+
+            try
+            {
+                var dirInfo = new DirectoryInfo(dirPath);
+                var security = dirInfo.GetAccessControl();
+                security.SetAccessRuleProtection(true, false);
+
+                var systemSid = new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null);
+                security.AddAccessRule(new FileSystemAccessRule(
+                    systemSid,
+                    FileSystemRights.FullControl,
+                    InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+                    PropagationFlags.None,
+                    AccessControlType.Allow));
+
+                var adminsSid = new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null);
+                security.AddAccessRule(new FileSystemAccessRule(
+                    adminsSid,
+                    FileSystemRights.FullControl,
+                    InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+                    PropagationFlags.None,
+                    AccessControlType.Allow));
+
+                dirInfo.SetAccessControl(security);
+            }
+            catch { }
         }
 
         public static IHostBuilder CreateHostBuilder(string[] args) =>

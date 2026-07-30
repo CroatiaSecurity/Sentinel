@@ -412,36 +412,47 @@ namespace Sentinel.Core
         {
             try
             {
+                // v1.8.1 RT-NEW-1: require a real thumbprint — never match by empty CN (Contains("") == true)
+                if (string.IsNullOrWhiteSpace(certThumbprint) || certThumbprint.Length < 16)
+                {
+                    _logger.LogWarning("[TlsCertificateMonitor] BYOVD scan skipped — missing/short cert thumbprint");
+                    return;
+                }
+
                 var driversDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "System32", "drivers");
                 if (!Directory.Exists(driversDir)) return;
 
+                const int maxDriversPerCert = 5;
+                int acted = 0;
+
                 foreach (var driverPath in Directory.EnumerateFiles(driversDir, "*.sys"))
                 {
+                    if (acted >= maxDriversPerCert) break;
+
                     try
                     {
-                        // Check if this driver is signed by the removed cert
                         var signerCert = GetFileCertificate(driverPath);
                         if (signerCert == null) continue;
 
-                        bool matchesThumbprint = signerCert.Thumbprint?.Equals(certThumbprint, StringComparison.OrdinalIgnoreCase) == true;
-                        bool matchesSubject = signerCert.Subject?.Contains(ExtractCN(certSubject), StringComparison.OrdinalIgnoreCase) == true;
-
-                        if (!matchesThumbprint && !matchesSubject) continue;
+                        // EXACT thumbprint only — subject substring matching removed (empty CN bricked hosts)
+                        bool matchesThumbprint = signerCert.Thumbprint?.Equals(
+                            certThumbprint, StringComparison.OrdinalIgnoreCase) == true;
+                        if (!matchesThumbprint) continue;
 
                         var driverName = Path.GetFileNameWithoutExtension(driverPath);
 
-                        _logger.LogWarning("[TlsCertificateMonitor] BYOVD: driver '{Driver}' signed by removed cert. Quarantining.", driverName);
+                        _logger.LogWarning("[TlsCertificateMonitor] BYOVD: driver '{Driver}' signed by removed cert (thumbprint match). Neutralizing service.", driverName);
 
-                        // Quarantine the driver file
                         await _eventLogger.LogEventAsync("response", new ResponseEvent
                         {
                             ProcessId = 0,
                             ProcessName = "TlsCertificateMonitor",
-                            ActionTaken = "QUARANTINE_BYOVD_DRIVER",
-                            Reason = $"Driver '{driverPath}' signed by removed TrustedPublisher cert '{certSubject}'. Quarantining."
+                            ActionTaken = "NEUTRALIZE_BYOVD_DRIVER",
+                            Reason = $"Driver '{driverPath}' exact thumbprint match for removed TrustedPublisher cert '{certSubject}'. Stopping service + deleting service key. File NOT deleted from System32\\drivers (WRP-safe)."
                         });
 
-                        // Try to stop the driver service first
+                        // Stop service + remove registration. Do NOT delete the .sys under System32\drivers —
+                        // WRP/OS integrity; mass-delete was a bricking risk when matching was too broad.
                         try
                         {
                             using var sc = new System.ServiceProcess.ServiceController(driverName);
@@ -450,7 +461,6 @@ namespace Sentinel.Core
                         }
                         catch { }
 
-                        // Remove the service registration
                         try
                         {
                             using var servicesKey = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(
@@ -459,47 +469,24 @@ namespace Sentinel.Core
                         }
                         catch { }
 
-                        // Quarantine the driver file (small delay for handle release)
-                        await Task.Delay(500);
-                        try
-                        {
-                            if (File.Exists(driverPath))
-                            {
-                                var quarantinePath = Path.Combine(
-                                    Path.GetDirectoryName(_eventLogger.LogFilePath) ?? "",
-                                    "Quarantine",
-                                    $"byovd_{driverName}_{DateTime.UtcNow:yyyyMMddHHmmss}.sys.quarantine");
-                                Directory.CreateDirectory(Path.GetDirectoryName(quarantinePath)!);
-
-                                // XOR encrypt to quarantine
-                                var bytes = await File.ReadAllBytesAsync(driverPath);
-                                for (int i = 0; i < bytes.Length; i++) bytes[i] ^= 0x5A;
-                                await File.WriteAllBytesAsync(quarantinePath, bytes);
-
-                                File.SetAttributes(driverPath, FileAttributes.Normal);
-                                File.Delete(driverPath);
-
-                                _logger.LogWarning("[TlsCertificateMonitor] BYOVD driver quarantined: {Driver} → {Quarantine}",
-                                    driverPath, quarantinePath);
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogError(ex, "[TlsCertificateMonitor] Failed to quarantine BYOVD driver: {Driver}", driverPath);
-                        }
+                        acted++;
 
                         await _detectionEngine.EmitAsync(new DetectionEvent
                         {
-                            RuleName = "BYOVD: Vulnerable Driver Quarantined",
-                            Evidence = $"Driver '{driverName}.sys' was signed by removed TrustedPublisher cert '{ExtractCN(certSubject)}'. Service registration removed, driver quarantined.",
-                            Reasoning = "A driver signed by a cert that was just removed from TrustedPublisher has been neutralized. " +
-                                        "BYOVD (Bring Your Own Vulnerable Driver) attacks plant a signed-but-vulnerable driver " +
-                                        "to gain kernel access. Removing the cert + driver + service registration closes the attack path.",
+                            RuleName = "BYOVD: Vulnerable Driver Neutralized",
+                            Evidence = $"Driver '{driverName}.sys' matched removed TrustedPublisher thumbprint. Service registration removed. Binary left in place for OS integrity.",
+                            Reasoning = "BYOVD neutralization stops the service and removes its SCM registration. " +
+                                        "v1.8.1 no longer deletes System32\\drivers binaries (RT-NEW-1: empty-CN subject match could wipe all drivers).",
                             Confidence = 0.95,
                             Tier = DetectionTier.Tier1Behavioral,
-                            AuthorizedResponse = ResponseAction.LogOnly, // Already handled
+                            AuthorizedResponse = ResponseAction.LogOnly,
                             ProcessName = driverName,
-                            ProcessId = 0
+                            ProcessId = 0,
+                            Metadata = new Dictionary<string, string>
+                            {
+                                { "CertThumbprint", certThumbprint },
+                                { "DriverPath", driverPath }
+                            }
                         });
                     }
                     catch { }

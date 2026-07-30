@@ -55,7 +55,8 @@ export default {
     const corsHeaders = {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, X-Sentinel-Auth, X-Sentinel-Signature, X-Sentinel-Timestamp',
+      // v1.8.1: X-Sentinel-Auth removed — shared secret must never be sent as a header
+      'Access-Control-Allow-Headers': 'Content-Type, X-Sentinel-Signature, X-Sentinel-Timestamp',
     };
 
     if (request.method === 'OPTIONS') {
@@ -103,8 +104,6 @@ export default {
 
     const signature = request.headers.get('X-Sentinel-Signature');
     const timestamp = request.headers.get('X-Sentinel-Timestamp');
-    // Optional explicit auth header — if present must match secret
-    const authHeader = request.headers.get('X-Sentinel-Auth');
 
     if (!signature || !timestamp) {
       return new Response(JSON.stringify({
@@ -115,12 +114,9 @@ export default {
       });
     }
 
-    if (authHeader != null && authHeader !== env.SENTINEL_SHARED_SECRET) {
-      return new Response(JSON.stringify({ error: 'Unauthorized: Invalid X-Sentinel-Auth' }), {
-        status: 401,
-        headers: { 'Content-Type': 'application/json', ...corsHeaders }
-      });
-    }
+    // v1.8.1 (RT-CRIT-1): X-Sentinel-Auth is ignored. Agents no longer send the shared
+    // secret as a header; HMAC over timestamp+path+body is the sole authenticator.
+    // Legacy clients that still send Auth are not rejected (HMAC still required).
 
     // Timestamp within 5 minutes
     const timestampVal = parseInt(timestamp, 10);

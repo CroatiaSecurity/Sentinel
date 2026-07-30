@@ -6,14 +6,17 @@ using System.Text;
 namespace Sentinel.Core
 {
     /// <summary>
-    /// v1.6.0: Shared HMAC auth for the Cloudflare threat-proxy Worker.
+    /// v1.6.0 / v1.8.1: Shared HMAC auth for the Cloudflare threat-proxy Worker.
     ///
     /// Protocol:
     ///   - Signing key = ThreatReportingConfig.ProxySharedSecret (server-side secret;
-    ///     never a client-generated key).
+    ///     never a client-generated key). The secret is used only as the HMAC key —
+    ///     it is never transmitted in a request header.
     ///   - Payload = $"{unixTimestamp}.{path}.{rawJsonBody}"
-    ///   - Headers: X-Sentinel-Timestamp, X-Sentinel-Signature (hex HMAC-SHA256),
-    ///              optional X-Sentinel-Auth (same secret, dual-check).
+    ///   - Headers: X-Sentinel-Timestamp, X-Sentinel-Signature (hex HMAC-SHA256).
+    ///
+    /// SECURITY v1.8.1 (RT-CRIT-1): Removed X-Sentinel-Auth which previously sent the
+    /// shared secret in cleartext. HMAC signature + timestamp is sufficient authentication.
     ///
     /// The worker fails closed if SENTINEL_SHARED_SECRET is unset and never
     /// accepts a client-supplied signing key (removed X-Sentinel-Key).
@@ -48,7 +51,6 @@ namespace Sentinel.Core
 
             request.Headers.TryAddWithoutValidation("X-Sentinel-Timestamp", timestamp);
             request.Headers.TryAddWithoutValidation("X-Sentinel-Signature", signature);
-            request.Headers.TryAddWithoutValidation("X-Sentinel-Auth", config.ProxySharedSecret!);
             return true;
         }
 

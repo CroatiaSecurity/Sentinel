@@ -1312,8 +1312,14 @@ namespace Sentinel.Agent
         {
             try
             {
+                // v1.8.1 RT-NEW-4: do not create SYSTEM-owned paths as the interactive user
                 if (!Directory.Exists(path))
-                    Directory.CreateDirectory(path);
+                {
+                    MessageBox.Show(
+                        $"Folder does not exist yet:\n{path}",
+                        "Sentinel", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
                 Process.Start(new ProcessStartInfo
                 {
                     FileName = "explorer.exe",

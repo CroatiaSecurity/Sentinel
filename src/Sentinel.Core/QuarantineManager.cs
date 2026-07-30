@@ -2,7 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Security.AccessControl;
 using System.Security.Cryptography;
+using System.Security.Principal;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 
@@ -12,6 +14,9 @@ namespace Sentinel.Core
     {
         private readonly string _quarantineDir;
         private static readonly Regex MetadataRegex = new(@"^q_([a-fA-F0-9]+)_([a-zA-Z0-9_\-\s\.]+)$", RegexOptions.Compiled);
+
+        /// <summary>v1.8.1 RT-NEW-5: refuse multi-GB in-memory quarantine (OOM / service death).</summary>
+        public const long MaxQuarantineFileBytes = 128L * 1024 * 1024;
 
         public string QuarantineDirectory => _quarantineDir;
 
@@ -35,12 +40,66 @@ namespace Sentinel.Core
                 {
                     Directory.CreateDirectory(_quarantineDir);
                 }
+                // v1.8.1 RT-NEW-4: lock production quarantine only (not unit-test temp dirs —
+                // SYSTEM+Admins-only ACLs break non-elevated Admin tests under UAC).
+                if (IsProductionQuarantinePath(_quarantineDir))
+                    SecureQuarantineDirectory(_quarantineDir);
             }
             catch (UnauthorizedAccessException)
             {
                 // Running as user-session Agent — quarantine dir is owned by SYSTEM.
                 // This is expected; the Agent only reads quarantine metadata for display.
             }
+            catch
+            {
+                // ACL lock may fail as non-elevated agent — ignore
+            }
+        }
+
+        private static bool IsProductionQuarantinePath(string dirPath)
+        {
+            try
+            {
+                var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
+                var expected = Path.GetFullPath(Path.Combine(programData, "Sentinel", "Quarantine"));
+                var actual = Path.GetFullPath(dirPath).TrimEnd('\\');
+                return actual.Equals(expected.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase)
+                    || actual.StartsWith(expected.TrimEnd('\\') + "\\", StringComparison.OrdinalIgnoreCase);
+            }
+            catch { return false; }
+        }
+
+        /// <summary>
+        /// SYSTEM + Admins full control; Users no access. Prevents sample theft / meta plant.
+        /// Only applied to production %ProgramData%\Sentinel\Quarantine.
+        /// </summary>
+        public static void SecureQuarantineDirectory(string dirPath)
+        {
+            if (string.IsNullOrWhiteSpace(dirPath) || !Directory.Exists(dirPath))
+                return;
+            if (!IsProductionQuarantinePath(dirPath))
+                return;
+            try
+            {
+                var dirInfo = new DirectoryInfo(dirPath);
+                var security = dirInfo.GetAccessControl();
+                security.SetAccessRuleProtection(true, false);
+
+                var systemSid = new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null);
+                security.AddAccessRule(new FileSystemAccessRule(
+                    systemSid, FileSystemRights.FullControl,
+                    InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+                    PropagationFlags.None, AccessControlType.Allow));
+
+                var adminsSid = new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null);
+                security.AddAccessRule(new FileSystemAccessRule(
+                    adminsSid, FileSystemRights.FullControl,
+                    InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+                    PropagationFlags.None, AccessControlType.Allow));
+
+                dirInfo.SetAccessControl(security);
+            }
+            catch { }
         }
 
         /// <summary>
@@ -98,8 +157,17 @@ namespace Sentinel.Core
             using (var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read,
                 FileShare.ReadWrite | FileShare.Delete))
             {
+                // v1.8.1 RT-NEW-5: hard cap to prevent SYSTEM OOM on huge decoy files
+                if (fs.Length > MaxQuarantineFileBytes)
+                    return null;
+
                 fileBytes = new byte[fs.Length];
                 await fs.ReadExactlyAsync(fileBytes);
+            }
+
+            if (IsProductionQuarantinePath(_quarantineDir))
+            {
+                try { SecureQuarantineDirectory(_quarantineDir); } catch { }
             }
 
             // Encrypt using DPAPI (machine-scoped) for quarantine isolation
@@ -190,24 +258,38 @@ namespace Sentinel.Core
             if (!File.Exists(quarantineFilePath))
                 throw new FileNotFoundException("Quarantine file not found", quarantineFilePath);
 
+            // v1.8.1: quarantine blob must live under the ACL-locked quarantine directory
+            if (!SecurityValidation.IsPathWithinDirectory(quarantineFilePath, QuarantineDirectory))
+                throw new InvalidOperationException("Restore denied: quarantine file is outside the quarantine directory.");
+
             if (string.IsNullOrEmpty(destinationPath))
             {
                 var meta = quarantineFilePath + ".meta";
-                if (File.Exists(meta))
+                if (File.Exists(meta) && SecurityValidation.IsPathWithinDirectory(meta, QuarantineDirectory))
                 {
                     destinationPath = (await File.ReadAllTextAsync(meta)).Trim();
                 }
                 else
                 {
                     ParseQuarantineMetadata(Path.GetFileName(quarantineFilePath), out _, out var originalName);
-                    if (string.IsNullOrEmpty(originalName))
-                        throw new InvalidOperationException("No restore path recorded and could not parse original name.");
+                    if (string.IsNullOrEmpty(originalName) || !SecurityValidation.IsSafeFilename(originalName))
+                        throw new InvalidOperationException("No restore path recorded and could not parse a safe original name.");
                     destinationPath = Path.Combine(
                         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
                         "Downloads",
                         originalName);
                 }
             }
+
+            // Never restore into OS-critical paths (WRP / System32 / Windows)
+            if (string.IsNullOrWhiteSpace(destinationPath) ||
+                SecurityValidation.IsOsCriticalPath(destinationPath) ||
+                destinationPath.Contains("..", StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("Restore denied: destination path is missing, traversal-like, or OS-critical.");
+            }
+
+            destinationPath = Path.GetFullPath(destinationPath);
 
             var encrypted = await File.ReadAllBytesAsync(quarantineFilePath);
             var plain = ProtectedData.Unprotect(encrypted, null, DataProtectionScope.LocalMachine);
