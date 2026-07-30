@@ -1,6 +1,6 @@
 # Sentinel — Design Document
 
-**Version: 1.7.9**
+**Version: 1.8.0**
 
 ---
 
@@ -519,6 +519,18 @@ Full cert-revocation chain for BYOVD attacks. When a vulnerable/suspicious drive
 | `CookieIntegrityMonitor` | 5 min | Tier2 LogOnly (Chrome/Edge/Brave cookie DB hash change) |
 
 ---
+
+## v1.8.0 Additions
+
+### TokenTheft false-positive hardening
+
+| Item | Value |
+|------|--------|
+| Problem | Built-in `Memory Compression` / `Registry` (SYSTEM token, empty image path) treated as potato/token theft → kill-grade + police packs every cooldown |
+| Fix | Expanded OS allowlists; empty path not suspicious; empty path + OS name skipped; unknown empty path LogOnly 0.55 only |
+| Cooldown | Per-PID/rule alert cache 60 minutes (was 5) |
+| Packs | `AutoIncidentReporter.IsTokenTheftOsFalsePositive` blocks LE packs for those FPs; Token Theft pack cooldown ≥ 1 hour |
+| Tests | `V180FeatureTests` |
 
 ## v1.7.9 Additions
 

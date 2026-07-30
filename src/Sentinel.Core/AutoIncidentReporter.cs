@@ -96,7 +96,7 @@ namespace Sentinel.Core
             _threatReportService = threatReportService;
             _toastService = toastService;
             _logger = logger;
-            _productVersion = typeof(AutoIncidentReporter).Assembly.GetName().Version?.ToString() ?? "1.7.8";
+            _productVersion = typeof(AutoIncidentReporter).Assembly.GetName().Version?.ToString() ?? "1.8.0";
 
             _reportRoot = _config.ReportDirectory
                 ?? Path.Combine(
@@ -175,6 +175,11 @@ namespace Sentinel.Core
         public bool ShouldReport(DetectionEvent detection)
         {
             if (detection == null) return false;
+
+            // v1.8.0: never generate police packs for known TokenTheft OS false positives
+            // (Memory Compression / Registry / empty-path SYSTEM noise).
+            if (IsTokenTheftOsFalsePositive(detection))
+                return false;
 
             var minConf = _config.MinConfidence;
             var killFloor = _config.ReportableGradeOnly
@@ -314,11 +319,45 @@ namespace Sentinel.Core
         private string BuildCooldownKey(DetectionEvent d) =>
             $"{d.RuleName}|{d.ProcessId}|{d.SignalType}";
 
+        /// <summary>
+        /// v1.8.0: Token Theft rules that only name built-in OS processes (or empty image path
+        /// with those names in evidence) must not create LE evidence packs. Real potato/token
+        /// theft from Temp/Downloads still reports normally.
+        /// </summary>
+        internal static bool IsTokenTheftOsFalsePositive(DetectionEvent detection)
+        {
+            if (detection == null) return false;
+            var rule = detection.RuleName ?? "";
+            if (!rule.Contains("Token Theft", StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            var name = detection.ProcessName ?? "";
+            if (TokenTheftMonitor.IsLikelyProtectedOsProcess(name) ||
+                TokenTheftMonitor.IsLegitimateSystemTokenHolder(name))
+                return true;
+
+            var evidence = detection.Evidence ?? "";
+            // Classic FP wording when image path is inaccessible
+            if (evidence.Contains("at ''", StringComparison.Ordinal) &&
+                (evidence.Contains("Memory Compression", StringComparison.OrdinalIgnoreCase) ||
+                 evidence.Contains("Process 'Registry'", StringComparison.OrdinalIgnoreCase) ||
+                 evidence.Contains("'Registry'", StringComparison.OrdinalIgnoreCase)))
+                return true;
+
+            return false;
+        }
+
         private bool IsOnCooldown(string key)
         {
             if (_cooldown.TryGetValue(key, out var last))
             {
-                if (DateTimeOffset.UtcNow - last < TimeSpan.FromSeconds(Math.Max(30, _config.CooldownSeconds)))
+                // v1.8.0: Token Theft packs use a longer cooldown (1h) even if config is 300s —
+                // prevents hundreds of near-identical packs from the same PID.
+                var seconds = Math.Max(30, _config.CooldownSeconds);
+                if (key.StartsWith("Token Theft", StringComparison.OrdinalIgnoreCase))
+                    seconds = Math.Max(seconds, 3600);
+
+                if (DateTimeOffset.UtcNow - last < TimeSpan.FromSeconds(seconds))
                     return true;
             }
             return false;

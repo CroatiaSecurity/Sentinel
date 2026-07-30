@@ -12,20 +12,21 @@ namespace Sentinel.Core
 {
     /// <summary>
     /// v1.6.7: Token Theft Monitor — detects token manipulation beyond integrity level changes.
-    /// 
+    /// v1.8.0: Suppress Windows built-in false positives (Memory Compression, Registry, empty
+    /// image path). Longer per-PID/rule cooldown. Empty path is no longer treated as "suspicious".
+    ///
     /// Blind spot addressed: TokenIntegrityMonitor only catches Medium→High escalation without
     /// consent.exe. It misses: DuplicateToken/ImpersonateLoggedOnUser from winlogon, make_token,
     /// steal_token (Cobalt Strike), and Rubeus-style Kerberos ticket manipulation that don't
     /// necessarily change the integrity level.
-    /// 
+    ///
     /// Detection approach:
     /// - Scan processes for tokens with SYSTEM/LocalService/NetworkService SID where the
     ///   process owner is a regular user (non-SYSTEM process holding SYSTEM token)
     /// - Detect processes with SeImpersonatePrivilege enabled from non-service paths
     /// - Monitor for processes with multiple distinct token users (impersonation indicators)
     /// - Watch for known token manipulation tool signatures in loaded modules
-    /// - Detect token handle duplication across session boundaries
-    /// 
+    ///
     /// Response: Tier1 KillProcessTree for confirmed token theft (0.85+).
     ///           Tier2 LogOnly for impersonation privilege anomalies (0.60-0.70).
     /// Scans every 20s. No elevation beyond PROCESS_QUERY_LIMITED_INFORMATION required.
@@ -37,7 +38,10 @@ namespace Sentinel.Core
         private readonly ContextBus? _contextBus;
         private readonly ILogger<TokenTheftMonitor> _logger;
 
-        private readonly ConcurrentDictionary<int, DateTime> _alertedPids = new();
+        /// <summary>Key: "pid|ruleShort" → last alert UTC. v1.8.0: 60-minute window (was 5).</summary>
+        private readonly ConcurrentDictionary<string, DateTime> _alertedKeys = new(StringComparer.OrdinalIgnoreCase);
+
+        private const int AlertCooldownMinutes = 60;
 
         // P/Invoke for token inspection
         [DllImport("advapi32.dll", SetLastError = true)]
@@ -62,27 +66,32 @@ namespace Sentinel.Core
         private const uint TOKEN_QUERY = 0x0008;
         private const int TokenUser = 1;
         private const int TokenPrivileges = 3;
-        private const int TokenElevationType = 18;
-        private const int TokenSessionId = 12;
 
         // Processes that legitimately hold SYSTEM tokens
         private static readonly HashSet<string> LegitimateSystemTokenHolders = new(StringComparer.OrdinalIgnoreCase)
         {
-            "system", "svchost", "services", "lsass", "csrss", "wininit", "winlogon",
-            "smss", "dwm", "spoolsv", "searchindexer", "wmiprvse", "dllhost",
+            "system", "system idle process", "idle", "registry", "memory compression",
+            "secure system", "smss", "csrss", "wininit", "winlogon", "services", "lsass",
+            "svchost", "dwm", "spoolsv", "searchindexer", "wmiprvse", "dllhost",
             "taskhostw", "fontdrvhost", "audiodg", "msdtc", "vds", "runtimebroker",
             "sgrmbroker", "securityhealthservice", "msmpsvc", "msmpeng",
             "nissrv", "sense", "mpdefendercoreservice", "sentinel.service",
             "sentinel.agent", "trustedinstaller", "tiworker", "wuauserv",
-            "msiexec", "dismhost", "ntlite"
+            "msiexec", "dismhost", "ntlite", "conhost", "sihost", "ctfmon",
+            "shellhost", "startmenuexperiencehost", "searchhost", "textinputhost",
+            "applicationframehost", "systemsettings", "securityhealthsystray",
+            "dashost", "lsaiso", "credentialuibroker", "consent", "werfault",
+            "wermgr", "taskmgr", "procexp", "procexp64"
         };
 
         // Processes that legitimately have SeImpersonatePrivilege
         private static readonly HashSet<string> LegitimateImpersonators = new(StringComparer.OrdinalIgnoreCase)
         {
-            "svchost", "services", "lsass", "sqlservr", "w3wp", "iisexpress",
+            "system", "system idle process", "idle", "registry", "memory compression",
+            "secure system", "svchost", "services", "lsass", "sqlservr", "w3wp", "iisexpress",
             "wmiprvse", "dllhost", "spoolsv", "msdtc", "searchindexer",
-            "sentinel.service", "trustedinstaller", "msiexec"
+            "sentinel.service", "sentinel.agent", "trustedinstaller", "msiexec",
+            "csrss", "wininit", "winlogon", "smss", "dwm", "fontdrvhost", "taskhostw"
         };
 
         // Known token manipulation tool module names
@@ -106,7 +115,9 @@ namespace Sentinel.Core
 
         protected override async Task ExecuteAsync(CancellationToken ct)
         {
-            _logger.LogInformation("[TokenTheftMonitor] Started — scanning for token manipulation every 20s");
+            _logger.LogInformation(
+                "[TokenTheftMonitor] Started — scan every 20s; OS FP allowlist + {Cooldown}m alert cooldown (v1.8.0)",
+                AlertCooldownMinutes);
             await Task.Delay(15000, ct); // Startup grace
 
             while (!ct.IsCancellationRequested)
@@ -139,11 +150,8 @@ namespace Sentinel.Core
 
                     string processName = proc.ProcessName;
 
-                    // Skip known legitimate SYSTEM token holders
-                    if (LegitimateSystemTokenHolders.Contains(processName)) continue;
-
-                    // Skip already alerted PIDs (5-minute window)
-                    if (_alertedPids.ContainsKey(pid)) continue;
+                    // v1.8.0: skip built-in OS / allowlisted names before any token open
+                    if (IsLegitimateSystemTokenHolder(processName)) continue;
 
                     // Get the token user for this process
                     var tokenInfo = GetProcessTokenUser(pid);
@@ -154,23 +162,39 @@ namespace Sentinel.Core
                     {
                         string imagePath = SecurityValidation.GetProcessImagePath(pid) ?? "";
 
+                        // v1.8.0: inaccessible image path on an OS-like name → ignore (Memory Compression, etc.)
+                        if (string.IsNullOrEmpty(imagePath) && IsLikelyProtectedOsProcess(processName))
+                            continue;
+
                         // Verify this isn't a service running from a legitimate path
                         if (!IsServicePath(imagePath))
                         {
-                            double confidence = 0.80;
+                            if (WasRecentlyAlerted(pid, "system-token"))
+                                continue;
+
+                            double confidence;
                             var response = ResponseAction.LogOnly;
 
-                            // Higher confidence if running from suspicious path
-                            if (IsSuspiciousPath(imagePath))
+                            if (string.IsNullOrEmpty(imagePath))
+                            {
+                                // Empty path without a known OS name: weak signal only — never kill/pack-grade
+                                confidence = 0.55;
+                                response = ResponseAction.LogOnly;
+                            }
+                            else if (IsSuspiciousPath(imagePath))
                             {
                                 confidence = 0.90;
                                 response = ResponseAction.KillProcessTree;
                             }
-                            // Higher confidence if the process has network connections
-                            else if (!string.IsNullOrEmpty(imagePath) && !IsInProgramFiles(imagePath))
+                            else if (!IsInProgramFiles(imagePath) && !IsServicePath(imagePath))
                             {
                                 confidence = 0.85;
                                 response = ResponseAction.KillProcessTree;
+                            }
+                            else
+                            {
+                                confidence = 0.70;
+                                response = ResponseAction.LogOnly;
                             }
 
                             await _detectionEngine.EmitAsync(new DetectionEvent
@@ -181,37 +205,46 @@ namespace Sentinel.Core
                                 Reasoning = "A process that is not a Windows service or known system component is running with SYSTEM-level token privileges. " +
                                             "This indicates token theft via DuplicateToken, ImpersonateLoggedOnUser, or make_token (MITRE T1134.001, T1134.003).",
                                 Confidence = confidence,
-                                Tier = DetectionTier.Tier1Behavioral,
+                                Tier = confidence >= 0.80
+                                    ? DetectionTier.Tier1Behavioral
+                                    : DetectionTier.Tier2Indicator,
                                 AuthorizedResponse = response,
                                 SignalType = SignalType.CredentialTheft,
                                 ProcessName = processName,
                                 ProcessId = pid,
                             });
 
-                            // v1.6.8: Publish enrichment signal for composite correlation (token theft + lateral movement)
-                            _contextBus?.Publish(new TokenTheftSignal
+                            if (confidence >= 0.80)
                             {
-                                ProcessId = pid,
-                                ProcessName = processName,
-                                SourceMonitor = "TokenTheftMonitor",
-                                TokenUserName = tokenInfo.Value.TokenUserName,
-                                TheftType = TokenTheftType.SystemTokenFromUserProcess,
-                                ImagePath = imagePath,
-                                HasImpersonatePrivilege = tokenInfo.Value.HasImpersonatePrivilege,
-                            });
+                                _contextBus?.Publish(new TokenTheftSignal
+                                {
+                                    ProcessId = pid,
+                                    ProcessName = processName,
+                                    SourceMonitor = "TokenTheftMonitor",
+                                    TokenUserName = tokenInfo.Value.TokenUserName,
+                                    TheftType = TokenTheftType.SystemTokenFromUserProcess,
+                                    ImagePath = imagePath,
+                                    HasImpersonatePrivilege = tokenInfo.Value.HasImpersonatePrivilege,
+                                });
+                            }
 
-                            _alertedPids[pid] = DateTime.UtcNow;
+                            MarkAlerted(pid, "system-token");
                         }
                     }
 
                     // Detect: SeImpersonatePrivilege from user-writable paths (potato attacks)
-                    if (tokenInfo.Value.HasImpersonatePrivilege && !LegitimateImpersonators.Contains(processName))
+                    if (tokenInfo.Value.HasImpersonatePrivilege && !IsLegitimateImpersonator(processName))
                     {
                         string imagePath = SecurityValidation.GetProcessImagePath(pid) ?? "";
 
-                        // v1.7.1: Exempt installer extractors (Inno Setup .tmp, NSIS) — elevated installers
-                        // legitimately have SeImpersonatePrivilege from UAC elevation. Without this,
-                        // Sentinel kills its own installer (SentinelSetup-*.tmp from Temp\is-XXXXX\).
+                        // v1.8.0: empty path is not a potato path — skip (was treating "" as suspicious)
+                        if (string.IsNullOrEmpty(imagePath))
+                            continue;
+
+                        if (IsLikelyProtectedOsProcess(processName))
+                            continue;
+
+                        // v1.7.1: Exempt installer extractors (Inno Setup .tmp, NSIS)
                         if (InstallerHeuristics.IsInstallerExtractor(processName, imagePath) ||
                             InstallerHeuristics.LooksLikeInstallerName(processName, imagePath))
                         {
@@ -220,6 +253,9 @@ namespace Sentinel.Core
 
                         if (IsSuspiciousPath(imagePath))
                         {
+                            if (WasRecentlyAlerted(pid, "seimpersonate"))
+                                continue;
+
                             await _detectionEngine.EmitAsync(new DetectionEvent
                             {
                                 RuleName = "Token Theft: SeImpersonatePrivilege from Suspicious Path",
@@ -235,7 +271,6 @@ namespace Sentinel.Core
                                 ProcessId = pid,
                             });
 
-                            // v1.6.8: Publish enrichment signal for composite correlation
                             _contextBus?.Publish(new TokenTheftSignal
                             {
                                 ProcessId = pid,
@@ -247,7 +282,7 @@ namespace Sentinel.Core
                                 HasImpersonatePrivilege = true,
                             });
 
-                            _alertedPids[pid] = DateTime.UtcNow;
+                            MarkAlerted(pid, "seimpersonate");
                         }
                     }
                 }
@@ -275,14 +310,13 @@ namespace Sentinel.Core
 
                 try
                 {
-                    // Get token user
                     string userName = GetTokenUserName(hToken);
                     bool isSystem = userName.Equals("SYSTEM", StringComparison.OrdinalIgnoreCase) ||
                                     userName.Equals("LOCAL SERVICE", StringComparison.OrdinalIgnoreCase) ||
                                     userName.Equals("NETWORK SERVICE", StringComparison.OrdinalIgnoreCase) ||
-                                    userName.Contains("NT AUTHORITY\\SYSTEM", StringComparison.OrdinalIgnoreCase);
+                                    userName.Contains("NT AUTHORITY\\SYSTEM", StringComparison.OrdinalIgnoreCase) ||
+                                    userName.EndsWith("\\SYSTEM", StringComparison.OrdinalIgnoreCase);
 
-                    // Check SeImpersonatePrivilege
                     bool hasImpersonate = CheckImpersonatePrivilege(hToken);
 
                     return new TokenUserInfo
@@ -308,7 +342,6 @@ namespace Sentinel.Core
                 if (!GetTokenInformation(hToken, TokenUser, buffer, needed, out _))
                     return "Unknown";
 
-                // TOKEN_USER structure: first field is SID_AND_ATTRIBUTES with pointer to SID
                 IntPtr sidPtr = Marshal.ReadIntPtr(buffer);
 
                 var nameBuilder = new System.Text.StringBuilder(256);
@@ -338,18 +371,16 @@ namespace Sentinel.Core
                     return false;
 
                 int count = Marshal.ReadInt32(buffer);
-                int offset = 4; // Skip PrivilegeCount
-                // SE_IMPERSONATE_NAME LUID is well-known: {0, 29}
+                int offset = 4;
                 const int SE_IMPERSONATE_PRIVILEGE = 29;
 
                 for (int i = 0; i < count && i < 100; i++)
                 {
-                    // LUID_AND_ATTRIBUTES: LUID (8 bytes) + Attributes (4 bytes) = 12 bytes
                     long luid = Marshal.ReadInt64(buffer, offset + (i * 12));
                     uint attrs = (uint)Marshal.ReadInt32(buffer, offset + (i * 12) + 8);
 
                     int lowPart = (int)(luid & 0xFFFFFFFF);
-                    if (lowPart == SE_IMPERSONATE_PRIVILEGE && (attrs & 0x2) != 0) // SE_PRIVILEGE_ENABLED
+                    if (lowPart == SE_IMPERSONATE_PRIVILEGE && (attrs & 0x2) != 0)
                         return true;
                 }
 
@@ -360,9 +391,14 @@ namespace Sentinel.Core
 
         private bool IsExpectedSystemProcess(string name, int pid)
         {
-            // Services running as SYSTEM from System32 or Program Files are expected
+            if (IsLegitimateSystemTokenHolder(name)) return true;
+
             string? path = SecurityValidation.GetProcessImagePath(pid);
-            if (string.IsNullOrEmpty(path)) return false;
+            if (string.IsNullOrEmpty(path))
+            {
+                // v1.8.0: no path + OS-like name → expected; bare unknown empty path is not "expected"
+                return IsLikelyProtectedOsProcess(name);
+            }
 
             string pathLower = path.ToLowerInvariant();
             return pathLower.Contains(@"\windows\") ||
@@ -380,13 +416,20 @@ namespace Sentinel.Core
                    lower.Contains(@"\program files (x86)\");
         }
 
-        private static bool IsSuspiciousPath(string path)
+        /// <summary>
+        /// v1.8.0: empty path is NOT suspicious. Prior versions returned true for "",
+        /// which caused Memory Compression / Registry (no queryable path) to fire
+        /// SeImpersonatePrivilege + Kill + police evidence packs every cooldown window.
+        /// </summary>
+        internal static bool IsSuspiciousPath(string path)
         {
-            if (string.IsNullOrEmpty(path)) return true;
+            if (string.IsNullOrWhiteSpace(path)) return false;
             string lower = path.ToLowerInvariant();
             return lower.Contains(@"\temp\") || lower.Contains(@"\tmp\") ||
                    lower.Contains(@"\downloads\") || lower.Contains(@"\appdata\local\temp") ||
-                   lower.Contains(@"\users\public\") || lower.Contains(@"\programdata\") ||
+                   lower.Contains(@"\users\public\") ||
+                   // ProgramData is mixed; only flag obvious drop dirs, not all ProgramData
+                   lower.Contains(@"\programdata\temp") ||
                    lower.Contains(@"\recycle") || lower.Contains(@"\desktop\");
         }
 
@@ -397,16 +440,71 @@ namespace Sentinel.Core
             return lower.Contains(@"\program files\") || lower.Contains(@"\program files (x86)\");
         }
 
+        internal static bool IsLegitimateSystemTokenHolder(string processName)
+        {
+            if (string.IsNullOrWhiteSpace(processName)) return false;
+            var n = NormalizeProcessName(processName);
+            return LegitimateSystemTokenHolders.Contains(n) ||
+                   LegitimateSystemTokenHolders.Contains(processName);
+        }
+
+        internal static bool IsLegitimateImpersonator(string processName)
+        {
+            if (string.IsNullOrWhiteSpace(processName)) return false;
+            var n = NormalizeProcessName(processName);
+            return LegitimateImpersonators.Contains(n) ||
+                   LegitimateImpersonators.Contains(processName);
+        }
+
+        /// <summary>
+        /// Names Windows exposes for protected / session-0 components that often have
+        /// empty GetProcessImagePath results and SYSTEM tokens.
+        /// </summary>
+        internal static bool IsLikelyProtectedOsProcess(string processName)
+        {
+            if (string.IsNullOrWhiteSpace(processName)) return false;
+            var n = NormalizeProcessName(processName);
+
+            if (IsLegitimateSystemTokenHolder(n)) return true;
+
+            // Partial matches for localization-safe variants
+            if (n.Contains("memory compression", StringComparison.OrdinalIgnoreCase)) return true;
+            if (n.Equals("registry", StringComparison.OrdinalIgnoreCase)) return true;
+            if (n.Contains("secure system", StringComparison.OrdinalIgnoreCase)) return true;
+            if (n.StartsWith("system ", StringComparison.OrdinalIgnoreCase)) return true;
+
+            return false;
+        }
+
+        private static string NormalizeProcessName(string name)
+        {
+            var n = name.Trim();
+            if (n.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+                n = n[..^4];
+            return n;
+        }
+
         private static string Truncate(string s, int maxLen) =>
-            s.Length <= maxLen ? s : s[..maxLen] + "...";
+            string.IsNullOrEmpty(s) ? s : (s.Length <= maxLen ? s : s[..maxLen] + "...");
+
+        private bool WasRecentlyAlerted(int pid, string ruleKey)
+        {
+            var key = $"{pid}|{ruleKey}";
+            return _alertedKeys.ContainsKey(key);
+        }
+
+        private void MarkAlerted(int pid, string ruleKey)
+        {
+            _alertedKeys[$"{pid}|{ruleKey}"] = DateTime.UtcNow;
+        }
 
         private void PruneAlertCache()
         {
-            var cutoff = DateTime.UtcNow.AddMinutes(-5);
-            foreach (var kvp in _alertedPids)
+            var cutoff = DateTime.UtcNow.AddMinutes(-AlertCooldownMinutes);
+            foreach (var kvp in _alertedKeys)
             {
                 if (kvp.Value < cutoff)
-                    _alertedPids.TryRemove(kvp.Key, out _);
+                    _alertedKeys.TryRemove(kvp.Key, out _);
             }
         }
     }

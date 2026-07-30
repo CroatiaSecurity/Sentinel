@@ -2,6 +2,31 @@
  
 All notable changes to Sentinel are documented in this file.
 
+## [1.8.0] - 2026-07-30
+
+### Fixed — Token Theft false-positive storm (Memory Compression / Registry)
+
+Hundreds of auto evidence packs were generated for built-in Windows processes that hold SYSTEM tokens and often have **no queryable image path**. That is **not** Discord token theft and is not potato/impersonation malware.
+
+#### Root cause
+- `IsSuspiciousPath("")` returned **true** (empty path treated as user-writable)
+- `Memory Compression`, `Registry`, and similar session-0 names were missing from allowlists
+- 5-minute alert + pack cooldown re-fired on the same PIDs → ~20 packs/hour → hundreds/day
+
+#### TokenTheftMonitor (v1.8.0)
+- Allowlist expanded: `Memory Compression`, `Registry`, `Secure System`, idle/system variants, common shell hosts
+- Empty image path is **not** suspicious; empty path + OS-like name is skipped entirely
+- Empty path on unknown name → **LogOnly 0.55** only (never kill / never reportable-grade)
+- Per-PID/rule alert cooldown **5 min → 60 min**
+
+#### AutoIncidentReporter
+- `IsTokenTheftOsFalsePositive()` blocks LE packs for Token Theft rules on OS process names / classic empty-path evidence
+- Token Theft pack cooldown floor **1 hour** (config cooldown still applies as minimum otherwise)
+- Real potato paths (`Temp\`, Downloads, etc.) still pack normally
+
+### Tests
+- `V180FeatureTests` — allowlist, empty-path path rules, pack gate positive/negative cases
+
 ## [1.7.9] - 2026-07-30
 
 ### Added — Agent Settings GUI (replaces Open Console)
