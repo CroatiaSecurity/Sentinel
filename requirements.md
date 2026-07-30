@@ -1,6 +1,6 @@
 # Sentinel — Requirements
 
-**Version: 1.7.9**
+**Version: 1.8.1**
 
 ---
 
@@ -21,7 +21,7 @@ Focus: transparency, safety, real-world threat detection, and blue-team educatio
 **Not designed for:**
 - Offensive security or red-team tooling
 - Evasion or stealth monitoring
-- Deployment as a managed enterprise agent
+- Deployment as a managed enterprise agent (no managed fleet / PPL kernel component)
 
 ---
 
@@ -31,8 +31,8 @@ Focus: transparency, safety, real-world threat detection, and blue-team educatio
 
 The system must implement two detection tiers with strictly enforced response contracts:
 
-- **Tier 1 (Behavioral):** Active response allowed when explicitly enabled
-- **Tier 2 (Indicator):** Log only â€” response action is **never** permitted regardless of configuration
+- **Tier 1 (Behavioral):** Active response allowed when `Sentinel:ActiveResponse` is true (default **true**). `EnforceActiveResponse` (default **true**) treats disabling ActiveResponse as tampering and force-re-enables it.
+- **Tier 2 (Indicator):** Log only — response action is **never** permitted regardless of configuration.
 
 ### FR-2: Tier 1 Detection Rules
 
@@ -43,7 +43,7 @@ The system must detect the following behavioral threats:
 | T1-01 | LSASS credential dumping | Known dumper names, LSASS-targeting command patterns, dump file names |
 | T1-02 | Reverse shell / C2 callback | Encoded PowerShell, LOLBin abuse, C2 framework indicators, suspicious ports |
 | T1-03 | Process injection / hollowing | Known injection tools, hollowing APIs, suspicious parent-child process relationships |
-| T1-04 | Ransomware activity | Shadow copy deletion, backup destruction, bulk file renames, 60+ ransomware extensions |
+| T1-04 | Ransomware activity | Shadow copy deletion, backup destruction, bulk file renames, ransomware extensions |
 | T1-05 | Security tool evasion | AMSI bypass, ETW patching, event log clearing, AV/EDR process termination |
 | T1-06 | Kernel-observed injection | VirtualAllocEx, VirtualProtect RWX, NtMapViewOfSection, APC injection, SetThreadContext (ETW Threat Intelligence provider) |
 | T1-07 | C2 beaconing | Statistical detection via coefficient of variation on connection intervals |
@@ -54,8 +54,10 @@ The system must detect the following behavioral threats:
 | T1-12 | Campaign IOCs | Known malicious hashes, domains, IPs, file names, threat campaign patterns |
 | T1-13 | Phantom keystrokes | Injected keystrokes detected via `LLKHF_INJECTED` flag and blocked via `WH_KEYBOARD_LL` |
 | T1-14 | Network: Unauthorized Network Bridge Detected | Virtual bridge detection and active SetupAPI uninstallation |
-| T1-15 | Network: Primary Adapter Disabled | Baselined physical adapter disabled state detection and active WMI restoration |
-| T1-16 | Network: Unauthorized DNS Change | NameServer configuration registry lock and global DoH enforcement |
+| T1-15 | Network: Primary Adapter Disabled | Baselined physical adapter disabled state detection and active restoration |
+| T1-16 | Network: Unauthorized DNS Change | NameServer configuration registry lock and browser DoH policy enforcement |
+| T1-17 | BYOVD / planted driver certs | Driver load + cert-trace; neutralize via service stop/SCM key remove (no System32 driver mass-delete) |
+| T1-18 | Token theft / potato-class impersonation | Non-service SYSTEM tokens from user-writable paths (OS false positives suppressed) |
 
 ### FR-3: Tier 2 Detection Rules
 
@@ -66,6 +68,7 @@ The system must detect the following indicators (log only):
 | T2-01 | Unsigned binary execution outside trusted system paths |
 | T2-02 | High-entropy process names (Shannon entropy > 4.2) |
 | T2-03 | Suspicious Win32 API names in command line, post-exploitation recon commands, persistence mechanism patterns |
+| T2-04 | Dynamic rules (`DynamicRulesEvaluator`) and consultant JSONL signals (sticky LogOnly; never kill) |
 
 ### FR-4: Composite Detections
 
@@ -83,7 +86,8 @@ The system must implement a behavioral correlation engine that fires composite d
 | C-08 | Spoofed Process Phoning Home | 0.92 |
 | C-09 | Evasion + Persistence Install | 0.91 |
 | C-10 | Escalation + C2 Channel | 0.90 |
-| C-06 | Credential Dump + Exfiltration | 0.96 |
+| C-11 | Named Pipe C2 + Network Beaconing | 0.95 |
+| C-12 | Token Theft + Named Pipe / Lateral | 0.94 |
 
 ### FR-5: Monitoring Sources
 
@@ -94,48 +98,31 @@ The system must implement a behavioral correlation engine that fires composite d
 | Network connections | GetExtendedTcpTable / GetExtendedUdpTable (IPv4+IPv6 TCP+UDP) | None |
 | File activity | FileSystemWatcher | None |
 | Process memory | GetMappedFileName + EnumProcessModules | None |
-| Process ancestry | CreateToolhelp32Snapshot (2s refresh) | None |
+| Process ancestry | CreateToolhelp32Snapshot (~5s refresh) | WMI on constrained SKUs |
 | Webcam/Mic access | Process module enumeration (camera/mic DLL detection) | None |
+| Hash reputation | CIRCL + MalwareBazaar + optional VT proxy | Unknown (fail closed for Safe) |
 
 ### FR-6: Response Actions
 
 | Action | Condition |
 |--------|-----------|
-| Pre-kill deception (DeceptionEngine) | Always before kill when active response is enabled. 2s time budget. |
-| Log detection + log response (LogOnly) | Always for Tier2; Tier1 when active response is disabled |
-| Kill process (`Process.Kill`) | Tier1 only, when `--active-response` is explicitly set |
+| Log detection + log response (`LogOnly`) | Always for Tier2; consultant signals; ActiveResponse disabled (lab); allowlist demotion; IDE host protection |
+| Kill process / process tree | Tier1 with kill authority when `ActiveResponse=true`; rate-limited (`MaxKillsPerMinute`, default 15) |
+| Quarantine / QuarantineAndKill | DPAPI machine-scope under `%ProgramData%\Sentinel\Quarantine`; refuse OS-critical paths; max 128 MB; production ACL SYSTEM+Admins |
+| NetworkIsolate | Public C2 IP only: firewall block (COM), DNS flush, ARP entry purge (native). Skip private/LAN/link-local/multicast/CDN resolvers. Rate-limited (`MaxNetworkIsolatesPerMinute`, default 10) |
+| RemoveCert / RemoveCertAndKillAdder | Planted / high-confidence rogue certificates |
+| RemoveRegistryEntry | Malicious autorun / service / COM persistence |
+| DismountVolume | ISO/VHD/SUBST hosts for threats |
 
-### FR-6a: Deception Tactics (v1.7.0)
+**ActiveResponse model:**
 
-The system must execute attacker-hostile tactics before process termination:
+| Source | Behavior |
+|--------|----------|
+| `Sentinel:ActiveResponse` | Default **true** in config and install |
+| `Sentinel:EnforceActiveResponse` | Default **true** — AntiTamper force-re-enables if flipped off |
+| CLI `--active-response` | Optional force-enable at service start (legacy / override; not required for normal install) |
 
-| ID | Tactic | Mechanism | Time Budget |
-|----|--------|-----------|-------------|
-| D-01 | Memory Flooding | VirtualAllocEx + WriteProcessMemory (256MB random garbage) | 500ms |
-| D-02 | DLL Stomping | Overwrite non-system module .text with INT3 (0xCC) | 200ms |
-| D-03 | Stack Corruption | Inject garbage into thread stack regions via WriteProcessMemory | 200ms |
-| D-04 | Handle Pollution | Create 60+ decoy named objects (fake debugger/EDR/C2 names) | 100ms |
-| D-05 | Beacon Flooding | Send 50+ fake beacon check-ins to identified C2 server | 800ms |
-| D-06 | Protocol Confusion | Send 20+ malformed payloads exploiting C2 parser bugs | included in D-05 |
-| D-07 | Clipboard Poisoning | Replace clipboard with fake AWS keys, SSH keys, crypto addresses | 100ms |
-| D-08 | Sparse File Bombs | Create 500GB sparse files in exfil-target directories | 200ms |
-| D-09 | Symlink Loops | Create 50-level recursive directory symlinks | 200ms |
-| D-10 | Polyglot Files | Deploy PDF/XLSX/DOCX with canary callbacks + parser crash payloads | 200ms |
-| D-11 | Corrupted Archives | Deploy tar.gz/gz/7z with valid headers but corrupted data | 200ms |
-| D-12 | File Locking | Exclusively lock files attacker is reading | 100ms |
-| D-13 | Environment Poisoning | Corrupt proxy, TLS, persistence registry (HKCU only) | 100ms |
-| D-14 | Honeypot Weaponization | Deploy fake SSH keys, cloud creds, wallet seeds, zip bombs | 500ms |
-| D-15 | Network Honeypots | Spin up fake SMB/RDP/HTTP/SSH listeners (30min lifetime) | 200ms |
-
-Constraints:
-- Total deception time must not exceed 2 seconds
-- Deception failure must never prevent kill
-- Never target own PID or system-critical processes
-- Beacon flooding only targets public IP addresses
-- All actions must be logged before execution
-- Ransomware Fast-Path: If 'ransomware' is detected in rule or reasoning, the pre-kill deception phase is bypassed entirely to prioritize immediate termination.
-- Thread context queries: Context retrieval must suspend target threads on x64 and map to a 16-byte packed native struct to avoid access violations or stack corruption.
-- Async background deception: Off-host and network-based deception tactics (BeaconFlooder, NetworkHoneypotDeployer) run asynchronously in the background, without blocking process termination or consuming the pre-kill budget.
+**Removed (not required):** pre-kill **DeceptionEngine** / attacker-hostile deception tactics. Removed for Defender / AV compatibility; design rule is “no offensive deception tactics.”
 
 ### FR-7: Logging
 
@@ -143,57 +130,81 @@ Constraints:
 - Default path: `%ProgramData%\Sentinel\events.jsonl`
 - Size-based rotation: 50 MB per file, up to 5 rotated files
 - Each entry must include: `type`, `timestamp`, `data` (with `ruleName`, `evidence`, `reasoning`, `confidence`, `tier`, `processName`, `processId`, `metadata`)
-- Rate limiting: max 100 entries/second, burst of 200 (prevents log flooding attacks)
-- File sharing: `FileShare.ReadWrite` â€” concurrent readers must not be blocked
-- Graceful degradation: log file access failure must NOT crash the service; fall back to degraded mode
+- Rate limiting: max **1000** entries/second, burst of **5000**
+- File sharing: `FileShare.ReadWrite` — concurrent readers must not be blocked
+- Graceful degradation: log file access failure must NOT crash the service
 - Self-healing: writer must retry opening the file on each write if the initial open failed
 - Stale file handling: locked/inaccessible files renamed to `.stale.<timestamp>` and fresh file created
 
 ### FR-8: Explainability
 
 Every `DetectionEvent` must include:
-- `RuleName` â€” which rule fired
-- `Evidence` â€” what was specifically observed
-- `Reasoning` â€” why it is suspicious (human-readable)
-- `Confidence` â€” 0.0â€“1.0 score calibrated per rule
-- `Metadata` â€” key-value pairs with raw observable data
+- `RuleName` — which rule fired
+- `Evidence` — what was specifically observed
+- `Reasoning` — why it is suspicious (human-readable)
+- `Confidence` — 0.0–1.0 score calibrated per rule
+- `Metadata` — key-value pairs with raw observable data
 
-### FR-9: CLI Interface
+### FR-9: Configuration & CLI
 
-The CLI must support:
-- `--active-response` â€” enable Tier1 process termination
-- `--log <path>` â€” override log file path
-- `--verbose` â€” enable debug logging
-- Configuration via `appsettings.json` (CLI flags override config)
+- Primary configuration: `appsettings.json` (`Sentinel` + `ThreatReporting` + `AutoIncidentReporting` sections)
+- CLI may support:
+  - `--active-response` — force-enable Tier1 destructive actions (does not replace default-true config)
+  - `--log <path>` — override log file path
+  - `--verbose` — enable debug logging
+- CLI flags override config when present
 
-### FR-9a: Agent Settings UI (v1.7.9)
+### FR-9a: Agent Settings UI (v1.7.9+)
 
 The user-session Agent must provide a Settings window (tray menu + double-click):
 - Overview of protection / service status and recent detections
 - Event log viewer (from `events.jsonl`)
 - Report-to-police helper: load evidence packs, edit affidavit fields, open national portal, attach ZIP workflow
-- Quarantine listing / open folder
+- Quarantine listing / open folder (**must not** create the quarantine directory as the interactive user)
 - Must **not** expose any user-level ActiveResponse disable control
-- Must not use balloon tips / Win32 notification APIs on hardened systems
+- Must not use balloon tips / Win32 notification APIs that deadlock under hardened WpnService removal
 
 ### FR-10: Deduplication
 
-- `DetectionEngine` must suppress identical `(RuleName, ProcessId)` detections within a 60-second window
-- `NetworkMonitor` must suppress identical `(ProcessId, RemoteAddress, RemotePort)` alerts within a 5-minute window
+- `DetectionEngine` must suppress identical `(RuleName, ProcessId)` detections within **10s (Tier1)** / **30s (Tier2)**
+- Network / monitor-level secondary cooldowns may apply per monitor
+
+### FR-11: Threat proxy authentication (v1.6.0 / v1.8.1)
+
+- Outbound threat report / VT proxy calls must HMAC-sign `{timestamp}.{path}.{body}` with `ThreatReporting:ProxySharedSecret`
+- Headers: `X-Sentinel-Timestamp`, `X-Sentinel-Signature` only
+- Must **not** transmit the shared secret in any header
+- Fail closed (skip reporting) if secret missing or shorter than 16 characters
+
+### FR-12: Evidence packs (v1.7.7–1.7.8)
+
+- Optional automatic local evidence packs under `%ProgramData%\Sentinel\IncidentReports`
+- Reportable-grade defaults: integrity seal (SHA-256 + machine HMAC), victim affidavit, national portal helper
+- Does **not** auto-file with law enforcement
+
+### FR-13: Self-protection
+
+- Service runs as SYSTEM; Agent is user-session UI/hooks only
+- Binary / config integrity and ActiveResponse enforcement via `AntiTamperGuard`
+- Safe Mode service registration
+- Kill and isolate budgets with Tier1 budget-exhaustion visibility
 
 ---
 
 ## Non-Functional Requirements
 
 ### NFR-1: Safety
-- Active response is enabled by default (President's Law rules fire immediately)
-- The tool must not persist, self-replicate, or hide itself
-- No kernel drivers, no direct syscalls
+- Active response is enabled by default; President's Law categories cannot be allowlist-suppressed into silent kill bypass
+- The tool must not self-replicate or hide itself as malware would
+- No kernel drivers required for core detection (userland EDR)
+- Never quarantine OS-critical / WRP paths
+- Never NetworkIsolate private/LAN addresses
 
 ### NFR-2: Reliability
-- Monitors must fail independently â€” one monitor failure must not crash the service
+- Monitors must fail independently — one monitor failure must not crash the service
 - All exceptions must be caught and logged; no silent failures
 - All `IDisposable` / `IAsyncDisposable` objects must be properly disposed
+- Telemetry queue must be **bounded** (DropOldest under flood) to prevent OOM
 
 ### NFR-3: Performance
 - Must not materially impact system performance during normal operation
@@ -201,22 +212,32 @@ The user-session Agent must provide a Settings window (tray menu + double-click)
 - Process ancestry snapshot must use atomic swap (no reader blocking)
 
 ### NFR-4: Portability of Privilege
-- Must run as a standard user with reduced capability
-- Must run as an elevated user with full capability
-- Degradation must be logged clearly
+- Service requires SYSTEM for full detection/response
+- Agent runs as logged-in user with reduced capability (UI / session hooks only)
+- Degradation / missing elevation must be logged clearly
 
 ### NFR-5: Testability
-- All detection rules must be unit-testable without system access
+- Detection rules and response contracts must be unit-testable without live malware
 - Tier2 response contract must be verified by automated test
 - Composite detection logic must be testable with mock detection engine
+- Security remediations covered by versioned suites (e.g. `V181SecurityHardeningTests`)
 
-### NFR-6: Deception Safety (v1.7.0)
-- Deception must never delay kill beyond 2 seconds
-- Deception failure must be non-fatal (kill always proceeds)
-- Deception must never target own process or system-critical processes (PID â‰¤ 4)
-- Environment poisoning must be HKCU-scoped only (never HKLM)
-- Beacon flooding must only target public IP addresses (never private/loopback)
-- All deception actions must be logged with full detail for forensic review and reversal
-- Honeypot files must use non-standard names to avoid confusion with real credentials
+### NFR-6: Response-path hygiene
+- Prefer native APIs / P/Invoke / COM for kill, firewall, DNS, ARP
+- Installer and some integrity helpers may still shell `sc`/`icacls`/`netsh`/`secedit`/`LGPO` (documented exceptions)
+- Prefer cancellable async delays; short `Thread.Sleep` allowed only for documented settle/STA cases
 
+### NFR-7: Intentionally out of scope
+- Pre-kill offensive deception (removed for AV compatibility)
+- Kernel PPL / ELAM driver
+- Authenticated Service↔Agent IPC (tracked backlog)
+- Full threat-intel certificate pinning (partial: Worker HMAC path preferred)
 
+---
+
+## Document history (parity)
+
+| Version | Notes |
+|---------|--------|
+| 1.7.9 | Agent Settings UI requirements added |
+| 1.8.1 | ActiveResponse defaults, response matrix, proxy auth, quarantine ACL, no DeceptionEngine, dedup windows, isolate private-IP deny |
