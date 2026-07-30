@@ -2,6 +2,38 @@
  
 All notable changes to Sentinel are documented in this file.
 
+## [1.7.9] - 2026-07-30
+
+### Added — Agent Settings GUI (replaces Open Console)
+
+Tray double-click / **Settings** opens a TrimKit-style dark WinForms settings window instead of notepad console.
+
+#### Navigation
+| Page | Purpose |
+|------|---------|
+| **Overview** | Service/agent status, pack & quarantine counts, recent detections |
+| **Events** | Last 200 detection events from `events.jsonl` + detail pane / open log |
+| **Report to Police** | Pick sealed evidence pack, edit affidavit fields, one-click filing helper |
+| **Quarantine** | List quarantined items + open folder |
+| **About** | Version, paths, filing honesty notes |
+
+#### Report to Police flow
+- Lists `%ProgramData%\Sentinel\IncidentReports\AUTO_*` packs (newest first)
+- Editable complainant fields (name, contact, narrative, loss/harm, country portal)
+- Consent checkboxes; **Save Affidavit** writes `victim_affidavit.txt` (still excluded from integrity seal)
+- **Send Report to Police** saves affidavit, rebuilds pack ZIP, copies a filing summary to the clipboard, opens the national cybercrime portal, and opens the pack folder so the user can attach evidence
+- Also: Verify Integrity, Open ZIP, Copy Summary, Open Portal Only
+- Identity defaults persist under `%LocalAppData%\Sentinel\user_report_prefs.json`
+
+#### Tray menu
+- **Settings** (default / double-click)
+- **Report to Police…** (jumps to filing tab)
+- Open Quarantine Folder / Open Event Log / Exit Agent
+- Still no ActiveResponse toggle (service-only)
+
+### Constraints
+- STA-safe: dashboard uses synchronous I/O only (no async/await on the tray pump)
+
 ## [1.7.8] - 2026-07-29
 
 ### Improved — Reportable-grade evidence packs (trust for human LE filing)

@@ -2,7 +2,7 @@
 
 Real-time endpoint detection and response for Windows. Runs as a background service, monitors system behavior, and kills threats automatically when multiple signals correlate.
 
-**Current version: 1.7.8**
+**Current version: 1.7.9**
 
 ---
 
@@ -94,6 +94,8 @@ Full transparency in [THREAT_MODEL.md](THREAT_MODEL.md).
 6. **Reputation** — The FileReputationEngine queries 3 sources (CIRCL, MalwareBazaar, VirusTotal via Cloudflare Worker proxy) and combines hash reputation with static PE analysis, signer trust, and contextual risk into a composite 0-100 score.
 
 7. **Reportable-grade evidence (v1.7.7/1.7.8)** — High-confidence attacks produce integrity-sealed packs under `%ProgramData%\Sentinel\IncidentReports\` (SHA-256 manifest + machine-bound HMAC, victim affidavit template, chain of custody, national cybercrime portal links, optional TI share). Sentinel prepares evidence for **you** to file; it does not auto-submit to police or INTERPOL.
+
+8. **Settings UI (v1.7.9)** — Tray **Settings** (double-click) opens a dark sidebar window: Overview, Events, **Report to Police** (edit affidavit → send filing helper), Quarantine, About. No ActiveResponse toggle in the agent (service-only).
 
 ---
 

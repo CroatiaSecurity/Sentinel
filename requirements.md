@@ -1,6 +1,6 @@
 # Sentinel — Requirements
 
-**Version: 1.7.8**
+**Version: 1.7.9**
 
 ---
 
@@ -165,6 +165,16 @@ The CLI must support:
 - `--log <path>` â€” override log file path
 - `--verbose` â€” enable debug logging
 - Configuration via `appsettings.json` (CLI flags override config)
+
+### FR-9a: Agent Settings UI (v1.7.9)
+
+The user-session Agent must provide a Settings window (tray menu + double-click):
+- Overview of protection / service status and recent detections
+- Event log viewer (from `events.jsonl`)
+- Report-to-police helper: load evidence packs, edit affidavit fields, open national portal, attach ZIP workflow
+- Quarantine listing / open folder
+- Must **not** expose any user-level ActiveResponse disable control
+- Must not use balloon tips / Win32 notification APIs on hardened systems
 
 ### FR-10: Deduplication
 

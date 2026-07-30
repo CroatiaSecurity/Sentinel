@@ -1,6 +1,6 @@
 # Sentinel — Design Document
 
-**Version: 1.7.8**
+**Version: 1.7.9**
 
 ---
 
@@ -196,7 +196,8 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 
 | Component | Mechanism | Notes |
 |-----------|-----------|-------|
-| `TrayIconService` | System tray NotifyIcon; context menu (console, quarantine, log). **No** `ShowBalloonTip` (WpnService removed by hardening deadlocks STA) | WinForms STA |
+| `TrayIconService` | System tray NotifyIcon; context menu **Settings** opens Agent settings UI (Overview / Events / Report to Police / Quarantine). **No** `ShowBalloonTip` (WpnService removed by hardening deadlocks STA) | WinForms STA |
+| `AgentDashboardForm` | TrimKit-style dark sidebar Settings UI; affidavit editor + national portal open for evidence packs | WinForms STA |
 | `ClipboardSanitizer` | Strips zero-width chars, RTL overrides, Cyrillic homoglyphs, Unicode tags; ClickFix paste-run clear | 10s poll |
 | `ScreenCaptureMonitor` | Detects DXGI desktop duplication + transparent overlay phishing windows | 15–25s |
 | `WebcamMicMonitor` | Detects background camera/mic access via DLL analysis (Media Foundation, WASAPI) | 20s |
@@ -518,6 +519,19 @@ Full cert-revocation chain for BYOVD attacks. When a vulnerable/suspicious drive
 | `CookieIntegrityMonitor` | 5 min | Tier2 LogOnly (Chrome/Edge/Brave cookie DB hash change) |
 
 ---
+
+## v1.7.9 Additions
+
+### Agent Settings UI
+
+| Item | Value |
+|------|--------|
+| Entry | Tray **Settings** (bold) / double-click; optional **Report to Police…** shortcut |
+| Form | `AgentDashboardForm` — dark sidebar (TrimKit-style), STA-safe sync I/O only |
+| Pages | Overview · Events · Report to Police · Quarantine · About |
+| Filing | Edit affidavit → save `victim_affidavit.txt` → Send Report opens national portal + pack folder; rebuilds ZIP |
+| Prefs | `%LocalAppData%\Sentinel\user_report_prefs.json` |
+| Not exposed | ActiveResponse toggle (service-only); balloon tips |
 
 ## v1.7.8 Additions
 

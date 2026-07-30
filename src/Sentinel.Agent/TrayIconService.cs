@@ -13,23 +13,27 @@ namespace Sentinel.Agent
 {
     public class TrayIconService : IHostedService, IDisposable
     {
-        private readonly SentinelConfig _config;
+        private readonly AutoIncidentReportingConfig _reportConfig;
+        private readonly QuarantineManager _quarantine;
         private NotifyIcon? _notifyIcon;
         private ContextMenuStrip? _contextMenu;
         private Thread? _uiThread;
         private readonly CancellationTokenSource _cts = new();
         private readonly string _version;
         private (string RuleName, string ProcessName, double Confidence, string Evidence)? _pendingDetection;
+        private AgentDashboardForm? _dashboard;
 
-        public TrayIconService(SentinelConfig config)
+        public TrayIconService(
+            AutoIncidentReportingConfig reportConfig,
+            QuarantineManager quarantine)
         {
-            _config = config;
+            _reportConfig = reportConfig ?? new AutoIncidentReportingConfig();
+            _quarantine = quarantine ?? new QuarantineManager();
             _version = LoadVersion();
         }
 
         private static string LoadVersion()
         {
-            // 1. Try version.txt next to the executable (single source of truth)
             var exeDir = AppContext.BaseDirectory;
             var versionFile = Path.Combine(exeDir, "version.txt");
             if (File.Exists(versionFile))
@@ -38,7 +42,6 @@ namespace Sentinel.Agent
                 if (!string.IsNullOrEmpty(text)) return text;
             }
 
-            // 2. Fallback to assembly version
             return typeof(TrayIconService).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
         }
 
@@ -65,21 +68,22 @@ namespace Sentinel.Agent
         private void RunUiThread()
         {
             _contextMenu = new ContextMenuStrip();
-            _contextMenu.Items.Add("Open Console", null, OnOpenConsole);
+            var openItem = new ToolStripMenuItem("Settings", null, OnOpenDashboard)
+            {
+                Font = new System.Drawing.Font(System.Drawing.SystemFonts.MenuFont!, System.Drawing.FontStyle.Bold)
+            };
+            _contextMenu.Items.Add(openItem);
+            _contextMenu.Items.Add("Report to Police…", null, OnOpenReportPage);
+            _contextMenu.Items.Add(new ToolStripSeparator());
             _contextMenu.Items.Add("Open Quarantine Folder", null, OnOpenQuarantine);
             _contextMenu.Items.Add("Open Event Log", null, OnOpenEventLog);
             _contextMenu.Items.Add(new ToolStripSeparator());
-            // SECURITY v1.4.4: Removed "Stop Protection" toggle. Previously, any user-level
-            // process could automate this menu item to disable ActiveResponse — blinding all
-            // Agent-side detection responses without elevation. The Service (running as SYSTEM)
-            // is now the sole authority on response mode. Users who need to disable protection
-            // must stop the Sentinel service via an elevated command prompt.
+            // SECURITY: No ActiveResponse toggle — service (SYSTEM) is sole authority.
             _contextMenu.Items.Add("Exit Agent", null, OnExit);
 
             System.Drawing.Icon? appIcon = null;
             try
             {
-                // Primary: load the deployed Sentinel.ico from the application directory
                 var icoPath = Path.Combine(AppContext.BaseDirectory, "Sentinel.ico");
                 if (File.Exists(icoPath))
                 {
@@ -87,7 +91,6 @@ namespace Sentinel.Agent
                 }
                 else
                 {
-                    // Fallback: extract the icon embedded in the exe via ApplicationIcon
                     appIcon = System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath);
                 }
             }
@@ -101,11 +104,8 @@ namespace Sentinel.Agent
                 Visible = true
             };
 
-            _notifyIcon.DoubleClick += OnOpenConsole;
+            _notifyIcon.DoubleClick += OnOpenDashboard;
 
-            // Start watching log file for new detections on a background thread.
-            // Must NOT use fire-and-forget async on the STA pump — async continuations
-            // would be posted to the WinForms sync context and starve the message loop.
             var watchThread = new Thread(() => WatchLogFileSync(_cts.Token))
             {
                 IsBackground = true,
@@ -129,11 +129,9 @@ namespace Sentinel.Agent
                 _notifyIcon = notifyIcon;
                 _taskbarCreatedMsg = RegisterWindowMessage("TaskbarCreated");
 
-                // Hidden window configuration
                 this.ShowInTaskbar = false;
                 this.WindowState = FormWindowState.Minimized;
 
-                // Force creation of the window handle so it can receive messages
                 var _ = this.Handle;
             }
 
@@ -143,7 +141,6 @@ namespace Sentinel.Agent
                 {
                     try
                     {
-                        // Explorer restarted, recreate notify icon
                         _notifyIcon.Visible = false;
                         _notifyIcon.Visible = true;
                     }
@@ -153,10 +150,43 @@ namespace Sentinel.Agent
             }
         }
 
-        private void OnOpenConsole(object? sender, EventArgs e)
+        private void OnOpenDashboard(object? sender, EventArgs e)
         {
-            // v1.6.0: No cmd.exe / powershell LOLBin — open log in notepad (same as event log).
-            OnOpenEventLog(sender, e);
+            ShowDashboard(initialPage: null);
+        }
+
+        private void OnOpenReportPage(object? sender, EventArgs e)
+        {
+            ShowDashboard(initialPage: 2); // Report to Police tab
+        }
+
+        private void ShowDashboard(int? initialPage)
+        {
+            try
+            {
+                if (_dashboard == null || _dashboard.IsDisposed)
+                {
+                    _dashboard = new AgentDashboardForm(_version, _reportConfig, _quarantine);
+                    _dashboard.FormClosed += (_, _) => _dashboard = null;
+                }
+
+                if (!_dashboard.Visible)
+                    _dashboard.Show();
+
+                if (_dashboard.WindowState == FormWindowState.Minimized)
+                    _dashboard.WindowState = FormWindowState.Normal;
+
+                _dashboard.BringToFront();
+                _dashboard.Activate();
+
+                if (initialPage.HasValue)
+                    _dashboard.SelectPage(initialPage.Value);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Failed to open Settings: {ex.Message}", "Sentinel",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
         }
 
         private void OnOpenQuarantine(object? sender, EventArgs e)
@@ -165,16 +195,16 @@ namespace Sentinel.Agent
             {
                 var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
                 var qDir = Path.Combine(programData, "Sentinel", "Quarantine");
-                if (Directory.Exists(qDir))
+                if (!Directory.Exists(qDir))
+                    Directory.CreateDirectory(qDir);
+
+                var psi = new ProcessStartInfo
                 {
-                    var psi = new ProcessStartInfo
-                    {
-                        FileName = "explorer.exe",
-                        UseShellExecute = false,
-                        ArgumentList = { qDir }
-                    };
-                    Process.Start(psi);
-                }
+                    FileName = "explorer.exe",
+                    UseShellExecute = false,
+                    ArgumentList = { qDir }
+                };
+                Process.Start(psi);
             }
             catch (Exception ex)
             {
@@ -190,7 +220,6 @@ namespace Sentinel.Agent
                 var logFile = Path.Combine(programData, "Sentinel", "events.jsonl");
                 if (File.Exists(logFile))
                 {
-                    // v1.6.0: ArgumentList avoids shell metacharacter injection; no cmd/powershell
                     var psi = new ProcessStartInfo
                     {
                         FileName = "notepad.exe",
@@ -198,6 +227,11 @@ namespace Sentinel.Agent
                         ArgumentList = { logFile }
                     };
                     Process.Start(psi);
+                }
+                else
+                {
+                    MessageBox.Show("Event log not found yet.", "Sentinel",
+                        MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
             }
             catch (Exception ex)
@@ -220,15 +254,14 @@ namespace Sentinel.Agent
         }
 
         /// <summary>
-        /// Synchronous log watcher running on a dedicated background thread.
-        /// Never touches the STA message pump. Uses only blocking I/O.
+        /// Synchronous log watcher on a dedicated background thread.
+        /// Never touches the STA message pump.
         /// </summary>
         private void WatchLogFileSync(CancellationToken cancellationToken)
         {
             var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
             var logFile = Path.Combine(programData, "Sentinel", "events.jsonl");
 
-            // Wait for log file to exist
             while (!File.Exists(logFile) && !cancellationToken.IsCancellationRequested)
             {
                 Thread.Sleep(1000);
@@ -246,14 +279,12 @@ namespace Sentinel.Agent
             }
             catch { }
 
-            var rateLimiter = new RateLimiter(3, TimeSpan.FromSeconds(5));
             var shownCache = new System.Collections.Generic.Dictionary<string, DateTime>();
 
             while (!cancellationToken.IsCancellationRequested)
             {
                 try
                 {
-                    // Clean up shownCache occasionally
                     var now = DateTime.UtcNow;
                     var keysToRemove = new System.Collections.Generic.List<string>();
                     foreach (var kvp in shownCache)
@@ -323,8 +354,18 @@ namespace Sentinel.Agent
                                             }
                                             shownCache[cacheKey] = DateTime.UtcNow;
 
-                                            // No-op: balloon tips removed — WpnService disabled by hardening.
-                                            // Detection is still logged in events.jsonl and visible in console.
+                                            // Balloon tips removed — WpnService disabled by hardening.
+                                            // Update tray tooltip briefly with last action context.
+                                            try
+                                            {
+                                                if (_notifyIcon != null)
+                                                {
+                                                    var tip = $"Sentinel v{_version} — last: {ruleName}";
+                                                    if (tip.Length > 63) tip = tip[..63];
+                                                    _notifyIcon.Text = tip;
+                                                }
+                                            }
+                                            catch { }
                                         }
                                         _pendingDetection = null;
                                     }
@@ -342,4 +383,3 @@ namespace Sentinel.Agent
         }
     }
 }
-
