@@ -64,7 +64,7 @@ namespace Sentinel.Core
         {
             if (string.IsNullOrWhiteSpace(filename)) return false;
             if (filename.Contains('\0')) return false;
-            if (filename.Contains('/') || filename.Contains('\\')) return false;
+            if (filename.IndexOf('/') >= 0 || filename.Contains('\\')) return false;
             if (filename.Contains("..")) return false;
 
             // Dangerous characters
@@ -91,7 +91,7 @@ namespace Sentinel.Core
                 var normalizedDir = Path.GetFullPath(expectedDir);
                 if (!normalizedDir.EndsWith(Path.DirectorySeparatorChar.ToString()))
                     normalizedDir += Path.DirectorySeparatorChar;
-                return normalizedPath.StartsWith(normalizedDir, StringComparison.OrdinalIgnoreCase);
+                return normalizedPath.StartsWith(normalizedDir);
             }
             catch { return false; }
         }
@@ -135,8 +135,8 @@ namespace Sentinel.Core
                 {
                     var winRoot = Path.GetFullPath(windows).TrimEnd('\\') + "\\";
                     var winTemp = Path.Combine(windows, "Temp").ToLowerInvariant() + "\\";
-                    if (lower.StartsWith(winRoot.ToLowerInvariant(), StringComparison.Ordinal) &&
-                        !lower.StartsWith(winTemp, StringComparison.Ordinal))
+                    if (lower.StartsWith(winRoot.ToLowerInvariant()) &&
+                        !lower.StartsWith(winTemp))
                         return true;
                 }
 

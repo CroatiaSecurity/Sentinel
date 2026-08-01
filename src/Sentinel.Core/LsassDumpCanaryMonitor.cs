@@ -102,7 +102,7 @@ namespace Sentinel.Core
                         if (record.TimeCreated <= queryTime) continue;
 
                         var xml = record.ToXml();
-                        if (!xml.Contains("lsass.exe", StringComparison.OrdinalIgnoreCase)) continue;
+                        if (!xml.Contains("lsass.exe")) continue;
 
                         // Extract source process info
                         var sourceImage = ExtractXmlField(xml, "SourceImage");
@@ -111,7 +111,7 @@ namespace Sentinel.Core
                         var sourceProcessId = ExtractXmlField(xml, "SourceProcessId");
 
                         if (string.IsNullOrEmpty(sourceImage)) continue;
-                        if (!targetImage?.Contains("lsass.exe", StringComparison.OrdinalIgnoreCase) == true) continue;
+                        if (!targetImage?.Contains("lsass.exe") == true) continue;
 
                         // Check if granted access includes PROCESS_VM_READ (0x10)
                         if (!string.IsNullOrEmpty(grantedAccess))
@@ -190,7 +190,7 @@ namespace Sentinel.Core
                     using (record)
                     {
                         var xml = record.ToXml();
-                        if (!xml.Contains("lsass", StringComparison.OrdinalIgnoreCase)) continue;
+                        if (!xml.Contains("lsass")) continue;
 
                         var processName = ExtractXmlField(xml, "ProcessName") ?? "";
                         if (IsTrustedPath(processName)) continue;
@@ -245,7 +245,7 @@ namespace Sentinel.Core
                     {
                         var xml = record.ToXml();
                         // ASR rule GUID for credential theft: 9e6c4e1f-7d60-472f-ba1a-a39ef669e4b2
-                        if (!xml.Contains("9e6c4e1f", StringComparison.OrdinalIgnoreCase)) continue;
+                        if (!xml.Contains("9e6c4e1f")) continue;
 
                         var processPath = ExtractXmlField(xml, "Path") ?? "unknown";
                         var shortName = Path.GetFileNameWithoutExtension(processPath);
@@ -276,7 +276,7 @@ namespace Sentinel.Core
         {
             if (string.IsNullOrEmpty(path)) return false;
             // Must be in a known system folder AND be signed
-            bool inSystemFolder = SystemLsassAccessorPaths.Any(t => path.StartsWith(t, StringComparison.OrdinalIgnoreCase));
+            bool inSystemFolder = SystemLsassAccessorPaths.Any(t => path.StartsWith(t));
             if (!inSystemFolder) return false;
             // Verify signature — unsigned binaries in system folders are suspicious
             if (_signerTrust != null)
@@ -288,7 +288,7 @@ namespace Sentinel.Core
         {
             // Simple extraction: look for Name="fieldName">value<
             var marker = $"Name=\"{fieldName}\">";
-            var idx = xml.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+            var idx = xml.IndexOf(marker);
             if (idx < 0) return null;
             idx += marker.Length;
             var endIdx = xml.IndexOf('<', idx);

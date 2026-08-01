@@ -185,10 +185,10 @@ namespace Sentinel.Core
 
                     string? cmdLine = GetCommandLine(pid);
                     bool hasRemoteTarget = !string.IsNullOrEmpty(cmdLine) &&
-                        (cmdLine.Contains(":", StringComparison.OrdinalIgnoreCase) &&
-                         (cmdLine.Contains("sync", StringComparison.OrdinalIgnoreCase) ||
-                          cmdLine.Contains("copy", StringComparison.OrdinalIgnoreCase) ||
-                          cmdLine.Contains("move", StringComparison.OrdinalIgnoreCase)));
+                        (cmdLine.Contains(":") &&
+                         (cmdLine.Contains("sync") ||
+                          cmdLine.Contains("copy") ||
+                          cmdLine.Contains("move")));
 
                     if (hasRemoteTarget) confidence = Math.Min(confidence + 0.1, 0.65);
 
@@ -267,7 +267,7 @@ namespace Sentinel.Core
             try
             {
                 // Parse HKCU path
-                var parts = regPath.Split('\\', 2);
+                var parts = regPath.Split(new char[] { '\\' }, 2);
                 if (parts.Length < 2) return;
                 using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(parts[1].Replace("HKEY_CURRENT_USER\\", ""));
                 if (key == null) return;

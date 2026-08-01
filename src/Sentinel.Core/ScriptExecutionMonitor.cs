@@ -173,7 +173,7 @@ namespace Sentinel.Core
                         if (string.IsNullOrEmpty(scriptBlock)) continue;
 
                         var matchedPatterns = MaliciousPatterns
-                            .Where(p => scriptBlock.Contains(p, StringComparison.OrdinalIgnoreCase))
+                            .Where(p => scriptBlock.Contains(p))
                             .ToList();
 
                         if (matchedPatterns.Count == 0) continue;
@@ -194,10 +194,10 @@ namespace Sentinel.Core
 
                         // Tier1 kill for AMSI bypass, credential theft, or Sentinel targeting
                         bool isCritical = matchedPatterns.Any(p =>
-                            p.Contains("Amsi", StringComparison.OrdinalIgnoreCase) ||
-                            p.Contains("Mimikatz", StringComparison.OrdinalIgnoreCase) ||
-                            p.Contains(string.Concat("seku","rlsa"), StringComparison.OrdinalIgnoreCase) ||
-                            p.Contains("Sentinel", StringComparison.OrdinalIgnoreCase));
+                            p.Contains("Amsi") ||
+                            p.Contains("Mimikatz") ||
+                            p.Contains(string.Concat("seku","rlsa")) ||
+                            p.Contains("Sentinel"));
 
                         int pid = 0;
                         string processName = "powershell";
@@ -260,7 +260,7 @@ namespace Sentinel.Core
                             }
                             catch { continue; }
 
-                            if (!parentName.Equals(parent, StringComparison.OrdinalIgnoreCase)) continue;
+                            if (!parentName.Equals(parent)) continue;
 
                             // Confirmed anomaly
                             var alertKey = $"ParentChild:{parentPid}:{proc.Id}";
@@ -336,7 +336,7 @@ namespace Sentinel.Core
                             var mods = NativeProcessMemory.EnumModules(proc.Id);
                             moduleCount = mods.Count;
                             amsiLoaded = mods.Any(m =>
-                                m.Name.Equals("amsi.dll", StringComparison.OrdinalIgnoreCase));
+                                m.Name.Equals("amsi.dll"));
                         }
                         catch { continue; }
 
@@ -492,7 +492,7 @@ namespace Sentinel.Core
                             catch { }
 
                             var contentPatterns = MaliciousPatterns
-                                .Where(p => content.Contains(p, StringComparison.OrdinalIgnoreCase))
+                                .Where(p => content.Contains(p))
                                 .ToList();
 
                             if (contentPatterns.Count == 0) continue; // Benign script drop

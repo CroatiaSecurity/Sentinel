@@ -92,15 +92,15 @@ namespace Sentinel.Core
             // Normalize: many driver ImagePaths use \SystemRoot\, system32\, or relative paths
             var normalized = imagePath.TrimStart('\\');
             // Absolute Windows paths
-            if (imagePath.Contains(@"\Windows\", StringComparison.OrdinalIgnoreCase)) return true;
+            if (imagePath.Contains(@"\Windows\")) return true;
             // \SystemRoot\ prefix (kernel notation for %SystemRoot%)
-            if (normalized.StartsWith("SystemRoot\\", StringComparison.OrdinalIgnoreCase)) return true;
+            if (normalized.StartsWith("SystemRoot\\")) return true;
             // Relative system32 paths like "system32\drivers\pacer.sys" or "System32\DRIVERS\tdx.sys"
-            if (normalized.StartsWith("system32\\", StringComparison.OrdinalIgnoreCase)) return true;
+            if (normalized.StartsWith("system32\\")) return true;
             // DriverStore path (inbox/WHQL drivers)
-            if (imagePath.Contains(@"\DriverStore\", StringComparison.OrdinalIgnoreCase)) return true;
+            if (imagePath.Contains(@"\DriverStore\")) return true;
             // Program Files (legitimate third-party drivers like GPU, antivirus)
-            if (imagePath.Contains(@"\Program Files", StringComparison.OrdinalIgnoreCase)) return true;
+            if (imagePath.Contains(@"\Program Files")) return true;
             return false;
         }
 
@@ -322,12 +322,12 @@ namespace Sentinel.Core
                         var deviceDesc = deviceKey.GetValue("DeviceDesc") as string ?? "";
 
                         // Only track actual portable devices (phones, tablets)
-                        if (deviceDesc.Contains("MTP", StringComparison.OrdinalIgnoreCase) ||
-                            deviceDesc.Contains("Portable", StringComparison.OrdinalIgnoreCase) ||
-                            deviceDesc.Contains("Phone", StringComparison.OrdinalIgnoreCase) ||
-                            deviceDesc.Contains("Android", StringComparison.OrdinalIgnoreCase) ||
-                            deviceDesc.Contains("Apple", StringComparison.OrdinalIgnoreCase) ||
-                            deviceDesc.Contains("iPhone", StringComparison.OrdinalIgnoreCase))
+                        if (deviceDesc.Contains("MTP") ||
+                            deviceDesc.Contains("Portable") ||
+                            deviceDesc.Contains("Phone") ||
+                            deviceDesc.Contains("Android") ||
+                            deviceDesc.Contains("Apple") ||
+                            deviceDesc.Contains("iPhone"))
                         {
                             _connectedDevices[subKeyName] = friendlyName ?? subKeyName;
                         }
@@ -461,7 +461,7 @@ namespace Sentinel.Core
                 {
                     // Explorer.exe doing drag-drop to MTP device — check clipboard/drag data
                     // This is handled by the WPD shell extension (wpdshext.dll)
-                    if (proc.ProcessName.Equals("explorer", StringComparison.OrdinalIgnoreCase))
+                    if (proc.ProcessName.Equals("explorer"))
                     {
                         // For Explorer, scan recent file operation cache
                         ScanExplorerRecentTransfers(results);
@@ -514,7 +514,7 @@ namespace Sentinel.Core
         {
             var paths = new List<string>();
             // Simple extraction: find tokens that look like file paths
-            var parts = cmdLine.Split('"', StringSplitOptions.RemoveEmptyEntries);
+            var parts = cmdLine.Split(new[] { '"' }, StringSplitOptions.RemoveEmptyEntries);
             foreach (var part in parts)
             {
                 var trimmed = part.Trim();

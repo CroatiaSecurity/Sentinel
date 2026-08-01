@@ -171,7 +171,7 @@ namespace Sentinel.Core
             {
                 if (freq[i] == 0) continue;
                 double p = (double)freq[i] / total;
-                entropy -= p * Math.Log2(p);
+                entropy -= p * MathNet48.Log2(p);
             }
             return entropy;
         }
@@ -311,8 +311,8 @@ namespace Sentinel.Core
         private static string HashFile(string path)
         {
             using var fs = File.OpenRead(path);
-            var hash = SHA256.HashData(fs);
-            return Convert.ToHexString(hash);
+            var hash = System.Security.Cryptography.Sha256Net48.HashData(fs);
+            return ConvertHex.ToHexString(hash);
         }
     }
 
@@ -343,11 +343,11 @@ namespace Sentinel.Core
                         try
                         {
                             var modPath = mod.FileName ?? "";
-                            if (!modPath.Contains(@"\Windows\", StringComparison.OrdinalIgnoreCase) &&
-                                !modPath.Contains(AppContext.BaseDirectory, StringComparison.OrdinalIgnoreCase) &&
-                                !modPath.Contains(@"\dotnet\", StringComparison.OrdinalIgnoreCase) &&
-                                !modPath.Contains(@"\Program Files", StringComparison.OrdinalIgnoreCase) &&
-                                !modPath.Contains(@"\Microsoft\Windows Defender\", StringComparison.OrdinalIgnoreCase))
+                            if (!modPath.Contains(@"\Windows\") &&
+                                !modPath.Contains(AppContext.BaseDirectory) &&
+                                !modPath.Contains(@"\dotnet\") &&
+                                !modPath.Contains(@"\Program Files") &&
+                                !modPath.Contains(@"\Microsoft\Windows Defender\"))
                             {
                                 await _detectionEngine.EmitAsync(new DetectionEvent
                                 {
@@ -356,7 +356,7 @@ namespace Sentinel.Core
                                     Reasoning = "A module from an untrusted path was loaded into the Sentinel service process, indicating possible DLL injection.",
                                     Confidence = 0.85, Tier = DetectionTier.Tier1Behavioral,
                                     AuthorizedResponse = ResponseAction.KillProcessTree,
-                                    ProcessName = "Sentinel.Service", ProcessId = Environment.ProcessId
+                                    ProcessName = "Sentinel.Service", ProcessId = System.Net48Environment.ProcessId
                                 });
                             }
                         }
@@ -429,7 +429,7 @@ namespace Sentinel.Core
                                     // Zone.Identifier is normal (Mark of the Web). Others are suspicious.
                                     foreach (var stream in streams)
                                     {
-                                        if (stream.Name.Contains("Zone.Identifier", StringComparison.OrdinalIgnoreCase)) continue;
+                                        if (stream.Name.Contains("Zone.Identifier")) continue;
                                         if (stream.Name == "::$DATA") continue; // Primary data stream
 
                                         if (stream.Size > 1024) // Only flag ADS > 1KB (payload-sized)

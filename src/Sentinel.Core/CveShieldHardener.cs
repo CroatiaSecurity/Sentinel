@@ -125,7 +125,7 @@ namespace Sentinel.Core
                 // Match by running process name
                 if (!string.IsNullOrWhiteSpace(vuln.Product))
                 {
-                    var matchedProc = runningProcesses.FirstOrDefault(p => p.Equals(vuln.Product, StringComparison.OrdinalIgnoreCase));
+                    var matchedProc = runningProcesses.FirstOrDefault(p => p.Equals(vuln.Product));
                     if (matchedProc != null)
                     {
                         isMatch = true;
@@ -137,8 +137,8 @@ namespace Sentinel.Core
                 // Match by installed software display name
                 if (!isMatch && !string.IsNullOrWhiteSpace(vuln.Product))
                 {
-                    var matchedApp = installedApps.FirstOrDefault(app => app.Contains(vuln.Product, StringComparison.OrdinalIgnoreCase) ||
-                                                                        (vuln.VendorProject != null && app.Contains(vuln.VendorProject, StringComparison.OrdinalIgnoreCase)));
+                    var matchedApp = installedApps.FirstOrDefault(app => app.Contains(vuln.Product) ||
+                                                                        (vuln.VendorProject != null && app.Contains(vuln.VendorProject)));
                     if (matchedApp != null)
                     {
                         isMatch = true;
@@ -187,7 +187,7 @@ namespace Sentinel.Core
                 try
                 {
                     _logger.LogInformation("CVE Shield: Loading feed from local path: {Path}", _config.CveShield.CustomFeedPath);
-                    var content = await File.ReadAllTextAsync(_config.CveShield.CustomFeedPath, cancellationToken);
+                    var content = await System.IO.FileNet48.ReadAllTextAsync(_config.CveShield.CustomFeedPath, cancellationToken);
                     var localCatalog = JsonSerializer.Deserialize<CisaKevCatalog>(content, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
                     return localCatalog?.Vulnerabilities ?? new List<CisaVulnerability>();
                 }
@@ -224,7 +224,7 @@ namespace Sentinel.Core
             if (string.IsNullOrWhiteSpace(vulnerableProcessName)) return;
 
             // Normalize process name (remove extension if present)
-            if (vulnerableProcessName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+            if (vulnerableProcessName.EndsWith(".exe"))
             {
                 vulnerableProcessName = Path.GetFileNameWithoutExtension(vulnerableProcessName);
             }

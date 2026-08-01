@@ -120,19 +120,19 @@ namespace Sentinel.Core
 
                 try
                 {
-                    var name = proc.ProcessName.Replace(".exe", "", StringComparison.OrdinalIgnoreCase);
+                    var name = Sentinel.Core.StringNet48.ReplaceIgnoreCase(proc.ProcessName, ".exe", "");
                     if (!BrowserProcessNames.Contains(name)) continue;
                     if (IsAlertCoolingDown(proc.Id)) continue;
 
                     string cmdLine = GetCommandLine(proc.Id);
                     if (string.IsNullOrEmpty(cmdLine)) continue;
 
-                    bool isHeadless = cmdLine.Contains("--headless", StringComparison.OrdinalIgnoreCase);
-                    bool hasDebugPort = cmdLine.Contains("--remote-debugging-port", StringComparison.OrdinalIgnoreCase);
-                    bool noSandbox = cmdLine.Contains("--no-sandbox", StringComparison.OrdinalIgnoreCase);
-                    bool tempProfile = cmdLine.Contains("--user-data-dir=", StringComparison.OrdinalIgnoreCase) &&
-                                       (cmdLine.Contains("\\Temp\\", StringComparison.OrdinalIgnoreCase) ||
-                                        cmdLine.Contains("/tmp/", StringComparison.OrdinalIgnoreCase));
+                    bool isHeadless = cmdLine.Contains("--headless");
+                    bool hasDebugPort = cmdLine.Contains("--remote-debugging-port");
+                    bool noSandbox = cmdLine.Contains("--no-sandbox");
+                    bool tempProfile = cmdLine.Contains("--user-data-dir=") &&
+                                       (cmdLine.Contains("\\Temp\\") ||
+                                        cmdLine.Contains("/tmp/"));
 
                     // Headless + debug port = potential C2 proxy
                     if (isHeadless && hasDebugPort)
@@ -140,7 +140,7 @@ namespace Sentinel.Core
                         // Check parent — if parent is node/python/automation tool from suspicious path, escalate
                         var parentInfo = GetParentInfo(proc.Id);
                         bool suspiciousParent = !string.IsNullOrEmpty(parentInfo.name) &&
-                            !BrowserProcessNames.Contains(parentInfo.name.Replace(".exe", "", StringComparison.OrdinalIgnoreCase));
+                            !BrowserProcessNames.Contains(Sentinel.Core.StringNet48.ReplaceIgnoreCase(parentInfo.name, ".exe", ""));
 
                         double confidence = 0.78;
                         var response = ResponseAction.LogOnly;
@@ -192,13 +192,13 @@ namespace Sentinel.Core
 
                 try
                 {
-                    var name = proc.ProcessName.Replace(".exe", "", StringComparison.OrdinalIgnoreCase);
+                    var name = Sentinel.Core.StringNet48.ReplaceIgnoreCase(proc.ProcessName, ".exe", "");
                     if (!BrowserProcessNames.Contains(name)) continue;
                     if (IsAlertCoolingDown(proc.Id)) continue;
 
                     string cmdLine = GetCommandLine(proc.Id);
                     if (string.IsNullOrEmpty(cmdLine)) continue;
-                    if (!cmdLine.Contains("--remote-debugging-port", StringComparison.OrdinalIgnoreCase)) continue;
+                    if (!cmdLine.Contains("--remote-debugging-port")) continue;
 
                     // Extract the debug port number
                     int debugPort = ExtractDebugPort(cmdLine);
@@ -322,13 +322,13 @@ namespace Sentinel.Core
         private static int ExtractDebugPort(string cmdLine)
         {
             const string flag = "--remote-debugging-port=";
-            int idx = cmdLine.IndexOf(flag, StringComparison.OrdinalIgnoreCase);
+            int idx = cmdLine.IndexOf(flag);
             if (idx < 0) return -1;
 
             int start = idx + flag.Length;
             int end = start;
             while (end < cmdLine.Length && char.IsDigit(cmdLine[end])) end++;
-            if (end > start && int.TryParse(cmdLine.AsSpan(start, end - start), out int port))
+            if (end > start && int.TryParse(cmdLine.Substring(start, end - start), out int port))
                 return port;
             return -1;
         }
@@ -379,7 +379,7 @@ namespace Sentinel.Core
                         try
                         {
                             using var clientProc = Process.GetProcessById(pid);
-                            var clientName = clientProc.ProcessName.Replace(".exe", "", StringComparison.OrdinalIgnoreCase);
+                            var clientName = Sentinel.Core.StringNet48.ReplaceIgnoreCase(clientProc.ProcessName, ".exe", "");
                             if (!BrowserProcessNames.Contains(clientName))
                                 return true;
                         }
@@ -466,7 +466,7 @@ namespace Sentinel.Core
                 {
                     var val = name.GetString();
                     // Skip MSG_ placeholders that need i18n resolution
-                    if (val != null && !val.StartsWith("__MSG_", StringComparison.OrdinalIgnoreCase))
+                    if (val != null && !val.StartsWith("__MSG_"))
                         return val;
                 }
             }

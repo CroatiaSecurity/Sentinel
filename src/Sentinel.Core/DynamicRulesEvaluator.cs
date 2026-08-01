@@ -55,17 +55,17 @@ namespace Sentinel.Core
             switch (Operator.ToLowerInvariant())
             {
                 case "equals":
-                    return strValue.Equals(Value, StringComparison.OrdinalIgnoreCase);
+                    return strValue.Equals(Value);
                 case "notequals":
-                    return !strValue.Equals(Value, StringComparison.OrdinalIgnoreCase);
+                    return !strValue.Equals(Value);
                 case "contains":
-                    return strValue.Contains(Value, StringComparison.OrdinalIgnoreCase);
+                    return strValue.Contains(Value);
                 case "notcontains":
-                    return !strValue.Contains(Value, StringComparison.OrdinalIgnoreCase);
+                    return !strValue.Contains(Value);
                 case "startswith":
-                    return strValue.StartsWith(Value, StringComparison.OrdinalIgnoreCase);
+                    return strValue.StartsWith(Value);
                 case "endswith":
-                    return strValue.EndsWith(Value, StringComparison.OrdinalIgnoreCase);
+                    return strValue.EndsWith(Value);
                 default:
                     return false;
             }
@@ -120,7 +120,7 @@ namespace Sentinel.Core
                 if (!DynamicCondition.IsAllowedPropertyName(prop.Name))
                     continue;
                 var val = prop.GetValue(source)?.ToString() ?? string.Empty;
-                result = result.Replace("{" + prop.Name + "}", val, StringComparison.OrdinalIgnoreCase);
+                result = Sentinel.Core.StringNet48.ReplaceIgnoreCase(result, "{" + prop.Name + "}", val);
             }
             return result;
         }
@@ -340,7 +340,7 @@ namespace Sentinel.Core
                 byte[]? providedBytes;
                 try
                 {
-                    providedBytes = Convert.FromHexString(providedHmac);
+                    providedBytes = ConvertHex.FromHexString(providedHmac);
                 }
                 catch
                 {
@@ -381,7 +381,7 @@ namespace Sentinel.Core
                 writer.WriteStartObject();
                 foreach (var prop in root.EnumerateObject())
                 {
-                    if (prop.Name.Equals("hmac", StringComparison.OrdinalIgnoreCase))
+                    if (prop.Name.Equals("hmac"))
                         continue;
                     prop.WriteTo(writer);
                 }
@@ -478,7 +478,7 @@ namespace Sentinel.Core
             {
                 foreach (var rule in _rules)
                 {
-                    if (!rule.EventType.Equals(eventTypeName, StringComparison.OrdinalIgnoreCase))
+                    if (!rule.EventType.Equals(eventTypeName))
                         continue;
 
                     bool matchesAll = true;

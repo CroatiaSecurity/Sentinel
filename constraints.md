@@ -1,6 +1,6 @@
 # Sentinel — Constraints
 
-**Version: 1.8.6**
+**Version: 1.8.7**
 
 ---
 
@@ -18,7 +18,9 @@
 | No shelling out to system tools | No `Process.Start("cmd.exe", ...)` for detection or response logic |
 | Tier2 can never trigger action | Enforced unconditionally in `AdvancedResponseEngine.HandleAsync` â€” no exceptions, no config override |
 | Active response armed, observe-until-chain default | `ActiveResponse` stays true so chain-confirmed nukes can fire. Default `ObserveUntilChain=true` demotes all single-signal actions to LogOnly. `EnforceActiveResponse` default **false** (lab/observe must not be force-overridden). |
-| Observe-until-chain (v1.8.6) | Kill / quarantine / isolate / host mutation ONLY after multi-signal or composite proof of a **terminal** outcome: C2 beaconing, exfil, token theft, reverse shell, credential dump, BYOVD. Enforced in `ResponsePolicy` + `AdvancedResponseEngine`. Steam DirectX / System32 redistributable writes are never terminal. |
+| Observe-until-chain (v1.8.6) | Kill / quarantine / isolate / host mutation ONLY after multi-signal or composite proof of a **kill-grade terminal**: token theft, credential dump, reverse shell, C2 beaconing. Enforced in `ResponsePolicy` + `AdvancedResponseEngine`. Steam DirectX / System32 redistributable writes are never terminal. |
+| Tier1 = kill-grade only | `ResponsePolicy.ApplyTierLaw`: Tier1 only for high-confidence (≥`MinTier1Confidence`, default 0.85) token theft / cred dump / reverse shell / C2, or multi-signal composites that prove those. All other monitor signals are Tier2 + LogOnly observe fuel for correlation. Critical score alone must not promote noise to Tier1. |
+| DirectX / redist = Tier2 observe only | Steam DirectX, VC++, GPU redistributables may emit **1–2 Tier2** signals (e.g. System32 write). They must **never** be Tier1, never chain-seed, never composite legs (`IsBenignInstallerNoise` / `IsNonCorrelatingObserveNoise`). |
 | DLL unloaders exempt | `DllUnloadEngine` (and proven sideload FreeLibrary/quarantine) may remediate immediately. All other monitors observe until chain. |
 | Silent observe (v1.8.6) | `SilentObserve=true`: no toasts / auto evidence packs until chain-confirmed. Detection logging always continues. |
 | Observe-first for user activity (v1.8.3) | Weak single-signal heuristics (shell+port, Downloads network, SeImpersonate alone, cloud-sync tools) MUST be LogOnly. IPSec default MUST be attack-only ports — not SSH/RDP/SMB. Full lockdown only via `RestrictivePortHardening`. |

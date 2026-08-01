@@ -55,7 +55,7 @@ namespace Sentinel.Tests
             };
 
             var json = JsonSerializer.Serialize(mockCatalog);
-            await File.WriteAllTextAsync(_feedPath, json);
+            File.WriteAllText(_feedPath, json);
 
             var cache = new SecureCacheStore(_tempTestDir);
             var iocScanner = new IoCScanner(cache);
@@ -90,7 +90,7 @@ namespace Sentinel.Tests
             // 3. Verify event was logged to jsonl
             Assert.True(File.Exists(_logPath), "Log file was not created.");
             await eventLogger.DisposeAsync(); // Release lock on sentinel.log
-            var logs = await File.ReadAllTextAsync(_logPath);
+            var logs = File.ReadAllText(_logPath);
             Assert.Contains("cve_shield_match", logs);
             Assert.Contains("CVE-2026-9999", logs);
 
@@ -128,7 +128,7 @@ namespace Sentinel.Tests
             };
 
             var json = JsonSerializer.Serialize(mockCatalog);
-            await File.WriteAllTextAsync(_feedPath, json);
+            File.WriteAllText(_feedPath, json);
 
             var cache = new SecureCacheStore(_tempTestDir);
             var iocScanner = new IoCScanner(cache);

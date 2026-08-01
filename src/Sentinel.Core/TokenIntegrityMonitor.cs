@@ -80,9 +80,9 @@ namespace Sentinel.Core
 
                                          if (imagePath != null)
                                          {
-                                             bool inUserPath = imagePath.Contains(@"\Temp\", StringComparison.OrdinalIgnoreCase) ||
-                                                               imagePath.Contains(@"\Downloads\", StringComparison.OrdinalIgnoreCase) ||
-                                                               imagePath.Contains(@"\AppData\", StringComparison.OrdinalIgnoreCase);
+                                             bool inUserPath = imagePath.Contains(@"\Temp\") ||
+                                                               imagePath.Contains(@"\Downloads\") ||
+                                                               imagePath.Contains(@"\AppData\");
 
                                              if (inUserPath)
                                              {

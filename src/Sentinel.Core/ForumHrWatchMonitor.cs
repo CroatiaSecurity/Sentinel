@@ -147,14 +147,14 @@ namespace Sentinel.Core
         {
             if (string.IsNullOrWhiteSpace(domain)) return false;
             domain = domain.Trim().TrimEnd('.').ToLowerInvariant();
-            if (domain.StartsWith("http://", StringComparison.Ordinal)) domain = domain[7..];
-            if (domain.StartsWith("https://", StringComparison.Ordinal)) domain = domain[8..];
+            if (domain.StartsWith("http://")) domain = domain[7..];
+            if (domain.StartsWith("https://")) domain = domain[8..];
             var slash = domain.IndexOf('/');
             if (slash >= 0) domain = domain[..slash];
             var colon = domain.IndexOf(':');
             if (colon >= 0) domain = domain[..colon];
 
-            return domain == "forum.hr" || domain.EndsWith(".forum.hr", StringComparison.Ordinal);
+            return domain == "forum.hr" || domain.EndsWith(".forum.hr");
         }
 
         /// <summary>
@@ -247,7 +247,7 @@ namespace Sentinel.Core
                 if (ct.IsCancellationRequested) break;
                 try
                 {
-                    var entries = await Dns.GetHostAddressesAsync(host, ct);
+                    var entries = await DnsNet48.GetHostAddressesAsync(host, ct);
                     foreach (var ip in entries)
                     {
                         if (IPAddress.IsLoopback(ip)) continue;

@@ -129,10 +129,10 @@ namespace Sentinel.Core
                 return false;
             }
 
-            // Verify strict path match on allowlisted entries
+            // Verify strict path match on allowlisted entries (case-insensitive — Windows paths)
             bool matchesEntry = _userAllowlist.Values.Any(e =>
                 !string.IsNullOrEmpty(e.ImagePath) &&
-                imagePath.Equals(e.ImagePath, StringComparison.OrdinalIgnoreCase));
+                string.Equals(imagePath, e.ImagePath, StringComparison.OrdinalIgnoreCase));
 
             if (matchesEntry)
             {

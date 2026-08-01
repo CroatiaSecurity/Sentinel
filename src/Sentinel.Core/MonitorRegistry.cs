@@ -190,7 +190,7 @@ namespace Sentinel.Core
                         Tier = status.FailureCount > 2 ? DetectionTier.Tier1Behavioral : DetectionTier.Tier2Indicator,
                         AuthorizedResponse = ResponseAction.LogOnly,
                         ProcessName = "Sentinel.Service",
-                        ProcessId = Environment.ProcessId,
+                        ProcessId = System.Net48Environment.ProcessId,
                         SignalType = SignalType.AntiTamper,
                         Metadata = new Dictionary<string, string>
                         {

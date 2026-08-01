@@ -453,7 +453,7 @@ namespace Sentinel.Tests
             int start = idx + flag.Length;
             int end = start;
             while (end < cmdLine.Length && char.IsDigit(cmdLine[end])) end++;
-            if (end > start && int.TryParse(cmdLine.AsSpan(start, end - start), out int port))
+            if (end > start && int.TryParse(cmdLine.Substring(start, end - start), out int port))
                 return port;
             return -1;
         }

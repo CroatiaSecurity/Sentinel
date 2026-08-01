@@ -448,7 +448,7 @@ namespace Sentinel.Core
 
                         // EXACT thumbprint only — subject substring matching removed (empty CN bricked hosts)
                         bool matchesThumbprint = signerCert.Thumbprint?.Equals(
-                            certThumbprint, StringComparison.OrdinalIgnoreCase) == true;
+                            certThumbprint) == true;
                         if (!matchesThumbprint) continue;
 
                         var driverName = Path.GetFileNameWithoutExtension(driverPath);
@@ -570,20 +570,20 @@ namespace Sentinel.Core
 
             // 1. Self-signed check (Subject == Issuer)
             // NOTE: All root CAs are self-signed! This is NORMAL, not suspicious.
-            bool isSelfSigned = subject.Equals(issuer, StringComparison.OrdinalIgnoreCase);
+            bool isSelfSigned = subject.Equals(issuer);
             // DO NOT add confidence for self-signed — this is expected for root certs
 
             // 2. Check for known legitimate public root CA — downgrade to Tier2 immediately
             bool isPublicRootCA = KnownPublicRootCAs.Any(ca =>
-                subject.Contains(ca, StringComparison.OrdinalIgnoreCase));
+                subject.Contains(ca));
 
             // 3. Known enterprise CA — downgrade to Tier2, reduce confidence
             bool isEnterpriseCa = KnownEnterpriseCAs.Any(ca =>
-                subject.Contains(ca, StringComparison.OrdinalIgnoreCase));
+                subject.Contains(ca));
 
             // 4. Known dev tool — downgrade to Tier2, reduce confidence
             bool isDevTool = KnownDevToolCAs.Any(dt =>
-                subject.Contains(dt, StringComparison.OrdinalIgnoreCase));
+                subject.Contains(dt));
 
             // If it's a known legitimate CA (public, enterprise, or dev tool), cap confidence and downgrade tier
             if (isPublicRootCA)
@@ -750,7 +750,7 @@ namespace Sentinel.Core
             foreach (var part in parts)
             {
                 var trimmed = part.Trim();
-                if (trimmed.StartsWith("CN=", StringComparison.OrdinalIgnoreCase))
+                if (trimmed.StartsWith("CN="))
                     return trimmed.Substring(3).Trim();
             }
             return string.Empty;
@@ -779,7 +779,7 @@ namespace Sentinel.Core
         {
             if (string.IsNullOrEmpty(cn)) return false;
             // Contains spaces/commas/dots = org name, not hostname
-            if (cn.Contains(' ') || cn.Contains(',') || cn.Contains('.')) return false;
+            if (cn.IndexOf(' ') >= 0 || cn.IndexOf(',') >= 0 || cn.IndexOf('.') >= 0) return false;
             // Contains CA-like words = not a hostname
             var lower = cn.ToLowerInvariant();
             if (lower.Contains("root") || lower.Contains("ca") || lower.Contains("cert") ||
@@ -796,12 +796,12 @@ namespace Sentinel.Core
             try
             {
                 var machineName = Environment.MachineName;
-                if (cn.Equals(machineName, StringComparison.OrdinalIgnoreCase))
+                if (cn.Equals(machineName))
                     return true;
             }
             catch { }
             // All-caps with dash, 8-15 chars = likely Windows auto-generated hostname
-            if (cn.Length >= 8 && cn.Length <= 15 && cn.Contains('-') &&
+            if (cn.Length >= 8 && cn.Length <= 15 && cn.IndexOf('-') >= 0 &&
                 cn.All(c => char.IsLetterOrDigit(c) || c == '-'))
                 return true;
             return false;
@@ -836,15 +836,15 @@ namespace Sentinel.Core
                         var message = entry.Message ?? string.Empty;
 
                         // Check if this event relates to the cert store
-                        if (!message.Contains("SystemCertificates", StringComparison.OrdinalIgnoreCase) &&
-                            !message.Contains("ROOT\\Certificates", StringComparison.OrdinalIgnoreCase))
+                        if (!message.Contains("SystemCertificates") &&
+                            !message.Contains("ROOT\\Certificates"))
                             continue;
 
                         // ONLY match events that contain our specific thumbprint
                         // Do NOT fall back to generic "ROOT\Certificates" matching - that causes
                         // misattribution when legitimate processes (browsers) touch the cert store
                         if (!string.IsNullOrEmpty(thumbprint) &&
-                            !message.Contains(thumbprint, StringComparison.OrdinalIgnoreCase))
+                            !message.Contains(thumbprint))
                             continue;
 
                         // Extract process info from the event
@@ -878,7 +878,7 @@ namespace Sentinel.Core
         /// </summary>
         private static string? ExtractFieldFromEventMessage(string message, string fieldName)
         {
-            var idx = message.IndexOf(fieldName + ":", StringComparison.OrdinalIgnoreCase);
+            var idx = message.IndexOf(fieldName + ":");
             if (idx < 0) return null;
 
             var start = idx + fieldName.Length + 1;
@@ -1377,7 +1377,7 @@ namespace Sentinel.Core
                 }
 
                 var dohMode = key.GetValue("DnsOverHttpsMode") as string;
-                if (dohMode == null || !string.Equals(dohMode, "off", StringComparison.OrdinalIgnoreCase))
+                if (dohMode == null || !string.Equals(dohMode, "off"))
                 {
                     key.SetValue("DnsOverHttpsMode", "off", RegistryValueKind.String);
                     if (!isNewKey) changed = true;
@@ -1465,7 +1465,7 @@ namespace Sentinel.Core
             _logger = l;
             _trustedContent = BuildTrustedHostsContent(config.BlockFcmPushChannel);
             using var sha = SHA256.Create();
-            _trustedHash = Convert.ToHexString(sha.ComputeHash(new UTF8Encoding(false).GetBytes(_trustedContent)));
+            _trustedHash = ConvertHex.ToHexString(sha.ComputeHash(new UTF8Encoding(false).GetBytes(_trustedContent)));
         }
 
         protected override async Task ExecuteAsync(CancellationToken ct)
@@ -1532,7 +1532,7 @@ namespace Sentinel.Core
                 if (File.Exists(HostsFilePath))
                 {
                     var currentHash = ComputeFileHash(HostsFilePath);
-                    if (string.Equals(currentHash, _trustedHash, StringComparison.OrdinalIgnoreCase))
+                    if (string.Equals(currentHash, _trustedHash))
                         return; // Already correct
                 }
 
@@ -1705,21 +1705,21 @@ namespace Sentinel.Core
                     {
                         // Never target critical system processes or user shells — killing these causes BSOD or breaks user workflow
                         var name = proc.ProcessName;
-                        if (string.Equals(name, "csrss", StringComparison.OrdinalIgnoreCase) ||
-                            string.Equals(name, "wininit", StringComparison.OrdinalIgnoreCase) ||
-                            string.Equals(name, "services", StringComparison.OrdinalIgnoreCase) ||
-                            string.Equals(name, "smss", StringComparison.OrdinalIgnoreCase) ||
-                            string.Equals(name, "lsass", StringComparison.OrdinalIgnoreCase) ||
-                            string.Equals(name, "svchost", StringComparison.OrdinalIgnoreCase) ||
-                            string.Equals(name, "winlogon", StringComparison.OrdinalIgnoreCase) ||
-                            string.Equals(name, "explorer", StringComparison.OrdinalIgnoreCase) ||
-                            string.Equals(name, "dwm", StringComparison.OrdinalIgnoreCase) ||
-                            string.Equals(name, "System", StringComparison.OrdinalIgnoreCase) ||
-                            string.Equals(name, "msiexec", StringComparison.OrdinalIgnoreCase) ||
-                            string.Equals(name, "TrustedInstaller", StringComparison.OrdinalIgnoreCase) ||
-                            string.Equals(name, "cmd", StringComparison.OrdinalIgnoreCase) ||
-                            string.Equals(name, "powershell", StringComparison.OrdinalIgnoreCase) ||
-                            string.Equals(name, "pwsh", StringComparison.OrdinalIgnoreCase))
+                        if (string.Equals(name, "csrss") ||
+                            string.Equals(name, "wininit") ||
+                            string.Equals(name, "services") ||
+                            string.Equals(name, "smss") ||
+                            string.Equals(name, "lsass") ||
+                            string.Equals(name, "svchost") ||
+                            string.Equals(name, "winlogon") ||
+                            string.Equals(name, "explorer") ||
+                            string.Equals(name, "dwm") ||
+                            string.Equals(name, "System") ||
+                            string.Equals(name, "msiexec") ||
+                            string.Equals(name, "TrustedInstaller") ||
+                            string.Equals(name, "cmd") ||
+                            string.Equals(name, "powershell") ||
+                            string.Equals(name, "pwsh"))
                         {
                             continue;
                         }
@@ -1744,7 +1744,7 @@ namespace Sentinel.Core
             {
                 using var stream = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
                 using var sha = SHA256.Create();
-                return Convert.ToHexString(sha.ComputeHash(stream));
+                return ConvertHex.ToHexString(sha.ComputeHash(stream));
             }
             catch { return string.Empty; }
         }
@@ -2026,7 +2026,7 @@ namespace Sentinel.Core
                 var current = CaptureBcdEntries();
 
                 if (current.TryGetValue("testsigning", out var ts) &&
-                    string.Equals(ts, "Yes", StringComparison.OrdinalIgnoreCase))
+                    string.Equals(ts, "Yes"))
                 {
                     await _detectionEngine.EmitAsync(new DetectionEvent
                     {
@@ -2041,7 +2041,7 @@ namespace Sentinel.Core
                 }
 
                 if (current.TryGetValue("debug", out var dbg) &&
-                    string.Equals(dbg, "Yes", StringComparison.OrdinalIgnoreCase))
+                    string.Equals(dbg, "Yes"))
                 {
                     await _detectionEngine.EmitAsync(new DetectionEvent
                     {
@@ -2056,7 +2056,7 @@ namespace Sentinel.Core
                 }
 
                 if (current.TryGetValue("nointegritychecks", out var nic) &&
-                    string.Equals(nic, "Yes", StringComparison.OrdinalIgnoreCase))
+                    string.Equals(nic, "Yes"))
                 {
                     await _detectionEngine.EmitAsync(new DetectionEvent
                     {
@@ -2120,7 +2120,7 @@ namespace Sentinel.Core
 
                     var imagePath = GetDriverImagePath(driver);
                     bool suspicious = !string.IsNullOrEmpty(imagePath) &&
-                        SuspiciousDriverPaths.Any(p => imagePath.Contains(p, StringComparison.OrdinalIgnoreCase));
+                        SuspiciousDriverPaths.Any(p => imagePath.Contains(p));
 
                     await _detectionEngine.EmitAsync(new DetectionEvent
                     {
@@ -2188,7 +2188,7 @@ namespace Sentinel.Core
                     foreach (var file in Directory.GetFiles(bootDir, "*.efi"))
                     {
                         var name = Path.GetFileName(file);
-                        if (!known.Contains(name) && !name.StartsWith("boot", StringComparison.OrdinalIgnoreCase))
+                        if (!known.Contains(name) && !name.StartsWith("boot"))
                         {
                             await _detectionEngine.EmitAsync(new DetectionEvent
                             {
@@ -2856,10 +2856,10 @@ namespace Sentinel.Core
             var sysWow = Path.Combine(sysRoot, "SysWOW64");
             var winsxs = Path.Combine(sysRoot, "WinSxS");
 
-            return normalized.StartsWith(sys32, StringComparison.OrdinalIgnoreCase) ||
-                   normalized.StartsWith(sysWow, StringComparison.OrdinalIgnoreCase) ||
-                   normalized.StartsWith(winsxs, StringComparison.OrdinalIgnoreCase) ||
-                   normalized.StartsWith(sysRoot + @"\assembly", StringComparison.OrdinalIgnoreCase);
+            return normalized.StartsWith(sys32) ||
+                   normalized.StartsWith(sysWow) ||
+                   normalized.StartsWith(winsxs) ||
+                   normalized.StartsWith(sysRoot + @"\assembly");
         }
 
         /// <summary>
@@ -2871,8 +2871,8 @@ namespace Sentinel.Core
             var pf = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
             var pf86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
 
-            return normalized.StartsWith(pf, StringComparison.OrdinalIgnoreCase) ||
-                   (!string.IsNullOrEmpty(pf86) && normalized.StartsWith(pf86, StringComparison.OrdinalIgnoreCase));
+            return normalized.StartsWith(pf) ||
+                   (!string.IsNullOrEmpty(pf86) && normalized.StartsWith(pf86));
         }
 
         /// <summary>
@@ -2882,7 +2882,7 @@ namespace Sentinel.Core
         {
             foreach (var sensitive in SensitiveNamespaces)
             {
-                if (ns.StartsWith(sensitive, StringComparison.OrdinalIgnoreCase))
+                if (ns.StartsWith(sensitive))
                     return true;
             }
             return false;

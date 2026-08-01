@@ -87,8 +87,8 @@ namespace Sentinel.Core
                     ? Path.GetFileName(proc.ImagePath)
                     : null;
                 if (indicators.FileNames.Any(f =>
-                    proc.ProcessName.Equals(f, StringComparison.OrdinalIgnoreCase) ||
-                    (imageFileName != null && imageFileName.Equals(f, StringComparison.OrdinalIgnoreCase))))
+                    proc.ProcessName.Equals(f) ||
+                    (imageFileName != null && imageFileName.Equals(f))))
                 {
                     confidence += 0.4;
                     matches.Add($"File name matches {campaign.Key}");
@@ -96,7 +96,7 @@ namespace Sentinel.Core
 
                 // Check process name pattern
                 if (indicators.ProcessPatterns.Any(p =>
-                    proc.ProcessName.Contains(p, StringComparison.OrdinalIgnoreCase)))
+                    proc.ProcessName.Contains(p)))
                 {
                     confidence += 0.3;
                     matches.Add($"Process name pattern matches {campaign.Key}");

@@ -47,7 +47,7 @@ namespace Sentinel.Core
             {
                 using var process = Process.GetProcessById(processId);
                 var processName = process.ProcessName;
-                process.Kill(entireProcessTree: true);
+                process.KillTree();
                 await process.WaitForExitAsync();
 
                 _logger.LogWarning("[IsolationResponse] Killed ISO-hosted process {ProcessName} (PID {ProcessId})",
@@ -250,7 +250,7 @@ namespace Sentinel.Core
                 // this is the primary kill mechanism. For Hyper-V it's the fallback.
                 if (actionTaken != "HyperV_WmiStop")
                 {
-                    process.Kill(entireProcessTree: true);
+                    process.KillTree();
                     await process.WaitForExitAsync();
                 }
 

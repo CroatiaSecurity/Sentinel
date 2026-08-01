@@ -91,10 +91,16 @@ namespace Sentinel.Core
 
         /// <summary>
         /// When true (default): all monitors log only until a multi-signal chain points at a
-        /// terminal attack (BYOVD, exfil, token theft, reverse shell, credential dump).
-        /// DLL unload remediations remain active. When the chain confirms, full kill/quarantine/isolate.
+        /// kill-grade terminal (token theft, credential dump, reverse shell, C2 beaconing)
+        /// or a composite proves one. DLL unload remediations remain active.
         /// </summary>
         public bool ObserveUntilChain { get; set; } = true;
+
+        /// <summary>
+        /// Minimum confidence (0–1) for a kill-grade family to remain Tier1.
+        /// Below this, signals demote to Tier2 observe (still feed correlation).
+        /// </summary>
+        public double MinTier1Confidence { get; set; } = 0.85;
 
         /// <summary>
         /// Distinct rule names on the same PID required (within ChainConfirmWindowSeconds)

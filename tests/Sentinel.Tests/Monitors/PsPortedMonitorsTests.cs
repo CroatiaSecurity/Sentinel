@@ -108,7 +108,7 @@ namespace Sentinel.Tests.Monitors
             var tempDir = Path.Combine(Path.GetTempPath(), "sentinel_cookie_" + Guid.NewGuid().ToString("N")[..8]);
             Directory.CreateDirectory(tempDir);
             var cookiePath = Path.Combine(tempDir, "Cookies");
-            await File.WriteAllTextAsync(cookiePath, "v1-cookies");
+            File.WriteAllText(cookiePath, "v1-cookies");
 
             try
             {

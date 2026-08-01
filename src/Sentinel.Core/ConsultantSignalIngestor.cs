@@ -152,7 +152,7 @@ namespace Sentinel.Core
 
         private async Task ProcessFileAsync(string filePath, CancellationToken ct)
         {
-            if (string.IsNullOrEmpty(filePath) || !filePath.EndsWith(".jsonl", StringComparison.OrdinalIgnoreCase))
+            if (string.IsNullOrEmpty(filePath) || !filePath.EndsWith(".jsonl"))
             {
                 return;
             }
@@ -240,7 +240,7 @@ namespace Sentinel.Core
                     using (var reader = new StreamReader(fs))
                     {
                         string? line;
-                        while ((line = await reader.ReadLineAsync(ct)) != null)
+                        while ((line = await reader.ReadLineAsync()) != null)
                         {
                             if (string.IsNullOrWhiteSpace(line)) continue;
                             try

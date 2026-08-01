@@ -117,8 +117,7 @@ namespace Sentinel.Agent
                     return;
                 }
 
-                var exePath = Environment.ProcessPath
-                    ?? Process.GetCurrentProcess().MainModule?.FileName;
+                var exePath = Process.GetCurrentProcess().MainModule?.FileName;
                 if (string.IsNullOrEmpty(exePath) || !File.Exists(exePath))
                     return;
 
@@ -129,13 +128,10 @@ namespace Sentinel.Agent
                 {
                     UseShellExecute = false,
                     WindowStyle = ProcessWindowStyle.Hidden,
-                    // Pass incremented counter so the child knows how many times this has been tried
-                    Environment = { [RestartCountEnvVar] = (restartCount + 1).ToString() }
                 };
-
-                // Forward original args
-                foreach (var a in args)
-                    psi.ArgumentList.Add(a);
+                psi.EnvironmentVariables[RestartCountEnvVar] = (restartCount + 1).ToString();
+                if (args != null && args.Length > 0)
+                    psi.Arguments = string.Join(" ", args);
 
                 Process.Start(psi);
             }
@@ -161,8 +157,7 @@ namespace Sentinel.Agent
                 if (envVal != null) int.TryParse(envVal, out restartCount);
                 if (restartCount >= MaxSelfRestarts) return;
 
-                var exePath = Environment.ProcessPath
-                    ?? Process.GetCurrentProcess().MainModule?.FileName;
+                var exePath = Process.GetCurrentProcess().MainModule?.FileName;
                 if (string.IsNullOrEmpty(exePath) || !File.Exists(exePath))
                     return;
 
@@ -180,10 +175,10 @@ namespace Sentinel.Agent
                 {
                     UseShellExecute = false,
                     WindowStyle = ProcessWindowStyle.Hidden,
-                    Environment = { [RestartCountEnvVar] = (restartCount + 1).ToString() }
                 };
-                foreach (var a in args)
-                    psi.ArgumentList.Add(a);
+                psi.EnvironmentVariables[RestartCountEnvVar] = (restartCount + 1).ToString();
+                if (args != null && args.Length > 0)
+                    psi.Arguments = string.Join(" ", args);
 
                 Process.Start(psi);
             }

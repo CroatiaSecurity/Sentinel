@@ -500,9 +500,9 @@ namespace Sentinel.Core
                     using (var fs = new FileStream(profilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
                     using (var reader = new StreamReader(fs))
                     {
-                        content = await reader.ReadToEndAsync(ct);
+                        content = await reader.ReadToEndAsync();
                         fs.Position = 0;
-                        hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(fs));
+                        hash = ConvertHex.ToHexString(System.Security.Cryptography.Sha256Net48.HashData(fs));
                     }
 
                     // First time seeing this profile — baseline it
@@ -522,7 +522,7 @@ namespace Sentinel.Core
                         suspiciousIndicators.Add("hidden_process");
                     if (contentLower.Contains("new-object") && contentLower.Contains("tcpclient"))
                         suspiciousIndicators.Add("reverse_shell");
-                    if (ReflectionPatterns.Any(p => content.Contains(p, StringComparison.OrdinalIgnoreCase)))
+                    if (ReflectionPatterns.Any(p => content.Contains(p)))
                         suspiciousIndicators.Add("reflection_loading");
                     if (contentLower.Contains("amsi") || contentLower.Contains("etw"))
                         suspiciousIndicators.Add("security_evasion");
@@ -630,7 +630,7 @@ namespace Sentinel.Core
 
                         // Extract the base64 blob
                         var afterFlag = cmdLine[(encIdx + cmdLine[encIdx..].IndexOf(' ') + 1)..].Trim();
-                        var b64 = afterFlag.Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? "";
+                        var b64 = afterFlag.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? "";
 
                         if (b64.Length < 100) continue; // Too short to be interesting
 
@@ -650,11 +650,11 @@ namespace Sentinel.Core
 
                         // Check for reflection loading
                         bool hasReflection = ReflectionPatterns.Any(p =>
-                            decoded.Contains(p, StringComparison.OrdinalIgnoreCase));
+                            decoded.Contains(p));
 
                         // Check for CLM bypass
                         bool hasClmBypass = ClmBypassPatterns.Any(p =>
-                            decoded.Contains(p, StringComparison.OrdinalIgnoreCase));
+                            decoded.Contains(p));
 
                         if (obfScore < 3 && !hasCradle && !hasReflection && !hasClmBypass) continue;
 
@@ -741,7 +741,7 @@ namespace Sentinel.Core
                         // Check if 32-bit PS (SysWOW64) — sometimes lacks CLM enforcement
                         var imagePath = GetProcessImagePathSafe(proc.Id);
                         if (!string.IsNullOrEmpty(imagePath) &&
-                            imagePath.Contains("SysWOW64", StringComparison.OrdinalIgnoreCase))
+                            imagePath.Contains("SysWOW64"))
                         {
                             var alertKey = $"CLMBypass32:{proc.Id}";
                             if (_recentAlerts.ContainsKey(alertKey)) continue;
@@ -829,7 +829,7 @@ namespace Sentinel.Core
                         }
 
                         // ─── .NET Assembly Reflection Loading ───
-                        if (ReflectionPatterns.Any(p => scriptBlock.Contains(p, StringComparison.OrdinalIgnoreCase)))
+                        if (ReflectionPatterns.Any(p => scriptBlock.Contains(p)))
                         {
                             var alertKey = $"SB_Reflect:{scriptBlock.GetHashCode()}";
                             if (!_recentAlerts.ContainsKey(alertKey))
@@ -961,7 +961,7 @@ namespace Sentinel.Core
             foreach (var count in freq.Values)
             {
                 double p = count / len;
-                if (p > 0) entropy -= p * Math.Log2(p);
+                if (p > 0) entropy -= p * MathNet48.Log2(p);
             }
             return entropy;
         }
@@ -974,7 +974,7 @@ namespace Sentinel.Core
                 {
                     if (!File.Exists(path)) continue;
                     using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-                    var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(fs));
+                    var hash = ConvertHex.ToHexString(System.Security.Cryptography.Sha256Net48.HashData(fs));
                     _knownProfileHashes.Add($"{path}:{hash}");
                 }
                 catch { }

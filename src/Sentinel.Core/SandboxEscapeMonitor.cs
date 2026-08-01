@@ -105,14 +105,14 @@ namespace Sentinel.Core
                 using var proc = Process.Start(psi);
                 if (proc == null) return;
 
-                var output = await proc.StandardOutput.ReadToEndAsync(ct);
+                var output = await proc.StandardOutput.ReadToEndAsync();
                 await proc.WaitForExitAsync(ct);
 
                 if (proc.ExitCode != 0) return;
 
-                foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+                foreach (var line in output.Split(new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries))
                 {
-                    var parts = line.Trim().Split(' ', 3);
+                    var parts = line.Trim().Split(new[] { ' ' }, 3);
                     if (parts.Length < 2) continue;
 
                     var containerId = parts[0];
@@ -146,7 +146,7 @@ namespace Sentinel.Core
                 using var proc = Process.Start(psi);
                 if (proc == null) return;
 
-                var output = (await proc.StandardOutput.ReadToEndAsync(ct)).Trim();
+                var output = (await proc.StandardOutput.ReadToEndAsync()).Trim();
                 await proc.WaitForExitAsync(ct);
 
                 if (proc.ExitCode != 0) return;
@@ -156,9 +156,9 @@ namespace Sentinel.Core
                 var pidMode = configParts.Length > 1 ? configParts[1] : "";
                 var privileged = configParts.Length > 2 ? configParts[2] : "";
 
-                bool isHostNetwork = networkMode.Equals("host", StringComparison.OrdinalIgnoreCase);
-                bool isHostPid = pidMode.Equals("host", StringComparison.OrdinalIgnoreCase);
-                bool isPrivileged = privileged.Equals("true", StringComparison.OrdinalIgnoreCase);
+                bool isHostNetwork = networkMode.Equals("host");
+                bool isHostPid = pidMode.Equals("host");
+                bool isPrivileged = privileged.Equals("true");
 
                 if (isPrivileged)
                 {
@@ -248,9 +248,9 @@ namespace Sentinel.Core
                         {
                             var content = File.ReadAllText(wsb);
                             // Check for sensitive path mappings
-                            if (content.Contains(@"C:\Users", StringComparison.OrdinalIgnoreCase) ||
-                                content.Contains(@"C:\Windows", StringComparison.OrdinalIgnoreCase) ||
-                                content.Contains("ReadWrite", StringComparison.OrdinalIgnoreCase))
+                            if (content.Contains(@"C:\Users") ||
+                                content.Contains(@"C:\Windows") ||
+                                content.Contains("ReadWrite"))
                             {
                                 var alertKey = $"sandbox:{wsb}";
                                 if (_alertedContainers.TryGetValue(alertKey, out var last) &&
@@ -302,8 +302,8 @@ namespace Sentinel.Core
                     if (string.IsNullOrEmpty(imagePath)) continue;
 
                     // If it's running from a host path (not container layer), that's suspicious
-                    if (imagePath.Contains(@"\docker\", StringComparison.OrdinalIgnoreCase) ||
-                        imagePath.Contains(@"\containerd\", StringComparison.OrdinalIgnoreCase))
+                    if (imagePath.Contains(@"\docker\") ||
+                        imagePath.Contains(@"\containerd\"))
                         continue;
 
                     // Process spawned by container runtime running from host filesystem

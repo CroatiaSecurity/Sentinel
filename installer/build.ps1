@@ -1,10 +1,13 @@
 # Sentinel Installer Build Script
+# Minimum framework-dependent installer for net48-windows.
+# Requires .NET Framework 4.8 on the target machine (installer offers download if missing).
 # Usage: .\build.ps1
 
 $ErrorActionPreference = "Stop"
 
 Write-Host "==============================================" -ForegroundColor Cyan
-Write-Host "   Sentinel - Building Installer      " -ForegroundColor Cyan
+Write-Host "   Sentinel - Building Minimum Installer      " -ForegroundColor Cyan
+Write-Host "   (net48-windows, framework-dependent)       " -ForegroundColor Cyan
 Write-Host "==============================================" -ForegroundColor Cyan
 
 # 0. Read version from single source of truth
@@ -13,13 +16,16 @@ $Version = (Get-Content $VersionFile -Raw).Trim()
 Write-Host "Version: $Version" -ForegroundColor Green
 
 # 0.1 Stamp all .csproj files with the version
-$CsprojFiles = Get-ChildItem (Join-Path $PSScriptRoot "..") -Recurse -Filter "*.csproj"
+$CsprojFiles = Get-ChildItem (Join-Path $PSScriptRoot "..") -Recurse -Filter "*.csproj" |
+    Where-Object { $_.FullName -notmatch '\\tools\\' }
 foreach ($csproj in $CsprojFiles) {
     $content = Get-Content $csproj.FullName -Raw
-    $content = $content -replace '<Version>[^<]+</Version>', "<Version>$Version</Version>"
-    Set-Content $csproj.FullName -Value $content -NoNewline
+    if ($content -match '<Version>') {
+        $content = $content -replace '<Version>[^<]+</Version>', "<Version>$Version</Version>"
+        Set-Content $csproj.FullName -Value $content -NoNewline
+    }
 }
-Write-Host "Stamped $($CsprojFiles.Count) .csproj files with version $Version" -ForegroundColor Yellow
+Write-Host "Stamped project versions to $Version" -ForegroundColor Yellow
 
 # 0.2 Stamp Inno Setup script
 $SetupScript = Join-Path $PSScriptRoot "setup.iss"
@@ -28,34 +34,45 @@ $issContent = $issContent -replace 'AppVersion=.*', "AppVersion=$Version"
 $issContent = $issContent -replace 'OutputBaseFilename=SentinelSetup-.*', "OutputBaseFilename=SentinelSetup-$Version"
 [System.IO.File]::WriteAllText($SetupScript, $issContent)
 
-# 1. Clean previous build artifacts and publish folder
+# 1. Clean previous publish folder
 $PublishDir = Join-Path $PSScriptRoot "..\publish"
 $SrcDir = Join-Path $PSScriptRoot "..\src"
-Write-Host "Cleaning bin/obj and publish outputs..." -ForegroundColor Yellow
-Get-ChildItem -Path $SrcDir -Include bin,obj -Directory -Recurse | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+Write-Host "Cleaning publish outputs..." -ForegroundColor Yellow
 if (Test-Path $PublishDir) {
     Remove-Item -Path $PublishDir -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-# 2. Build and Publish Service (win-x64 self-contained single-file)
-Write-Host "Publishing Sentinel Service (win-x64 self-contained)..." -ForegroundColor Yellow
+$Dotnet = "C:\Program Files\dotnet\dotnet.exe"
+if (-not (Test-Path $Dotnet)) { $Dotnet = "dotnet" }
+
+# 2. Publish Service — framework-dependent net48 (small; uses installed .NET 4.8)
+Write-Host "Publishing Sentinel Service (net48-windows, framework-dependent)..." -ForegroundColor Yellow
 $ServiceProj = Join-Path $PSScriptRoot "..\src\Sentinel.Service\Sentinel.Service.csproj"
-& "C:\Program Files\dotnet\dotnet.exe" publish $ServiceProj -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -p:PublishReadyToRun=false -o (Join-Path $PublishDir "service")
+$ServiceOut = Join-Path $PublishDir "service"
+& $Dotnet publish $ServiceProj -c Release -f net48-windows -o $ServiceOut
+if ($LASTEXITCODE -ne 0) { throw "Service publish failed" }
 
-# 3. Build and Publish Agent (win-x64 self-contained single-file)
-Write-Host "Publishing Sentinel Agent (win-x64 self-contained)..." -ForegroundColor Yellow
+# 3. Publish Agent — framework-dependent net48
+Write-Host "Publishing Sentinel Agent (net48-windows, framework-dependent)..." -ForegroundColor Yellow
 $AgentProj = Join-Path $PSScriptRoot "..\src\Sentinel.Agent\Sentinel.Agent.csproj"
-& "C:\Program Files\dotnet\dotnet.exe" publish $AgentProj -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -o (Join-Path $PublishDir "agent")
+$AgentOut = Join-Path $PublishDir "agent"
+& $Dotnet publish $AgentProj -c Release -f net48-windows -o $AgentOut
+if ($LASTEXITCODE -ne 0) { throw "Agent publish failed" }
 
-# 3a. Copy Sentinel.ico and version.txt to publish outputs
-Write-Host "Deploying Sentinel.ico and version.txt to publish directories..." -ForegroundColor Yellow
+# 3a. Icon + version.txt
+Write-Host "Deploying Sentinel.ico and version.txt..." -ForegroundColor Yellow
 $IconSource = Join-Path $PSScriptRoot "assets\Sentinel.ico"
-Copy-Item $IconSource -Destination (Join-Path $PublishDir "agent\Sentinel.ico") -Force
-Copy-Item $IconSource -Destination (Join-Path $PublishDir "service\Sentinel.ico") -Force
-Copy-Item $VersionFile -Destination (Join-Path $PublishDir "agent\version.txt") -Force
-Copy-Item $VersionFile -Destination (Join-Path $PublishDir "service\version.txt") -Force
+if (-not (Test-Path $IconSource)) {
+    $IconSource = Join-Path $PSScriptRoot "..\assets\Sentinel.ico"
+}
+if (Test-Path $IconSource) {
+    Copy-Item $IconSource -Destination (Join-Path $AgentOut "Sentinel.ico") -Force
+    Copy-Item $IconSource -Destination (Join-Path $ServiceOut "Sentinel.ico") -Force
+}
+Copy-Item $VersionFile -Destination (Join-Path $AgentOut "version.txt") -Force
+Copy-Item $VersionFile -Destination (Join-Path $ServiceOut "version.txt") -Force
 
-# 3b. Offline PE/URL ML models (trained via tools/Sentinel.MlTrainer)
+# 3b. Offline PE/URL ML models
 $MlModelsSrc = Join-Path $PSScriptRoot "..\src\Sentinel.Core\MlModels"
 foreach ($target in @("service", "agent")) {
     $dest = Join-Path $PublishDir "$target\MlModels"
@@ -68,7 +85,7 @@ foreach ($target in @("service", "agent")) {
     }
 }
 
-# 4. Locate Inno Setup Compiler (ISCC.exe)
+# 4. Locate Inno Setup Compiler
 Write-Host "Locating Inno Setup compiler..." -ForegroundColor Yellow
 $DefaultIsccPaths = @(
     "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
@@ -84,38 +101,35 @@ foreach ($Path in $DefaultIsccPaths) {
         break
     }
 }
-
 if (-not $IsccPath) {
-    # Try searching in PATH
     $IsccPath = Get-Command ISCC.exe -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source
 }
-
 if (-not $IsccPath) {
-    Write-Host "ERROR: Inno Setup compiler (ISCC.exe) was not found in default locations or system PATH." -ForegroundColor Red
-    Write-Host "Please install Inno Setup 6 (https://jrsoftware.org/isdl.php) and try again." -ForegroundColor Red
+    Write-Host "ERROR: Inno Setup compiler (ISCC.exe) was not found." -ForegroundColor Red
+    Write-Host "Install Inno Setup 6: https://jrsoftware.org/isdl.php" -ForegroundColor Red
     Exit 1
 }
-
 Write-Host "Found Inno Setup at: $IsccPath" -ForegroundColor Green
 
-# 5. Compile the Installer
+# 5. Compile installer
 Write-Host "Compiling installer with Inno Setup..." -ForegroundColor Yellow
-$SetupScript = Join-Path $PSScriptRoot "setup.iss"
 & $IsccPath $SetupScript
+if ($LASTEXITCODE -ne 0) { throw "ISCC failed" }
 
-Write-Host "==============================================" -ForegroundColor Green
-Write-Host "Build completed successfully!" -ForegroundColor Green
-Write-Host "Installer output: installer\SentinelSetup-$Version.exe" -ForegroundColor Green
-Write-Host "==============================================" -ForegroundColor Green
-
-# 6. Copy installer to releases folder for push.ps1 pickup
-$ReleasesDir = Join-Path $PSScriptRoot "..\releases\$Version"
-if (-not (Test-Path $ReleasesDir)) { New-Item -ItemType Directory -Path $ReleasesDir -Force | Out-Null }
 $InstallerPath = Join-Path $PSScriptRoot "SentinelSetup-$Version.exe"
-if (Test-Path $InstallerPath) {
-    Copy-Item $InstallerPath -Destination $ReleasesDir -Force
-    Write-Host "Copied installer to releases\$Version\ for GitHub Release upload" -ForegroundColor Green
-} else {
-    Write-Host "WARNING: Installer not found at expected path, skipping releases copy" -ForegroundColor Yellow
+if (-not (Test-Path $InstallerPath)) {
+    throw "Installer not produced at $InstallerPath"
 }
 
+$sizeMb = [math]::Round((Get-Item $InstallerPath).Length / 1MB, 2)
+Write-Host "==============================================" -ForegroundColor Green
+Write-Host "Build completed successfully!" -ForegroundColor Green
+Write-Host "Installer: installer\SentinelSetup-$Version.exe ($sizeMb MB)" -ForegroundColor Green
+Write-Host "Runtime:   .NET Framework 4.8 (framework-dependent)" -ForegroundColor Green
+Write-Host "==============================================" -ForegroundColor Green
+
+# 6. Copy to releases/ for GitHub upload
+$ReleasesDir = Join-Path $PSScriptRoot "..\releases\$Version"
+if (-not (Test-Path $ReleasesDir)) { New-Item -ItemType Directory -Path $ReleasesDir -Force | Out-Null }
+Copy-Item $InstallerPath -Destination $ReleasesDir -Force
+Write-Host "Copied installer to releases\$Version\" -ForegroundColor Green

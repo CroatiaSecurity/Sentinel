@@ -142,8 +142,8 @@ namespace Sentinel.Core
                         try
                         {
                             var path = SecurityValidation.GetProcessImagePath(proc.Id) ?? "";
-                            if (!path.Contains("Windows", StringComparison.OrdinalIgnoreCase) &&
-                                !path.Contains("wsl", StringComparison.OrdinalIgnoreCase))
+                            if (!path.Contains("Windows") &&
+                                !path.Contains("wsl"))
                                 continue;
                         }
                         catch { continue; }
@@ -269,8 +269,8 @@ namespace Sentinel.Core
                         {
                             var mainModule = SecurityValidation.GetProcessImagePath(proc.Id);
                             if (mainModule != null &&
-                                (mainModule.StartsWith(@"\\wsl", StringComparison.OrdinalIgnoreCase) ||
-                                 mainModule.StartsWith(@"\\wsl.localhost", StringComparison.OrdinalIgnoreCase)))
+                                (mainModule.StartsWith(@"\\wsl") ||
+                                 mainModule.StartsWith(@"\\wsl.localhost")))
                             {
                                 await _detectionEngine.EmitAsync(new DetectionEvent
                                 {
@@ -549,15 +549,15 @@ namespace Sentinel.Core
                     string imagePath = SecurityValidation.GetProcessImagePath(proc.Id) ?? "";
 
                     // Process running from Docker overlay filesystem reaching into host
-                    if (imagePath.Contains(@"\Docker\", StringComparison.OrdinalIgnoreCase) &&
-                        imagePath.Contains(@"\overlay2\", StringComparison.OrdinalIgnoreCase))
+                    if (imagePath.Contains(@"\Docker\") &&
+                        imagePath.Contains(@"\overlay2\"))
                     {
                         string cmdLine = GetProcessCommandLine(proc.Id);
                         bool targetsSensitiveResource =
-                            cmdLine.Contains(@"\Windows\", StringComparison.OrdinalIgnoreCase) ||
-                            cmdLine.Contains(@"\ProgramData\", StringComparison.OrdinalIgnoreCase) ||
-                            cmdLine.Contains("HKLM", StringComparison.OrdinalIgnoreCase) ||
-                            cmdLine.Contains("lsass", StringComparison.OrdinalIgnoreCase);
+                            cmdLine.Contains(@"\Windows\") ||
+                            cmdLine.Contains(@"\ProgramData\") ||
+                            cmdLine.Contains("HKLM") ||
+                            cmdLine.Contains("lsass");
 
                         if (targetsSensitiveResource)
                         {

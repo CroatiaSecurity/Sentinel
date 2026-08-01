@@ -63,8 +63,8 @@ namespace Sentinel.Core
                 var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
                 var expected = Path.GetFullPath(Path.Combine(programData, "Sentinel", "Quarantine"));
                 var actual = Path.GetFullPath(dirPath).TrimEnd('\\');
-                return actual.Equals(expected.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase)
-                    || actual.StartsWith(expected.TrimEnd('\\') + "\\", StringComparison.OrdinalIgnoreCase);
+                return actual.Equals(expected.TrimEnd('\\'))
+                    || actual.StartsWith(expected.TrimEnd('\\') + "\\");
             }
             catch { return false; }
         }
@@ -185,7 +185,7 @@ namespace Sentinel.Core
             var metaPath = Path.Combine(_quarantineDir, $"{quarantineFileName}.meta");
 
             // Write, move, and delete source atomically
-            await File.WriteAllBytesAsync(tempPath, fileBytes);
+            await System.IO.FileNet48.WriteAllBytesAsync(tempPath, fileBytes);
 
             if (File.Exists(finalPath))
             {
@@ -195,7 +195,7 @@ namespace Sentinel.Core
 
             try
             {
-                await File.WriteAllTextAsync(metaPath, filePath);
+                await System.IO.FileNet48.WriteAllTextAsync(metaPath, filePath);
             }
             catch { /* restore still possible by filename guess */ }
 
@@ -227,10 +227,10 @@ namespace Sentinel.Core
                 foreach (var file in Directory.EnumerateFiles(_quarantineDir))
                 {
                     var name = Path.GetFileName(file);
-                    if (name.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase) ||
-                        name.EndsWith(".meta", StringComparison.OrdinalIgnoreCase))
+                    if (name.EndsWith(".tmp") ||
+                        name.EndsWith(".meta"))
                         continue;
-                    if (!name.StartsWith("q_", StringComparison.OrdinalIgnoreCase))
+                    if (!name.StartsWith("q_"))
                         continue;
 
                     string? original = null;
@@ -267,7 +267,7 @@ namespace Sentinel.Core
                 var meta = quarantineFilePath + ".meta";
                 if (File.Exists(meta) && SecurityValidation.IsPathWithinDirectory(meta, QuarantineDirectory))
                 {
-                    destinationPath = (await File.ReadAllTextAsync(meta)).Trim();
+                    destinationPath = (await System.IO.FileNet48.ReadAllTextAsync(meta)).Trim();
                 }
                 else
                 {
@@ -284,21 +284,21 @@ namespace Sentinel.Core
             // Never restore into OS-critical paths (WRP / System32 / Windows)
             if (string.IsNullOrWhiteSpace(destinationPath) ||
                 SecurityValidation.IsOsCriticalPath(destinationPath) ||
-                destinationPath.Contains("..", StringComparison.Ordinal))
+                destinationPath.Contains(".."))
             {
                 throw new InvalidOperationException("Restore denied: destination path is missing, traversal-like, or OS-critical.");
             }
 
             destinationPath = Path.GetFullPath(destinationPath);
 
-            var encrypted = await File.ReadAllBytesAsync(quarantineFilePath);
+            var encrypted = await FileNet48.ReadAllBytesAsync(quarantineFilePath);
             var plain = ProtectedData.Unprotect(encrypted, null, DataProtectionScope.LocalMachine);
 
             var destDir = Path.GetDirectoryName(destinationPath);
             if (!string.IsNullOrEmpty(destDir) && !Directory.Exists(destDir))
                 Directory.CreateDirectory(destDir);
 
-            await File.WriteAllBytesAsync(destinationPath, plain);
+            await System.IO.FileNet48.WriteAllBytesAsync(destinationPath, plain);
 
             try
             {

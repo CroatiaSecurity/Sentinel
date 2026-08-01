@@ -234,7 +234,7 @@ namespace Sentinel.Core
                     continue;
 
                 // Spamhaus DROP format: "x.x.x.x/xx ; SBnnnnn"
-                if (feedName.Contains("Spamhaus", StringComparison.OrdinalIgnoreCase))
+                if (feedName.Contains("Spamhaus"))
                 {
                     var parts = line.Split(';');
                     var ipPart = parts[0].Trim();
@@ -261,7 +261,7 @@ namespace Sentinel.Core
             if (string.IsNullOrWhiteSpace(value)) return false;
 
             // CIDR notation: x.x.x.x/nn
-            if (value.Contains('/'))
+            if (value.IndexOf('/') >= 0)
             {
                 var parts = value.Split('/');
                 if (parts.Length != 2) return false;
@@ -386,7 +386,7 @@ namespace Sentinel.Core
                     try
                     {
                         string? name = rule.Name as string;
-                        if (name != null && name.StartsWith(RuleNamePrefix, StringComparison.OrdinalIgnoreCase))
+                        if (name != null && name.StartsWith(RuleNamePrefix))
                             toRemove.Add(name);
                     }
                     catch { /* skip malformed rule */ }
@@ -422,12 +422,12 @@ namespace Sentinel.Core
                     foreach (var line in output.Split('\n'))
                     {
                         // "Rule Name:                            Sentinel-ThreatIntel-0-OUT"
-                        if (!line.Contains(RuleNamePrefix, StringComparison.OrdinalIgnoreCase))
+                        if (!line.Contains(RuleNamePrefix))
                             continue;
                         var idx = line.IndexOf(':');
                         if (idx < 0) continue;
                         var name = line[(idx + 1)..].Trim();
-                        if (!name.StartsWith(RuleNamePrefix, StringComparison.OrdinalIgnoreCase))
+                        if (!name.StartsWith(RuleNamePrefix))
                             continue;
 
                         var del = new System.Diagnostics.ProcessStartInfo("netsh.exe",
@@ -536,7 +536,7 @@ namespace Sentinel.Core
 
             foreach (var kv in _blockedIps)
             {
-                if (!kv.Key.Contains('/')) continue;
+                if (kv.Key.IndexOf('/') < 0) continue;
                 if (IpInCidr(remoteIp, kv.Key))
                 {
                     feedSource = kv.Value;

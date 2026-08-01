@@ -23,7 +23,10 @@ namespace Sentinel.Tests
             Assert.True(config.ActiveResponse);
             Assert.Equal(15, config.MaxKillsPerMinute);
             Assert.Equal(10, config.MaxNetworkIsolatesPerMinute);
-            Assert.True(config.EnforceActiveResponse);
+            // v1.8.6: lab/observe must not force-arm AR; product default is observe-until-chain.
+            Assert.False(config.EnforceActiveResponse);
+            Assert.True(config.ObserveUntilChain);
+            Assert.True(config.SilentObserve);
             Assert.True(config.AutoDisableFailedUsbEnumeration);
             Assert.Empty(config.TrustedCastDevices);
             Assert.Empty(config.TrustedUsbDevices);

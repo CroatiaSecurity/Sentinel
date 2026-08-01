@@ -21,6 +21,8 @@ namespace Sentinel.Tests
         [InlineData("python-3.12.0-amd64", true)]
         [InlineData("windowsdesktop-runtime-8.0.11-win-x64", true)]
         [InlineData("vcredist_x64", true)]
+        [InlineData("dxsetup", true)]
+        [InlineData("DXSETUP.exe", true)]
         [InlineData("setup", true)]
         [InlineData("SentinelSetup-1.6.1", true)]
         [InlineData("evil-payload", false)]
@@ -28,6 +30,17 @@ namespace Sentinel.Tests
         public void LooksLikeInstallerName_RecognizesOfficialPatterns(string name, bool expected)
         {
             Assert.Equal(expected, InstallerHeuristics.LooksLikeInstallerName(name));
+        }
+
+        [Theory]
+        [InlineData("dxsetup", null, true)]
+        [InlineData("DXSETUP", @"C:\Steam\steamapps\common\Game\_CommonRedist\DirectX\DXSETUP.exe", true)]
+        [InlineData("vcredist_x64", null, true)]
+        [InlineData("evil", @"C:\Temp\evil.exe", false)]
+        [InlineData("unknown", @"C:\WINDOWS\System32\d3dx9_43.dll", true)]
+        public void IsDirectXOrRuntimeRedist_RecognizesSteamAndRedist(string name, string? path, bool expected)
+        {
+            Assert.Equal(expected, InstallerHeuristics.IsDirectXOrRuntimeRedist(name, path));
         }
 
         [Fact]

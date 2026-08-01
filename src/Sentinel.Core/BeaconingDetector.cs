@@ -408,8 +408,8 @@ namespace Sentinel.Core
                                 {
                                     // A known sideload target DLL exists in the same directory as the signed binary
                                     var winDir = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
-                                    var winDirTrailing = winDir.EndsWith('\\') ? winDir : winDir + '\\';
-                                    if (!dir.StartsWith(winDirTrailing, StringComparison.OrdinalIgnoreCase))
+                                    var winDirTrailing = winDir.EndsWith("\\") ? winDir : winDir + '\\';
+                                    if (!dir.StartsWith(winDirTrailing))
                                     {
                                         return true;
                                     }
@@ -433,7 +433,7 @@ namespace Sentinel.Core
             var normalized = imagePath.Replace('/', '\\');
             foreach (var protectedPath in ProtectedInstallPaths)
             {
-                if (normalized.IndexOf(protectedPath, StringComparison.OrdinalIgnoreCase) >= 0)
+                if (normalized.IndexOf(protectedPath) >= 0)
                     return true;
             }
             return false;
@@ -457,7 +457,7 @@ namespace Sentinel.Core
                     FileShare.ReadWrite | FileShare.Delete))
                 {
                     var hashBytes = sha.ComputeHash(fs);
-                    hash = Convert.ToHexString(hashBytes).ToLowerInvariant();
+                    hash = ConvertHex.ToHexString(hashBytes).ToLowerInvariant();
                 }
 
                 return _fileVerdictAds.GetVerdict(imagePath, hash);

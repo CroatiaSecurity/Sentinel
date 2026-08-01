@@ -359,7 +359,7 @@ namespace Sentinel.Core.Ml
             {
                 if (freq[i] == 0) continue;
                 double p = freq[i] / len;
-                ent -= p * Math.Log2(p);
+                ent -= p * MathNet48.Log2(p);
             }
             return ent;
         }

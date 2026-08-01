@@ -14,11 +14,11 @@ namespace Sentinel.Core
         {
             if (context.TriggeringEvent is ProcessTelemetry pt)
             {
-                var cmd = pt.CommandLine;
-                if (cmd.Contains("lsass", StringComparison.OrdinalIgnoreCase) && 
-                    (cmd.Contains("dumptool", StringComparison.OrdinalIgnoreCase) || 
-                     cmd.Contains("minidump", StringComparison.OrdinalIgnoreCase) || 
-                     cmd.Contains("procdump", StringComparison.OrdinalIgnoreCase)))
+                var cmd = (pt.CommandLine ?? "").ToLowerInvariant();
+                if (cmd.Contains("lsass") && 
+                    (cmd.Contains("dumptool") || 
+                     cmd.Contains("minidump") || 
+                     cmd.Contains("procdump")))
                 {
                     return new DetectionEvent
                     {
@@ -47,10 +47,10 @@ namespace Sentinel.Core
         {
             if (context.TriggeringEvent is ProcessTelemetry pt)
             {
-                var cmd = pt.CommandLine;
-                if (cmd.Contains("vssadmin", StringComparison.OrdinalIgnoreCase) && 
-                    cmd.Contains("delete", StringComparison.OrdinalIgnoreCase) && 
-                    cmd.Contains("shadows", StringComparison.OrdinalIgnoreCase))
+                var cmd = (pt.CommandLine ?? "").ToLowerInvariant();
+                if (cmd.Contains("vssadmin") && 
+                    cmd.Contains("delete") && 
+                    cmd.Contains("shadows"))
                 {
                     return new DetectionEvent
                     {
@@ -110,14 +110,14 @@ namespace Sentinel.Core
         {
             if (context.TriggeringEvent is ProcessTelemetry pt)
             {
-                var cmd = pt.CommandLine;
-                if (pt.ProcessName.Contains("powershell", StringComparison.OrdinalIgnoreCase) && 
-                    (cmd.Contains("-enc", StringComparison.OrdinalIgnoreCase) || 
-                     cmd.Contains("-encodedcommand", StringComparison.OrdinalIgnoreCase)))
+                var cmd = (pt.CommandLine ?? "").ToLowerInvariant();
+                if (pt.ProcessName.Contains("powershell") && 
+                    (cmd.Contains("-enc") || 
+                     cmd.Contains("-encodedcommand")))
                 {
                     // Check for escalation indicators that suggest malicious use
                     bool hasEscalationIndicator = EscalationIndicators.Any(
-                        indicator => cmd.Contains(indicator, StringComparison.OrdinalIgnoreCase));
+                        indicator => cmd.Contains(indicator));
 
                     if (hasEscalationIndicator)
                     {
@@ -191,7 +191,7 @@ namespace Sentinel.Core
 
                 foreach (var api in InjectionAPIs)
                 {
-                    if (tit.ApiName.Contains(api, StringComparison.OrdinalIgnoreCase))
+                    if (tit.ApiName.Contains(api))
                     {
                         return new DetectionEvent
                         {
@@ -247,11 +247,11 @@ namespace Sentinel.Core
 
                 foreach (var pattern in UacBypassPatterns)
                 {
-                    if (cmd.Contains(pattern, StringComparison.OrdinalIgnoreCase) ||
-                        image.Contains(pattern, StringComparison.OrdinalIgnoreCase))
+                    if (cmd.Contains(pattern) ||
+                        image.Contains(pattern))
                     {
                         // Skip legitimate uses — these only trigger when spawned by non-explorer parents
-                        if (pattern.EndsWith(".exe") && pt.ParentProcessName?.Equals("explorer", StringComparison.OrdinalIgnoreCase) == true)
+                        if (pattern.EndsWith(".exe") && pt.ParentProcessName?.Equals("explorer") == true)
                             continue;
 
                         // Skip COM auto-elevation: when auto-elevate binaries are launched with
@@ -261,7 +261,7 @@ namespace Sentinel.Core
                             continue;
 
                         // Skip false positives on legitimate named pipes used for IPC by development/IDE tools or other applications
-                        if (pattern.Equals("\\pipe\\", StringComparison.OrdinalIgnoreCase))
+                        if (pattern.Equals("\\pipe\\"))
                         {
                             var procName = pt.ProcessName.ToLowerInvariant();
                             bool isShell = procName == "cmd" || procName == "cmd.exe" ||
@@ -405,7 +405,7 @@ namespace Sentinel.Core
         private static bool HasWordBoundaryMatch(string text, string pattern)
         {
             int idx = -1;
-            while ((idx = text.IndexOf(pattern, idx + 1, StringComparison.OrdinalIgnoreCase)) >= 0)
+            while ((idx = text.IndexOf(pattern, idx + 1)) >= 0)
             {
                 bool leftBound = idx == 0 || !char.IsLetterOrDigit(text[idx - 1]);
                 int endIdx = idx + pattern.Length;
@@ -419,17 +419,17 @@ namespace Sentinel.Core
         {
             if (context.TriggeringEvent is ProcessTelemetry pt)
             {
-                var cmd = pt.CommandLine;
+                var cmd = (pt.CommandLine ?? "").ToLowerInvariant();
                 var image = pt.ImagePath;
 
                 // Custom check for symlink/junction abuse targeting system folders (BlueHammer, etc.)
-                if ((cmd.Contains("mklink", StringComparison.OrdinalIgnoreCase) || 
-                     cmd.Contains("junction", StringComparison.OrdinalIgnoreCase)) &&
-                    (cmd.Contains(@"\system32\config", StringComparison.OrdinalIgnoreCase) ||
-                     cmd.Contains(@"\windows defender", StringComparison.OrdinalIgnoreCase) ||
-                     cmd.Contains(@"\config\system", StringComparison.OrdinalIgnoreCase) ||
-                     cmd.Contains(@"\config\sam", StringComparison.OrdinalIgnoreCase) ||
-                     cmd.Contains(@"\config\security", StringComparison.OrdinalIgnoreCase)))
+                if ((cmd.Contains("mklink") || 
+                     cmd.Contains("junction")) &&
+                    (cmd.Contains(@"\system32\config") ||
+                     cmd.Contains(@"\windows defender") ||
+                     cmd.Contains(@"\config\system") ||
+                     cmd.Contains(@"\config\sam") ||
+                     cmd.Contains(@"\config\security")))
                 {
                     return new DetectionEvent
                     {
@@ -448,15 +448,15 @@ namespace Sentinel.Core
 
                 foreach (var (pattern, category) in ToolSignatures)
                 {
-                    if (cmd.Contains(pattern, StringComparison.OrdinalIgnoreCase) ||
-                        image.Contains(pattern, StringComparison.OrdinalIgnoreCase))
+                    if (cmd.Contains(pattern) ||
+                        image.Contains(pattern))
                     {
                         // For short APT tool names, require word-boundary or filename-exact match
                         // to avoid false positives from substring matches
-                        if (category.StartsWith("APTTool:", StringComparison.OrdinalIgnoreCase))
+                        if (category.StartsWith("APTTool:"))
                         {
                             var fileName = Path.GetFileNameWithoutExtension(pt.ImagePath).ToLowerInvariant();
-                            bool isExactFilename = fileName.Equals(pattern, StringComparison.OrdinalIgnoreCase);
+                            bool isExactFilename = fileName.Equals(pattern);
                             // Check for word boundary in command line: pattern preceded/followed by non-alphanumeric
                             bool hasWordBoundary = HasWordBoundaryMatch(cmd, pattern);
                             if (!isExactFilename && !hasWordBoundary)
@@ -468,7 +468,7 @@ namespace Sentinel.Core
                             RuleName = Name,
                             ProcessName = pt.ProcessName,
                             ProcessId = pt.ProcessId,
-                            SignalType = category.Equals("C2", StringComparison.OrdinalIgnoreCase) ? SignalType.NetworkC2 : SignalType.SuspiciousProcess,
+                            SignalType = category.Equals("C2") ? SignalType.NetworkC2 : SignalType.SuspiciousProcess,
                             Confidence = 0.95,
                             Tier = DetectionTier.Tier1Behavioral,
                             AuthorizedResponse = ResponseAction.KillProcessTree,
@@ -513,7 +513,7 @@ namespace Sentinel.Core
 
                 foreach (var mal in MaliciousFilenames)
                 {
-                    if (filename.Equals(mal, StringComparison.OrdinalIgnoreCase))
+                    if (filename.Equals(mal))
                     {
                         return new DetectionEvent
                         {
@@ -529,10 +529,10 @@ namespace Sentinel.Core
                     }
                 }
 
-                var cmd = pt.CommandLine;
+                var cmd = (pt.CommandLine ?? "").ToLowerInvariant();
                 foreach (var domain in MaliciousDomainPatterns)
                 {
-                    if (cmd.Contains(domain, StringComparison.OrdinalIgnoreCase))
+                    if (cmd.Contains(domain))
                     {
                         return new DetectionEvent
                         {
@@ -658,7 +658,7 @@ namespace Sentinel.Core
                     using var sha = System.Security.Cryptography.SHA256.Create();
                     using var fs = File.OpenRead(imagePath);
                     var hashBytes = sha.ComputeHash(fs);
-                    hash = Convert.ToHexString(hashBytes).ToLowerInvariant();
+                    hash = ConvertHex.ToHexString(hashBytes).ToLowerInvariant();
                 }
                 catch
                 {
@@ -726,14 +726,14 @@ namespace Sentinel.Core
                     "runtimebroker" or "runtimebroker.exe";
 
             bool isSuspiciousShell =
-                name.Contains("powershell", StringComparison.OrdinalIgnoreCase) ||
-                name.Contains("pwsh", StringComparison.OrdinalIgnoreCase) ||
-                name.Contains("cmd", StringComparison.OrdinalIgnoreCase) ||
-                name.Contains("mshta", StringComparison.OrdinalIgnoreCase) ||
-                name.Contains("wscript", StringComparison.OrdinalIgnoreCase) ||
-                name.Contains("cscript", StringComparison.OrdinalIgnoreCase) ||
-                name.Contains("msdt", StringComparison.OrdinalIgnoreCase) ||
-                name.Contains("forfiles", StringComparison.OrdinalIgnoreCase);
+                name.Contains("powershell") ||
+                name.Contains("pwsh") ||
+                name.Contains("cmd") ||
+                name.Contains("mshta") ||
+                name.Contains("wscript") ||
+                name.Contains("cscript") ||
+                name.Contains("msdt") ||
+                name.Contains("forfiles");
 
             if (!isExplorerOrBrowserParent || !isSuspiciousShell)
                 return null;
@@ -766,7 +766,7 @@ namespace Sentinel.Core
                 cmd.Contains("-w h") || cmd.Contains("-w hidden") || cmd.Contains("windowstyle hidden") ||
                 cmd.Contains("-nop") && (cmd.Contains("http") || cmd.Contains("iex") || cmd.Contains("irm")) ||
                 cmd.Contains("mshta") && cmd.Contains("http") ||
-                (cmd.Contains("http") && name.Contains("mshta", StringComparison.OrdinalIgnoreCase)) ||
+                (cmd.Contains("http") && name.Contains("mshta")) ||
                 cmd.Contains("javascript:") ||
                 cmd.Contains("vbscript:") ||
                 // Fake CAPTCHA clipboard often starts with verification noise then command
@@ -818,13 +818,13 @@ namespace Sentinel.Core
 
             var name = pt.ProcessName ?? "";
             bool childIsShell =
-                name.Contains("powershell", StringComparison.OrdinalIgnoreCase) ||
-                name.Contains("pwsh", StringComparison.OrdinalIgnoreCase) ||
-                name.Contains("cmd", StringComparison.OrdinalIgnoreCase) ||
-                name.Contains("curl", StringComparison.OrdinalIgnoreCase) ||
-                name.Contains("wget", StringComparison.OrdinalIgnoreCase) ||
-                name.Contains("bitsadmin", StringComparison.OrdinalIgnoreCase) ||
-                name.Contains("certutil", StringComparison.OrdinalIgnoreCase);
+                name.Contains("powershell") ||
+                name.Contains("pwsh") ||
+                name.Contains("cmd") ||
+                name.Contains("curl") ||
+                name.Contains("wget") ||
+                name.Contains("bitsadmin") ||
+                name.Contains("certutil");
 
             if (!childIsShell)
                 return null;
@@ -874,16 +874,16 @@ namespace Sentinel.Core
             {
                 // Detect browser launched with --remote-debugging-port which enables
                 // full session/cookie access via Chrome DevTools Protocol (CDP)
-                var procName = pt.ProcessName.Replace(".exe", "", StringComparison.OrdinalIgnoreCase);
+                var procName = Sentinel.Core.StringNet48.ReplaceIgnoreCase(pt.ProcessName, ".exe", "");
                 if (!BrowserProcesses.Contains(procName)) return null;
 
-                var cmd = pt.CommandLine;
-                if (cmd.Contains("--remote-debugging-port", StringComparison.OrdinalIgnoreCase))
+                var cmd = (pt.CommandLine ?? "").ToLowerInvariant();
+                if (cmd.Contains("--remote-debugging-port"))
                 {
                     // Check who launched it — if parent is a known browser (self-spawn), skip
                     if (!string.IsNullOrEmpty(pt.ParentProcessName))
                     {
-                        var parentName = pt.ParentProcessName.Replace(".exe", "", StringComparison.OrdinalIgnoreCase);
+                        var parentName = Sentinel.Core.StringNet48.ReplaceIgnoreCase(pt.ParentProcessName, ".exe", "");
                         if (BrowserProcesses.Contains(parentName))
                             return null; // Browser spawning its own subprocess with debug port — normal
                     }
@@ -928,13 +928,13 @@ namespace Sentinel.Core
                 {
                     // Check if it is a signed Microsoft utility (e.g. system tools or OneDrive)
                     // that should normally reside in System32 or Program Files
-                    var procName = pt.ProcessName.Replace(".exe", "", StringComparison.OrdinalIgnoreCase);
-                    bool isSystemToolName = procName.Equals("onedrive", StringComparison.OrdinalIgnoreCase) ||
-                                            procName.Equals("msoju", StringComparison.OrdinalIgnoreCase) ||
-                                            procName.Equals("winword", StringComparison.OrdinalIgnoreCase) ||
-                                            procName.Equals("excel", StringComparison.OrdinalIgnoreCase) ||
-                                            procName.Equals("powershell", StringComparison.OrdinalIgnoreCase) ||
-                                            procName.Equals("cmd", StringComparison.OrdinalIgnoreCase);
+                    var procName = Sentinel.Core.StringNet48.ReplaceIgnoreCase(pt.ProcessName, ".exe", "");
+                    bool isSystemToolName = procName.Equals("onedrive") ||
+                                            procName.Equals("msoju") ||
+                                            procName.Equals("winword") ||
+                                            procName.Equals("excel") ||
+                                            procName.Equals("powershell") ||
+                                            procName.Equals("cmd");
 
                     // Exclude developer build environments to avoid developer false positives
                     if (path.Contains(@"\bin\debug") || path.Contains(@"\bin\release") || path.Contains(@".nuget"))

@@ -185,7 +185,7 @@ namespace Sentinel.Core
                 if (exePath2 != null)
                 {
                     var winDir = Environment.GetFolderPath(Environment.SpecialFolder.Windows).ToLowerInvariant();
-                    var winDirTrailing = winDir.EndsWith('\\') ? winDir : winDir + '\\';
+                    var winDirTrailing = winDir.EndsWith("\\") ? winDir : winDir + '\\';
                     if (exePath2.ToLowerInvariant().StartsWith(winDirTrailing))
                         return; // Legitimate system process
                 }
@@ -228,7 +228,7 @@ namespace Sentinel.Core
             // Try to find the executable on disk for reputation check
             var exePath = FindExecutable(exeName);
             bool isSuspiciousPath = exePath != null &&
-                SuspiciousStagingPaths.Any(p => exePath.Contains(p, StringComparison.OrdinalIgnoreCase));
+                SuspiciousStagingPaths.Any(p => exePath.Contains(p));
 
             // If the executable no longer exists on disk — self-deletion pattern
             bool selfDeleted = exePath == null || !File.Exists(exePath);
@@ -381,14 +381,14 @@ namespace Sentinel.Core
         private static bool IsKnownGameEphemeralName(string? name)
         {
             if (string.IsNullOrEmpty(name)) return false;
-            var n = name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
+            var n = name.EndsWith(".exe")
                 ? Path.GetFileNameWithoutExtension(name)
                 : name;
-            if (n.Equals("fm", StringComparison.OrdinalIgnoreCase)) return true;
-            if (n.StartsWith("fm20", StringComparison.OrdinalIgnoreCase)) return true;
-            if (n.StartsWith("footballmanager", StringComparison.OrdinalIgnoreCase)) return true;
-            if (n.Equals("steam", StringComparison.OrdinalIgnoreCase)) return true;
-            if (n.Equals("gameoverlayui", StringComparison.OrdinalIgnoreCase)) return true;
+            if (n.Equals("fm")) return true;
+            if (n.StartsWith("fm20")) return true;
+            if (n.StartsWith("footballmanager")) return true;
+            if (n.Equals("steam")) return true;
+            if (n.Equals("gameoverlayui")) return true;
             return false;
         }
 
@@ -470,11 +470,11 @@ namespace Sentinel.Core
                     {
                         // "path"		"D:\\SteamLibrary"
                         var t = line.Trim();
-                        if (!t.Contains("path", StringComparison.OrdinalIgnoreCase)) continue;
-                        var parts = t.Split('"', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                        if (!t.Contains("path")) continue;
+                        var parts = t.Split(new[] { '"' }, StringSplitOptions.RemoveEmptyEntries);
                         foreach (var p in parts)
                         {
-                            if (p.Contains(':') && Directory.Exists(p.Replace(@"\\", @"\")))
+                            if (p.IndexOf(':') >= 0 && Directory.Exists(p.Replace(@"\\", @"\")))
                                 roots.Add(p.Replace(@"\\", @"\"));
                         }
                     }
@@ -487,7 +487,7 @@ namespace Sentinel.Core
 
         private static string ExtractFieldFromEvent(string message, string fieldName)
         {
-            var idx = message.IndexOf(fieldName, StringComparison.OrdinalIgnoreCase);
+            var idx = message.IndexOf(fieldName);
             if (idx < 0) return "";
             var start = idx + fieldName.Length;
             var end = message.IndexOf('\n', start);
@@ -500,8 +500,8 @@ namespace Sentinel.Core
             try
             {
                 using var stream = File.OpenRead(filePath);
-                var hash = SHA256.HashData(stream);
-                return Convert.ToHexString(hash).ToLowerInvariant();
+                var hash = System.Security.Cryptography.Sha256Net48.HashData(stream);
+                return ConvertHex.ToHexString(hash).ToLowerInvariant();
             }
             catch { return null; }
         }

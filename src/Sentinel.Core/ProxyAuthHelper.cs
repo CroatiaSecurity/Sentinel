@@ -46,7 +46,7 @@ namespace Sentinel.Core
             using (var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(config.ProxySharedSecret!)))
             {
                 var hash = hmac.ComputeHash(Encoding.UTF8.GetBytes(signaturePayload));
-                signature = Convert.ToHexString(hash).ToLowerInvariant();
+                signature = ConvertHex.ToHexString(hash).ToLowerInvariant();
             }
 
             request.Headers.TryAddWithoutValidation("X-Sentinel-Timestamp", timestamp);

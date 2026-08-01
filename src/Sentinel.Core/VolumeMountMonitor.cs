@@ -131,7 +131,7 @@ namespace Sentinel.Core
                 if (ResponsePolicy.MayPerformInlineHostMutation(_config) && !string.IsNullOrEmpty(vol.DriveLetter))
                 {
                     var startupClassification = ClassifyVolume(vol);
-                    if (string.Equals(startupClassification, "SUBST", StringComparison.OrdinalIgnoreCase))
+                    if (string.Equals(startupClassification, "SUBST"))
                     {
                         _logger.LogWarning(
                             "[VolumeMountMonitor] SUBST drive {Drive} found at startup — dismounting (no legitimate SUBST drives exist)",
@@ -173,7 +173,7 @@ namespace Sentinel.Core
                             if (!string.IsNullOrEmpty(vol.DriveLetter))
                             {
                                 var letter = vol.DriveLetter.TrimEnd('\\', ':');
-                                if (!letter.Equals("C", StringComparison.OrdinalIgnoreCase))
+                                if (!letter.Equals("C"))
                                 {
                                     var psi = new ProcessStartInfo
                                     {
@@ -212,7 +212,7 @@ namespace Sentinel.Core
                         if (inGracePeriod || driveLetterWasBaselined)
                         {
                             var graceClassification = ClassifyVolume(vol);
-                            if (string.Equals(graceClassification, "SUBST", StringComparison.OrdinalIgnoreCase))
+                            if (string.Equals(graceClassification, "SUBST"))
                             {
                                 // SUBST drives don't get grace period protection — fall through to dismount
                             }
@@ -232,7 +232,7 @@ namespace Sentinel.Core
                             // Even during cooldown, always kill SUBST drives
                             var quickClassification = ClassifyVolume(vol);
                             if (ResponsePolicy.MayPerformInlineHostMutation(_config) &&
-                                string.Equals(quickClassification, "SUBST", StringComparison.OrdinalIgnoreCase) &&
+                                string.Equals(quickClassification, "SUBST") &&
                                 !string.IsNullOrEmpty(vol.DriveLetter))
                             {
                                 await DismountFallbackDrive(vol);
@@ -251,7 +251,7 @@ namespace Sentinel.Core
                         // payloads after their primary C2 relay is cut off.
                         // No phantom device correlation required for SUBST — unconditional kill.
                         if (ResponsePolicy.MayPerformInlineHostMutation(_config) &&
-                            string.Equals(classification, "SUBST", StringComparison.OrdinalIgnoreCase) &&
+                            string.Equals(classification, "SUBST") &&
                             !string.IsNullOrEmpty(vol.DriveLetter))
                         {
                             _logger.LogWarning(
@@ -302,7 +302,7 @@ namespace Sentinel.Core
                         // FileVerdictScanner already excludes CDRom drives (DriveType check) and
                         // the servicing-process guard covers any stragglers.
                         if (!string.IsNullOrEmpty(vol.DriveLetter) &&
-                            !string.Equals(classification, "ISO", StringComparison.OrdinalIgnoreCase) &&
+                            !string.Equals(classification, "ISO") &&
                             !IsWimMountDrive(vol.DriveLetter))
                         {
                             _fileActivityMonitor.AddWatchPath(vol.DriveLetter);
@@ -399,7 +399,7 @@ namespace Sentinel.Core
                     var target = new string(buffer, 0, (int)result).TrimEnd('\0');
 
                     // SUBST drives have targets like "\??\C:\path" (the \??\ prefix indicates substitution)
-                    if (target.StartsWith(@"\??\", StringComparison.Ordinal))
+                    if (target.StartsWith(@"\??\"))
                     {
                         // Remove the SUBST mapping (works if SUBST is in our session / global)
                         bool removed = DefineDosDevice(
@@ -457,9 +457,9 @@ namespace Sentinel.Core
                     var parentPid = Convert.ToInt32(proc["ParentProcessId"]);
                     var name = proc["Name"]?.ToString() ?? "";
 
-                    bool isSubstCreator = name.Equals("subst.exe", StringComparison.OrdinalIgnoreCase) ||
-                        (cmdLine.Contains("subst", StringComparison.OrdinalIgnoreCase) &&
-                         cmdLine.Contains(normalizedLetter, StringComparison.OrdinalIgnoreCase));
+                    bool isSubstCreator = name.Equals("subst.exe") ||
+                        (cmdLine.Contains("subst") &&
+                         cmdLine.Contains(normalizedLetter));
 
                     if (isSubstCreator && pid > 4)
                     {
@@ -516,7 +516,7 @@ namespace Sentinel.Core
                 try
                 {
                     var process = Process.GetProcessById(pid);
-                    process.Kill(entireProcessTree: true);
+                    process.KillTree();
                     killed.Add(pid);
                     _logger.LogWarning(
                         "[VolumeMountMonitor] KILLED {Name} (PID {Pid}) — reason: {Reason}, cmdline: {Cmd}",
@@ -536,7 +536,7 @@ namespace Sentinel.Core
                     // Don't kill critical system processes
                     if (!IsProtectedProcess(parentName))
                     {
-                        parent.Kill(entireProcessTree: true);
+                        parent.KillTree();
                         killed.Add(parentPid);
                         _logger.LogWarning(
                             "[VolumeMountMonitor] KILLED PARENT implant: {Name} (PID {Pid}) — spawned SUBST creator",
@@ -584,8 +584,8 @@ namespace Sentinel.Core
 
                 foreach (var line in output.Split('\n'))
                 {
-                    if (!line.Contains("ESTABLISHED", StringComparison.OrdinalIgnoreCase) &&
-                        !line.Contains("SYN_SENT", StringComparison.OrdinalIgnoreCase))
+                    if (!line.Contains("ESTABLISHED") &&
+                        !line.Contains("SYN_SENT"))
                         continue;
 
                     var parts = line.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
@@ -610,7 +610,7 @@ namespace Sentinel.Core
 
                             if (IsProtectedProcess(processName)) continue;
 
-                            process.Kill(entireProcessTree: true);
+                            process.KillTree();
                             killed.Add(pid);
 
                             _logger.LogWarning(
@@ -655,7 +655,7 @@ namespace Sentinel.Core
                 if (result == 0) return null;
 
                 var target = new string(buffer, 0, (int)result).TrimEnd('\0');
-                if (target.StartsWith(@"\??\", StringComparison.Ordinal))
+                if (target.StartsWith(@"\??\"))
                     return target[4..]; // Strip \??\ prefix to get real path
 
                 return null;
@@ -685,13 +685,13 @@ namespace Sentinel.Core
                     if (IsProtectedProcess(name)) continue;
 
                     // Process is running FROM the SUBST target path (staged payload)
-                    if (exePath.StartsWith(substTarget, StringComparison.OrdinalIgnoreCase) ||
-                        exePath.StartsWith($"{driveLetter}:", StringComparison.OrdinalIgnoreCase))
+                    if (exePath.StartsWith(substTarget) ||
+                        exePath.StartsWith($"{driveLetter}:"))
                     {
                         try
                         {
                             var process = Process.GetProcessById(pid);
-                            process.Kill(entireProcessTree: true);
+                            process.KillTree();
                             killed.Add(pid);
 
                             _logger.LogWarning(
@@ -768,7 +768,7 @@ namespace Sentinel.Core
                     try
                     {
                         var process = Process.GetProcessById(pid);
-                        process.Kill(entireProcessTree: true);
+                        process.KillTree();
                         killed.Add(pid);
 
                         _logger.LogWarning(
@@ -850,8 +850,8 @@ namespace Sentinel.Core
                     foreach (var valueName in key.GetValueNames())
                     {
                         var valueData = key.GetValue(valueName)?.ToString() ?? "";
-                        if (valueData.Contains("subst", StringComparison.OrdinalIgnoreCase) &&
-                            valueData.Contains(driveLetter, StringComparison.OrdinalIgnoreCase))
+                        if (valueData.Contains("subst") &&
+                            valueData.Contains(driveLetter))
                         {
                             key.DeleteValue(valueName, throwOnMissingValue: false);
                             _logger.LogWarning(
@@ -902,8 +902,8 @@ namespace Sentinel.Core
                                 foreach (var valueName in key.GetValueNames())
                                 {
                                     var valueData = key.GetValue(valueName)?.ToString() ?? "";
-                                    if (valueData.Contains("subst", StringComparison.OrdinalIgnoreCase) &&
-                                        valueData.Contains(driveLetter, StringComparison.OrdinalIgnoreCase))
+                                    if (valueData.Contains("subst") &&
+                                        valueData.Contains(driveLetter))
                                     {
                                         key.DeleteValue(valueName, throwOnMissingValue: false);
                                         _logger.LogWarning(
@@ -956,11 +956,11 @@ namespace Sentinel.Core
                 await proc.WaitForExitAsync();
 
                 // Parse CSV output for tasks with subst + drive letter in "Task To Run" column
-                var lines = output.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+                var lines = output.Split(new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries);
                 foreach (var line in lines)
                 {
-                    if (line.Contains("subst", StringComparison.OrdinalIgnoreCase) &&
-                        line.Contains(driveLetter, StringComparison.OrdinalIgnoreCase))
+                    if (line.Contains("subst") &&
+                        line.Contains(driveLetter))
                     {
                         // Extract task name (first CSV field after header)
                         var fields = line.Split(',');
@@ -1026,17 +1026,17 @@ namespace Sentinel.Core
                     var name = consumer["Name"]?.ToString() ?? "";
 
                     bool isSubstPersistence =
-                        (cmdLine.Contains("subst", StringComparison.OrdinalIgnoreCase) ||
-                         execPath.Contains("subst", StringComparison.OrdinalIgnoreCase)) &&
-                        (cmdLine.Contains(driveLetter, StringComparison.OrdinalIgnoreCase) ||
-                         execPath.Contains(driveLetter, StringComparison.OrdinalIgnoreCase));
+                        (cmdLine.Contains("subst") ||
+                         execPath.Contains("subst")) &&
+                        (cmdLine.Contains(driveLetter) ||
+                         execPath.Contains(driveLetter));
 
                     // Also catch DefineDosDevice-based persistence
                     if (!isSubstPersistence)
                     {
                         isSubstPersistence =
-                            cmdLine.Contains("DefineDosDevice", StringComparison.OrdinalIgnoreCase) &&
-                            cmdLine.Contains(driveLetter, StringComparison.OrdinalIgnoreCase);
+                            cmdLine.Contains("DefineDosDevice") &&
+                            cmdLine.Contains(driveLetter);
                     }
 
                     if (isSubstPersistence)
@@ -1088,7 +1088,7 @@ namespace Sentinel.Core
                 foreach (ManagementObject binding in bindingSearcher.Get())
                 {
                     var consumerRef = binding["Consumer"]?.ToString() ?? "";
-                    if (consumerRef.Contains(consumerName, StringComparison.OrdinalIgnoreCase))
+                    if (consumerRef.Contains(consumerName))
                     {
                         // Extract filter name from binding and delete the filter
                         var filterRef = binding["Filter"]?.ToString() ?? "";
@@ -1138,15 +1138,15 @@ namespace Sentinel.Core
                         if (!drive.IsReady) continue;
 
                         var fs = drive.DriveFormat;
-                        if (!string.Equals(fs, "FAT32", StringComparison.OrdinalIgnoreCase) &&
-                            !string.Equals(fs, "FAT", StringComparison.OrdinalIgnoreCase))
+                        if (!string.Equals(fs, "FAT32") &&
+                            !string.Equals(fs, "FAT"))
                             continue;
 
                         var letter = drive.Name.TrimEnd('\\'); // e.g. "S:"
                         if (string.IsNullOrEmpty(letter)) continue;
 
                         var driveLetter = letter.TrimEnd(':');
-                        if (driveLetter.Equals("C", StringComparison.OrdinalIgnoreCase)) continue;
+                        if (driveLetter.Equals("C")) continue;
 
                         var capacity = drive.TotalSize;
                         var label = drive.VolumeLabel;
@@ -1247,18 +1247,18 @@ namespace Sentinel.Core
         private bool IsEfiPartition(VolumeInfo vol)
         {
             if (string.IsNullOrEmpty(vol.FileSystem)) return false;
-            if (!vol.FileSystem.Equals("FAT32", StringComparison.OrdinalIgnoreCase) &&
-                !vol.FileSystem.Equals("FAT", StringComparison.OrdinalIgnoreCase))
+            if (!vol.FileSystem.Equals("FAT32") &&
+                !vol.FileSystem.Equals("FAT"))
                 return false;
 
             // We don't have capacity in VolumeInfo from the scan loop — check by label only
             // for runtime detection. EFI partitions have distinctive labels.
             var label = vol.Label ?? "";
             return string.IsNullOrEmpty(label) ||
-                   label.Contains("EFI", StringComparison.OrdinalIgnoreCase) ||
-                   label.Equals("SYSTEM", StringComparison.OrdinalIgnoreCase) ||
-                   label.Equals("ESP", StringComparison.OrdinalIgnoreCase) ||
-                   label.Equals("BOOT", StringComparison.OrdinalIgnoreCase);
+                   label.Contains("EFI") ||
+                   label.Equals("SYSTEM") ||
+                   label.Equals("ESP") ||
+                   label.Equals("BOOT");
         }
 
         /// <summary>
@@ -1269,10 +1269,10 @@ namespace Sentinel.Core
         {
             return capacity > 0 && capacity <= 300 * 1024 * 1024 &&
                 (string.IsNullOrEmpty(label) ||
-                 label.Contains("EFI", StringComparison.OrdinalIgnoreCase) ||
-                 label.Equals("SYSTEM", StringComparison.OrdinalIgnoreCase) ||
-                 label.Equals("ESP", StringComparison.OrdinalIgnoreCase) ||
-                 label.Equals("BOOT", StringComparison.OrdinalIgnoreCase));
+                 label.Contains("EFI") ||
+                 label.Equals("SYSTEM") ||
+                 label.Equals("ESP") ||
+                 label.Equals("BOOT"));
         }
 
         /// <summary>
@@ -1288,12 +1288,12 @@ namespace Sentinel.Core
         {
             // SUBST drives, RAM disks, encrypted containers, and VHDs are never "likely legitimate"
             // in the context of phantom device correlation
-            if (classification.Contains("SUBST", StringComparison.OrdinalIgnoreCase) ||
-                classification.Contains("RamDisk", StringComparison.OrdinalIgnoreCase) ||
-                classification.Contains("Encrypted", StringComparison.OrdinalIgnoreCase) ||
-                classification.Contains("VHD", StringComparison.OrdinalIgnoreCase) ||
-                classification.Contains("PMEM", StringComparison.OrdinalIgnoreCase) ||
-                classification.Contains("ISO", StringComparison.OrdinalIgnoreCase))
+            if (classification.Contains("SUBST") ||
+                classification.Contains("RamDisk") ||
+                classification.Contains("Encrypted") ||
+                classification.Contains("VHD") ||
+                classification.Contains("PMEM") ||
+                classification.Contains("ISO"))
             {
                 return false; // These are suspicious — allow fallback dismount
             }
@@ -1368,7 +1368,7 @@ namespace Sentinel.Core
                         if (result > 0)
                         {
                             var target = new string(buffer, 0, (int)result).TrimEnd('\0');
-                            if (target.StartsWith(@"\??\", StringComparison.OrdinalIgnoreCase))
+                            if (target.StartsWith(@"\??\"))
                             {
                                 isSubst = true;
                             }
@@ -1422,7 +1422,7 @@ namespace Sentinel.Core
                 {
                     if (seenDriveLetters.Contains(letter)) continue;
                     // Avoid duplicates from Session 0 check above
-                    if (volumes.Any(v => string.Equals(v.DriveLetter, letter, StringComparison.OrdinalIgnoreCase)))
+                    if (volumes.Any(v => string.Equals(v.DriveLetter, letter)))
                         continue;
 
                     volumes.Add(new VolumeInfo
@@ -1483,7 +1483,7 @@ namespace Sentinel.Core
                             foreach (var valueName in userRunKey.GetValueNames())
                             {
                                 var value = userRunKey.GetValue(valueName)?.ToString() ?? "";
-                                if (value.Contains("subst", StringComparison.OrdinalIgnoreCase))
+                                if (value.Contains("subst"))
                                 {
                                     // Parse drive letter from command like: subst S: C:\path
                                     var match = System.Text.RegularExpressions.Regex.Match(
@@ -1521,7 +1521,7 @@ namespace Sentinel.Core
                             {
                                 var letter = parts[0].Trim().TrimEnd('\\', ':') + ":";
                                 var target = parts[1].Trim();
-                                if (!results.Any(r => r.Item1.Equals(letter, StringComparison.OrdinalIgnoreCase)))
+                                if (!results.Any(r => r.Item1.Equals(letter)))
                                     results.Add((letter, target));
                             }
                         }
@@ -1716,7 +1716,7 @@ namespace Sentinel.Core
                             n.Equals("dismhost",         StringComparison.OrdinalIgnoreCase) ||
                             n.Equals("ntlite",           StringComparison.OrdinalIgnoreCase) ||
                             n.Equals("tiworker",         StringComparison.OrdinalIgnoreCase) ||
-                            n.Equals("trustedinstaller", StringComparison.OrdinalIgnoreCase))
+                            n.Equals("trustedinstaller"))
                             return true;
                     }
                     catch { }
@@ -1752,7 +1752,7 @@ namespace Sentinel.Core
                 if (result > 0)
                 {
                     var target = new string(buffer, 0, (int)result).TrimEnd('\0');
-                    if (target.StartsWith(@"\??\", StringComparison.Ordinal))
+                    if (target.StartsWith(@"\??\"))
                         return "SUBST";
                 }
 
@@ -1771,22 +1771,22 @@ namespace Sentinel.Core
                         var model = disk["Model"]?.ToString() ?? "";
 
                         // RAM disk drivers
-                        if (RamDiskDrivers.Any(d => pnpId.Contains(d, StringComparison.OrdinalIgnoreCase) ||
-                                                     model.Contains(d, StringComparison.OrdinalIgnoreCase)))
+                        if (RamDiskDrivers.Any(d => pnpId.Contains(d) ||
+                                                     model.Contains(d)))
                             return "RamDisk";
 
                         // PMEM drivers
-                        if (PmemDrivers.Any(d => pnpId.Contains(d, StringComparison.OrdinalIgnoreCase)))
+                        if (PmemDrivers.Any(d => pnpId.Contains(d)))
                             return "PMEM";
 
                         // VHD/VHDX (Microsoft Virtual Disk)
-                        if (model.Contains("Virtual Disk", StringComparison.OrdinalIgnoreCase) ||
-                            pnpId.Contains("VHDMP", StringComparison.OrdinalIgnoreCase))
+                        if (model.Contains("Virtual Disk") ||
+                            pnpId.Contains("VHDMP"))
                             return "VHD";
 
                         // Encrypted containers
-                        if (EncryptedContainerDrivers.Any(d => pnpId.Contains(d, StringComparison.OrdinalIgnoreCase) ||
-                                                               model.Contains(d, StringComparison.OrdinalIgnoreCase)))
+                        if (EncryptedContainerDrivers.Any(d => pnpId.Contains(d) ||
+                                                               model.Contains(d)))
                             return "Encrypted";
                     }
                 }

@@ -227,22 +227,22 @@ namespace Sentinel.Core
                                 {
                                     var name = proc.ProcessName;
                                     // Skip known legitimate token consumers
-                                    if (name.Contains("RuntimeBroker", StringComparison.OrdinalIgnoreCase) ||
-                                        name.Contains("svchost", StringComparison.OrdinalIgnoreCase) ||
-                                        name.Contains("TokenBroker", StringComparison.OrdinalIgnoreCase) ||
-                                        name.Contains("msedge", StringComparison.OrdinalIgnoreCase) ||
-                                        name.Contains("chrome", StringComparison.OrdinalIgnoreCase) ||
-                                        name.Contains("Teams", StringComparison.OrdinalIgnoreCase) ||
-                                        name.Contains("OneDrive", StringComparison.OrdinalIgnoreCase) ||
-                                        name.Contains("explorer", StringComparison.OrdinalIgnoreCase))
+                                    if (name.Contains("RuntimeBroker") ||
+                                        name.Contains("svchost") ||
+                                        name.Contains("TokenBroker") ||
+                                        name.Contains("msedge") ||
+                                        name.Contains("chrome") ||
+                                        name.Contains("Teams") ||
+                                        name.Contains("OneDrive") ||
+                                        name.Contains("explorer"))
                                         continue;
 
                                     // Check if process is from temp/suspicious path
                                     string? imagePath = null;
                                     try { imagePath = SecurityValidation.GetProcessImagePath(proc.Id); } catch { }
                                     if (!string.IsNullOrEmpty(imagePath) &&
-                                        (imagePath.Contains(@"\Temp\", StringComparison.OrdinalIgnoreCase) ||
-                                         imagePath.Contains(@"\Downloads\", StringComparison.OrdinalIgnoreCase)))
+                                        (imagePath.Contains(@"\Temp\") ||
+                                         imagePath.Contains(@"\Downloads\")))
                                     {
                                         _alertedFiles.Add(fileName);
                                         await _detectionEngine.EmitAsync(new DetectionEvent
@@ -723,8 +723,8 @@ namespace Sentinel.Core
                     var output = proc.StandardOutput.ReadToEnd();
                     proc.WaitForExit(5000);
                     // "Account active               Yes"
-                    return output.Contains("Yes", StringComparison.OrdinalIgnoreCase) &&
-                           output.Contains("active", StringComparison.OrdinalIgnoreCase);
+                    return output.Contains("Yes") &&
+                           output.Contains("active");
                 }
                 catch { }
             }
@@ -1174,7 +1174,7 @@ namespace Sentinel.Core
         {
             try
             {
-                if (username.Contains('@')) return true;
+                if (username.IndexOf('@') >= 0) return true;
 
                 using var profileKey = Registry.LocalMachine.OpenSubKey(
                     $@"SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\{sid}");

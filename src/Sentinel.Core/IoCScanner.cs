@@ -26,9 +26,9 @@ namespace Sentinel.Core
                 if (string.IsNullOrWhiteSpace(data)) return;
 
                 // Format: one SHA256 hash per line
-                foreach (var line in data.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                foreach (var line in data.Split(new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries))
                 {
-                    if (line.Length == 64 && !line.StartsWith('#')) // SHA256 hex length, skip comments
+                    if (line.Length == 64 && !line.StartsWith("#")) // SHA256 hex length, skip comments
                         _hashIoCs.Add(line);
                 }
             }
@@ -44,7 +44,7 @@ namespace Sentinel.Core
             foreach (var h in hashes) _hashIoCs.Add(h);
             try
             {
-                _cacheStore.Save("ioc", "hashes", string.Join('\n', _hashIoCs));
+                _cacheStore.Save("ioc", "hashes", string.Join("\n", _hashIoCs));
             }
             catch { }
         }

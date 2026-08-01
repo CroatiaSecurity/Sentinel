@@ -200,7 +200,7 @@ namespace Sentinel.Core
                 using var cert = X509Certificate2.CreateFromSignedFile(filePath);
 #pragma warning restore SYSLIB0057
                 var subject = cert.Subject;
-                var cnStart = subject.IndexOf("CN=", StringComparison.OrdinalIgnoreCase);
+                var cnStart = subject.IndexOf("CN=");
                 if (cnStart < 0) return subject;
 
                 cnStart += 3;

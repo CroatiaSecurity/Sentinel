@@ -72,10 +72,10 @@ namespace Sentinel.Tests.Monitors
                 var jsonLine = JsonSerializer.Serialize(sampleEvent);
                 // Atomic-ish write: temp then move so watcher sees a complete line
                 var tmpWrite = consultantFile + ".tmp";
-                await File.WriteAllTextAsync(tmpWrite, jsonLine + Environment.NewLine);
-                File.Move(tmpWrite, consultantFile, overwrite: true);
+                File.WriteAllText(tmpWrite, jsonLine + Environment.NewLine);
+                File.Copy(tmpWrite, consultantFile, true); File.Delete(tmpWrite);
                 // Touch again to force change event on some FS watchers
-                await File.AppendAllTextAsync(consultantFile, "");
+                File.AppendAllText(consultantFile, "");
 
                 // Wait for file watcher / poll loop to process (up to ~8s under load)
                 int waitRetries = 80;

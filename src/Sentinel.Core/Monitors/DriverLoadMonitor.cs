@@ -223,8 +223,8 @@ namespace Sentinel.Core
                         var serviceType = record.Properties[2]?.Value?.ToString() ?? "";
 
                         // Only care about kernel drivers
-                        if (!serviceType.Contains("kernel", StringComparison.OrdinalIgnoreCase) &&
-                            !serviceType.Contains("driver", StringComparison.OrdinalIgnoreCase) &&
+                        if (!serviceType.Contains("kernel") &&
+                            !serviceType.Contains("driver") &&
                             serviceType != "1" && serviceType != "2")
                             continue;
 
@@ -312,7 +312,7 @@ namespace Sentinel.Core
                         try
                         {
                             using var fs = new FileStream(sysFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-                            hash = Convert.ToHexString(SHA256.HashData(fs));
+                            hash = ConvertHex.ToHexString(System.Security.Cryptography.Sha256Net48.HashData(fs));
                             hashMatch = VulnerableDriverHashes.Contains(hash);
                         }
                         catch { }
@@ -372,9 +372,9 @@ namespace Sentinel.Core
             var resolvedPath = imagePath;
             if (imagePath.StartsWith(@"\??\"))
                 resolvedPath = imagePath[4..];
-            else if (imagePath.StartsWith("System32", StringComparison.OrdinalIgnoreCase))
+            else if (imagePath.StartsWith("System32"))
                 resolvedPath = Path.Combine(Environment.SystemDirectory, imagePath.Replace("System32\\", ""));
-            else if (!Path.IsPathFullyQualified(imagePath))
+            else if (!PathNet48.IsPathFullyQualified(imagePath))
                 resolvedPath = Path.Combine(Environment.SystemDirectory, "drivers", imagePath);
 
             // Check filename against known vulnerable drivers
@@ -383,7 +383,7 @@ namespace Sentinel.Core
 
             // Check if loaded from a non-standard path
             bool isNonStandardPath = !LegitimateDriverPaths.Any(p =>
-                resolvedPath.StartsWith(p, StringComparison.OrdinalIgnoreCase));
+                resolvedPath.StartsWith(p));
 
             // Hash check
             string hash = "";
@@ -393,7 +393,7 @@ namespace Sentinel.Core
                 try
                 {
                     using var fs = new FileStream(resolvedPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-                    hash = Convert.ToHexString(SHA256.HashData(fs));
+                    hash = ConvertHex.ToHexString(System.Security.Cryptography.Sha256Net48.HashData(fs));
                     hashMatch = VulnerableDriverHashes.Contains(hash);
                 }
                 catch { }
@@ -632,16 +632,16 @@ namespace Sentinel.Core
                         var driverCert = GetDriverAuthenticodeCert(driverPath);
                         if (driverCert == null) continue;
 
-                        bool matchesThumbprint = string.Equals(driverCert.Thumbprint, thumbprint, StringComparison.OrdinalIgnoreCase);
+                        bool matchesThumbprint = string.Equals(driverCert.Thumbprint, thumbprint);
                         bool matchesCN = !string.IsNullOrEmpty(cn) &&
-                            (driverCert.Subject?.Contains(cn, StringComparison.OrdinalIgnoreCase) == true);
+                            (driverCert.Subject?.Contains(cn) == true);
 
                         driverCert.Dispose();
 
                         if (!matchesThumbprint && !matchesCN) continue;
 
                         var driverName = Path.GetFileNameWithoutExtension(driverPath);
-                        if (string.Equals(driverName, excludeService, StringComparison.OrdinalIgnoreCase)) continue;
+                        if (string.Equals(driverName, excludeService)) continue;
 
                         _logger.LogWarning("[DriverLoadMonitor] Cert-trace: additional driver '{Driver}' " +
                             "signed by revoked cert. Disabling service.", driverName);
@@ -732,7 +732,7 @@ namespace Sentinel.Core
                 {
                     foreach (var cert in store.Certificates)
                     {
-                        if (cert.Subject?.Contains(cn, StringComparison.OrdinalIgnoreCase) == true)
+                        if (cert.Subject?.Contains(cn) == true)
                         {
                             var matchThumb = cert.Thumbprint;
                             return (true, matchThumb);
@@ -771,7 +771,7 @@ namespace Sentinel.Core
             };
 
             return knownPublicCas.Any(ca =>
-                distinguishedName.Contains(ca, StringComparison.OrdinalIgnoreCase));
+                distinguishedName.Contains(ca));
         }
 
         /// <summary>
@@ -781,7 +781,7 @@ namespace Sentinel.Core
         {
             if (string.IsNullOrEmpty(distinguishedName)) return "";
             var cnPrefix = "CN=";
-            var idx = distinguishedName.IndexOf(cnPrefix, StringComparison.OrdinalIgnoreCase);
+            var idx = distinguishedName.IndexOf(cnPrefix);
             if (idx < 0) return "";
             var start = idx + cnPrefix.Length;
             var end = distinguishedName.IndexOf(',', start);

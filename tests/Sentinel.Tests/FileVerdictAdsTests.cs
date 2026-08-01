@@ -104,16 +104,43 @@ namespace Sentinel.Tests
                 // Mismatching SHA256 should return Unknown
                 Assert.Equal(HashVerdict.Unknown, ads.GetVerdict(testFile, "different_sha256_hash_here_12345678"));
 
-                // Corrupt signature in Alternate Data Stream
+                // Corrupt signature in stored payload (NTFS ADS or sidecar fallback)
                 var adsPath = $"{testFile}:sentinel_verdict";
-                Assert.True(File.Exists(adsPath));
-                var payload = File.ReadAllText(adsPath);
-                
+                var sidecarPath = testFile + ".sentinel_verdict";
+                string? storePath = null;
+                string? payload = null;
+                try
+                {
+                    using var fs = new FileStream(adsPath, FileMode.Open, FileAccess.Read,
+                        FileShare.ReadWrite | FileShare.Delete);
+                    using var sr = new StreamReader(fs);
+                    payload = sr.ReadToEnd();
+                    storePath = adsPath;
+                }
+                catch
+                {
+                    if (File.Exists(sidecarPath))
+                    {
+                        payload = File.ReadAllText(sidecarPath);
+                        storePath = sidecarPath;
+                    }
+                }
+                Assert.False(string.IsNullOrEmpty(payload), "Expected a stored verdict payload after SetVerdict");
+                Assert.NotNull(storePath);
+
                 // Tamper with the payload (e.g. corrupting the signature hex part)
-                var parts = payload.Split('|');
+                var parts = payload!.Split('|');
                 parts[3] = "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"; // fake hmac signature
-                var corruptedPayload = string.Join('|', parts);
-                File.WriteAllText(adsPath, corruptedPayload);
+                var corruptedPayload = string.Join("|", parts);
+                if (storePath == sidecarPath)
+                    File.WriteAllText(storePath!, corruptedPayload);
+                else
+                {
+                    using var fs = new FileStream(storePath!, FileMode.Create, FileAccess.Write,
+                        FileShare.ReadWrite | FileShare.Delete);
+                    using var sw = new StreamWriter(fs);
+                    sw.Write(corruptedPayload);
+                }
 
                 // Verdict should be rejected and return Unknown
                 Assert.Equal(HashVerdict.Unknown, ads.GetVerdict(testFile, sha256));

@@ -1,6 +1,6 @@
 [Setup]
 AppName=Sentinel
-AppVersion=1.8.6
+AppVersion=1.8.7
 AppPublisher=Gorstak
 AppPublisherURL=https://gorstak.eu
 SourceDir=.
@@ -11,7 +11,7 @@ UninstallDisplayIcon={app}\Sentinel.ico
 Compression=lzma2
 SolidCompression=yes
 OutputDir=.
-OutputBaseFilename=SentinelSetup-1.8.6
+OutputBaseFilename=SentinelSetup-1.8.7
 PrivilegesRequired=admin
 ; One active Setup wizard at a time (elevation handoff still works: non-elevated exits first)
 SetupMutex=Global\SentinelSetupMutex
@@ -22,13 +22,12 @@ RestartApplications=no
 
 
 [Files]
+; Framework-dependent net48 publish: all managed deps + exes (small installer; needs .NET 4.8)
 Source: "assets\Sentinel.ico"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\publish\service\Sentinel.Service.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\publish\agent\Sentinel.Agent.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\publish\service\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\publish\agent\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; Never overwrite user customizations on upgrade
 Source: "..\publish\service\appsettings.json"; DestDir: "{app}"; Flags: onlyifdoesntexist
-Source: "..\publish\service\version.txt"; DestDir: "{app}"; Flags: ignoreversion
-; Offline PE/URL ML models (optional — installer continues if missing at compile time)
-Source: "..\publish\service\MlModels\*"; DestDir: "{app}\MlModels"; Flags: ignoreversion skipifsourcedoesntexist recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\Sentinel Agent"; Filename: "{app}\Sentinel.Agent.exe"; IconFilename: "{app}\Sentinel.ico"
@@ -44,19 +43,11 @@ Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Control\Lsa\FipsAlgorithmPolicy"; 
 Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Control\Lsa"; ValueType: dword; ValueName: "FipsAlgorithmPolicy"; ValueData: 0
 
 [Run]
-; Restore root certificates from backup
-; Clean up .old files from rename-on-upgrade fallback
-Filename: "{sys}\cmd.exe"; Parameters: "/c del /f /q ""{app}\*.old"""; Flags: runhidden
-; Filename: "{sys}\reg.exe"; Parameters: "import ""d:\Gorstak\Registry\Certs.reg"""; Flags: runhidden; StatusMsg: "Restoring root certificates..."
-; Install the service using SCM
-Filename: "{sys}\sc.exe"; Parameters: "create ""Sentinel"" start= auto binPath= ""{app}\Sentinel.Service.exe"""
-Filename: "{sys}\sc.exe"; Parameters: "description ""Sentinel"" ""Userland Endpoint Detection & Response (EDR) Service"""
-; Configure failure restart
-Filename: "{sys}\sc.exe"; Parameters: "failure ""Sentinel"" reset= 86400 actions= restart/1000/restart/5000/restart/30000"
-; Start the service
-Filename: "{sys}\sc.exe"; Parameters: "start ""Sentinel"""
-; Launch the Agent in user session
-Filename: "{app}\Sentinel.Agent.exe"; Flags: nowait postinstall runasoriginaluser
+; Clean up .old files from rename-on-upgrade fallback (ignore failures — silent)
+; Force exit 0 even if no .old files — avoids post-install error popup
+Filename: "{sys}\cmd.exe"; Parameters: "/c del /f /q ""{app}\*.old"" 2>nul & exit /b 0"; Flags: runhidden waituntilterminated
+; Service install + agent start run from Pascal (ssPostInstall) so upgrades never show
+; "sc create failed" / "service already running" error dialogs.
 
 [UninstallRun]
 ; Stop and delete the service
@@ -151,6 +142,53 @@ begin
   Exec(PsPath, Cmd, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
 
+// .NET Framework 4.8 (Release DWORD >= 528040). Framework-dependent install.
+function IsDotNet48OrHigher(): Boolean;
+var
+  Release: Cardinal;
+begin
+  Result := False;
+  // Prefer 64-bit view of the registry (Inno 32-bit setup on x64 Windows)
+  if IsWin64 then
+  begin
+    if RegQueryDWordValue(HKLM64, 'SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full', 'Release', Release) then
+    begin
+      Result := Release >= 528040;
+      Exit;
+    end;
+  end;
+  if RegQueryDWordValue(HKLM, 'SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full', 'Release', Release) then
+    Result := Release >= 528040;
+end;
+
+function OfferDotNet48Download(): Boolean;
+var
+  ErrCode: Integer;
+  Choice: Integer;
+begin
+  // Returns True if setup should continue (4.8 present or user insisted).
+  Result := False;
+  Choice := MsgBox(
+    'Sentinel requires .NET Framework 4.8, which was not found on this PC.' + #13#10#13#10 +
+    'Most Windows 10/11 systems already have it. If Setup cannot detect it, install ' +
+    'the official Microsoft runtime, then run this installer again.' + #13#10#13#10 +
+    'Yes = open the Microsoft .NET Framework 4.8 download page' + #13#10 +
+    'No  = cancel Setup',
+    mbConfirmation, MB_YESNO);
+  if Choice = IDYES then
+  begin
+    // Official download hub (web installer / offline packages)
+    ShellExec('open',
+      'https://dotnet.microsoft.com/download/dotnet-framework/net48',
+      '', '', SW_SHOWNORMAL, ewNoWait, ErrCode);
+    MsgBox(
+      'After .NET Framework 4.8 finishes installing, run SentinelSetup again.' + #13#10 +
+      'A reboot may be required before Setup can detect the runtime.',
+      mbInformation, MB_OK);
+  end;
+  Result := False;
+end;
+
 function InitializeSetup(): Boolean;
 begin
   Result := True;
@@ -163,14 +201,65 @@ begin
       'This leftover Setup window cannot install again. Click OK to close it.',
       mbInformation, MB_OK);
     Result := False;
+    Exit;
   end;
+
+  // Minimum runtime: .NET Framework 4.8 (assume present; offer download if missing)
+  if not IsDotNet48OrHigher() then
+  begin
+    Result := OfferDotNet48Download();
+  end;
+end;
+
+// Idempotent service install — never surface sc.exe exit codes to the user.
+// create fails (1073) when service exists; start fails (1056) when already running.
+procedure InstallOrUpdateService();
+var
+  ResultCode: Integer;
+  Sc: String;
+  BinPath: String;
+begin
+  Sc := ExpandConstant('{sysnative}\sc.exe');
+  if not FileExists(Sc) then
+    Sc := ExpandConstant('{sys}\sc.exe');
+  BinPath := ExpandConstant('{app}\Sentinel.Service.exe');
+
+  // create (fresh) or config (upgrade / reinstall)
+  Exec(Sc, 'create "Sentinel" start= auto binPath= "' + BinPath + '"',
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  if ResultCode <> 0 then
+    Exec(Sc, 'config "Sentinel" binPath= "' + BinPath + '" start= auto',
+      '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+  Exec(Sc, 'description "Sentinel" "Userland Endpoint Detection & Response (EDR) Service"',
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(Sc, 'failure "Sentinel" reset= 86400 actions= restart/1000/restart/5000/restart/30000',
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+  // start — ignore "already running"
+  Exec(Sc, 'start "Sentinel"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
+// Start tray agent in the interactive user session without error dialogs.
+procedure LaunchAgentSilent();
+var
+  AgentPath: String;
+  ErrCode: Integer;
+begin
+  AgentPath := ExpandConstant('{app}\Sentinel.Agent.exe');
+  if not FileExists(AgentPath) then
+    Exit;
+  // ShellExec + no wait: Process.Start style; does not treat non-zero as setup failure
+  ShellExec('open', AgentPath, '', ExpandConstant('{app}'), SW_HIDE, ewNoWait, ErrCode);
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
-  // After files/service are in place, stamp success and tear down sibling wizards
+  // After files are in place: register service, start agent tray, stamp success
   if CurStep = ssPostInstall then
   begin
+    InstallOrUpdateService();
+    LaunchAgentSilent();
     MarkInstallCompleted();
     CloseSiblingSetupProcesses();
   end;

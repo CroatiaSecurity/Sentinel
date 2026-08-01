@@ -21,7 +21,8 @@ namespace Sentinel.Core
     /// so a simple Process.Start won't land in the correct session.
     ///
     /// Solution:
-    ///   1. Poll for the Agent process every 10 seconds.
+    ///   1. Check for the Agent immediately on service start (no multi-second grace),
+    ///      then poll every 10 seconds.
     ///   2. If absent, launch it in the active console session via CreateProcessAsUser
     ///      (WTSQueryUserToken → CreateEnvironmentBlock → CreateProcessAsUser).
     ///   3. Rate-limit relaunches (max 1 per 15s, 5 in 5 minutes before backing off)
@@ -50,10 +51,10 @@ namespace Sentinel.Core
         private const int KillThresholdForAlert = 3;
         private const int MaxRelaunchesInWindow = 5;
 
-        // How long to wait after service start before first check.
-        // Gives the Run key a chance to launch the agent during login before we
-        // step in — avoids a dual-launch race at session start.
-        private static readonly TimeSpan StartupGrace = TimeSpan.FromSeconds(20);
+        // No multi-second grace before first check. Post-install and service start must
+        // surface the tray immediately when the agent is missing. IsAgentRunning() already
+        // prevents dual-launch if the installer / Run key already started the agent.
+        private static readonly TimeSpan StartupGrace = TimeSpan.Zero;
 
         private DateTimeOffset _lastRelaunchTime = DateTimeOffset.MinValue;
         private int _killCount;
@@ -74,15 +75,18 @@ namespace Sentinel.Core
         {
             _logger.LogInformation("[AgentWatchdog] Started — will monitor {Agent} liveness", AgentProcessName);
 
-            // Startup grace — let the HKLM Run key do its job first
-            await Task.Delay(StartupGrace, stoppingToken);
+            // Optional zero-cost yield only (StartupGrace is Zero). Check FIRST so tray
+            // appears immediately after install / service start when agent is absent —
+            // never sit idle for PollInterval before the first relaunch attempt.
+            if (StartupGrace > TimeSpan.Zero)
+                await Task.Delay(StartupGrace, stoppingToken);
 
             while (!stoppingToken.IsCancellationRequested)
             {
                 try
                 {
-                    await Task.Delay(PollInterval, stoppingToken);
                     await CheckAgentAsync(stoppingToken);
+                    await Task.Delay(PollInterval, stoppingToken);
                 }
                 catch (OperationCanceledException) { break; }
                 catch (Exception ex)

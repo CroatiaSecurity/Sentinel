@@ -211,12 +211,12 @@ namespace Sentinel.Core
                     foreach (var mod in NativeProcessMemory.EnumModules(processId))
                     {
                         if (string.IsNullOrEmpty(mod.Path)) continue;
-                        if (mod.Path.Contains(@"\Windows\", StringComparison.OrdinalIgnoreCase)) continue;
+                        if (mod.Path.Contains(@"\Windows\")) continue;
 
-                        bool fromTemp = mod.Path.Contains(@"\Temp\", StringComparison.OrdinalIgnoreCase) ||
-                                        mod.Path.Contains(@"\AppData\Local\Temp\", StringComparison.OrdinalIgnoreCase);
+                        bool fromTemp = mod.Path.Contains(@"\Temp\") ||
+                                        mod.Path.Contains(@"\AppData\Local\Temp\");
                         var modDir = Path.GetDirectoryName(mod.Path) ?? "";
-                        bool plantNameInAppDir = modDir.Equals(procDir, StringComparison.OrdinalIgnoreCase) &&
+                        bool plantNameInAppDir = modDir.Equals(procDir) &&
                                                  SideloadTargets.Contains(mod.Name);
 
                         // Behavior: module is loaded from Temp, or loaded plant that is hostile
@@ -304,7 +304,7 @@ namespace Sentinel.Core
                         try
                         {
                             using var p = Process.GetProcessById(processId);
-                            p.Kill(entireProcessTree: true);
+                            p.KillTree();
                         }
                         catch { }
                     }
@@ -384,8 +384,8 @@ namespace Sentinel.Core
                     return true;
 
                 var signer = _signerTrust.GetSignerName(dllPath) ?? "";
-                if (signer.Contains("Microsoft", StringComparison.OrdinalIgnoreCase) ||
-                    signer.Contains("Windows", StringComparison.OrdinalIgnoreCase))
+                if (signer.Contains("Microsoft") ||
+                    signer.Contains("Windows"))
                     return false;
 
                 return true;
@@ -411,7 +411,7 @@ namespace Sentinel.Core
                         if (SecurityValidation.IsGameOrAntiCheatPath(path)) continue;
                         var pDir = Path.GetDirectoryName(path);
                         if (string.IsNullOrEmpty(pDir)) continue;
-                        if (!pDir.TrimEnd('\\').Equals(directory.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase))
+                        if (!pDir.TrimEnd('\\').Equals(directory.TrimEnd('\\')))
                             continue;
                         list.Add(proc.Id);
                     }
@@ -434,7 +434,7 @@ namespace Sentinel.Core
                 try
                 {
                     if (!File.Exists(dllPath))
-                        await File.WriteAllBytesAsync(dllPath, Array.Empty<byte>());
+                        await System.IO.FileNet48.WriteAllBytesAsync(dllPath, Array.Empty<byte>());
                     File.SetAttributes(dllPath,
                         FileAttributes.ReadOnly | FileAttributes.Hidden | FileAttributes.System);
                 }
@@ -488,12 +488,12 @@ namespace Sentinel.Core
         private static bool IsProtectedPath(string? path)
         {
             if (string.IsNullOrEmpty(path)) return false;
-            return path.StartsWith(@"C:\Windows\", StringComparison.OrdinalIgnoreCase) ||
-                   path.StartsWith(@"C:\Program Files", StringComparison.OrdinalIgnoreCase) ||
-                   path.Contains(@"\AppData\Local\Google\", StringComparison.OrdinalIgnoreCase) ||
-                   path.Contains(@"\AppData\Local\Microsoft\", StringComparison.OrdinalIgnoreCase) ||
-                   path.Contains(@"\AppData\Local\Programs\", StringComparison.OrdinalIgnoreCase) ||
-                   path.Contains(@"\Sentinel", StringComparison.OrdinalIgnoreCase);
+            return path.StartsWith(@"C:\Windows\") ||
+                   path.StartsWith(@"C:\Program Files") ||
+                   path.Contains(@"\AppData\Local\Google\") ||
+                   path.Contains(@"\AppData\Local\Microsoft\") ||
+                   path.Contains(@"\AppData\Local\Programs\") ||
+                   path.Contains(@"\Sentinel");
         }
     }
 

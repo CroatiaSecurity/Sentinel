@@ -43,7 +43,7 @@ namespace Sentinel.Tests
 
             var payload = $"{ts}.{path}.{body}";
             using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secret));
-            var expected = Convert.ToHexString(hmac.ComputeHash(Encoding.UTF8.GetBytes(payload))).ToLowerInvariant();
+            var expected = ConvertHex.ToHexString(hmac.ComputeHash(Encoding.UTF8.GetBytes(payload))).ToLowerInvariant();
             Assert.Equal(expected, sig);
         }
 

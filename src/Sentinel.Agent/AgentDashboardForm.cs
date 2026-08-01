@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -848,8 +848,8 @@ namespace Sentinel.Agent
                     Process.Start(new ProcessStartInfo
                     {
                         FileName = "explorer.exe",
-                        UseShellExecute = false,
-                        ArgumentList = { folder }
+                        UseShellExecute = true,
+                        Arguments = folder
                     });
                 }
                 catch { }
@@ -905,8 +905,8 @@ namespace Sentinel.Agent
                 Process.Start(new ProcessStartInfo
                 {
                     FileName = "explorer.exe",
-                    UseShellExecute = false,
-                    ArgumentList = { "/select,", pack.ZipPath }
+                    UseShellExecute = true,
+                    Arguments = "/select,\"" + pack.ZipPath + "\""
                 });
             }
             catch (Exception ex)
@@ -1125,7 +1125,7 @@ namespace Sentinel.Agent
                 using var sha = System.Security.Cryptography.SHA256.Create();
                 using var fs = new FileStream(pack.ZipPath, FileMode.Open, FileAccess.Read,
                     FileShare.ReadWrite | FileShare.Delete);
-                var hash = Convert.ToHexString(sha.ComputeHash(fs)).ToLowerInvariant();
+                var hash = ConvertHex.ToHexString(sha.ComputeHash(fs)).ToLowerInvariant();
                 File.WriteAllText(pack.ZipPath + ".sha256",
                     $"{hash}  {Path.GetFileName(pack.ZipPath)}{Environment.NewLine}");
             }
@@ -1306,8 +1306,8 @@ namespace Sentinel.Agent
                 Process.Start(new ProcessStartInfo
                 {
                     FileName = "notepad.exe",
-                    UseShellExecute = false,
-                    ArgumentList = { path }
+                    UseShellExecute = true,
+                    Arguments = "\"" + path + "\""
                 });
             }
             catch (Exception ex)
@@ -1482,8 +1482,8 @@ namespace Sentinel.Agent
                 Process.Start(new ProcessStartInfo
                 {
                     FileName = "notepad.exe",
-                    UseShellExecute = false,
-                    ArgumentList = { log }
+                    UseShellExecute = true,
+                    Arguments = "\"" + log + "\""
                 });
             }
             catch (Exception ex)
@@ -1507,8 +1507,8 @@ namespace Sentinel.Agent
                 Process.Start(new ProcessStartInfo
                 {
                     FileName = "explorer.exe",
-                    UseShellExecute = false,
-                    ArgumentList = { path }
+                    UseShellExecute = true,
+                    Arguments = path
                 });
             }
             catch { }

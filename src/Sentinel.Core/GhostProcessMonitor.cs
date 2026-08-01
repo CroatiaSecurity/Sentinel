@@ -388,7 +388,7 @@ namespace Sentinel.Core
 
                 int numEntries = Marshal.ReadInt32(buffer);
                 int structSize = Marshal.SizeOf<MIB_TCPROW_OWNER_PID>();
-                int myPid = Environment.ProcessId;
+                int myPid = System.Net48Environment.ProcessId;
 
                 for (int i = 0; i < numEntries; i++)
                 {

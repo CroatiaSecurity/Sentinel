@@ -83,7 +83,7 @@ namespace Sentinel.Tests
 
             var drop = Path.Combine(_tempDir, "unsigned-drop.exe");
             // Minimal MZ stub — unsigned
-            await File.WriteAllBytesAsync(drop, new byte[] { 0x4D, 0x5A, 0x90, 0x00, 0x03, 0x00 });
+            File.WriteAllBytes(drop, new byte[] { 0x4D, 0x5A, 0x90, 0x00, 0x03, 0x00 });
 
             var result = await qm.QuarantineFileAtomicAsync(drop);
             Assert.NotNull(result);

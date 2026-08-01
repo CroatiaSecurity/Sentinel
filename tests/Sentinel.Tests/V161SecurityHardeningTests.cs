@@ -89,7 +89,7 @@ namespace Sentinel.Tests
 
             var logPath = Path.Combine(_tempDir, "events.jsonl");
             string text;
-            await using (var fs = new FileStream(logPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+            using (var fs = new FileStream(logPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
             using (var reader = new StreamReader(fs))
                 text = await reader.ReadToEndAsync();
 
@@ -191,7 +191,7 @@ namespace Sentinel.Tests
 
             var logPath = Path.Combine(_tempDir, "events.jsonl");
             string text;
-            await using (var fs = new FileStream(logPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+            using (var fs = new FileStream(logPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
             using (var reader = new StreamReader(fs))
                 text = await reader.ReadToEndAsync();
 

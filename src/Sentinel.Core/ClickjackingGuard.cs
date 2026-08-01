@@ -471,23 +471,23 @@ namespace Sentinel.Core
                     try { using var p = Process.GetProcessById((int)pid); procName = p.ProcessName; } catch { }
 
                     // Skip known-good overlay creators
-                    if (procName.Equals("dwm", StringComparison.OrdinalIgnoreCase) ||
-                        procName.Equals("explorer", StringComparison.OrdinalIgnoreCase) ||
-                        procName.Equals("GeForceOverlay", StringComparison.OrdinalIgnoreCase) ||
-                        procName.Equals("GameBar", StringComparison.OrdinalIgnoreCase) ||
-                        procName.Equals("Discord", StringComparison.OrdinalIgnoreCase) ||
-                        procName.Contains("Overlay", StringComparison.OrdinalIgnoreCase) ||
+                    if (procName.Equals("dwm") ||
+                        procName.Equals("explorer") ||
+                        procName.Equals("GeForceOverlay") ||
+                        procName.Equals("GameBar") ||
+                        procName.Equals("Discord") ||
+                        procName.Contains("Overlay") ||
                         // v1.5.5: IDEs use layered topmost windows for autocomplete, tooltips,
                         // debugging overlays, and notification panels.
-                        procName.Equals("Code", StringComparison.OrdinalIgnoreCase) ||
-                        procName.Equals("kiro", StringComparison.OrdinalIgnoreCase) ||
-                        procName.Equals("cursor", StringComparison.OrdinalIgnoreCase) ||
-                        procName.Equals("windsurf", StringComparison.OrdinalIgnoreCase) ||
-                        procName.Equals("devenv", StringComparison.OrdinalIgnoreCase) ||
-                        procName.Contains("rider", StringComparison.OrdinalIgnoreCase) ||
-                        procName.Contains("idea", StringComparison.OrdinalIgnoreCase) ||
-                        procName.Contains("webstorm", StringComparison.OrdinalIgnoreCase) ||
-                        procName.Contains("pycharm", StringComparison.OrdinalIgnoreCase))
+                        procName.Equals("Code") ||
+                        procName.Equals("kiro") ||
+                        procName.Equals("cursor") ||
+                        procName.Equals("windsurf") ||
+                        procName.Equals("devenv") ||
+                        procName.Contains("rider") ||
+                        procName.Contains("idea") ||
+                        procName.Contains("webstorm") ||
+                        procName.Contains("pycharm"))
                         return true;
 
                     // Check alpha transparency
@@ -551,11 +551,11 @@ namespace Sentinel.Core
                 var className = classSb.ToString();
 
                 // Detect windows with UAC-like titles from non-consent.exe processes
-                bool looksLikeUac = title.Contains("User Account Control", StringComparison.OrdinalIgnoreCase) ||
-                                    title.Contains("Windows Security", StringComparison.OrdinalIgnoreCase) ||
-                                    title.Contains("Administrator permission", StringComparison.OrdinalIgnoreCase) ||
-                                    title.Contains("Credential", StringComparison.OrdinalIgnoreCase) && title.Contains("Windows", StringComparison.OrdinalIgnoreCase) ||
-                                    title.Contains("Sign in", StringComparison.OrdinalIgnoreCase) && className.Contains("#32770");
+                bool looksLikeUac = title.Contains("User Account Control") ||
+                                    title.Contains("Windows Security") ||
+                                    title.Contains("Administrator permission") ||
+                                    title.Contains("Credential") && title.Contains("Windows") ||
+                                    title.Contains("Sign in") && className.Contains("#32770");
 
                 if (!looksLikeUac) return true;
 
@@ -579,7 +579,7 @@ namespace Sentinel.Core
                     return true;
 
                 // Also skip our own agent process by name (it won't have a third-party signature)
-                if (string.Equals(procName, "Sentinel.Agent", StringComparison.OrdinalIgnoreCase))
+                if (string.Equals(procName, "Sentinel.Agent"))
                     return true;
 
                 // This is a non-system process with a UAC-like window title — fake UAC

@@ -210,7 +210,7 @@ namespace Sentinel.Core
         {
             try
             {
-                int myPid = Environment.ProcessId;
+                int myPid = System.Net48Environment.ProcessId;
                 var currentCounts = new Dictionary<string, int>();
 
                 void ProcessConnection(string localIp, string remoteIp, int localPort, int remotePort, int owningPid)

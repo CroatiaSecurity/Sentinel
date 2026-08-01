@@ -275,7 +275,7 @@ namespace Sentinel.Core
         {
             foreach (var prefix in LegitimatePatterns)
             {
-                if (pipeName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                if (pipeName.StartsWith(prefix))
                     return true;
             }
 
@@ -306,7 +306,7 @@ namespace Sentinel.Core
             foreach (var count in freq.Values)
             {
                 double p = count / len;
-                if (p > 0) entropy -= p * Math.Log2(p);
+                if (p > 0) entropy -= p * MathNet48.Log2(p);
             }
             return entropy;
         }

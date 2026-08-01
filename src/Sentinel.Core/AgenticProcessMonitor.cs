@@ -106,13 +106,13 @@ namespace Sentinel.Core
                 try { name = p.ProcessName; }
                 catch { continue; }
 
-                var bare = name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
+                var bare = name.EndsWith(".exe")
                     ? name[..^4]
                     : name;
 
                 if (AgentNames.Contains(name) || AgentNames.Contains(bare) ||
-                    name.Contains("claude", StringComparison.OrdinalIgnoreCase) ||
-                    name.Contains("cursor", StringComparison.OrdinalIgnoreCase))
+                    name.Contains("claude") ||
+                    name.Contains("cursor"))
                 {
                     _agentPids[p.Id] = now;
                 }
@@ -135,14 +135,14 @@ namespace Sentinel.Core
 
                 var isAgentChild = _agentPids.ContainsKey(ppid) ||
                     AgentNames.Contains(parentName) ||
-                    parentName.Contains("claude", StringComparison.OrdinalIgnoreCase) ||
-                    parentName.Contains("cursor", StringComparison.OrdinalIgnoreCase);
+                    parentName.Contains("claude") ||
+                    parentName.Contains("cursor");
 
                 if (!isAgentChild) continue;
 
                 _spawnCounts.AddOrUpdate(ppid, 1, (_, c) => c + 1);
 
-                var childBare = childName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
+                var childBare = childName.EndsWith(".exe")
                     ? childName[..^4]
                     : childName;
 
@@ -153,7 +153,7 @@ namespace Sentinel.Core
                 try { path = SecurityValidation.GetProcessImagePath(p.Id); } catch { /* access denied */ }
 
                 var credTouch = path != null && CredentialPathFragments.Any(f =>
-                    path.Contains(f, StringComparison.OrdinalIgnoreCase));
+                    path.Contains(f));
 
                 // Burst: many children from one agent
                 var burst = _spawnCounts.TryGetValue(ppid, out var count) && count >= 12;
@@ -164,8 +164,8 @@ namespace Sentinel.Core
                 _alertCooldown[key] = now;
 
                 var critical = credTouch ||
-                    childBare.Equals(string.Concat("mimi","katz"), StringComparison.OrdinalIgnoreCase) ||
-                    childBare.Equals("procdump", StringComparison.OrdinalIgnoreCase);
+                    childBare.Equals(string.Concat("mimi","katz")) ||
+                    childBare.Equals("procdump");
 
                 var confidence = critical ? 0.88 : burst ? 0.72 : 0.62;
                 var response = critical

@@ -149,7 +149,7 @@ namespace Sentinel.Core
                 using (var fs = new FileStream(tempFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
                 using (var reader = new StreamReader(fs, Encoding.UTF8))
                 {
-                    content = await reader.ReadToEndAsync(ct);
+                    content = await reader.ReadToEndAsync();
                 }
 
                 await AnalyzeWfpFiltersAsync(content, ct);
@@ -188,7 +188,7 @@ namespace Sentinel.Core
 
                 // Check if this filter targets Sentinel
                 bool targetsSentinel = SentinelBinaries.Any(name =>
-                    appPath.Contains(name, StringComparison.OrdinalIgnoreCase));
+                    appPath.Contains(name));
 
                 if (targetsSentinel)
                 {
@@ -198,7 +198,7 @@ namespace Sentinel.Core
 
                 // Check if this filter targets known EDR processes (broader EDRSilencer detection)
                 bool targetsEdr = KnownEdRTargets.Any(name =>
-                    appPath.Contains(name, StringComparison.OrdinalIgnoreCase));
+                    appPath.Contains(name));
 
                 if (targetsEdr)
                 {

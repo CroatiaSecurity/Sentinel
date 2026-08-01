@@ -176,7 +176,7 @@ namespace Sentinel.Core
 
                     if (ParentPidSpoofDetector.IsStockWindowsConsoleHost(detection.ProcessName, detectionPath) ||
                         (!string.IsNullOrEmpty(detectionPath) && SecurityValidation.IsOsCriticalPath(detectionPath) &&
-                         detection.RuleName.StartsWith("PPID Spoofing", StringComparison.OrdinalIgnoreCase)))
+                         detection.RuleName.StartsWith("PPID Spoofing")))
                     {
                         _logger.LogInformation(
                             "[ChainTracer] Skipping chain kill — detection is stock OS console/host PPID race (PID {Pid} {Name} path={Path})",
@@ -189,7 +189,7 @@ namespace Sentinel.Core
 
                     foreach (var node in chain)
                     {
-                        var cleanName = node.ProcessName.Replace(".exe", "", StringComparison.OrdinalIgnoreCase);
+                        var cleanName = Sentinel.Core.StringNet48.ReplaceIgnoreCase(node.ProcessName, ".exe", "");
 
                         // Critical system hosts (explorer, csrss, …):
                         // - Path under Windows → never kill
@@ -435,7 +435,7 @@ namespace Sentinel.Core
         {
             // Never trust name alone — require path verification
             if (string.IsNullOrEmpty(imagePath)) return false;
-            return SystemPaths.Any(sp => imagePath.StartsWith(sp, StringComparison.OrdinalIgnoreCase));
+            return SystemPaths.Any(sp => imagePath.StartsWith(sp));
         }
 
         /// <summary>
@@ -454,15 +454,15 @@ namespace Sentinel.Core
         {
             if (string.IsNullOrEmpty(processName)) return false;
 
-            var stem = processName.Replace(".exe", "", StringComparison.OrdinalIgnoreCase).Trim();
+            var stem = Sentinel.Core.StringNet48.ReplaceIgnoreCase(processName, ".exe", "").Trim();
             if (string.IsNullOrEmpty(stem)) return false;
 
-            bool isGenericSetup = stem.Equals("setup", StringComparison.OrdinalIgnoreCase);
+            bool isGenericSetup = stem.Equals("setup");
             bool nameMatches = BrowserHostNames.Contains(stem) ||
-                               stem.StartsWith("firefox setup", StringComparison.OrdinalIgnoreCase) ||
-                               stem.Contains("chromesetup", StringComparison.OrdinalIgnoreCase) ||
-                               stem.Contains("chrome_installer", StringComparison.OrdinalIgnoreCase) ||
-                               stem.Contains("mini_installer", StringComparison.OrdinalIgnoreCase);
+                               stem.StartsWith("firefox setup") ||
+                               stem.Contains("chromesetup") ||
+                               stem.Contains("chrome_installer") ||
+                               stem.Contains("mini_installer");
 
             if (!nameMatches) return false;
 
@@ -497,10 +497,10 @@ namespace Sentinel.Core
             try
             {
                 using var sha256 = SHA256.Create();
-                await using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read,
+                using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read,
                     FileShare.ReadWrite | FileShare.Delete);
                 var hash = await sha256.ComputeHashAsync(stream, ct);
-                return Convert.ToHexString(hash);
+                return ConvertHex.ToHexString(hash);
             }
             catch { return ""; }
         }
@@ -514,7 +514,7 @@ namespace Sentinel.Core
         internal static bool IsLegitimateIdeHost(string? imagePath, string processName)
         {
             if (string.IsNullOrEmpty(processName)) return false;
-            var cleanName = processName.Replace(".exe", "", StringComparison.OrdinalIgnoreCase);
+            var cleanName = Sentinel.Core.StringNet48.ReplaceIgnoreCase(processName, ".exe", "");
             if (!IdeHostProcessNames.Contains(cleanName)) return false;
 
             // Name matches — verify the path is legitimate

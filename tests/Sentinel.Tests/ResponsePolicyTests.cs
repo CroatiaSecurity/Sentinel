@@ -21,6 +21,171 @@ namespace Sentinel.Tests
         };
 
         [Fact]
+        public void MinTier1Confidence_Default_Is_PointEightyFive()
+        {
+            // Locks the kill-grade confidence floor used by ApplyTierLaw / AdvancedResponseEngine.
+            Assert.Equal(0.85, ResponsePolicy.DefaultMinTier1Confidence);
+            Assert.Equal(0.85, new SentinelConfig().MinTier1Confidence);
+        }
+
+        [Fact]
+        public void DirectX_Install_Is_Tier2_Observe_Never_Composite_Or_Kill()
+        {
+            var cfg = ObserveConfig();
+
+            // Typical Steam DirectX System32 drop (often PID 0 race)
+            var sysWrite = new DetectionEvent
+            {
+                RuleName = "System Integrity: Unauthorized Write to System Directory",
+                Evidence = @"File 'C:\WINDOWS\System32\d3dx9_43.dll' was created by process 'dxsetup' (PID 0)",
+                ProcessId = 0,
+                ProcessName = "dxsetup",
+                Confidence = 0.92, // monitors must not "confidence wash" this into Tier1
+                Tier = DetectionTier.Tier1Behavioral,
+                AuthorizedResponse = ResponseAction.KillProcessTree,
+                Metadata = new Dictionary<string, string>
+                {
+                    ["FilePath"] = @"C:\WINDOWS\System32\d3dx9_43.dll",
+                    ["BenignInstallerNoise"] = "true",
+                }
+            };
+            ResponsePolicy.ApplyTierLaw(sysWrite);
+            Assert.Equal(DetectionTier.Tier2Indicator, sysWrite.Tier);
+            Assert.Equal(ResponseAction.LogOnly, sysWrite.AuthorizedResponse);
+            Assert.True(ResponsePolicy.IsBenignInstallerNoise(sysWrite));
+            Assert.True(ResponsePolicy.IsNonCorrelatingObserveNoise(sysWrite));
+            Assert.Null(ResponsePolicy.ClassifyTerminalOutcome(sysWrite));
+            Assert.False(ResponsePolicy.MayPerformDestructiveResponse(sysWrite, cfg));
+
+            // Second weak signal from same installer wave must still not chain-nuke
+            var ephemeral = new DetectionEvent
+            {
+                RuleName = "Ephemeral Process: Self-Deleting Binary",
+                ProcessId = 5555,
+                ProcessName = "dxsetup",
+                Confidence = 0.80,
+                Tier = DetectionTier.Tier1Behavioral,
+                AuthorizedResponse = ResponseAction.KillProcessTree,
+                Metadata = new Dictionary<string, string>
+                {
+                    ["ImagePath"] = @"C:\Program Files (x86)\Steam\steamapps\common\Game\_CommonRedist\DirectX\DXSETUP.exe",
+                }
+            };
+            ResponsePolicy.ApplyTierLaw(ephemeral);
+            Assert.Equal(DetectionTier.Tier2Indicator, ephemeral.Tier);
+            Assert.True(ResponsePolicy.IsBenignInstallerNoise(ephemeral));
+            Assert.False(ResponsePolicy.MayPerformDestructiveResponse(ephemeral, cfg));
+
+            // Even stacking two installer signals must not authorize kill
+            Assert.False(ResponsePolicy.MayPerformDestructiveResponse(sysWrite, cfg));
+            Assert.False(ResponsePolicy.MayPerformDestructiveResponse(ephemeral, cfg));
+        }
+
+        [Fact]
+        public void TierLaw_Only_KillGrade_HighConfidence_Is_Tier1()
+        {
+            var weakGhost = new DetectionEvent
+            {
+                RuleName = "Ghost Process: Unresolvable PID",
+                ProcessId = 1001,
+                ProcessName = "something.exe",
+                Confidence = 0.95,
+                Tier = DetectionTier.Tier1Behavioral,
+                AuthorizedResponse = ResponseAction.KillProcessTree,
+            };
+            ResponsePolicy.ApplyTierLaw(weakGhost);
+            Assert.Equal(DetectionTier.Tier2Indicator, weakGhost.Tier);
+            Assert.Equal(ResponseAction.LogOnly, weakGhost.AuthorizedResponse);
+
+            var lowConfC2 = new DetectionEvent
+            {
+                RuleName = "C2 Beaconing: Statistical Beacon Detected",
+                SignalType = SignalType.NetworkC2,
+                ProcessId = 1002,
+                ProcessName = "maybe.exe",
+                Confidence = 0.50,
+                Tier = DetectionTier.Tier1Behavioral,
+                AuthorizedResponse = ResponseAction.KillProcessTree,
+            };
+            ResponsePolicy.ApplyTierLaw(lowConfC2);
+            Assert.Equal(DetectionTier.Tier2Indicator, lowConfC2.Tier);
+            Assert.Equal(ResponseAction.LogOnly, lowConfC2.AuthorizedResponse);
+
+            var highConfCred = new DetectionEvent
+            {
+                RuleName = "LSASS Credential Dump",
+                SignalType = SignalType.CredentialTheft,
+                ProcessId = 1003,
+                ProcessName = "mimikatz.exe",
+                Confidence = 0.92,
+                Tier = DetectionTier.Tier2Indicator,
+                AuthorizedResponse = ResponseAction.KillProcessTree,
+            };
+            ResponsePolicy.ApplyTierLaw(highConfCred);
+            Assert.Equal(DetectionTier.Tier1Behavioral, highConfCred.Tier);
+            Assert.True(ResponsePolicy.IsKillGradeTerminal(highConfCred));
+
+            var highConfToken = new DetectionEvent
+            {
+                RuleName = "Token Theft: SYSTEM Token Stolen",
+                ProcessId = 1004,
+                ProcessName = "evil.exe",
+                Confidence = 0.90,
+                Tier = DetectionTier.Tier2Indicator,
+                AuthorizedResponse = ResponseAction.KillProcessTree,
+            };
+            ResponsePolicy.ApplyTierLaw(highConfToken);
+            Assert.Equal(DetectionTier.Tier1Behavioral, highConfToken.Tier);
+
+            var highConfShell = new DetectionEvent
+            {
+                RuleName = "Reverse Shell Detected",
+                SignalType = SignalType.ReverseShell,
+                ProcessId = 1005,
+                ProcessName = "nc.exe",
+                Confidence = 0.91,
+                Tier = DetectionTier.Tier2Indicator,
+                AuthorizedResponse = ResponseAction.KillProcessTree,
+            };
+            ResponsePolicy.ApplyTierLaw(highConfShell);
+            Assert.Equal(DetectionTier.Tier1Behavioral, highConfShell.Tier);
+
+            var highConfC2 = new DetectionEvent
+            {
+                RuleName = "C2 Beaconing: Statistical Beacon Detected",
+                SignalType = SignalType.NetworkC2,
+                ProcessId = 1006,
+                ProcessName = "beacon.exe",
+                Confidence = 0.90,
+                Tier = DetectionTier.Tier2Indicator,
+                AuthorizedResponse = ResponseAction.NetworkIsolate,
+            };
+            ResponsePolicy.ApplyTierLaw(highConfC2);
+            Assert.Equal(DetectionTier.Tier1Behavioral, highConfC2.Tier);
+
+            // Still no single-signal nuke under ObserveUntilChain
+            Assert.False(ResponsePolicy.MayPerformDestructiveResponse(highConfC2, ObserveConfig()));
+        }
+
+        [Fact]
+        public void TierLaw_Composite_Stays_Tier1_KillGrade()
+        {
+            var composite = new DetectionEvent
+            {
+                RuleName = "Injected C2 Beacon",
+                Evidence = "[COMPOSITE] injection + C2",
+                ProcessId = 2001,
+                ProcessName = "evil.exe",
+                Confidence = 0.98,
+                Tier = DetectionTier.Tier2Indicator,
+                AuthorizedResponse = ResponseAction.LogOnly,
+            };
+            ResponsePolicy.ApplyTierLaw(composite);
+            Assert.Equal(DetectionTier.Tier1Behavioral, composite.Tier);
+            Assert.True(composite.AuthorizedResponse >= ResponseAction.KillProcessTree);
+        }
+
+        [Fact]
         public void DirectX_System32_Write_Is_Benign_Noise_Never_Chain()
         {
             var d = new DetectionEvent

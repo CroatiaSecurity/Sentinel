@@ -256,7 +256,7 @@ namespace Sentinel.Core
         {
             if (string.IsNullOrWhiteSpace(ruleName)) return false;
             var lower = ruleName.ToLowerInvariant();
-            return AttackRuleKeywords.Any(k => lower.Contains(k, StringComparison.Ordinal));
+            return AttackRuleKeywords.Any(k => lower.Contains(k));
         }
 
         /// <summary>
@@ -278,7 +278,7 @@ namespace Sentinel.Core
                 var mismatches = new List<string>();
                 foreach (var line in lines)
                 {
-                    if (string.IsNullOrWhiteSpace(line) || line.StartsWith('#'))
+                    if (string.IsNullOrWhiteSpace(line) || line.StartsWith("#"))
                         continue;
                     var parts = line.Split(new[] { "  " }, 2, StringSplitOptions.None);
                     if (parts.Length != 2)
@@ -299,7 +299,7 @@ namespace Sentinel.Core
                     }
 
                     var actual = ComputeFileSha256Hex(full);
-                    if (!string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase))
+                    if (!string.Equals(actual, expected))
                         mismatches.Add($"hash-mismatch:{rel}");
                 }
 
@@ -310,7 +310,7 @@ namespace Sentinel.Core
                 {
                     var expectedHmac = File.ReadAllText(hmacPath).Trim().ToLowerInvariant();
                     var actualHmac = ComputeManifestHmacHex(File.ReadAllBytes(manifestPath));
-                    if (!string.Equals(expectedHmac, actualHmac, StringComparison.Ordinal))
+                    if (!string.Equals(expectedHmac, actualHmac))
                     {
                         return new EvidenceIntegrityResult(false, "MANIFEST.hmac signature mismatch (pack may have been altered or moved from original machine).");
                     }
@@ -336,7 +336,7 @@ namespace Sentinel.Core
         {
             if (detection == null) return false;
             var rule = detection.RuleName ?? "";
-            if (!rule.Contains("Token Theft", StringComparison.OrdinalIgnoreCase))
+            if (!rule.Contains("Token Theft"))
                 return false;
 
             var name = detection.ProcessName ?? "";
@@ -352,10 +352,10 @@ namespace Sentinel.Core
                 return true;
 
             // Classic FP wording when image path is inaccessible
-            if (evidence.Contains("at ''", StringComparison.Ordinal) &&
-                (evidence.Contains("Memory Compression", StringComparison.OrdinalIgnoreCase) ||
-                 evidence.Contains("Process 'Registry'", StringComparison.OrdinalIgnoreCase) ||
-                 evidence.Contains("'Registry'", StringComparison.OrdinalIgnoreCase)))
+            if (evidence.Contains("at ''") &&
+                (evidence.Contains("Memory Compression") ||
+                 evidence.Contains("Process 'Registry'") ||
+                 evidence.Contains("'Registry'")))
                 return true;
 
             return false;
@@ -368,7 +368,7 @@ namespace Sentinel.Core
                 // v1.8.0: Token Theft packs use a longer cooldown (1h) even if config is 300s —
                 // prevents hundreds of near-identical packs from the same PID.
                 var seconds = Math.Max(30, _config.CooldownSeconds);
-                if (key.StartsWith("Token Theft", StringComparison.OrdinalIgnoreCase))
+                if (key.StartsWith("Token Theft"))
                     seconds = Math.Max(seconds, 3600);
 
                 if (DateTimeOffset.UtcNow - last < TimeSpan.FromSeconds(seconds))
@@ -486,7 +486,7 @@ namespace Sentinel.Core
             report.AppendLine();
             try
             {
-                await File.WriteAllLinesAsync(
+                await FileNet48.WriteAllLinesAsync(
                     Path.Combine(reportDir, "network_snapshot.txt"),
                     networkLines).ConfigureAwait(false);
             }
@@ -555,7 +555,7 @@ namespace Sentinel.Core
             report.AppendLine("═══════════════════════════════════════════════════════════════════");
 
             var reportPath = Path.Combine(reportDir, "incident_report.txt");
-            await File.WriteAllTextAsync(reportPath, report.ToString(), Encoding.UTF8).ConfigureAwait(false);
+            await System.IO.FileNet48.WriteAllTextAsync(reportPath, report.ToString(), Encoding.UTF8).ConfigureAwait(false);
 
             var indicators = ExtractIndicators(detection);
             var summary = new StringBuilder();
@@ -575,7 +575,7 @@ namespace Sentinel.Core
                 summary.AppendLine($"ip={ip}");
             foreach (var url in indicators.Urls)
                 summary.AppendLine($"url={url}");
-            await File.WriteAllTextAsync(
+            await System.IO.FileNet48.WriteAllTextAsync(
                 Path.Combine(reportDir, "indicators.txt"),
                 summary.ToString(), Encoding.UTF8).ConfigureAwait(false);
 
@@ -600,7 +600,7 @@ namespace Sentinel.Core
                     ZipFile.CreateFromDirectory(reportDir, zipPath, CompressionLevel.Optimal, includeBaseDirectory: false);
                     // Seal zip hash alongside for transport integrity
                     var zipHash = ComputeFileSha256Hex(zipPath);
-                    await File.WriteAllTextAsync(
+                    await System.IO.FileNet48.WriteAllTextAsync(
                         zipPath + ".sha256",
                         $"{zipHash}  {Path.GetFileName(zipPath)}{Environment.NewLine}",
                         Encoding.UTF8).ConfigureAwait(false);
@@ -651,7 +651,7 @@ namespace Sentinel.Core
             sb.AppendLine("  _____________ | ____ | ___ | _____________________________ | _________");
             sb.AppendLine("  _____________ | ____ | ___ | _____________________________ | _________");
 
-            await File.WriteAllTextAsync(
+            await System.IO.FileNet48.WriteAllTextAsync(
                 Path.Combine(reportDir, "chain_of_custody.txt"),
                 sb.ToString(), Encoding.UTF8).ConfigureAwait(false);
         }
@@ -733,7 +733,7 @@ namespace Sentinel.Core
             sb.AppendLine("Attach: incident_report.txt, indicators.txt, MANIFEST.sha256, chain_of_custody.txt,");
             sb.AppendLine("and the .zip export if filing electronically.");
 
-            await File.WriteAllTextAsync(
+            await System.IO.FileNet48.WriteAllTextAsync(
                 Path.Combine(reportDir, "victim_affidavit.txt"),
                 sb.ToString(), Encoding.UTF8).ConfigureAwait(false);
         }
@@ -745,7 +745,7 @@ namespace Sentinel.Core
             var files = Directory.GetFiles(reportDir)
                 .Select(f => new FileInfo(f))
                 .Where(f => !IntegritySkipFileNames.Contains(f.Name))
-                .Where(f => !f.Name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+                .Where(f => !f.Name.EndsWith(".zip"))
                 .OrderBy(f => f.Name, StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
@@ -770,10 +770,10 @@ namespace Sentinel.Core
             var manifestBody = string.Join(Environment.NewLine, manifestLines) + Environment.NewLine;
             var manifestBytes = Encoding.UTF8.GetBytes(manifestBody);
             var manifestPath = Path.Combine(reportDir, "MANIFEST.sha256");
-            await File.WriteAllBytesAsync(manifestPath, manifestBytes).ConfigureAwait(false);
+            await System.IO.FileNet48.WriteAllBytesAsync(manifestPath, manifestBytes).ConfigureAwait(false);
 
             var hmacHex = ComputeManifestHmacHex(manifestBytes);
-            await File.WriteAllTextAsync(
+            await System.IO.FileNet48.WriteAllTextAsync(
                 Path.Combine(reportDir, "MANIFEST.hmac"),
                 hmacHex + Environment.NewLine,
                 Encoding.UTF8).ConfigureAwait(false);
@@ -798,7 +798,7 @@ namespace Sentinel.Core
                 hmacScope = "machine-bound (MachineName + domain + fixed salt); verify on original host"
             };
 
-            await File.WriteAllTextAsync(
+            await System.IO.FileNet48.WriteAllTextAsync(
                 Path.Combine(reportDir, "evidence_manifest.json"),
                 JsonSerializer.Serialize(json, new JsonSerializerOptions { WriteIndented = true }),
                 Encoding.UTF8).ConfigureAwait(false);
@@ -821,7 +821,7 @@ namespace Sentinel.Core
             verify.AppendLine();
             verify.AppendLine($"Sealed UTC: {sealedAt:O}");
             verify.AppendLine($"Report ID:  {reportId}");
-            await File.WriteAllTextAsync(
+            await System.IO.FileNet48.WriteAllTextAsync(
                 Path.Combine(reportDir, "VERIFY.txt"),
                 verify.ToString(), Encoding.UTF8).ConfigureAwait(false);
         }
@@ -834,23 +834,23 @@ namespace Sentinel.Core
         {
             var material = Encoding.UTF8.GetBytes(
                 $"SentinelEvidenceV1|{Environment.MachineName}|{Environment.UserDomainName}|LE-Pack");
-            return SHA256.HashData(material);
+            return System.Security.Cryptography.Sha256Net48.HashData(material);
         }
 
         internal static string ComputeManifestHmacHex(byte[] manifestBytes)
         {
             using var hmac = new HMACSHA256(DeriveEvidenceHmacKey());
-            return Convert.ToHexString(hmac.ComputeHash(manifestBytes)).ToLowerInvariant();
+            return ConvertHex.ToHexString(hmac.ComputeHash(manifestBytes)).ToLowerInvariant();
         }
 
         internal static string ComputeFileSha256Hex(string path)
         {
             using var fs = File.OpenRead(path);
-            return Convert.ToHexString(SHA256.HashData(fs)).ToLowerInvariant();
+            return ConvertHex.ToHexString(System.Security.Cryptography.Sha256Net48.HashData(fs)).ToLowerInvariant();
         }
 
         internal static string ComputeSha256Hex(byte[] data) =>
-            Convert.ToHexString(SHA256.HashData(data)).ToLowerInvariant();
+            ConvertHex.ToHexString(System.Security.Cryptography.Sha256Net48.HashData(data)).ToLowerInvariant();
 
         private async Task<int> SubmitThreatIntelAsync(DetectionEvent detection)
         {
@@ -908,8 +908,8 @@ namespace Sentinel.Core
 
                 if (k.Contains("url") || k.Contains("uri"))
                 {
-                    if (value.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
-                        value.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+                    if (value.StartsWith("http://") ||
+                        value.StartsWith("https://"))
                         urls.Add(value.Trim());
                 }
 
@@ -988,7 +988,7 @@ namespace Sentinel.Core
                 var matched = 0;
                 foreach (var line in all)
                 {
-                    if (pidToken != null && line.TrimEnd().EndsWith(pidToken, StringComparison.Ordinal))
+                    if (pidToken != null && line.TrimEnd().EndsWith(pidToken))
                     {
                         lines.Add("  " + line.Trim());
                         matched++;
@@ -1007,7 +1007,7 @@ namespace Sentinel.Core
                 var sample = 0;
                 foreach (var line in all)
                 {
-                    if (line.Contains("ESTABLISHED", StringComparison.OrdinalIgnoreCase))
+                    if (line.Contains("ESTABLISHED"))
                     {
                         lines.Add("  " + line.Trim());
                         if (++sample >= 20) break;

@@ -111,7 +111,7 @@ namespace Sentinel.Core
             // Windows PE executables — MalwareBazaar dumps, renamed payloads, and staged
             // binaries often lack extensions to evade extension-based scanning.
             // Check PE magic bytes (MZ header) for extensionless files.
-            if (string.IsNullOrEmpty(ext) || !ext.Contains('.'))
+            if (string.IsNullOrEmpty(ext) || ext.IndexOf('.') < 0)
             {
                 return HasPeMagicBytes(filePath);
             }
@@ -290,10 +290,10 @@ namespace Sentinel.Core
             {
                 string hash;
                 using (var sha = SHA256.Create())
-                await using (var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                using (var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
                 {
                     var hashBytes = await sha.ComputeHashAsync(fs);
-                    hash = Convert.ToHexString(hashBytes).ToLowerInvariant();
+                    hash = ConvertHex.ToHexString(hashBytes).ToLowerInvariant();
                 }
 
                 // Lazy: skip if already marked (ADS verdict exists and hash matches)

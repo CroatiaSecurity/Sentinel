@@ -2,9 +2,9 @@
 
 Real-time endpoint detection and response for Windows. Runs as a background service, monitors system behavior, and kills threats automatically when multiple signals correlate.
 
-**Current version: 1.8.6**
+**Current version: 1.8.7**
 
-### Product posture (v1.8.6 — observe-until-chain)
+### Product posture (v1.8.7 — observe-until-chain + Tier1 kill-grade only)
 
 **Full sensors. Silent until a real attack chain. Then nuke.**
 
@@ -61,7 +61,7 @@ Sentinel is honest about its limits:
 - **Kernel implants already loaded and active** — Sentinel runs in userland. A kernel driver that is already executing can suppress any user-mode process. However, Sentinel detects the *entire attack chain leading up to driver load* (privilege escalation, driver file drop, service creation, cert planting) and can neutralize attacks before they reach kernel. See "BYOVD Defense" below.
 - **Nation-state zero-days with novel kernel implants** — Custom kernel exploits targeting unknown vulnerabilities are difficult for any behavioral tool to catch at the moment of exploitation. Sentinel still shrinks classic lateral-movement surface (attack-only IPSec, ASR, service/registry hardening, reactive threat-intel isolate) without pre-breaking SSH/RDP for normal users. For kiosk-style lockdown, set `RestrictivePortHardening: true`.
 - **Pre-boot attacks** — Sentinel starts after Windows. It detects boot config changes (BCD, EFI, boot drivers) after the fact via `BootIntegrityGuard`.
-- **Weak / non-terminal signals alone** — Shell using SSH, Downloads network, SeImpersonate alone, System32 redistributable writes (DirectX/GPU), netsh noise: **logged**, not killed. Destructive response requires a multi-signal chain to C2/exfil/token/shell/cred-dump/BYOVD (`ObserveUntilChain`, v1.8.6).
+- **Weak / non-terminal signals alone** — Shell using SSH, Downloads network, SeImpersonate alone, System32 redistributable writes (DirectX/GPU), netsh noise: **logged**, not killed. Destructive response requires a multi-signal chain to C2/exfil/token/shell/cred-dump/BYOVD (`ObserveUntilChain`, v1.8.7).
 
 ---
 
@@ -122,7 +122,7 @@ Full transparency in [THREAT_MODEL.md](THREAT_MODEL.md).
 
 ## Test Suite
 
-**886+** automated tests (xUnit), all passing:
+**1000** automated tests (xUnit), all passing on net48:
 - End-to-end integration tests (full pipeline: telemetry → detection → scoring → correlation → response)
 - Unit tests for all critical engines (Response, Correlation, ChainTracer, FileReputation, AntiTamper, Detection)
 - Monitor unit tests including LNK classification, threat-intel feed parsing, USB failed-enumeration, PS-ported guards, v1.7.5–1.7.6 features, auto incident evidence packs (v1.7.7/1.7.8)
@@ -132,13 +132,22 @@ Full transparency in [THREAT_MODEL.md](THREAT_MODEL.md).
 
 ## Installation
 
-Download the latest installer from [releases/](releases/) and run it. Sentinel installs as a Windows Service and starts automatically.
+Download **`SentinelSetup-1.8.7.exe`** from [GitHub Releases](https://github.com/CroatiaSecurity/Sentinel/releases) (or `releases/1.8.7/` after a local build) and run it as Administrator.
+
+**Minimum installer** — framework-dependent `net48-windows` (no bundled runtime). Small setup package.
 
 Requirements:
 - Windows 10 or 11 (x64)
-- .NET 10 Runtime
+- **.NET Framework 4.8** (already on most machines; Setup offers the Microsoft download page if missing)
 - Administrator privileges for installation
-- Runs as SYSTEM after install
+- Service runs as SYSTEM; tray Agent runs in the user session (starts immediately after install)
+
+Build the installer locally:
+```powershell
+cd installer
+.\build.ps1
+# → installer\SentinelSetup-<version>.exe
+```
 
 ---
 

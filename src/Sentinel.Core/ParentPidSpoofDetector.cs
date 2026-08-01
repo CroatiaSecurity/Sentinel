@@ -221,18 +221,18 @@ namespace Sentinel.Core
         internal static bool IsStockWindowsConsoleHost(string processName, string? imagePath)
         {
             var stem = (processName ?? string.Empty)
-                .Replace(".exe", "", StringComparison.OrdinalIgnoreCase)
+                .Replace(".exe", "")
                 .Trim();
             if (stem.Length == 0) return false;
 
             bool nameIsConsole =
-                stem.Equals("conhost", StringComparison.OrdinalIgnoreCase) ||
-                stem.Equals("openconsole", StringComparison.OrdinalIgnoreCase);
+                stem.Equals("conhost") ||
+                stem.Equals("openconsole");
 
             if (!nameIsConsole) return false;
 
             if (string.IsNullOrWhiteSpace(imagePath))
-                return stem.Equals("conhost", StringComparison.OrdinalIgnoreCase);
+                return stem.Equals("conhost");
 
             try
             {

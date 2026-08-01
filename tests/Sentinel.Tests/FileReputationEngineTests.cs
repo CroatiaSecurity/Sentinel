@@ -65,7 +65,7 @@ namespace Sentinel.Tests
         {
             // Create a small text file (not a PE, not suspicious)
             var testFile = Path.Combine(_tempDir, "harmless.txt");
-            await File.WriteAllTextAsync(testFile, "This is a harmless text file for testing purposes.");
+            File.WriteAllText(testFile, "This is a harmless text file for testing purposes.");
 
             var result = await _engine.EvaluateFileAsync(testFile);
 
@@ -95,7 +95,7 @@ namespace Sentinel.Tests
         public async Task EvaluateFile_CachesResults()
         {
             var testFile = Path.Combine(_tempDir, "cached_test.txt");
-            await File.WriteAllTextAsync(testFile, "Cache test content " + Guid.NewGuid());
+            File.WriteAllText(testFile, "Cache test content " + Guid.NewGuid());
 
             // First evaluation
             var result1 = await _engine.EvaluateFileAsync(testFile);
@@ -114,7 +114,7 @@ namespace Sentinel.Tests
             var tempFile = Path.Combine(Path.GetTempPath(), "sentinel_risk_test_" + Guid.NewGuid().ToString("N")[..8] + ".txt");
             try
             {
-                await File.WriteAllTextAsync(tempFile, "test content");
+                File.WriteAllText(tempFile, "test content");
 
                 var result = await _engine.EvaluateFileAsync(tempFile);
 
@@ -203,7 +203,7 @@ namespace Sentinel.Tests
         public async Task EvaluateFile_DeduplicatesParallelCalls()
         {
             var testFile = Path.Combine(_tempDir, "dedup_test.txt");
-            await File.WriteAllTextAsync(testFile, "Dedup test " + Guid.NewGuid());
+            File.WriteAllText(testFile, "Dedup test " + Guid.NewGuid());
 
             // Fire multiple concurrent evaluations — should deduplicate
             var tasks = new Task<FileReputationResult>[5];

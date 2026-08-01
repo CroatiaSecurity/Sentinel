@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -108,7 +109,7 @@ namespace Sentinel.Tests
                 Tier = DetectionTier.Tier1Behavioral,
                 AuthorizedResponse = ResponseAction.LogOnly,
                 ProcessName = "Sentinel.Service",
-                ProcessId = Environment.ProcessId,
+                ProcessId = Process.GetCurrentProcess().Id,
                 Metadata = new Dictionary<string, string>
                 {
                     ["GapSeconds"] = "5.0",

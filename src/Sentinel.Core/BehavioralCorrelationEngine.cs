@@ -52,12 +52,17 @@ namespace Sentinel.Core
             var pid = signal.ProcessId;
             if (pid <= 0) return;
 
+            // DirectX / redistributable / System32 installer noise: log only, never composite legs.
+            // A Steam DirectX install may emit 1–2 Tier2 signals; that is not multi-signal malice.
+            if (ResponsePolicy.IsNonCorrelatingObserveNoise(signal))
+                return;
+
             // v1.5.4: Periodic pruning of dead PID entries to prevent memory leak
             // on high-churn systems (build servers, containers).
             PruneStaleBuffers();
 
             // Check if process name is in the Electron/JIT allowlist
-            var stem = signal.ProcessName.Replace(".exe", "", StringComparison.OrdinalIgnoreCase);
+            var stem = Sentinel.Core.StringNet48.ReplaceIgnoreCase(signal.ProcessName, ".exe", "");
             if (ElectronAndJitApps.Contains(stem))
             {
                 // Verify the process is legitimately signed
@@ -195,10 +200,10 @@ namespace Sentinel.Core
             // DGA + C2 Beaconing (0.94)
             // Suspicious DNS (high entropy or rapid queries) + network C2 beaconing
             var hasDnsAnomaly = currentSignals.Any(s =>
-                s.RuleName.Contains("DNS", StringComparison.OrdinalIgnoreCase) &&
-                (s.RuleName.Contains("DGA", StringComparison.OrdinalIgnoreCase) ||
-                 s.RuleName.Contains("Rapid", StringComparison.OrdinalIgnoreCase) ||
-                 s.RuleName.Contains("Tunnel", StringComparison.OrdinalIgnoreCase)));
+                s.RuleName.Contains("DNS") &&
+                (s.RuleName.Contains("DGA") ||
+                 s.RuleName.Contains("Rapid") ||
+                 s.RuleName.Contains("Tunnel")));
             if (hasDnsAnomaly && types.Contains(SignalType.NetworkC2))
             {
                 await EmitCompositeAsync(pid, "DGA + C2 Beaconing", 0.94,
@@ -211,17 +216,17 @@ namespace Sentinel.Core
             // Unsigned binary from staging path + sustained network + no visible window or recon activity
             var hasUnsignedOrSuspicious = currentSignals.Any(s =>
                 s.SignalType == SignalType.SuspiciousProcess ||
-                s.RuleName.Contains("Unsigned", StringComparison.OrdinalIgnoreCase) ||
-                s.RuleName.Contains("Suspicious Path", StringComparison.OrdinalIgnoreCase) ||
-                s.RuleName.Contains("Attack Tool", StringComparison.OrdinalIgnoreCase));
+                s.RuleName.Contains("Unsigned") ||
+                s.RuleName.Contains("Suspicious Path") ||
+                s.RuleName.Contains("Attack Tool"));
             var hasStagingPath = currentSignals.Any(s =>
-                s.RuleName.Contains("Staging", StringComparison.OrdinalIgnoreCase) ||
-                s.Evidence?.Contains("\\Temp\\", StringComparison.OrdinalIgnoreCase) == true ||
-                s.Evidence?.Contains("\\AppData\\", StringComparison.OrdinalIgnoreCase) == true);
+                s.RuleName.Contains("Staging") ||
+                s.Evidence?.Contains("\\Temp\\") == true ||
+                s.Evidence?.Contains("\\AppData\\") == true);
             var hasRecon = currentSignals.Any(s =>
-                s.RuleName.Contains("Recon", StringComparison.OrdinalIgnoreCase) ||
-                s.RuleName.Contains("Enumeration", StringComparison.OrdinalIgnoreCase) ||
-                s.RuleName.Contains("Discovery", StringComparison.OrdinalIgnoreCase));
+                s.RuleName.Contains("Recon") ||
+                s.RuleName.Contains("Enumeration") ||
+                s.RuleName.Contains("Discovery"));
             if (hasUnsignedOrSuspicious && hasStagingPath && types.Contains(SignalType.NetworkC2))
             {
                 double covertRatConfidence = hasRecon ? 0.92 : 0.88;
@@ -234,8 +239,8 @@ namespace Sentinel.Core
             // ═══ v1.7.1: Confirmed C2 Beacon — Unsigned Process (0.88–0.93) ═══
             // Unsigned binary exhibiting periodic beaconing (statistical CV < threshold)
             var hasBeaconing = currentSignals.Any(s =>
-                s.RuleName.Contains("Beaconing", StringComparison.OrdinalIgnoreCase) ||
-                s.RuleName.Contains("Beacon", StringComparison.OrdinalIgnoreCase));
+                s.RuleName.Contains("Beaconing") ||
+                s.RuleName.Contains("Beacon"));
             if (hasUnsignedOrSuspicious && hasBeaconing)
             {
                 double beaconConfidence = hasStagingPath ? 0.93 : 0.88;
@@ -248,11 +253,11 @@ namespace Sentinel.Core
             // ═══ v1.7.1: Covert C2 — Unsigned + Sustained Connection (0.90) ═══
             // Unsigned binary maintaining a long-lived outbound connection (60s+)
             var hasSustainedConnection = currentSignals.Any(s =>
-                s.RuleName.Contains("Sustained", StringComparison.OrdinalIgnoreCase) ||
-                s.RuleName.Contains("Long-lived", StringComparison.OrdinalIgnoreCase) ||
-                s.RuleName.Contains("Persistent Connection", StringComparison.OrdinalIgnoreCase) ||
+                s.RuleName.Contains("Sustained") ||
+                s.RuleName.Contains("Long-lived") ||
+                s.RuleName.Contains("Persistent Connection") ||
                 (s.SignalType == SignalType.NetworkC2 &&
-                 s.Evidence?.Contains("60s", StringComparison.OrdinalIgnoreCase) == true));
+                 s.Evidence?.Contains("60s") == true));
             if (hasUnsignedOrSuspicious && hasSustainedConnection)
             {
                 await EmitCompositeAsync(pid, "Covert C2: Unsigned + Sustained Connection", 0.90,
@@ -274,7 +279,7 @@ namespace Sentinel.Core
             // ═══ v1.6.8: Named Pipe C2 + Network Beaconing (0.95) ═══
             // Named pipe matching C2/lateral-movement pattern + network C2 beaconing on same PID
             var hasNamedPipe = currentSignals.Any(s =>
-                s.RuleName.Contains("Named Pipe", StringComparison.OrdinalIgnoreCase));
+                s.RuleName.Contains("Named Pipe"));
             if (hasNamedPipe && types.Contains(SignalType.NetworkC2))
             {
                 await EmitCompositeAsync(pid, "Named Pipe C2 + Network Beaconing", 0.95,
@@ -286,8 +291,8 @@ namespace Sentinel.Core
             // Spoofed Process + Network (0.92)
             // PPID spoofing detection + any network activity
             var hasPpidSpoof = currentSignals.Any(s =>
-                s.RuleName.Contains("Parent", StringComparison.OrdinalIgnoreCase) &&
-                s.RuleName.Contains("Spoof", StringComparison.OrdinalIgnoreCase));
+                s.RuleName.Contains("Parent") &&
+                s.RuleName.Contains("Spoof"));
             if (hasPpidSpoof && (types.Contains(SignalType.NetworkC2) || types.Contains(SignalType.ReverseShell)))
             {
                 await EmitCompositeAsync(pid, "Spoofed Process Phoning Home", 0.92,
@@ -299,10 +304,10 @@ namespace Sentinel.Core
             // Evasion + Persistence (0.91)
             // Security evasion + any registry/persistence signal
             var hasPersistence = currentSignals.Any(s =>
-                s.RuleName.Contains("Autorun", StringComparison.OrdinalIgnoreCase) ||
-                s.RuleName.Contains("Service", StringComparison.OrdinalIgnoreCase) ||
-                s.RuleName.Contains("Scheduled Task", StringComparison.OrdinalIgnoreCase) ||
-                s.RuleName.Contains("Registry", StringComparison.OrdinalIgnoreCase));
+                s.RuleName.Contains("Autorun") ||
+                s.RuleName.Contains("Service") ||
+                s.RuleName.Contains("Scheduled Task") ||
+                s.RuleName.Contains("Registry"));
             if (types.Contains(SignalType.SecurityEvasion) && hasPersistence)
             {
                 await EmitCompositeAsync(pid, "Evasion + Persistence Install", 0.91,
@@ -314,13 +319,13 @@ namespace Sentinel.Core
             // ═══ v1.6.8: Token Theft + Lateral Movement (0.93) ═══
             // Token theft/impersonation + RPC/SMB lateral movement or named pipe IPC
             var hasTokenTheft = currentSignals.Any(s =>
-                s.RuleName.Contains("Token Theft", StringComparison.OrdinalIgnoreCase) ||
-                s.RuleName.Contains("Impersonate", StringComparison.OrdinalIgnoreCase));
+                s.RuleName.Contains("Token Theft") ||
+                s.RuleName.Contains("Impersonate"));
             var hasLateralMovement = currentSignals.Any(s =>
-                s.RuleName.Contains("Lateral", StringComparison.OrdinalIgnoreCase) ||
-                s.RuleName.Contains("RPC", StringComparison.OrdinalIgnoreCase) ||
-                s.RuleName.Contains("Named Pipe", StringComparison.OrdinalIgnoreCase) ||
-                s.RuleName.Contains("Network Share", StringComparison.OrdinalIgnoreCase));
+                s.RuleName.Contains("Lateral") ||
+                s.RuleName.Contains("RPC") ||
+                s.RuleName.Contains("Named Pipe") ||
+                s.RuleName.Contains("Network Share"));
             if (hasTokenTheft && hasLateralMovement)
             {
                 await EmitCompositeAsync(pid, "Token Theft + Lateral Movement", 0.93,
@@ -332,9 +337,9 @@ namespace Sentinel.Core
             // Privilege Escalation + Network (0.90)
             // Privilege escalation + any outbound network
             var hasPrivEsc = currentSignals.Any(s =>
-                s.RuleName.Contains("Privilege", StringComparison.OrdinalIgnoreCase) ||
-                s.RuleName.Contains("Escalation", StringComparison.OrdinalIgnoreCase) ||
-                s.RuleName.Contains("Token", StringComparison.OrdinalIgnoreCase));
+                s.RuleName.Contains("Privilege") ||
+                s.RuleName.Contains("Escalation") ||
+                s.RuleName.Contains("Token"));
             if (hasPrivEsc && (types.Contains(SignalType.NetworkC2) || types.Contains(SignalType.ReverseShell)))
             {
                 await EmitCompositeAsync(pid, "Escalation + C2 Channel", 0.90,

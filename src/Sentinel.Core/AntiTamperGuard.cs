@@ -107,7 +107,7 @@ namespace Sentinel.Core
             _eventLogger = eventLogger;
             _config = config;
             _logger = logger;
-            _ownExePath = Environment.ProcessPath;
+            _ownExePath = System.Net48Environment.ProcessPath;
             _lastGaspPath = Path.Combine(
                 Path.GetDirectoryName(_eventLogger.LogFilePath) ?? AppContext.BaseDirectory,
                 "last_gasp.jsonl");
@@ -242,7 +242,7 @@ namespace Sentinel.Core
                             Tier = DetectionTier.Tier1Behavioral,
                             AuthorizedResponse = ResponseAction.LogOnly, // Can't kill ourselves; alert is the response
                             ProcessName = "Sentinel.Service",
-                            ProcessId = Environment.ProcessId,
+                            ProcessId = System.Net48Environment.ProcessId,
                             Metadata = new Dictionary<string, string>
                             {
                                 ["GapSeconds"] = gapSeconds.ToString("F1"),
@@ -387,7 +387,7 @@ namespace Sentinel.Core
                     return;
                 }
 
-                if (!string.Equals(_appsettingsHash, currentHash, StringComparison.OrdinalIgnoreCase))
+                if (!string.Equals(_appsettingsHash, currentHash))
                 {
                     _logger.LogWarning("[AntiTamperGuard] appsettings.json hash changed (config file modified on disk).");
 
@@ -436,7 +436,7 @@ namespace Sentinel.Core
                 var path = Path.Combine(AppContext.BaseDirectory, "appsettings.json");
                 if (!File.Exists(path)) return null;
                 var bytes = File.ReadAllBytes(path);
-                return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes));
+                return ConvertHex.ToHexString(System.Security.Cryptography.Sha256Net48.HashData(bytes));
             }
             catch
             {
@@ -534,7 +534,7 @@ namespace Sentinel.Core
                 {
                     Timestamp = DateTimeOffset.UtcNow,
                     Reason = reason,
-                    ProcessId = Environment.ProcessId,
+                    ProcessId = System.Net48Environment.ProcessId,
                     Uptime = (DateTimeOffset.UtcNow - Process.GetCurrentProcess().StartTime.ToUniversalTime()).ToString(),
                     LastTick = _lastTick
                 });
@@ -562,7 +562,7 @@ namespace Sentinel.Core
                     var appName = subKey.GetValue("App Name") as string;
                     // Match product name
                     if (!string.IsNullOrEmpty(appName) &&
-                        appName.Contains("Sentinel", StringComparison.OrdinalIgnoreCase))
+                        appName.Contains("Sentinel"))
                     {
                         // Found a policy targeting Sentinel! Delete it.
                         baseKey.DeleteSubKeyTree(subkeyName);

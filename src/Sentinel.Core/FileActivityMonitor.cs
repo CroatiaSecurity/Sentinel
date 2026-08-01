@@ -118,10 +118,10 @@ namespace Sentinel.Core
                         foreach (var dir in Directory.GetDirectories(usersDir))
                         {
                             var name = Path.GetFileName(dir);
-                            if (name.Equals("Public", StringComparison.OrdinalIgnoreCase) ||
-                                name.Equals("Default", StringComparison.OrdinalIgnoreCase) ||
-                                name.Equals("Default User", StringComparison.OrdinalIgnoreCase) ||
-                                name.Equals("All Users", StringComparison.OrdinalIgnoreCase) ||
+                            if (name.Equals("Public") ||
+                                name.Equals("Default") ||
+                                name.Equals("Default User") ||
+                                name.Equals("All Users") ||
                                 name.StartsWith("."))
                             {
                                 continue;
@@ -218,7 +218,7 @@ namespace Sentinel.Core
             // Check if already watched
             lock (_watchers)
             {
-                if (_watchers.Any(w => w.Path.Equals(path, StringComparison.OrdinalIgnoreCase)))
+                if (_watchers.Any(w => w.Path.Equals(path)))
                     return;
             }
 
@@ -358,24 +358,29 @@ namespace Sentinel.Core
                 {
                     // Only alert if the writer is NOT TrustedInstaller, Windows Update, Defender, or Sentinel itself
                     if (!IsTrustedSystemWriter(processInfo.pid, processInfo.name, e.FullPath) &&
-                        !processInfo.name.Contains("Sentinel", StringComparison.OrdinalIgnoreCase) &&
-                        !processInfo.name.Contains("Delivery Optimization", StringComparison.OrdinalIgnoreCase) &&
-                        !processInfo.name.Contains("AppX", StringComparison.OrdinalIgnoreCase) &&
-                        !processInfo.name.Contains("WinStore", StringComparison.OrdinalIgnoreCase))
+                        !processInfo.name.Contains("Sentinel") &&
+                        !processInfo.name.Contains("Delivery Optimization") &&
+                        !processInfo.name.Contains("AppX") &&
+                        !processInfo.name.Contains("WinStore"))
                     {
                         var changeVerb = e.ChangeType == WatcherChangeTypes.Created ? "created" : "changed";
                         // Observe-only: Steam DirectX / GPU redistributables write here constantly.
                         // Kill only if a multi-signal chain later ties the same PID to C2/exfil/etc.
                         // Unresolved writer (PID 0) is never kill-class — attribution race, not BYOVD.
                         bool attributed = processInfo.pid > 4;
+                        bool redist = InstallerHeuristics.IsDirectXOrRuntimeRedist(processInfo.name, e.FullPath);
+                        // DirectX / VC++ / GPU redist → Tier2 observe only (maybe 1–2 signals).
+                        // Never kill-grade confidence, never composite/chain seed.
                         _ = _detectionEngine.EmitAsync(new DetectionEvent
                         {
                             RuleName = "System Integrity: Unauthorized Write to System Directory",
                             Evidence = $"File '{e.FullPath}' was {changeVerb} by process '{processInfo.name}' (PID {processInfo.pid})",
-                            Reasoning = "A non-system process wrote to a protected OS directory (System32/SysWOW64). " +
-                                        "Logged for correlation only — installers (DirectX, VC++, GPU runtimes) do this legitimately. " +
-                                        "Destructive response requires a multi-signal chain to C2/exfil/token/cred-dump/BYOVD.",
-                            Confidence = attributed ? 0.55 : 0.40,
+                            Reasoning = redist
+                                ? "DirectX/runtime redistributable wrote to System32/SysWOW64 — normal installer life. Tier2 observe only; never Tier1/composite/kill."
+                                : "A non-system process wrote to a protected OS directory (System32/SysWOW64). " +
+                                  "Logged for correlation only — installers (DirectX, VC++, GPU runtimes) do this legitimately. " +
+                                  "Destructive response requires multi-signal proof of token theft / cred dump / reverse shell / C2.",
+                            Confidence = redist ? 0.35 : (attributed ? 0.55 : 0.40),
                             Tier = DetectionTier.Tier2Indicator,
                             AuthorizedResponse = ResponseAction.LogOnly,
                             ProcessName = processInfo.name,
@@ -383,7 +388,9 @@ namespace Sentinel.Core
                             Metadata = new Dictionary<string, string>
                             {
                                 ["FilePath"] = e.FullPath,
-                                ["Operation"] = e.ChangeType.ToString()
+                                ["Operation"] = e.ChangeType.ToString(),
+                                ["BenignInstallerNoise"] = "true",
+                                ["ObserveOnly"] = "true",
                             }
                         });
                     }
@@ -604,13 +611,13 @@ namespace Sentinel.Core
                     {
                         var n = proc.ProcessName;
                         proc.Dispose();
-                        if (n.Equals("dism", StringComparison.OrdinalIgnoreCase) ||
-                            n.Equals("dismhost", StringComparison.OrdinalIgnoreCase) ||
-                            n.Equals("ntlite", StringComparison.OrdinalIgnoreCase) ||
-                            n.Equals("tiworker", StringComparison.OrdinalIgnoreCase) ||
-                            n.Equals("trustedinstaller", StringComparison.OrdinalIgnoreCase) ||
-                            n.Equals("msmgtoolkit", StringComparison.OrdinalIgnoreCase) ||
-                            n.Equals("imagex", StringComparison.OrdinalIgnoreCase))
+                        if (n.Equals("dism") ||
+                            n.Equals("dismhost") ||
+                            n.Equals("ntlite") ||
+                            n.Equals("tiworker") ||
+                            n.Equals("trustedinstaller") ||
+                            n.Equals("msmgtoolkit") ||
+                            n.Equals("imagex"))
                             return true;
                     }
                     catch { }
@@ -718,7 +725,7 @@ namespace Sentinel.Core
             }
 
             // Own PID = Sentinel itself writing (e.g., quarantine lock files)
-            if (pid == Environment.ProcessId) return true;
+            if (pid == System.Net48Environment.ProcessId) return true;
 
              // Verify by path — only trust if running from System32/Windows or Defender folder, or if it is signed by Microsoft
              try
@@ -726,10 +733,10 @@ namespace Sentinel.Core
                  var imagePath = SecurityValidation.GetProcessImagePath(pid);
                  if (!string.IsNullOrEmpty(imagePath))
                  {
-                     if (imagePath.StartsWith(@"C:\Windows\", StringComparison.OrdinalIgnoreCase) ||
-                         imagePath.Contains(@"\Windows Defender\", StringComparison.OrdinalIgnoreCase) ||
-                         imagePath.Contains(@"\Microsoft Security Client\", StringComparison.OrdinalIgnoreCase) ||
-                         imagePath.Contains(@"\Sentinel\", StringComparison.OrdinalIgnoreCase))
+                     if (imagePath.StartsWith(@"C:\Windows\") ||
+                         imagePath.Contains(@"\Windows Defender\") ||
+                         imagePath.Contains(@"\Microsoft Security Client\") ||
+                         imagePath.Contains(@"\Sentinel\"))
                      {
                          return true;
                      }

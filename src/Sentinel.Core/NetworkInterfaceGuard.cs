@@ -189,8 +189,8 @@ namespace Sentinel.Core
             {
                 // Check if any adapter in NetworkInterface list is a bridge
                 var bridgeInterfaces = NetworkInterface.GetAllNetworkInterfaces()
-                    .Where(ni => ni.Description.Contains("MAC Bridge", StringComparison.OrdinalIgnoreCase) || 
-                                 ni.Description.Contains("Multiplexor Driver", StringComparison.OrdinalIgnoreCase))
+                    .Where(ni => ni.Description.Contains("MAC Bridge") || 
+                                 ni.Description.Contains("Multiplexor Driver"))
                     .ToList();
 
                 if (bridgeInterfaces.Count == 0) return;
@@ -235,8 +235,8 @@ namespace Sentinel.Core
                 while (SetupDiEnumDeviceInfo(deviceInfoSet, index, ref deviceInfoData))
                 {
                     string service = GetDeviceProperty(deviceInfoSet, ref deviceInfoData, SPDRP_SERVICE);
-                    if (service.Equals("bridge", StringComparison.OrdinalIgnoreCase) || 
-                        service.Equals("macbridge", StringComparison.OrdinalIgnoreCase))
+                    if (service.Equals("bridge") || 
+                        service.Equals("macbridge"))
                     {
                         _logger.LogWarning("[NetworkInterfaceGuard] Found MAC Bridge device (Service: {Service}). Removing...", service);
                         
@@ -315,7 +315,7 @@ namespace Sentinel.Core
                     if (_baselineDnsServers.TryGetValue(ni.Id, out var baselineDns))
                     {
                         var currentDns = GetRegistryDns(ni.Id);
-                        if (!string.IsNullOrEmpty(currentDns) && !currentDns.Equals(baselineDns, StringComparison.OrdinalIgnoreCase))
+                        if (!string.IsNullOrEmpty(currentDns) && !currentDns.Equals(baselineDns))
                         {
                             await _detectionEngine.EmitAsync(new DetectionEvent
                             {

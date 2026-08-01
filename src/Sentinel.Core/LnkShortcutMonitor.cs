@@ -182,7 +182,7 @@ namespace Sentinel.Core
 
         private void OnLnkRenamed(object sender, RenamedEventArgs e)
         {
-            if (e.FullPath.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase))
+            if (e.FullPath.EndsWith(".lnk"))
             {
                 Thread.Sleep(200);
                 AnalyzeShortcut(e.FullPath);
@@ -334,25 +334,25 @@ namespace Sentinel.Core
             arguments ??= string.Empty;
             attackVector = string.Empty;
 
-            if (targetPath.StartsWith(@"\\", StringComparison.Ordinal) ||
-                targetPath.StartsWith("//", StringComparison.Ordinal))
+            if (targetPath.StartsWith(@"\\") ||
+                targetPath.StartsWith("//"))
             {
                 attackVector = "UNC_Path";
                 return true;
             }
 
-            if (targetPath.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
-                targetPath.StartsWith("https://", StringComparison.OrdinalIgnoreCase) ||
-                targetPath.StartsWith("search-ms:", StringComparison.OrdinalIgnoreCase) ||
-                targetPath.StartsWith("ms-msdt:", StringComparison.OrdinalIgnoreCase))
+            if (targetPath.StartsWith("http://") ||
+                targetPath.StartsWith("https://") ||
+                targetPath.StartsWith("search-ms:") ||
+                targetPath.StartsWith("ms-msdt:"))
             {
                 attackVector = "ProtocolHandler";
                 return true;
             }
 
             var combo = (targetPath + " " + arguments).ToLowerInvariant();
-            bool hasUncInArgs = arguments.Contains(@"\\", StringComparison.Ordinal) ||
-                                arguments.Contains("//", StringComparison.Ordinal);
+            bool hasUncInArgs = arguments.Contains(@"\\") ||
+                                arguments.Contains("//");
             bool hasRemoteUrl = combo.Contains("http://") || combo.Contains("https://");
             bool isLolbin = combo.Contains("powershell") || combo.Contains("cmd.exe") ||
                             combo.Contains("mshta") || combo.Contains("wscript") ||
@@ -411,7 +411,7 @@ namespace Sentinel.Core
                 if (bytes.Length > 100)
                 {
                     var content = System.Text.Encoding.Unicode.GetString(bytes);
-                    var uncIdx = content.IndexOf(@"\\", StringComparison.Ordinal);
+                    var uncIdx = content.IndexOf(@"\\");
                     if (uncIdx >= 0)
                     {
                         var end = content.IndexOfAny(new[] { '\0', ' ', '"' }, uncIdx + 2);

@@ -91,8 +91,8 @@ namespace Sentinel.Core
                             catch { continue; }
 
                             if (hasDxgi && hasD3d &&
-                                !proc.ProcessName.Equals("dwm", StringComparison.OrdinalIgnoreCase) &&
-                                !proc.ProcessName.Equals("csrss", StringComparison.OrdinalIgnoreCase))
+                                !proc.ProcessName.Equals("dwm") &&
+                                !proc.ProcessName.Equals("csrss"))
                             {
                                 await _detectionEngine.EmitAsync(new DetectionEvent
                                 {
@@ -1018,8 +1018,8 @@ namespace Sentinel.Core
                             if ((name.Contains("sendinput") || name.Contains("autoit") ||
                                  name.Contains("nircmd") || name.Contains("inputsimulator")) &&
                                 !string.IsNullOrEmpty(imagePath) &&
-                                (imagePath.Contains(@"\Temp\", StringComparison.OrdinalIgnoreCase) ||
-                                 imagePath.Contains(@"\Downloads\", StringComparison.OrdinalIgnoreCase)))
+                                (imagePath.Contains(@"\Temp\") ||
+                                 imagePath.Contains(@"\Downloads\")))
                             {
                                 if ((DateTime.UtcNow - _lastAlertTime).TotalSeconds < 60) break;
                                 _lastAlertTime = DateTime.UtcNow;

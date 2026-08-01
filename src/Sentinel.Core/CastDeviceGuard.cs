@@ -123,7 +123,7 @@ namespace Sentinel.Core
                     try
                     {
                         string? name = rule.Name as string;
-                        if (name != null && name.StartsWith(CastBlockRulePrefix, StringComparison.OrdinalIgnoreCase))
+                        if (name != null && name.StartsWith(CastBlockRulePrefix))
                             toRemove.Add(name);
                     }
                     catch { }
@@ -169,11 +169,11 @@ namespace Sentinel.Core
                     int direction = (int)rule.Direction; // 1 = Inbound
 
                     if (direction == 1 &&
-                        (name.Contains("Cast to Device", StringComparison.OrdinalIgnoreCase) ||
-                         name.Contains("Media Center Extenders", StringComparison.OrdinalIgnoreCase) ||
-                         name.Contains("RTSP-Streaming-In", StringComparison.OrdinalIgnoreCase) ||
-                         name.Contains("HTTP-Streaming-In", StringComparison.OrdinalIgnoreCase) ||
-                         name.Contains("RTCP-Streaming-In", StringComparison.OrdinalIgnoreCase)))
+                        (name.Contains("Cast to Device") ||
+                         name.Contains("Media Center Extenders") ||
+                         name.Contains("RTSP-Streaming-In") ||
+                         name.Contains("HTTP-Streaming-In") ||
+                         name.Contains("RTCP-Streaming-In")))
                     {
                         toDelete.Add(name);
                     }

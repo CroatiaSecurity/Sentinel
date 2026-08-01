@@ -386,8 +386,8 @@ namespace Sentinel.Core
                                 string childName = proc.ProcessName;
 
                                 // Known legitimate spooler children
-                                if (childName.Equals("splwow64", StringComparison.OrdinalIgnoreCase) ||
-                                    childName.Equals("printfilterpipelinesvc", StringComparison.OrdinalIgnoreCase))
+                                if (childName.Equals("splwow64") ||
+                                    childName.Equals("printfilterpipelinesvc"))
                                     continue;
 
                                 string childPath = SecurityValidation.GetProcessImagePath(proc.Id) ?? "";

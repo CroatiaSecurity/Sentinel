@@ -45,7 +45,7 @@ namespace Sentinel.Core
 
                     // Only apply production ACLs if this is the default production path in CommonApplicationData
                     var prodDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "Sentinel");
-                    if (directory.StartsWith(prodDir, StringComparison.OrdinalIgnoreCase))
+                    if (directory.StartsWith(prodDir))
                     {
                         // Restrict log directory ACLs to SYSTEM and Administrators (Full) and Users (Read-Only)
                         var dirInfo = new DirectoryInfo(directory);
@@ -188,7 +188,7 @@ namespace Sentinel.Core
 
                 if (_writer != null)
                 {
-                    await _writer.WriteLineAsync(jsonLine.AsMemory(), cancellationToken);
+                    await _writer.WriteLineAsync(jsonLine);
                 }
             }
             finally

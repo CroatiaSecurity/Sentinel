@@ -212,15 +212,12 @@ namespace Sentinel.Core
 
         public HashVerdict GetVerdict(string filePath, string expectedSha256)
         {
-            var adsPath = $"{filePath}:sentinel_verdict";
             try
             {
-                if (!File.Exists(adsPath))
-                {
+                if (string.IsNullOrEmpty(filePath) || !File.Exists(filePath))
                     return HashVerdict.Unknown;
-                }
 
-                var text = File.ReadAllText(adsPath, Encoding.UTF8);
+                var text = TryReadVerdictPayload(filePath);
                 if (string.IsNullOrWhiteSpace(text)) return HashVerdict.Unknown;
 
                 var parts = text.Split('|');
@@ -231,14 +228,14 @@ namespace Sentinel.Core
                 var sha256 = parts[2];
                 var signatureHex = parts[3];
 
-                // Verify file hash match
-                if (!expectedSha256.Equals(sha256, StringComparison.OrdinalIgnoreCase))
+                // Verify file hash match (hex is case-insensitive)
+                if (!string.Equals(expectedSha256, sha256, StringComparison.OrdinalIgnoreCase))
                 {
                     return HashVerdict.Unknown;
                 }
 
-                // Verify signature
-                var payloadStr = $"{verdictStr}|{timestampStr}|{sha256}";
+                // Verify signature — payload must match SetVerdict (lowercase sha)
+                var payloadStr = $"{verdictStr}|{timestampStr}|{sha256.ToLowerInvariant()}";
                 var payloadBytes = Encoding.UTF8.GetBytes(payloadStr);
 
                 byte[] computedSignature;
@@ -246,7 +243,7 @@ namespace Sentinel.Core
                 {
                     computedSignature = hmac.ComputeHash(payloadBytes);
                 }
-                var signatureBytes = Convert.FromHexString(signatureHex);
+                var signatureBytes = ConvertHex.FromHexString(signatureHex);
 
                 if (!SecurityValidation.SecureCompare(computedSignature, signatureBytes))
                 {
@@ -281,9 +278,11 @@ namespace Sentinel.Core
 
         public void SetVerdict(string filePath, string fileSha256, HashVerdict verdict)
         {
-            var adsPath = $"{filePath}:sentinel_verdict";
             try
             {
+                if (string.IsNullOrEmpty(filePath) || !File.Exists(filePath))
+                    return;
+
                 var timestampTicks = DateTime.UtcNow.Ticks;
                 var payloadStr = $"{verdict}|{timestampTicks}|{fileSha256.ToLowerInvariant()}";
                 var payloadBytes = Encoding.UTF8.GetBytes(payloadStr);
@@ -293,15 +292,72 @@ namespace Sentinel.Core
                 {
                     signature = hmac.ComputeHash(payloadBytes);
                 }
-                var signatureHex = Convert.ToHexString(signature);
+                var signatureHex = ConvertHex.ToHexString(signature);
 
                 var finalPayload = $"{payloadStr}|{signatureHex}";
-                File.WriteAllText(adsPath, finalPayload, Encoding.UTF8);
+                TryWriteVerdictPayload(filePath, finalPayload);
             }
             catch
             {
                 // Degrade gracefully
             }
+        }
+
+        /// <summary>
+        /// Prefer NTFS ADS; fall back to adjacent sidecar when ADS path is rejected
+        /// (common under modern path validation / some test hosts).
+        /// </summary>
+        private static string SidecarPath(string filePath)
+            => filePath + ".sentinel_verdict";
+
+        private static string AdsPath(string filePath)
+            => filePath + ":sentinel_verdict";
+
+        private static void TryWriteVerdictPayload(string filePath, string payload)
+        {
+            // 1) NTFS ADS via FileStream (WriteAllText path validation often rejects ":stream")
+            try
+            {
+                var ads = AdsPath(filePath);
+                using (var fs = new FileStream(ads, FileMode.Create, FileAccess.Write,
+                    FileShare.ReadWrite | FileShare.Delete))
+                using (var sw = new StreamWriter(fs, Encoding.UTF8))
+                {
+                    sw.Write(payload);
+                }
+                return;
+            }
+            catch
+            {
+                // fall through to sidecar
+            }
+
+            // 2) Sidecar file next to the target
+            File.WriteAllText(SidecarPath(filePath), payload, Encoding.UTF8);
+        }
+
+        private static string? TryReadVerdictPayload(string filePath)
+        {
+            try
+            {
+                var ads = AdsPath(filePath);
+                using (var fs = new FileStream(ads, FileMode.Open, FileAccess.Read,
+                    FileShare.ReadWrite | FileShare.Delete))
+                using (var sr = new StreamReader(fs, Encoding.UTF8))
+                {
+                    return sr.ReadToEnd();
+                }
+            }
+            catch
+            {
+                // fall through
+            }
+
+            var side = SidecarPath(filePath);
+            if (File.Exists(side))
+                return File.ReadAllText(side, Encoding.UTF8);
+
+            return null;
         }
     }
 }

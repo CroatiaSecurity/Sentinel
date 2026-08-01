@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System;
 using System.Reflection;
 using Xunit;
@@ -12,7 +13,7 @@ namespace Sentinel.Tests
         {
             // Arrange
             var cache = new ProcessAncestryCache();
-            int myPid = Environment.ProcessId;
+            int myPid = Process.GetCurrentProcess().Id;
             int fakeParentPid = 1337;
             string myName = System.Diagnostics.Process.GetCurrentProcess().ProcessName;
 

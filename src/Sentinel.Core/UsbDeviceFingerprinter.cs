@@ -99,12 +99,12 @@ namespace Sentinel.Core
         {
             if (string.IsNullOrWhiteSpace(raw)) return null;
             var s = raw.Trim().ToUpperInvariant()
-                .Replace("VID_", "", StringComparison.Ordinal)
-                .Replace("PID_", "", StringComparison.Ordinal)
-                .Replace("&", ":", StringComparison.Ordinal)
-                .Replace("-", ":", StringComparison.Ordinal)
-                .Replace(" ", "", StringComparison.Ordinal);
-            var parts = s.Split(':', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                .Replace("VID_", "")
+                .Replace("PID_", "")
+                .Replace("&", ":")
+                .Replace("-", ":")
+                .Replace(" ", "");
+            var parts = s.Split(new[] { ':' }, StringSplitOptions.RemoveEmptyEntries);
             if (parts.Length != 2) return null;
             if (parts[0].Length != 4 || parts[1].Length != 4) return null;
             return $"{parts[0]}:{parts[1]}";
@@ -178,25 +178,25 @@ namespace Sentinel.Core
         /// </summary>
         internal static bool IsFailedEnumerationSignals(string? vid, string? name)
         {
-            if (vid != null && vid.Equals("0000", StringComparison.OrdinalIgnoreCase))
+            if (vid != null && vid.Equals("0000"))
                 return true;
 
             if (string.IsNullOrWhiteSpace(name))
                 return false;
 
             // Exact Windows USB failure substrings (usb.inf device_descriptor_failure etc.)
-            if (name.Contains("Device Descriptor Request Failed", StringComparison.OrdinalIgnoreCase))
+            if (name.Contains("Device Descriptor Request Failed"))
                 return true;
-            if (name.Contains("Device Descriptor Failure", StringComparison.OrdinalIgnoreCase))
+            if (name.Contains("Device Descriptor Failure"))
                 return true;
-            if (name.Contains("Port Reset Failed", StringComparison.OrdinalIgnoreCase))
+            if (name.Contains("Port Reset Failed"))
                 return true;
-            if (name.Contains("Set Address Failed", StringComparison.OrdinalIgnoreCase))
+            if (name.Contains("Set Address Failed"))
                 return true;
 
             // Windows always appends a parenthetical reason for unknown/failed USB devices.
             // Require the parenthesis so we never match an invented bare "Unknown USB Device".
-            if (name.StartsWith("Unknown USB Device (", StringComparison.OrdinalIgnoreCase))
+            if (name.StartsWith("Unknown USB Device ("))
                 return true;
 
             return false;
@@ -287,14 +287,14 @@ namespace Sentinel.Core
             {
                 RuleName = ruleName,
                 ProcessName = "SentinelService.exe",
-                ProcessId = Environment.ProcessId,
+                ProcessId = System.Net48Environment.ProcessId,
                 Confidence = confidence,
                 Tier = tier,
                 AuthorizedResponse = response,
                 Evidence = evidence,
                 Reasoning = $"New unbaselined USB device detected at runtime. Action tier resolved to {tier}." +
                             (disabled ? " Auto-disabled." : "") +
-                            (evidence.Contains("removed from PnP tree", StringComparison.OrdinalIgnoreCase) ? " Removed." : ""),
+                            (evidence.Contains("removed from PnP tree") ? " Removed." : ""),
                 Metadata = new Dictionary<string, string>
                 {
                     { "VID", dev.Vid },
@@ -304,7 +304,7 @@ namespace Sentinel.Core
                     { "DeviceId", dev.DeviceId ?? "" },
                     { "FailedEnumeration", IsFailedEnumerationDevice(dev).ToString() },
                     { "Disabled", disabled.ToString() },
-                    { "Ejected", evidence.Contains("removed from PnP tree", StringComparison.OrdinalIgnoreCase).ToString() },
+                    { "Ejected", evidence.Contains("removed from PnP tree").ToString() },
                     { "Trusted", _trustedVidPid.Contains(vidPid).ToString() }
                 }
             };
@@ -760,12 +760,12 @@ namespace Sentinel.Core
                     if (parts.Length >= 2)
                     {
                         var hardwareId = parts[1];
-                        var vidIdx = hardwareId.IndexOf("VID_", StringComparison.OrdinalIgnoreCase);
+                        var vidIdx = hardwareId.IndexOf("VID_");
                         if (vidIdx != -1 && hardwareId.Length >= vidIdx + 8)
                         {
                             vid = hardwareId.Substring(vidIdx + 4, 4);
                         }
-                        var pidIdx = hardwareId.IndexOf("PID_", StringComparison.OrdinalIgnoreCase);
+                        var pidIdx = hardwareId.IndexOf("PID_");
                         if (pidIdx != -1 && hardwareId.Length >= pidIdx + 8)
                         {
                             pid = hardwareId.Substring(pidIdx + 4, 4);
@@ -788,11 +788,11 @@ namespace Sentinel.Core
                     string classGuidStr = GetDeviceProperty(deviceInfoSet, ref deviceInfoData, SPDRP_CLASSGUID);
                     string service = GetDeviceProperty(deviceInfoSet, ref deviceInfoData, SPDRP_SERVICE);
 
-                    bool isHid = classGuidStr.Equals("{745a17a0-74d3-11d0-b6fe-00a0c90f57da}", StringComparison.OrdinalIgnoreCase) ||
-                                 service.Equals("HidUsb", StringComparison.OrdinalIgnoreCase);
+                    bool isHid = classGuidStr.Equals("{745a17a0-74d3-11d0-b6fe-00a0c90f57da}") ||
+                                 service.Equals("HidUsb");
 
-                    bool isMassStorage = service.Equals("USBSTOR", StringComparison.OrdinalIgnoreCase);
-                    bool isComposite = service.Equals("usbccgp", StringComparison.OrdinalIgnoreCase);
+                    bool isMassStorage = service.Equals("USBSTOR");
+                    bool isComposite = service.Equals("usbccgp");
 
                     bool isFailedEnum = IsFailedEnumerationSignals(vid, name);
 

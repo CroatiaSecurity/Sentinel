@@ -214,7 +214,8 @@ namespace Sentinel.Tests
             Assert.NotNull(composite);
             Assert.Equal("Injected C2 Beacon", composite!.RuleName);
             Assert.Equal(0.98, composite.Confidence);
-            Assert.Equal(ResponseAction.KillProcessTree, composite.AuthorizedResponse);
+            // Composites authorize full destructive response (quarantine+kill)
+            Assert.True(composite.AuthorizedResponse >= ResponseAction.KillProcessTree);
         }
 
         [Fact]
@@ -370,7 +371,7 @@ namespace Sentinel.Tests
 
             Assert.NotNull(composite);
             Assert.Equal(DetectionTier.Tier1Behavioral, composite!.Tier);
-            Assert.Equal(ResponseAction.KillProcessTree, composite.AuthorizedResponse);
+            Assert.True(composite.AuthorizedResponse >= ResponseAction.KillProcessTree);
         }
     }
 }

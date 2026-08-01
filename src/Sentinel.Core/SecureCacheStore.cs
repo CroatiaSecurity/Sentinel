@@ -157,7 +157,7 @@ namespace Sentinel.Core
             // (prevents reuse of this key material for other purposes)
             ms.Write(Encoding.UTF8.GetBytes("sentinel-secure-cache-hmac-v2"));
 
-            return SHA256.HashData(ms.ToArray());
+            return System.Security.Cryptography.Sha256Net48.HashData(ms.ToArray());
         }
 
         public void Save(string cacheName, string key, string value)

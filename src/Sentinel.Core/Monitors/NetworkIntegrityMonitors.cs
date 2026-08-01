@@ -382,7 +382,7 @@ namespace Sentinel.Core
                 {
                     try
                     {
-                        var addrs = await Dns.GetHostAddressesAsync(d, ct);
+                        var addrs = await DnsNet48.GetHostAddressesAsync(d, ct);
                         _baselineResolutions[d] = addrs;
                         var subnets = _knownSubnets.GetOrAdd(d, _ => new HashSet<string>(StringComparer.OrdinalIgnoreCase));
                         foreach (var a in addrs)
@@ -404,7 +404,7 @@ namespace Sentinel.Core
                     {
                         try
                         {
-                            var current = await Dns.GetHostAddressesAsync(domain, ct);
+                            var current = await DnsNet48.GetHostAddressesAsync(domain, ct);
                             if (_baselineResolutions.TryGetValue(domain, out var baseline))
                             {
                                 var currentSet = new HashSet<string>(current.Select(a => a.ToString()));
@@ -466,7 +466,7 @@ namespace Sentinel.Core
         /// <summary>Extract subnet prefix (first two octets for IPv4 /16, or first two segments for IPv6 /32) for CDN rotation tolerance.</summary>
         private static string GetSubnet(string ip)
         {
-            if (ip.Contains(':'))
+            if (ip.IndexOf(':') >= 0)
             {
                 var parts = ip.Split(':');
                 return parts.Length >= 2 ? $"{parts[0]}:{parts[1]}" : ip;
@@ -531,7 +531,7 @@ namespace Sentinel.Core
             try
             {
                 using var http = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromSeconds(5) };
-                return (await http.GetStringAsync("https://api.ipify.org", ct)).Trim();
+                return (await http.GetStringAsync("https://api.ipify.org")).Trim();
             }
             catch { return null; }
         }
@@ -633,8 +633,8 @@ namespace Sentinel.Core
                     // === Check 3: Encryption downgrade ===
                     if (current.ssid != null && current.auth != null)
                     {
-                        bool isInsecure = current.auth.Contains("Open", StringComparison.OrdinalIgnoreCase) ||
-                                          current.auth.Contains("WEP", StringComparison.OrdinalIgnoreCase);
+                        bool isInsecure = current.auth.Contains("Open") ||
+                                          current.auth.Contains("WEP");
                         if (isInsecure && !_alertedProfiles.Contains(current.ssid))
                         {
                             _alertedProfiles.Add(current.ssid);
@@ -879,8 +879,8 @@ namespace Sentinel.Core
 
                                 // Tunneling from Temp/Downloads = very suspicious
                                 bool fromSuspiciousPath = imagePath != null &&
-                                    (imagePath.Contains(@"\Temp\", StringComparison.OrdinalIgnoreCase) ||
-                                     imagePath.Contains(@"\Downloads\", StringComparison.OrdinalIgnoreCase));
+                                    (imagePath.Contains(@"\Temp\") ||
+                                     imagePath.Contains(@"\Downloads\"));
 
                                 var confidence = isTunnel ? (fromSuspiciousPath ? 0.85 : 0.75) : 0.55;
                                 var tier = (isTunnel && fromSuspiciousPath)
@@ -1004,8 +1004,8 @@ namespace Sentinel.Core
                     foreach (var dev in current)
                     {
                         if (dev.Mac == "FF-FF-FF-FF-FF-FF") continue;
-                        if (dev.Mac.StartsWith("01-00-5E", StringComparison.OrdinalIgnoreCase)) continue;
-                        if (dev.Mac.StartsWith("33-33-", StringComparison.OrdinalIgnoreCase)) continue;
+                        if (dev.Mac.StartsWith("01-00-5E")) continue;
+                        if (dev.Mac.StartsWith("33-33-")) continue;
                         if (_trustedIps.Contains(dev.Ip)) continue;
 
                         if (!_knownDevices.ContainsKey(dev.Mac))
@@ -1022,10 +1022,10 @@ namespace Sentinel.Core
                             if (suspiciousService != null)
                             {
                                 // High-risk ports that always warrant blocking
-                                bool isHighRisk = suspiciousService.Contains("ADB", StringComparison.OrdinalIgnoreCase) || 
-                                                  suspiciousService.Contains("Telnet", StringComparison.OrdinalIgnoreCase) || 
-                                                  suspiciousService.Contains("DevTools", StringComparison.OrdinalIgnoreCase) || 
-                                                  suspiciousService.Contains("Pharos", StringComparison.OrdinalIgnoreCase);
+                                bool isHighRisk = suspiciousService.Contains("ADB") || 
+                                                  suspiciousService.Contains("Telnet") || 
+                                                  suspiciousService.Contains("DevTools") || 
+                                                  suspiciousService.Contains("Pharos");
 
                                 if (isHighRisk)
                                 {
@@ -1037,8 +1037,8 @@ namespace Sentinel.Core
                                 // Chromecast — it's a C2 relay masquerading as one (PlugX technique).
                                 // If no ghost connection, treat as normal consumer device (log only).
                                 if (!isHighRisk && 
-                                    (suspiciousService.Contains("Cast", StringComparison.OrdinalIgnoreCase) ||
-                                     suspiciousService.Contains("8008", StringComparison.OrdinalIgnoreCase)))
+                                    (suspiciousService.Contains("Cast") ||
+                                     suspiciousService.Contains("8008")))
                                 {
                                     if (HasGhostConnectionTo(dev.Ip))
                                     {
@@ -1224,7 +1224,7 @@ namespace Sentinel.Core
                     using var client = new System.Net.Sockets.TcpClient();
                     using var timeout = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
                     using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
-                    await client.ConnectAsync(IPAddress.Parse(ip), port, linked.Token);
+                    await client.ConnectAsync(IPAddress.Parse(ip), port);
                     var serviceName = port switch
                     {
                         8008 => "HTTP-Alt (Cast discovery)",
@@ -1332,7 +1332,7 @@ namespace Sentinel.Core
 
                     int numEntries = Marshal.ReadInt32(buffer);
                     int structSize = 24; // sizeof MIB_TCPROW_OWNER_PID (6 uint = 24 bytes)
-                    int myPid = Environment.ProcessId;
+                    int myPid = System.Net48Environment.ProcessId;
 
                     for (int i = 0; i < numEntries; i++)
                     {
@@ -1345,7 +1345,7 @@ namespace Sentinel.Core
                         if (owningPid <= 4 || owningPid == myPid) continue;
 
                         var remoteIp = new IPAddress(BitConverter.GetBytes(remoteAddr)).ToString();
-                        if (!remoteIp.Equals(targetIp, StringComparison.Ordinal)) continue;
+                        if (!remoteIp.Equals(targetIp)) continue;
 
                         // Found a connection to the target IP — check if the owning process is resolvable
                         try

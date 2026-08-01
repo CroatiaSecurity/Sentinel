@@ -88,8 +88,8 @@ namespace Sentinel.Core
             if (state == WtsConnectState.WTSReset) return false;
 
             var name = (winStationName ?? string.Empty).Trim();
-            if (name.Equals("Console", StringComparison.OrdinalIgnoreCase)) return false;
-            if (name.Equals("Services", StringComparison.OrdinalIgnoreCase)) return false;
+            if (name.Equals("Console")) return false;
+            if (name.Equals("Services")) return false;
 
             // Active/connected/disconnected remote sessions (rdp-tcp#N, ica-tcp#N, etc.)
             return state is WtsConnectState.WTSActive

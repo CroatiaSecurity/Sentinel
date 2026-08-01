@@ -138,8 +138,8 @@ namespace Sentinel.Core
             {
                 var name = Path.GetFileName(e.FullPath);
                 if (string.IsNullOrEmpty(name)) return;
-                if (!DevConfigNames.Any(n => name.Equals(n, StringComparison.OrdinalIgnoreCase) ||
-                                            name.Equals(".cursorrules", StringComparison.OrdinalIgnoreCase)))
+                if (!DevConfigNames.Any(n => name.Equals(n) ||
+                                            name.Equals(".cursorrules")))
                     return;
                 // Ignore huge trees noise: only shallow-ish paths (≤6 segments under profile)
                 var parts = e.FullPath.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
@@ -199,7 +199,7 @@ namespace Sentinel.Core
                 }
                 catch { continue; }
 
-                var bare = name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? name[..^4] : name;
+                var bare = name.EndsWith(".exe") ? name[..^4] : name;
                 if (PackageManagers.Contains(name) || PackageManagers.Contains(bare))
                     _pkgSessions[pid] = now;
             }
@@ -223,21 +223,21 @@ namespace Sentinel.Core
 
                 var parentIsPkg = _pkgSessions.ContainsKey(ppid) ||
                     PackageManagers.Contains(parentName) ||
-                    PackageManagers.Contains(parentName.Replace(".exe", "", StringComparison.OrdinalIgnoreCase));
+                    PackageManagers.Contains(Sentinel.Core.StringNet48.ReplaceIgnoreCase(parentName, ".exe", ""));
 
                 if (!parentIsPkg) continue;
 
-                var childBare = childName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
+                var childBare = childName.EndsWith(".exe")
                     ? childName[..^4]
                     : childName;
 
                 var dangerousChild = DangerousChildren.Contains(childName) || DangerousChildren.Contains(childBare);
                 var inPackageTree = path != null && PackageTreeFragments.Any(f =>
-                    path.Contains(f, StringComparison.OrdinalIgnoreCase));
+                    path.Contains(f));
                 var isExeDrop = path != null &&
-                    (path.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ||
-                     path.EndsWith(".dll", StringComparison.OrdinalIgnoreCase) ||
-                     path.EndsWith(".scr", StringComparison.OrdinalIgnoreCase)) &&
+                    (path.EndsWith(".exe") ||
+                     path.EndsWith(".dll") ||
+                     path.EndsWith(".scr")) &&
                     inPackageTree;
 
                 if (!dangerousChild && !isExeDrop) continue;
@@ -248,10 +248,10 @@ namespace Sentinel.Core
                 _alertCooldown[key] = now;
 
                 var high = dangerousChild && (
-                    childBare.Equals("mshta", StringComparison.OrdinalIgnoreCase) ||
-                    childBare.Equals("certutil", StringComparison.OrdinalIgnoreCase) ||
-                    childBare.Equals("powershell", StringComparison.OrdinalIgnoreCase) ||
-                    childBare.Equals("pwsh", StringComparison.OrdinalIgnoreCase));
+                    childBare.Equals("mshta") ||
+                    childBare.Equals("certutil") ||
+                    childBare.Equals("powershell") ||
+                    childBare.Equals("pwsh"));
 
                 _ = _detectionEngine.EmitAsync(new DetectionEvent
                 {

@@ -136,7 +136,7 @@ namespace Sentinel.Core
             // This is more reliable than NtQuerySystemInformation for userland
             try
             {
-                var selfPid = Environment.ProcessId;
+                var selfPid = System.Net48Environment.ProcessId;
                 foreach (var proc in Process.GetProcesses())
                 {
                     try
@@ -395,18 +395,18 @@ namespace Sentinel.Core
         private static bool IsVolumeRootHandle(string path)
         {
             if (string.IsNullOrEmpty(path)) return false;
-            return path.Contains(@"\Device\HarddiskVolume", StringComparison.OrdinalIgnoreCase) ||
-                   path.Contains(@"\\.\Volume{", StringComparison.OrdinalIgnoreCase);
+            return path.Contains(@"\Device\HarddiskVolume") ||
+                   path.Contains(@"\\.\Volume{");
         }
 
         private static bool IsPhysicalDriveHandle(string path)
         {
             if (string.IsNullOrEmpty(path)) return false;
             // True sector device: \\.\PhysicalDrive0 or \Device\Harddisk0\DR0 — not HarddiskVolumeN
-            if (path.Contains(@"PhysicalDrive", StringComparison.OrdinalIgnoreCase)) return true;
-            if (path.Contains(@"HarddiskVolume", StringComparison.OrdinalIgnoreCase)) return false;
-            if (path.Contains(@"\Harddisk", StringComparison.OrdinalIgnoreCase) &&
-                path.Contains(@"\DR", StringComparison.OrdinalIgnoreCase))
+            if (path.Contains(@"PhysicalDrive")) return true;
+            if (path.Contains(@"HarddiskVolume")) return false;
+            if (path.Contains(@"\Harddisk") &&
+                path.Contains(@"\DR"))
                 return true;
             return false;
         }
@@ -422,8 +422,8 @@ namespace Sentinel.Core
             if (string.IsNullOrEmpty(imagePath)) return false;
             var winDir = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
             if (string.IsNullOrEmpty(winDir)) return false;
-            var winDirTrailing = winDir.EndsWith('\\') ? winDir : winDir + '\\';
-            return imagePath.StartsWith(winDirTrailing, StringComparison.OrdinalIgnoreCase);
+            var winDirTrailing = winDir.EndsWith("\\") ? winDir : winDir + '\\';
+            return imagePath.StartsWith(winDirTrailing);
         }
 
         private static bool IsRawDiskPath(string path)
@@ -435,12 +435,12 @@ namespace Sentinel.Core
             // Example of file: \Device\HarddiskVolume3\Windows\System32\winlogon.exe
             
             // 1. Check if it matches any pattern
-            bool matches = RawDiskPatterns.Any(p => path.Contains(p, StringComparison.OrdinalIgnoreCase));
+            bool matches = RawDiskPatterns.Any(p => path.Contains(p));
             if (!matches) return false;
 
             // 2. If it is a file/folder inside a volume (has a subpath), ignore it.
             // A subpath is indicated by a backslash after the volume name.
-            if (path.StartsWith(@"\Device\HarddiskVolume", StringComparison.OrdinalIgnoreCase))
+            if (path.StartsWith(@"\Device\HarddiskVolume"))
             {
                 var remaining = path[@"\Device\HarddiskVolume".Length..];
                 int firstBackslash = remaining.IndexOf('\\');
@@ -449,12 +449,12 @@ namespace Sentinel.Core
                     return false;
                 }
             }
-            else if (path.StartsWith(@"\Device\Harddisk", StringComparison.OrdinalIgnoreCase))
+            else if (path.StartsWith(@"\Device\Harddisk"))
             {
                 var remaining = path[@"\Device\Harddisk".Length..];
-                if (remaining.Contains("Volume", StringComparison.OrdinalIgnoreCase))
+                if (remaining.Contains("Volume"))
                 {
-                    int volIdx = remaining.IndexOf("Volume", StringComparison.OrdinalIgnoreCase);
+                    int volIdx = remaining.IndexOf("Volume");
                     var volRemaining = remaining[(volIdx + "Volume".Length)..];
                     int firstBackslash = volRemaining.IndexOf('\\');
                     if (firstBackslash >= 0 && firstBackslash < volRemaining.Length - 1)

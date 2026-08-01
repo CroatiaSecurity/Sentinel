@@ -444,8 +444,8 @@ namespace Sentinel.Core
 
                         var titleLower = title.ToLowerInvariant();
 
-                        int scareHits = ScarewarePatterns.Count(p => titleLower.Contains(p, StringComparison.Ordinal));
-                        bool fakeSystem = FakeSystemPatterns.Any(p => titleLower.Contains(p, StringComparison.Ordinal));
+                        int scareHits = ScarewarePatterns.Count(p => titleLower.Contains(p));
+                        bool fakeSystem = FakeSystemPatterns.Any(p => titleLower.Contains(p));
 
                         if (scareHits < 2 && !fakeSystem) continue;
                         if (_alerted.ContainsKey(proc.Id)) continue;
@@ -668,7 +668,7 @@ namespace Sentinel.Core
                 try { hash = ComputeSha256(path); }
                 catch { continue; }
 
-                if (_hashes.TryGetValue(path, out var prev) && !string.Equals(prev, hash, StringComparison.OrdinalIgnoreCase))
+                if (_hashes.TryGetValue(path, out var prev) && !string.Equals(prev, hash))
                 {
                     changes++;
                     if (alert)
@@ -728,7 +728,7 @@ namespace Sentinel.Core
         {
             using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
             using var sha = SHA256.Create();
-            return Convert.ToHexString(sha.ComputeHash(fs));
+            return ConvertHex.ToHexString(sha.ComputeHash(fs));
         }
     }
 }

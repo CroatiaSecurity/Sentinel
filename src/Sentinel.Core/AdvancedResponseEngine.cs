@@ -60,7 +60,7 @@ namespace Sentinel.Core
             int limit = _config.MaxKillsPerMinute;
             if (limit <= 0) return true;
 
-            long now = Environment.TickCount64;
+            long now = System.Net48Environment.TickCount64;
             long windowStart = now - 60_000;
             while (_killTimestampsMs.TryPeek(out long ts) && ts < windowStart)
                 _killTimestampsMs.TryDequeue(out _);
@@ -99,7 +99,7 @@ namespace Sentinel.Core
             int limit = _config.MaxNetworkIsolatesPerMinute;
             if (limit <= 0) return true;
 
-            long now = Environment.TickCount64;
+            long now = System.Net48Environment.TickCount64;
             long windowStart = now - 60_000;
             while (_isolateTimestampsMs.TryPeek(out long ts) && ts < windowStart)
                 _isolateTimestampsMs.TryDequeue(out _);
@@ -198,23 +198,23 @@ namespace Sentinel.Core
             var r = ruleName;
 
             // Composites / confirmed campaigns always act
-            if (r.Contains("Composite", StringComparison.OrdinalIgnoreCase) ||
-                r.Contains("Fileless Attack", StringComparison.OrdinalIgnoreCase) ||
-                r.Contains("Covert RAT", StringComparison.OrdinalIgnoreCase) ||
-                r.Contains("Dropped Payload", StringComparison.OrdinalIgnoreCase) ||
-                r.Contains("Confirmed C2", StringComparison.OrdinalIgnoreCase) ||
-                r.Contains("SYSTEM Token", StringComparison.OrdinalIgnoreCase) ||
-                r.Contains("Non-Service Process with SYSTEM", StringComparison.OrdinalIgnoreCase))
+            if (r.Contains("Composite") ||
+                r.Contains("Fileless Attack") ||
+                r.Contains("Covert RAT") ||
+                r.Contains("Dropped Payload") ||
+                r.Contains("Confirmed C2") ||
+                r.Contains("SYSTEM Token") ||
+                r.Contains("Non-Service Process with SYSTEM"))
                 return false;
 
-            return r.Contains("Reverse Shell: Suspicious Outbound", StringComparison.OrdinalIgnoreCase) ||
-                   r.Contains("Connection on Blocked Port", StringComparison.OrdinalIgnoreCase) ||
-                   r.Contains("Classic Malware Port", StringComparison.OrdinalIgnoreCase) ||
-                   r.Contains("Attack Tool: Connection from Suspicious Path", StringComparison.OrdinalIgnoreCase) ||
-                   r.Contains("Network Policy: Unusual Destination", StringComparison.OrdinalIgnoreCase) ||
-                   r.Contains("SeImpersonatePrivilege from Suspicious Path", StringComparison.OrdinalIgnoreCase) ||
-                   r.Contains("Cloud Sync Tool Running", StringComparison.OrdinalIgnoreCase) ||
-                   r.Contains("Data Exfiltration: Cloud Sync", StringComparison.OrdinalIgnoreCase);
+            return r.Contains("Reverse Shell: Suspicious Outbound") ||
+                   r.Contains("Connection on Blocked Port") ||
+                   r.Contains("Classic Malware Port") ||
+                   r.Contains("Attack Tool: Connection from Suspicious Path") ||
+                   r.Contains("Network Policy: Unusual Destination") ||
+                   r.Contains("SeImpersonatePrivilege from Suspicious Path") ||
+                   r.Contains("Cloud Sync Tool Running") ||
+                   r.Contains("Data Exfiltration: Cloud Sync");
         }
 
         public async Task HandleAsync(DetectionEvent detection)
@@ -249,7 +249,7 @@ namespace Sentinel.Core
                     if (detectedImagePath != null)
                     {
                         var normalizedTarget = Path.GetFullPath(detectedImagePath);
-                        if (normalizedTarget.StartsWith(selfDir, StringComparison.OrdinalIgnoreCase))
+                        if (normalizedTarget.StartsWith(selfDir))
                         {
                             reason = "LogOnly (Self-exclusion: verified Sentinel install path)";
                             stopwatch.Stop();
@@ -268,6 +268,18 @@ namespace Sentinel.Core
                     }
                 }
                 catch { /* process may have exited — continue with normal handling */ }
+            }
+
+            // Standing product default: ObserveUntilChain=true → enforce tier law here
+            // (Tier1 only for kill-grade terminals / composites). When ObserveUntilChain is
+            // explicitly false (lab / unit tests of response paths), preserve author tier.
+            // Live DetectionEngine always applies ApplyTierLaw before this gate.
+            if (_config.ObserveUntilChain)
+            {
+                double minTier1 = _config.MinTier1Confidence > 0
+                    ? _config.MinTier1Confidence
+                    : ResponsePolicy.DefaultMinTier1Confidence;
+                ResponsePolicy.ApplyTierLaw(detection, minTier1);
             }
 
             var isPresidentsLaw = IsPresidentsLawRule(detection);
@@ -363,7 +375,7 @@ namespace Sentinel.Core
                 if (ar)
                 {
                     shouldQuarantineAndKill = true;
-                    if (!reason.StartsWith("ChainConfirmed", StringComparison.Ordinal))
+                    if (!reason.StartsWith("ChainConfirmed"))
                         reason = $"QuarantineAndKill (AuthorizedResponse={effectiveResponse})";
                 }
                 else
@@ -820,7 +832,7 @@ namespace Sentinel.Core
                         {
                             using var fs = new FileStream(path, FileMode.Open, FileAccess.Read,
                                 FileShare.ReadWrite | FileShare.Delete);
-                            hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(fs)).ToLowerInvariant();
+                            hash = ConvertHex.ToHexString(System.Security.Cryptography.Sha256Net48.HashData(fs)).ToLowerInvariant();
                         }
                     }
                     catch { }

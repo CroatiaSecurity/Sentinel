@@ -270,7 +270,7 @@ namespace Sentinel.Core
 
         private static bool IsSuspiciousPath(string path)
         {
-            return SuspiciousPaths.Any(s => path.Contains(s, StringComparison.OrdinalIgnoreCase));
+            return SuspiciousPaths.Any(s => path.Contains(s));
         }
     }
 }

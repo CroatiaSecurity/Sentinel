@@ -203,8 +203,8 @@ namespace Sentinel.Core
                 proc.WaitForExit(5000);
                 // Policy exists and is assigned if output contains "Assigned" and "Yes"
                 return proc.ExitCode == 0 &&
-                       output.Contains("Assign", StringComparison.OrdinalIgnoreCase) &&
-                       output.Contains("Yes", StringComparison.OrdinalIgnoreCase);
+                       output.Contains("Assign") &&
+                       output.Contains("Yes");
             }
             catch
             {
@@ -382,7 +382,7 @@ namespace Sentinel.Core
             if (processId <= 4) return; // Never target System/Idle
 
             // CRITICAL: Never kill our own process or our Agent sibling
-            if (processId == Environment.ProcessId) return;
+            if (processId == System.Net48Environment.ProcessId) return;
 
             // HARDENING v1.3.8: Never kill any process whose binary resides in our install directory.
             // When explorer.exe was killed with entireProcessTree:true, it cascaded
@@ -400,7 +400,7 @@ namespace Sentinel.Core
                 if (targetImagePath != null)
                 {
                     var normalizedTarget = Path.GetFullPath(targetImagePath);
-                    if (normalizedTarget.StartsWith(selfDir, StringComparison.OrdinalIgnoreCase))
+                    if (normalizedTarget.StartsWith(selfDir))
                     {
                         Debug.WriteLine($"SafeKillProcessTree: REFUSED to kill sibling Sentinel process PID {processId} at verified install path '{targetImagePath}'");
                         return;
@@ -432,7 +432,7 @@ namespace Sentinel.Core
                     Debug.WriteLine($"SafeKillProcessTree: Process claims to be '{name}' but path is '{imagePath}' — masquerading detected, allowing kill");
                 }
 
-                proc.Kill(entireProcessTree: true);
+                proc.KillTree();
             }
             catch (Exception ex)
             {
@@ -451,27 +451,27 @@ namespace Sentinel.Core
         /// </summary>
         private static bool IsCriticalProcessName(string name)
         {
-            return string.Equals(name, "csrss", StringComparison.OrdinalIgnoreCase) ||
-                   string.Equals(name, "wininit", StringComparison.OrdinalIgnoreCase) ||
-                   string.Equals(name, "services", StringComparison.OrdinalIgnoreCase) ||
-                   string.Equals(name, "smss", StringComparison.OrdinalIgnoreCase) ||
-                   string.Equals(name, "lsass", StringComparison.OrdinalIgnoreCase) ||
-                   string.Equals(name, "winlogon", StringComparison.OrdinalIgnoreCase) ||
-                   string.Equals(name, "dwm", StringComparison.OrdinalIgnoreCase) ||
-                   string.Equals(name, "explorer", StringComparison.OrdinalIgnoreCase) ||
-                   string.Equals(name, "System", StringComparison.OrdinalIgnoreCase) ||
+            return string.Equals(name, "csrss") ||
+                   string.Equals(name, "wininit") ||
+                   string.Equals(name, "services") ||
+                   string.Equals(name, "smss") ||
+                   string.Equals(name, "lsass") ||
+                   string.Equals(name, "winlogon") ||
+                   string.Equals(name, "dwm") ||
+                   string.Equals(name, "explorer") ||
+                   string.Equals(name, "System") ||
                    // v1.4.0: svchost hosts hundreds of critical Windows services — killing it can
                    // BSOD or leave the system in an unrecoverable state. Protect all instances
                    // that reside in System32 (the path check below verifies legitimacy).
-                   string.Equals(name, "svchost", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(name, "svchost") ||
                    // v1.6.0: Core security products — path verified below (system or Program Files)
-                   string.Equals(name, "MsMpEng", StringComparison.OrdinalIgnoreCase) ||
-                   string.Equals(name, "NisSrv", StringComparison.OrdinalIgnoreCase) ||
-                   string.Equals(name, "SecurityHealthService", StringComparison.OrdinalIgnoreCase) ||
-                   string.Equals(name, "Sense", StringComparison.OrdinalIgnoreCase) ||
-                   string.Equals(name, "MpDefenderCoreService", StringComparison.OrdinalIgnoreCase) ||
-                   string.Equals(name, "smartscreen", StringComparison.OrdinalIgnoreCase) ||
-                   string.Equals(name, "SgrmBroker", StringComparison.OrdinalIgnoreCase);
+                   string.Equals(name, "MsMpEng") ||
+                   string.Equals(name, "NisSrv") ||
+                   string.Equals(name, "SecurityHealthService") ||
+                   string.Equals(name, "Sense") ||
+                   string.Equals(name, "MpDefenderCoreService") ||
+                   string.Equals(name, "smartscreen") ||
+                   string.Equals(name, "SgrmBroker");
         }
 
         private static bool IsInSystemDirectory(string imagePath)
@@ -481,8 +481,8 @@ namespace Sentinel.Core
             {
                 var normalized = Path.GetFullPath(imagePath);
                 var winDir = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
-                var winDirTrailing = winDir.EndsWith('\\') ? winDir : winDir + '\\';
-                if (normalized.StartsWith(winDirTrailing, StringComparison.OrdinalIgnoreCase))
+                var winDirTrailing = winDir.EndsWith("\\") ? winDir : winDir + '\\';
+                if (normalized.StartsWith(winDirTrailing))
                     return true;
 
                 // v1.6.0: Also treat Program Files\Windows Defender* as protected paths
@@ -493,8 +493,8 @@ namespace Sentinel.Core
                     if (string.IsNullOrEmpty(root)) continue;
                     var defender = Path.Combine(root, "Windows Defender") + Path.DirectorySeparatorChar;
                     var defenderAdv = Path.Combine(root, "Windows Defender Advanced Threat Protection") + Path.DirectorySeparatorChar;
-                    if (normalized.StartsWith(defender, StringComparison.OrdinalIgnoreCase) ||
-                        normalized.StartsWith(defenderAdv, StringComparison.OrdinalIgnoreCase))
+                    if (normalized.StartsWith(defender) ||
+                        normalized.StartsWith(defenderAdv))
                         return true;
                 }
             }

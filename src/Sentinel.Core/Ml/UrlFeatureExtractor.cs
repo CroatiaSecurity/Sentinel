@@ -29,7 +29,7 @@ namespace Sentinel.Core.Ml
 
             // Normalize: allow bare hosts
             string forParse = raw;
-            if (!raw.Contains("://", StringComparison.Ordinal) && !raw.StartsWith("//", StringComparison.Ordinal))
+            if (!raw.Contains("://") && !raw.StartsWith("//"))
                 forParse = "http://" + raw;
 
             string host = "";
@@ -42,8 +42,8 @@ namespace Sentinel.Core.Ml
                     host = uri.IdnHost ?? uri.Host ?? "";
                     path = uri.AbsolutePath ?? "";
                     query = uri.Query ?? "";
-                    v.HasHttps = uri.Scheme.Equals("https", StringComparison.OrdinalIgnoreCase) ? 1f : 0f;
-                    v.HasHttp = uri.Scheme.Equals("http", StringComparison.OrdinalIgnoreCase) ? 1f : 0f;
+                    v.HasHttps = uri.Scheme.Equals("https") ? 1f : 0f;
+                    v.HasHttp = uri.Scheme.Equals("http") ? 1f : 0f;
                 }
                 else
                 {
@@ -106,14 +106,14 @@ namespace Sentinel.Core.Ml
 
             v.HasIpHost = IsIpHost(host) ? 1f : 0f;
 
-            var hostParts = host.Split('.', StringSplitOptions.RemoveEmptyEntries);
+            var hostParts = host.Split(new[] { '.' }, StringSplitOptions.RemoveEmptyEntries);
             v.SubdomainCount = Math.Max(0, hostParts.Length - 2);
             string tld = hostParts.Length > 0 ? hostParts[^1] : "";
             v.TldLength = tld.Length;
             v.HasSuspiciousTld = 0f;
             foreach (var s in SuspiciousTlds)
             {
-                if (tld.Equals(s, StringComparison.OrdinalIgnoreCase))
+                if (tld.Equals(s))
                 {
                     v.HasSuspiciousTld = 1f;
                     break;
@@ -123,7 +123,7 @@ namespace Sentinel.Core.Ml
             v.HasShortenerHint = 0f;
             foreach (var s in ShortenerHints)
             {
-                if (raw.Contains(s, StringComparison.OrdinalIgnoreCase))
+                if (raw.Contains(s))
                 {
                     v.HasShortenerHint = 1f;
                     break;
@@ -138,8 +138,8 @@ namespace Sentinel.Core.Ml
             if (string.IsNullOrEmpty(host)) return false;
             if (IPAddress.TryParse(host, out _)) return true;
             // Strip brackets for IPv6 URLs
-            if (host.StartsWith('[') && host.EndsWith(']'))
-                return IPAddress.TryParse(host[1..^1], out _);
+            if (host.StartsWith("[") && host.EndsWith("]"))
+                return IPAddress.TryParse(host.Substring(1, host.Length - 2), out _);
             return false;
         }
 
@@ -153,7 +153,7 @@ namespace Sentinel.Core.Ml
             {
                 if (freq[i] == 0) continue;
                 double p = freq[i] / len;
-                ent -= p * Math.Log2(p);
+                ent -= p * MathNet48.Log2(p);
             }
             return ent;
         }

@@ -248,8 +248,8 @@ namespace Sentinel.Agent
                 Process.Start(new ProcessStartInfo
                 {
                     FileName = "explorer.exe",
-                    UseShellExecute = false,
-                    ArgumentList = { qDir }
+                    UseShellExecute = true,
+                    Arguments = qDir
                 });
             }
             catch (Exception ex)
@@ -268,8 +268,8 @@ namespace Sentinel.Agent
                     Process.Start(new ProcessStartInfo
                     {
                         FileName = "notepad.exe",
-                        UseShellExecute = false,
-                        ArgumentList = { logFile }
+                        UseShellExecute = true,
+                        Arguments = "\"" + logFile + "\""
                     });
                 }
                 else
@@ -300,8 +300,8 @@ namespace Sentinel.Agent
                 Process.Start(new ProcessStartInfo
                 {
                     FileName = "explorer.exe",
-                    UseShellExecute = false,
-                    ArgumentList = { root }
+                    UseShellExecute = true,
+                    Arguments = root
                 });
             }
             catch (Exception ex)

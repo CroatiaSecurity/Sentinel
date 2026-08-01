@@ -123,9 +123,9 @@ namespace Sentinel.Core
 
             // Check by path — anything in Windows\System32 or Windows\SysWOW64 is a system binary
             var normalized = pathOrName.Replace('/', '\\');
-            if (normalized.Contains(@"\Windows\System32\", StringComparison.OrdinalIgnoreCase) ||
-                normalized.Contains(@"\Windows\SysWOW64\", StringComparison.OrdinalIgnoreCase) ||
-                normalized.Contains(@"\Windows\WinSxS\", StringComparison.OrdinalIgnoreCase))
+            if (normalized.Contains(@"\Windows\System32\") ||
+                normalized.Contains(@"\Windows\SysWOW64\") ||
+                normalized.Contains(@"\Windows\WinSxS\"))
                 return true;
 
             return false;
@@ -361,23 +361,23 @@ namespace Sentinel.Core
                 using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
                 // Skip files larger than 100MB to avoid performance issues
                 if (fs.Length > 100 * 1024 * 1024) return null;
-                var hashBytes = SHA256.HashData(fs);
-                return Convert.ToHexString(hashBytes).ToLowerInvariant();
+                var hashBytes = System.Security.Cryptography.Sha256Net48.HashData(fs);
+                return ConvertHex.ToHexString(hashBytes).ToLowerInvariant();
             }
             catch { return null; }
         }
 
         private static bool IsExecutableExtension(string ext)
         {
-            return ext.Equals(".exe", StringComparison.OrdinalIgnoreCase) ||
-                   ext.Equals(".dll", StringComparison.OrdinalIgnoreCase) ||
-                   ext.Equals(".scr", StringComparison.OrdinalIgnoreCase) ||
-                   ext.Equals(".com", StringComparison.OrdinalIgnoreCase) ||
-                   ext.Equals(".bat", StringComparison.OrdinalIgnoreCase) ||
-                   ext.Equals(".cmd", StringComparison.OrdinalIgnoreCase) ||
-                   ext.Equals(".ps1", StringComparison.OrdinalIgnoreCase) ||
-                   ext.Equals(".vbs", StringComparison.OrdinalIgnoreCase) ||
-                   ext.Equals(".js", StringComparison.OrdinalIgnoreCase);
+            return ext.Equals(".exe") ||
+                   ext.Equals(".dll") ||
+                   ext.Equals(".scr") ||
+                   ext.Equals(".com") ||
+                   ext.Equals(".bat") ||
+                   ext.Equals(".cmd") ||
+                   ext.Equals(".ps1") ||
+                   ext.Equals(".vbs") ||
+                   ext.Equals(".js");
         }
     }
 }

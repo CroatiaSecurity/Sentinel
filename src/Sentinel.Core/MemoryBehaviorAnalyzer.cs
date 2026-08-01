@@ -94,8 +94,8 @@ namespace Sentinel.Core
                             if (growth >= ModuleGrowthThreshold)
                             {
                                 bool suspiciousPath = !string.IsNullOrEmpty(path) &&
-                                    (path.Contains(@"\Temp\", StringComparison.OrdinalIgnoreCase) ||
-                                     path.Contains(@"\Downloads\", StringComparison.OrdinalIgnoreCase));
+                                    (path.Contains(@"\Temp\") ||
+                                     path.Contains(@"\Downloads\"));
 
                                 // Single-signal growth: observe. Temp/Downloads path growth is stronger
                                 // but still LogOnly until response engine / composites prove malice chain.
@@ -128,7 +128,7 @@ namespace Sentinel.Core
 
                         // Missing image alone is weak — observe only (not kill on identity/path absence)
                         if (!string.IsNullOrEmpty(path) &&
-                            !path.StartsWith(@"\\", StringComparison.Ordinal) &&
+                            !path.StartsWith(@"\\") &&
                             path.Length > 3 &&
                             !File.Exists(path))
                         {

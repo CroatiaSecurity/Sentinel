@@ -131,7 +131,7 @@ namespace Sentinel.Core
         {
             _cleanupTimer.Dispose();
             GC.SuppressFinalize(this);
-            return ValueTask.CompletedTask;
+            return default(ValueTask);
         }
     }
 

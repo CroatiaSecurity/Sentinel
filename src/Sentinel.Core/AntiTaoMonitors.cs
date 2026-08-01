@@ -75,10 +75,10 @@ namespace Sentinel.Core
                     using var proc = Process.Start(psi);
                     if (proc != null)
                     {
-                        var output = await proc.StandardOutput.ReadToEndAsync(ct);
+                        var output = await proc.StandardOutput.ReadToEndAsync();
                         proc.WaitForExit(5000);
-                        hypervisorAuto = output.Contains("hypervisorlaunchtype", StringComparison.OrdinalIgnoreCase)
-                            && output.Contains("Auto", StringComparison.OrdinalIgnoreCase);
+                        hypervisorAuto = output.Contains("hypervisorlaunchtype")
+                            && output.Contains("Auto");
                     }
                 }
                 catch { }
@@ -158,11 +158,11 @@ namespace Sentinel.Core
                         using var proc = Process.Start(psi);
                         if (proc != null)
                         {
-                            var output = await proc.StandardOutput.ReadToEndAsync(ct);
+                            var output = await proc.StandardOutput.ReadToEndAsync();
                             proc.WaitForExit(5000);
                             // "Protection Status:    Protection On" or "Fully Encrypted"
-                            bitlockerActive = output.Contains("Protection On", StringComparison.OrdinalIgnoreCase)
-                                || output.Contains("Fully Encrypted", StringComparison.OrdinalIgnoreCase);
+                            bitlockerActive = output.Contains("Protection On")
+                                || output.Contains("Fully Encrypted");
                         }
                     }
                     catch { }
@@ -273,7 +273,7 @@ namespace Sentinel.Core
                 IPAddress[] systemResults;
                 try
                 {
-                    systemResults = await Dns.GetHostAddressesAsync(TestDomain, ct);
+                    systemResults = await DnsNet48.GetHostAddressesAsync(TestDomain, ct);
                 }
                 catch { return; } // No network — skip
 
@@ -348,7 +348,7 @@ namespace Sentinel.Core
                 using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
                 timeoutCts.CancelAfter(3000);
 
-                var receiveTask = udp.ReceiveAsync(timeoutCts.Token);
+                var receiveTask = udp.ReceiveAsync();
                 var result = await receiveTask;
                 var response = result.Buffer;
 
@@ -593,8 +593,8 @@ namespace Sentinel.Core
         {
             // Device IDs look like: VID_046D&PID_C52B\7&12345678&0&0000
             var upper = deviceId.ToUpperInvariant();
-            var vidIdx = upper.IndexOf("VID_", StringComparison.Ordinal);
-            var pidIdx = upper.IndexOf("PID_", StringComparison.Ordinal);
+            var vidIdx = upper.IndexOf("VID_");
+            var pidIdx = upper.IndexOf("PID_");
             if (vidIdx < 0 || pidIdx < 0) return null;
 
             try
@@ -830,14 +830,14 @@ namespace Sentinel.Core
                 using var proc = Process.Start(psi);
                 if (proc == null) return;
 
-                var output = await proc.StandardOutput.ReadToEndAsync(ct);
+                var output = await proc.StandardOutput.ReadToEndAsync();
                 proc.WaitForExit(5000);
 
                 foreach (var line in output.Split('\n'))
                 {
                     var trimmed = line.Trim();
-                    if (!trimmed.StartsWith("TCP", StringComparison.OrdinalIgnoreCase)) continue;
-                    if (!trimmed.Contains("ESTABLISHED", StringComparison.OrdinalIgnoreCase)) continue;
+                    if (!trimmed.StartsWith("TCP")) continue;
+                    if (!trimmed.Contains("ESTABLISHED")) continue;
 
                     // Parse: TCP    192.168.1.100:12345    142.250.80.46:443    ESTABLISHED
                     var parts = trimmed.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);

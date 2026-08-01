@@ -319,11 +319,11 @@ namespace Sentinel.Core
                 try
                 {
                     string userName = GetTokenUserName(hToken);
-                    bool isSystem = userName.Equals("SYSTEM", StringComparison.OrdinalIgnoreCase) ||
-                                    userName.Equals("LOCAL SERVICE", StringComparison.OrdinalIgnoreCase) ||
-                                    userName.Equals("NETWORK SERVICE", StringComparison.OrdinalIgnoreCase) ||
-                                    userName.Contains("NT AUTHORITY\\SYSTEM", StringComparison.OrdinalIgnoreCase) ||
-                                    userName.EndsWith("\\SYSTEM", StringComparison.OrdinalIgnoreCase);
+                    bool isSystem = userName.Equals("SYSTEM") ||
+                                    userName.Equals("LOCAL SERVICE") ||
+                                    userName.Equals("NETWORK SERVICE") ||
+                                    userName.Contains("NT AUTHORITY\\SYSTEM") ||
+                                    userName.EndsWith("\\SYSTEM");
 
                     bool hasImpersonate = CheckImpersonatePrivilege(hToken);
 
@@ -476,10 +476,10 @@ namespace Sentinel.Core
             if (IsLegitimateSystemTokenHolder(n)) return true;
 
             // Partial matches for localization-safe variants
-            if (n.Contains("memory compression", StringComparison.OrdinalIgnoreCase)) return true;
-            if (n.Equals("registry", StringComparison.OrdinalIgnoreCase)) return true;
-            if (n.Contains("secure system", StringComparison.OrdinalIgnoreCase)) return true;
-            if (n.StartsWith("system ", StringComparison.OrdinalIgnoreCase)) return true;
+            if (n.Contains("memory compression")) return true;
+            if (n.Equals("registry")) return true;
+            if (n.Contains("secure system")) return true;
+            if (n.StartsWith("system ")) return true;
 
             return false;
         }
@@ -487,7 +487,7 @@ namespace Sentinel.Core
         private static string NormalizeProcessName(string name)
         {
             var n = name.Trim();
-            if (n.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+            if (n.EndsWith(".exe"))
                 n = n[..^4];
             return n;
         }

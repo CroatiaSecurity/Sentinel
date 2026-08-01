@@ -67,7 +67,7 @@ namespace Sentinel.Core
                 bool legitimate = false;
                 try
                 {
-                    var stem = processName.Replace(".exe", "", StringComparison.OrdinalIgnoreCase);
+                    var stem = Sentinel.Core.StringNet48.ReplaceIgnoreCase(processName, ".exe", "");
                     var imagePath = SecurityValidation.GetProcessImagePath(processId);
 
                     // 1) Known high-IO app names with path verification

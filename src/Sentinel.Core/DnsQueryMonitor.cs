@@ -281,7 +281,7 @@ namespace Sentinel.Core
             foreach (var count in freq.Values)
             {
                 double p = (double)count / s.Length;
-                entropy -= p * Math.Log2(p);
+                entropy -= p * MathNet48.Log2(p);
             }
             return entropy;
         }

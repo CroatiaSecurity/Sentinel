@@ -140,7 +140,7 @@ namespace Sentinel.Core
                                             // Trailing separator prevents prefix collision attacks.
                                             var selfDir = Path.GetFullPath(AppContext.BaseDirectory).TrimEnd('\\') + '\\';
                                             var normalizedImagePath = Path.GetFullPath(imagePath);
-                                            if (normalizedImagePath.StartsWith(selfDir, StringComparison.OrdinalIgnoreCase))
+                                            if (normalizedImagePath.StartsWith(selfDir))
                                                 return;
 
                                             // v1.3.1: Use multi-signal FileReputationEngine for on-execute verdicts
@@ -330,36 +330,35 @@ namespace Sentinel.Core
             }
 
             // Apply threat scoring
+            if (detection.Metadata == null)
+                detection.Metadata = new Dictionary<string, string>();
             var scoreProfile = _scoringEngine.Score(detection);
             detection.Metadata["ThreatScore"] = scoreProfile.Score.ToString();
             detection.Metadata["ThreatVerdict"] = scoreProfile.Verdict.ToString();
 
             bool isConsultant = detection.Metadata.TryGetValue("ConsultantSignal", out var csFlag)
-                && string.Equals(csFlag, "true", StringComparison.OrdinalIgnoreCase);
+                && string.Equals(csFlag, "true");
 
-            // Adjust tier if verdict is Critical — never escalate consultant / external signals
-            // (v1.8.1 RT-NEW-2: admin-writable consultant JSONL must not become a kill RPC)
-            if (scoreProfile.Verdict == Verdict.Critical && !isConsultant)
-            {
-                detection.Tier = DetectionTier.Tier1Behavioral;
-                if (detection.AuthorizedResponse < ResponseAction.KillProcessTree)
-                {
-                    detection.AuthorizedResponse = ResponseAction.KillProcessTree;
-                }
-            }
-            else if (isConsultant)
+            // Consultant / external signals are observational only — never kill authority.
+            if (isConsultant)
             {
                 detection.Tier = DetectionTier.Tier2Indicator;
                 detection.AuthorizedResponse = ResponseAction.LogOnly;
             }
+            else
+            {
+                // Standing tier law: Tier1 only for high-confidence kill-grade terminals
+                // (token theft, cred dump, reverse shell, C2) or multi-signal composites.
+                // Critical score alone must NOT promote random heuristics to kill.
+                // Scoring still enriches Metadata for correlation.
+                ResponsePolicy.ApplyTierLaw(detection);
+            }
 
             await HandleDetectionEventAsync(detection);
 
-            // Feed to correlation engine for composite evaluations
-            if (detection.Tier == DetectionTier.Tier1Behavioral || detection.Tier == DetectionTier.Tier2Indicator)
-            {
-                await _correlationEngine.RegisterSignalAsync(detection);
-            }
+            // Feed ALL tiers to correlation — Tier2 observe signals seed composites;
+            // multi-signal composites are what authorize kill.
+            await _correlationEngine.RegisterSignalAsync(detection);
         }
 
         private async Task HandleDetectionEventAsync(DetectionEvent detection)

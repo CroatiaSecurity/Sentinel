@@ -118,11 +118,11 @@ namespace Sentinel.Core
             try
             {
                 using var sha = SHA256.Create();
-                await using var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read,
+                using var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read,
                     FileShare.ReadWrite | FileShare.Delete);
                 fileSize = fs.Length;
                 var hashBytes = await sha.ComputeHashAsync(fs, ct);
-                hash = Convert.ToHexString(hashBytes).ToLowerInvariant();
+                hash = ConvertHex.ToHexString(hashBytes).ToLowerInvariant();
             }
             catch (Exception ex)
             {
@@ -267,7 +267,7 @@ namespace Sentinel.Core
 
                 if (response.IsSuccessStatusCode)
                 {
-                    var json = await response.Content.ReadAsStringAsync(ct);
+                    var json = await response.Content.ReadAsStringAsync();
                     var trustMatch = System.Text.RegularExpressions.Regex.Match(
                         json, @"""hashlookup:trust""\s*:\s*(\d+)");
                     if (trustMatch.Success && int.TryParse(trustMatch.Groups[1].Value, out int trust))
@@ -300,7 +300,7 @@ namespace Sentinel.Core
 
                 if (response.IsSuccessStatusCode)
                 {
-                    var json = await response.Content.ReadAsStringAsync(ct);
+                    var json = await response.Content.ReadAsStringAsync();
                     if (json.Contains("\"query_status\":\"ok\"") || json.Contains("\"query_status\": \"ok\""))
                         return new ApiVerdict { Source = "MalwareBazaar", Status = VerdictStatus.Malicious };
                     if (json.Contains("\"query_status\":\"hash_not_found\"") || json.Contains("\"query_status\": \"hash_not_found\""))
@@ -355,7 +355,7 @@ namespace Sentinel.Core
                         return new ApiVerdict { Source = "VirusTotal", Status = VerdictStatus.Error };
                     }
 
-                    var json = await response.Content.ReadAsStringAsync(ct);
+                    var json = await response.Content.ReadAsStringAsync();
 
                     // Parse proxy response: { success, verdict, detections, engines, detectionRate }
                     using var doc = System.Text.Json.JsonDocument.Parse(json);
@@ -478,7 +478,7 @@ namespace Sentinel.Core
             {
                 if (freq[i] == 0) continue;
                 double p = freq[i] / len;
-                entropy -= p * Math.Log2(p);
+                entropy -= p * MathNet48.Log2(p);
             }
             return entropy;
         }
@@ -537,7 +537,7 @@ namespace Sentinel.Core
 
                     foreach (var import in SuspiciousImports)
                     {
-                        if (!found.Contains(import) && text.Contains(import, StringComparison.Ordinal))
+                        if (!found.Contains(import) && text.Contains(import))
                         {
                             found.Add(import);
                         }
@@ -638,7 +638,7 @@ namespace Sentinel.Core
             else if (hr.VirusTotalVerdict.Status == VerdictStatus.Safe) score -= 25;
             else if (hr.VirusTotalVerdict.Status == VerdictStatus.NotFound) score += 0; // Neutral
 
-            return Math.Clamp(score, 0, 100);
+            return MathNet48.Clamp(score, 0, 100);
         }
 
         private static int CalculateCompositeScore(FileReputationResult r)
@@ -689,10 +689,10 @@ namespace Sentinel.Core
             if (r.ContextualRisk.IsNewFile) contextScore += 15;
             if (r.ContextualRisk.IsProtectedPath) contextScore -= 20;
             if (r.ContextualRisk.Prevalence > 5) contextScore -= 15; // Widely seen = less suspicious
-            contextScore = Math.Clamp(contextScore, 0, 100);
+            contextScore = MathNet48.Clamp(contextScore, 0, 100);
             score += contextScore * (hasMl ? 0.12 : 0.15);
 
-            return (int)Math.Clamp(score, 0, 100);
+            return (int)MathNet48.Clamp(score, 0, 100);
         }
 
         private static FileVerdict DetermineVerdict(int compositeScore) => compositeScore switch

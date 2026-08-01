@@ -290,7 +290,7 @@ namespace Sentinel.Core
                 var currentHash = ComputeFileHash(executablePath);
                 if (currentHash == null) return; // File locked, will retry next cycle
 
-                if (!string.Equals(currentHash, baseline.Sha256Hash, StringComparison.OrdinalIgnoreCase))
+                if (!string.Equals(currentHash, baseline.Sha256Hash))
                 {
                     // Hash mismatch — verify publisher
                     var currentPublisher = GetAuthenticodePublisher(executablePath);
@@ -298,7 +298,7 @@ namespace Sentinel.Core
 
                     // Determine if this is a legitimate update vs cuckoo egg
                     bool publisherMatch = !string.IsNullOrEmpty(baseline.ExpectedPublisher) &&
-                        string.Equals(currentPublisher, baseline.ExpectedPublisher, StringComparison.OrdinalIgnoreCase);
+                        string.Equals(currentPublisher, baseline.ExpectedPublisher);
 
                     if (publisherMatch)
                     {
@@ -323,10 +323,18 @@ namespace Sentinel.Core
 
                     await EmitCuckooDetection(baseline, "REPLACED", evidence, reasoning, offenderPid, currentHash, currentPublisher, currentProductName);
 
-                    // Active response only when chain policy allows host mutation (observe-until-chain default: no).
+                    // Observe-until-chain (default): detect + log only. No kill/quarantine/restore
+                    // until ResponsePolicy authorizes host mutation (multi-signal / chain).
+                    // Never pass null chain context — single cuckoo signal is not kill authority.
                     if (ResponsePolicy.MayPerformInlineHostMutation(_sentinelConfig))
                     {
                         await RespondToCuckooEgg(executablePath, baseline, offenderPid);
+                    }
+                    else
+                    {
+                        _logger.LogInformation(
+                            "[ApplicationIntegrityMonitor] Cuckoo egg observed for {Name} — LogOnly (observe-until-chain; no inline kill)",
+                            baseline.Name);
                     }
 
                     // Generate forensic incident report for law enforcement
@@ -358,14 +366,16 @@ namespace Sentinel.Core
             if (!string.IsNullOrEmpty(impostorPublisher)) metadata["ImpostorPublisher"] = impostorPublisher;
             if (!string.IsNullOrEmpty(impostorProduct)) metadata["ImpostorProduct"] = impostorProduct;
 
+            // Recommend LogOnly at emit — DetectionEngine.ApplyTierLaw also demotes non-kill-grade.
+            // Destructive response only via AdvancedResponseEngine after chain confirm (or lab AR).
             await _detectionEngine.EmitAsync(new DetectionEvent
             {
                 RuleName = "Application Integrity: Cuckoo Egg Detected",
                 Evidence = evidence,
                 Reasoning = reasoning,
                 Confidence = 0.99,
-                Tier = DetectionTier.Tier1Behavioral,
-                AuthorizedResponse = ResponseAction.KillProcessTree,
+                Tier = DetectionTier.Tier2Indicator,
+                AuthorizedResponse = ResponseAction.LogOnly,
                 ProcessName = offenderPid > 4 ? GetProcessNameSafe(offenderPid) : "UNKNOWN_INSTALLER",
                 ProcessId = offenderPid > 0 ? offenderPid : 0,
                 SignalType = SignalType.AntiTamper,
@@ -375,6 +385,15 @@ namespace Sentinel.Core
 
         private async Task RespondToCuckooEgg(string executablePath, AppBaseline baseline, int offenderPid)
         {
+            // Defense in depth: never kill/quarantine if observe-until-chain is on without gate.
+            if (!ResponsePolicy.MayPerformInlineHostMutation(_sentinelConfig))
+            {
+                _logger.LogInformation(
+                    "[ApplicationIntegrityMonitor] RespondToCuckooEgg suppressed for {Name} (observe-until-chain)",
+                    baseline.Name);
+                return;
+            }
+
             _logger.LogWarning("[ApplicationIntegrityMonitor] *** CUCKOO EGG RESPONSE *** Quarantining impostor and restoring original for {Name}",
                 baseline.Name);
 
@@ -456,7 +475,7 @@ namespace Sentinel.Core
             report.AppendLine($"  Baselined At:   {baseline.BaselinedAt:yyyy-MM-dd HH:mm:ss} UTC");
             report.AppendLine();
 
-            await File.WriteAllTextAsync(Path.Combine(reportDir, "incident_report.txt"), report.ToString());
+            await System.IO.FileNet48.WriteAllTextAsync(Path.Combine(reportDir, "incident_report.txt"), report.ToString());
 
             // Continue building the report in parts
             await AppendImpostorDetails(reportDir, report, impostorHash, impostorPublisher, impostorProduct, executablePath);
@@ -465,7 +484,7 @@ namespace Sentinel.Core
             await AppendTimelineAndRecommendations(reportDir, report, baseline, timestamp);
 
             // Write final complete report
-            await File.WriteAllTextAsync(Path.Combine(reportDir, "incident_report.txt"), report.ToString());
+            await System.IO.FileNet48.WriteAllTextAsync(Path.Combine(reportDir, "incident_report.txt"), report.ToString());
 
             // Also log as structured event
             await _eventLogger.LogEventAsync("cuckoo_egg_incident", new
@@ -568,7 +587,7 @@ namespace Sentinel.Core
                     catch { }
 
                     if (modules.Count > 0)
-                        await File.WriteAllLinesAsync(Path.Combine(reportDir, "offender_modules.txt"), modules);
+                        await FileNet48.WriteAllLinesAsync(Path.Combine(reportDir, "offender_modules.txt"), modules);
                 }
                 catch
                 {
@@ -623,7 +642,7 @@ namespace Sentinel.Core
 
                 // Save full connection snapshot regardless
                 var allConnsText = allConnections.Select(c => $"PID {c.pid}\t{c.protocol}\t{c.localAddr}:{c.localPort}\t{c.remoteAddr}:{c.remotePort}\t{c.state}");
-                await File.WriteAllLinesAsync(Path.Combine(reportDir, "network_snapshot.txt"), allConnsText);
+                await FileNet48.WriteAllLinesAsync(Path.Combine(reportDir, "network_snapshot.txt"), allConnsText);
             }
             catch (Exception ex)
             {
@@ -724,8 +743,8 @@ namespace Sentinel.Core
             try
             {
                 using var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-                var hashBytes = SHA256.HashData(fs);
-                return Convert.ToHexString(hashBytes).ToLowerInvariant();
+                var hashBytes = System.Security.Cryptography.Sha256Net48.HashData(fs);
+                return ConvertHex.ToHexString(hashBytes).ToLowerInvariant();
             }
             catch
             {
@@ -742,7 +761,7 @@ namespace Sentinel.Core
 #pragma warning restore SYSLIB0057
                 using var cert2 = new X509Certificate2(cert);
                 var subject = cert2.Subject;
-                var cnStart = subject.IndexOf("CN=", StringComparison.OrdinalIgnoreCase);
+                var cnStart = subject.IndexOf("CN=");
                 if (cnStart >= 0)
                 {
                     cnStart += 3;
@@ -800,7 +819,7 @@ namespace Sentinel.Core
                     return;
                 }
 
-                var encrypted = await File.ReadAllBytesAsync(backupPath);
+                var encrypted = await FileNet48.ReadAllBytesAsync(backupPath);
                 var decrypted = ProtectedData.Unprotect(encrypted, null, DataProtectionScope.LocalMachine);
 
                 // Ensure target directory exists
@@ -808,7 +827,7 @@ namespace Sentinel.Core
                 if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
                     Directory.CreateDirectory(dir);
 
-                await File.WriteAllBytesAsync(executablePath, decrypted);
+                await System.IO.FileNet48.WriteAllBytesAsync(executablePath, decrypted);
                 _logger.LogWarning("[ApplicationIntegrityMonitor] ✓ Restored original {Name} from backup", baseline.Name);
 
                 await _eventLogger.LogEventAsync("integrity_restore", new
@@ -836,7 +855,7 @@ namespace Sentinel.Core
                     try
                     {
                         var imagePath = SecurityValidation.GetProcessImagePath(proc.Id);
-                        if (string.Equals(imagePath, executablePath, StringComparison.OrdinalIgnoreCase))
+                        if (string.Equals(imagePath, executablePath))
                         {
                             HardeningModule.SafeKillProcessTree(proc.Id);
                         }
@@ -868,19 +887,19 @@ namespace Sentinel.Core
                         if (string.IsNullOrEmpty(imagePath)) { proc.Dispose(); continue; }
 
                         // Look for installer-like processes that started recently
-                        var isInstaller = imagePath.Contains("installer", StringComparison.OrdinalIgnoreCase) ||
-                                         imagePath.Contains("setup", StringComparison.OrdinalIgnoreCase) ||
-                                         imagePath.Contains("update", StringComparison.OrdinalIgnoreCase) ||
-                                         imagePath.Contains("msiexec", StringComparison.OrdinalIgnoreCase) ||
-                                         imagePath.Contains("unins", StringComparison.OrdinalIgnoreCase);
+                        var isInstaller = imagePath.Contains("installer") ||
+                                         imagePath.Contains("setup") ||
+                                         imagePath.Contains("update") ||
+                                         imagePath.Contains("msiexec") ||
+                                         imagePath.Contains("unins");
 
                         // Also check if the process has the target directory in its working path
                         var hasTargetDir = false;
                         try
                         {
                             var cmdLine = GetProcessCommandLine(proc.Id);
-                            hasTargetDir = cmdLine.Contains(dir, StringComparison.OrdinalIgnoreCase) ||
-                                          cmdLine.Contains(filePath, StringComparison.OrdinalIgnoreCase);
+                            hasTargetDir = cmdLine.Contains(dir) ||
+                                          cmdLine.Contains(filePath);
                         }
                         catch { }
 
@@ -982,7 +1001,7 @@ namespace Sentinel.Core
                 var output = proc.StandardOutput.ReadToEnd();
                 proc.WaitForExit(5000);
 
-                foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+                foreach (var line in output.Split(new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries))
                 {
                     var parts = line.Trim().Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
                     if (parts.Length < 5) continue;
@@ -1043,7 +1062,7 @@ namespace Sentinel.Core
 
             if (string.IsNullOrEmpty(currentPublisher))
                 sb.Append("is now MISSING (unsigned binary replaced a signed one). ");
-            else if (!string.Equals(currentPublisher, baseline.ExpectedPublisher, StringComparison.OrdinalIgnoreCase))
+            else if (!string.Equals(currentPublisher, baseline.ExpectedPublisher))
                 sb.Append($"changed from '{baseline.ExpectedPublisher}' to '{currentPublisher}' (different organization). ");
 
             if (!string.IsNullOrEmpty(currentProductName) && currentProductName != baseline.ProductName)

@@ -101,7 +101,7 @@ namespace Sentinel.Core.Ml
             string host = urlOrHost.Trim().ToLowerInvariant();
             try
             {
-                if (!host.Contains("://", StringComparison.Ordinal) && host.Contains('/'))
+                if (!host.Contains("://") && host.IndexOf('/') >= 0)
                     host = "http://" + host;
                 if (Uri.TryCreate(host.Contains("://") ? host : "http://" + host, UriKind.Absolute, out var uri))
                     host = uri.IdnHost ?? uri.Host ?? host;
@@ -122,7 +122,7 @@ namespace Sentinel.Core.Ml
             };
             foreach (var s in suffixes)
             {
-                if (host == s || host.EndsWith("." + s, StringComparison.Ordinal))
+                if (host == s || host.EndsWith("." + s))
                     return true;
             }
             return false;
@@ -225,7 +225,7 @@ namespace Sentinel.Core.Ml
             return null;
         }
 
-        private static double Clamp01(float v) => Math.Clamp(v, 0f, 1f);
+        private static double Clamp01(float v) => MathNet48.Clamp(v, 0f, 1f);
 
         public void Dispose()
         {

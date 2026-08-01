@@ -159,7 +159,10 @@ namespace Sentinel.Tests
 
                 var threatCfg = new ThreatReportingConfig { Enabled = false };
                 var threat = new ThreatReportService(threatCfg, NullLogger<ThreatReportService>.Instance);
-                var reporter = new AutoIncidentReporter(cfg, threat, NullLogger<AutoIncidentReporter>.Instance);
+                // SilentObserve default blocks packs until chain-confirmed — disable for pack-path unit test
+                var sentinelCfg = new SentinelConfig { SilentObserve = false, ObserveUntilChain = false };
+                var reporter = new AutoIncidentReporter(cfg, threat, NullLogger<AutoIncidentReporter>.Instance,
+                    sentinelConfig: sentinelCfg);
 
                 var hash = new string('a', 64);
                 var detection = new DetectionEvent
@@ -196,14 +199,14 @@ namespace Sentinel.Tests
                 Assert.True(File.Exists(Path.Combine(dirs[0], "incident_report.txt")));
                 Assert.True(File.Exists(Path.Combine(dirs[0], "indicators.txt")));
 
-                var body = await File.ReadAllTextAsync(Path.Combine(dirs[0], "incident_report.txt"));
+                var body = File.ReadAllText(Path.Combine(dirs[0], "incident_report.txt"));
                 Assert.Contains("REPORTABLE-GRADE EVIDENCE PACK", body);
                 Assert.Contains("ic3.gov", body, StringComparison.OrdinalIgnoreCase);
                 Assert.Contains("INTERPOL", body, StringComparison.OrdinalIgnoreCase);
                 Assert.Contains("cannot", body, StringComparison.OrdinalIgnoreCase);
                 Assert.Contains(hash, body);
 
-                var indicators = await File.ReadAllTextAsync(Path.Combine(dirs[0], "indicators.txt"));
+                var indicators = File.ReadAllText(Path.Combine(dirs[0], "indicators.txt"));
                 Assert.Contains($"sha256={hash}", indicators);
             }
             finally

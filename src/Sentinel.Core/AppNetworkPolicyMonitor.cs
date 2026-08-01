@@ -203,8 +203,8 @@ namespace Sentinel.Core
         {
             if (string.IsNullOrWhiteSpace(remoteAddress)) return;
 
-            var stem = processName.Replace(".exe", "", StringComparison.OrdinalIgnoreCase);
-            if (string.IsNullOrWhiteSpace(stem) || stem.Equals("unknown", StringComparison.OrdinalIgnoreCase)) return;
+            var stem = Sentinel.Core.StringNet48.ReplaceIgnoreCase(processName, ".exe", "");
+            if (string.IsNullOrWhiteSpace(stem) || stem.Equals("unknown")) return;
 
             // HARDENING v1.3.0: NetworkAllowlist now requires Authenticode signature verification.
             // Previously, name-only matching meant an attacker could name their binary "chrome.exe"
@@ -222,7 +222,7 @@ namespace Sentinel.Core
 
             // Determine /24 subnet (IPv4) or /32 prefix (IPv6)
             string subnet;
-            if (remoteAddress.Contains(':'))
+            if (remoteAddress.IndexOf(':') >= 0)
             {
                 // IPv6 subnet determination (take first two segments for a /32 subnet equivalent)
                 var parts = remoteAddress.Split(':');
@@ -361,18 +361,18 @@ namespace Sentinel.Core
                 var pathLower = imagePath.ToLowerInvariant();
 
                 // System processes (svchost, lsass, etc.) must reside in Windows directory
-                bool isSystemEntry = stem.Equals("svchost", StringComparison.OrdinalIgnoreCase) ||
-                                     stem.Equals("lsass", StringComparison.OrdinalIgnoreCase) ||
-                                     stem.Equals("sihost", StringComparison.OrdinalIgnoreCase) ||
-                                     stem.Equals("taskhostw", StringComparison.OrdinalIgnoreCase) ||
-                                     stem.Equals("RuntimeBroker", StringComparison.OrdinalIgnoreCase) ||
-                                     stem.Equals("SearchHost", StringComparison.OrdinalIgnoreCase) ||
-                                     stem.Equals("System", StringComparison.OrdinalIgnoreCase);
+                bool isSystemEntry = stem.Equals("svchost") ||
+                                     stem.Equals("lsass") ||
+                                     stem.Equals("sihost") ||
+                                     stem.Equals("taskhostw") ||
+                                     stem.Equals("RuntimeBroker") ||
+                                     stem.Equals("SearchHost") ||
+                                     stem.Equals("System");
 
                 if (isSystemEntry)
                 {
                     var winDir = Environment.GetFolderPath(Environment.SpecialFolder.Windows).ToLowerInvariant();
-                    var winDirTrailing = winDir.EndsWith('\\') ? winDir : winDir + '\\';
+                    var winDirTrailing = winDir.EndsWith("\\") ? winDir : winDir + '\\';
                     verified = pathLower.StartsWith(winDirTrailing);
                 }
                 else

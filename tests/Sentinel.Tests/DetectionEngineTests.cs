@@ -168,9 +168,16 @@ namespace Sentinel.Tests
                 engine.SubmitTelemetry(context);
                 await Task.Delay(500);
 
-                // Should only see ONE detection logged (dedup suppresses the second)
+                // Should only see ONE detection logged (dedup suppresses the second).
+                // Count detection-type lines only — response rows may also mention the rule name.
                 var log = ReadLog();
-                var detectionCount = CountOccurrences(log, "\"RuleName\":\"LsassAccessRule\"");
+                var detectionCount = 0;
+                foreach (var line in log.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+                {
+                    if (line.IndexOf("\"type\":\"detection\"", StringComparison.Ordinal) >= 0 &&
+                        line.IndexOf("LsassAccessRule", StringComparison.Ordinal) >= 0)
+                        detectionCount++;
+                }
                 Assert.Equal(1, detectionCount);
             }
             finally

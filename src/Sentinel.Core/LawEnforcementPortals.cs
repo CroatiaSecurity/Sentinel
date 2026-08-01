@@ -208,7 +208,7 @@ namespace Sentinel.Core
         {
             if (string.IsNullOrWhiteSpace(code)) return null;
             code = code.Trim().ToUpperInvariant();
-            if (code.Equals("UK", StringComparison.Ordinal)) return "GB";
+            if (code.Equals("UK")) return "GB";
             return code.Length == 2 ? code : null;
         }
 

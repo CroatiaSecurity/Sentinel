@@ -18,53 +18,58 @@ namespace Sentinel.Core
         /// </summary>
         public static bool LooksLikeInstallerName(string? processName, string? imagePath = null)
         {
-            var n = (processName ?? "").Replace(".exe", "", StringComparison.OrdinalIgnoreCase);
+            // Normalize to lowercase so name matching is case-insensitive on net48
+            // (string.IndexOf/StartsWith without StringComparison are ordinal case-sensitive).
+            var n = StringNet48.ReplaceIgnoreCase(processName ?? "", ".exe", "").ToLowerInvariant();
             if (string.IsNullOrEmpty(n) && !string.IsNullOrEmpty(imagePath))
-                n = Path.GetFileNameWithoutExtension(imagePath) ?? "";
+                n = (Path.GetFileNameWithoutExtension(imagePath) ?? "").ToLowerInvariant();
 
             if (string.IsNullOrEmpty(n)) return false;
 
-            if (n.Contains("setup", StringComparison.OrdinalIgnoreCase) ||
-                n.Contains("install", StringComparison.OrdinalIgnoreCase) ||
-                n.Contains("update", StringComparison.OrdinalIgnoreCase) ||
-                n.Contains("unins", StringComparison.OrdinalIgnoreCase) ||
-                n.StartsWith("git-", StringComparison.OrdinalIgnoreCase) ||
-                n.StartsWith("git_", StringComparison.OrdinalIgnoreCase) ||
-                n.Equals("git", StringComparison.OrdinalIgnoreCase) ||
-                n.StartsWith("node-v", StringComparison.OrdinalIgnoreCase) ||
-                n.StartsWith("python-", StringComparison.OrdinalIgnoreCase) ||
-                (n.StartsWith("go", StringComparison.OrdinalIgnoreCase) && n.Contains("windows", StringComparison.OrdinalIgnoreCase)) ||
-                n.Contains("vscode", StringComparison.OrdinalIgnoreCase) ||
-                n.Contains("docker", StringComparison.OrdinalIgnoreCase) ||
-                n.Contains("chrome", StringComparison.OrdinalIgnoreCase) ||
-                n.Contains("firefox", StringComparison.OrdinalIgnoreCase) ||
-                n.Contains("edge", StringComparison.OrdinalIgnoreCase) ||
-                n.Contains("brave", StringComparison.OrdinalIgnoreCase) ||
-                n.Contains("dotnet", StringComparison.OrdinalIgnoreCase) ||
-                n.Contains("jdk", StringComparison.OrdinalIgnoreCase) ||
-                n.Contains("jre", StringComparison.OrdinalIgnoreCase) ||
-                n.Contains("msiexec", StringComparison.OrdinalIgnoreCase) ||
-                n.Contains("windowsdesktop-runtime", StringComparison.OrdinalIgnoreCase) ||
-                n.Contains("vcredist", StringComparison.OrdinalIgnoreCase) ||
-                n.Contains("sentinelsetup", StringComparison.OrdinalIgnoreCase) ||
-                n.Contains("finalizer", StringComparison.OrdinalIgnoreCase)) // WiX burn
+            if (IsDirectXOrRuntimeRedist(n, imagePath))
+                return true;
+
+            if (n.IndexOf("setup", StringComparison.Ordinal) >= 0 ||
+                n.IndexOf("install", StringComparison.Ordinal) >= 0 ||
+                n.IndexOf("update", StringComparison.Ordinal) >= 0 ||
+                n.IndexOf("unins", StringComparison.Ordinal) >= 0 ||
+                n.StartsWith("git-", StringComparison.Ordinal) ||
+                n.StartsWith("git_", StringComparison.Ordinal) ||
+                n.Equals("git", StringComparison.Ordinal) ||
+                n.StartsWith("node-v", StringComparison.Ordinal) ||
+                n.StartsWith("python-", StringComparison.Ordinal) ||
+                (n.StartsWith("go", StringComparison.Ordinal) && n.IndexOf("windows", StringComparison.Ordinal) >= 0) ||
+                n.IndexOf("vscode", StringComparison.Ordinal) >= 0 ||
+                n.IndexOf("docker", StringComparison.Ordinal) >= 0 ||
+                n.IndexOf("chrome", StringComparison.Ordinal) >= 0 ||
+                n.IndexOf("firefox", StringComparison.Ordinal) >= 0 ||
+                n.IndexOf("edge", StringComparison.Ordinal) >= 0 ||
+                n.IndexOf("brave", StringComparison.Ordinal) >= 0 ||
+                n.IndexOf("dotnet", StringComparison.Ordinal) >= 0 ||
+                n.IndexOf("jdk", StringComparison.Ordinal) >= 0 ||
+                n.IndexOf("jre", StringComparison.Ordinal) >= 0 ||
+                n.IndexOf("msiexec", StringComparison.Ordinal) >= 0 ||
+                n.IndexOf("windowsdesktop-runtime", StringComparison.Ordinal) >= 0 ||
+                n.IndexOf("vcredist", StringComparison.Ordinal) >= 0 ||
+                n.IndexOf("sentinelsetup", StringComparison.Ordinal) >= 0 ||
+                n.IndexOf("finalizer", StringComparison.Ordinal) >= 0) // WiX burn
                 return true;
 
             // Product-1.2.3-64-bit / Product-x64 / Product-amd64
             if (Regex.IsMatch(n, @"-\d+(\.\d+)+", RegexOptions.CultureInvariant) &&
-                (n.Contains("64", StringComparison.OrdinalIgnoreCase) ||
-                 n.Contains("86", StringComparison.OrdinalIgnoreCase) ||
-                 n.Contains("arm", StringComparison.OrdinalIgnoreCase) ||
-                 n.Contains("bit", StringComparison.OrdinalIgnoreCase) ||
-                 n.Contains("amd64", StringComparison.OrdinalIgnoreCase) ||
-                 n.Contains("x64", StringComparison.OrdinalIgnoreCase)))
+                (n.Contains("64") ||
+                 n.Contains("86") ||
+                 n.Contains("arm") ||
+                 n.Contains("bit") ||
+                 n.Contains("amd64") ||
+                 n.Contains("x64")))
                 return true;
 
             if (!string.IsNullOrEmpty(imagePath))
             {
-                var file = Path.GetFileNameWithoutExtension(imagePath);
+                var file = (Path.GetFileNameWithoutExtension(imagePath) ?? "").ToLowerInvariant();
                 if (!string.IsNullOrEmpty(file) &&
-                    !file.Equals(n, StringComparison.OrdinalIgnoreCase) &&
+                    !file.Equals(n, StringComparison.Ordinal) &&
                     LooksLikeInstallerName(file, null))
                     return true;
             }
@@ -150,10 +155,11 @@ namespace Sentinel.Core
         public static bool IsBenignEphemeralPrefetchName(string? exeOrPrefetchStem)
         {
             if (string.IsNullOrEmpty(exeOrPrefetchStem)) return false;
-            var n = Path.GetFileNameWithoutExtension(exeOrPrefetchStem)
-                .Replace(".tmp", "", StringComparison.OrdinalIgnoreCase);
+            var n = StringNet48.ReplaceIgnoreCase(
+                Path.GetFileNameWithoutExtension(exeOrPrefetchStem) ?? "", ".tmp", "");
 
-            if (IsInstallerExtractor(n, null) || LooksLikeInstallerName(n, null))
+            if (IsInstallerExtractor(n, null) || LooksLikeInstallerName(n, null) ||
+                IsDirectXOrRuntimeRedist(n, null))
                 return true;
 
             // Prefetch often uppercases and truncates
@@ -162,8 +168,66 @@ namespace Sentinel.Core
                 u.StartsWith("PYTHON-") || u.StartsWith("NODE-V") || u.Contains("SETUP") ||
                 u.Contains("INSTALL") || u.StartsWith("ISIDE") || u.StartsWith("FINALIZER") ||
                 u.Contains("CHROME") || u.Contains("VSCODE") || u.Contains("VCREDIST") ||
+                u.Contains("DXSETUP") || u.Contains("DIRECTX") || u.Contains("XNAFX") ||
                 u.Contains("SENTINELSETUP") || u.Contains("GOOGLEUPDATE"))
                 return true;
+
+            return false;
+        }
+
+        /// <summary>
+        /// Steam / game DirectX, VC++/XNA redistributables, GPU runtime drops.
+        /// These write System32 DLLs and look "suspicious" but must never be kill-grade
+        /// or composite legs — at most Tier2 observe noise.
+        /// </summary>
+        public static bool IsDirectXOrRuntimeRedist(string? processName, string? imagePath = null)
+        {
+            var n = StringNet48.ReplaceIgnoreCase(processName ?? "", ".exe", "").ToLowerInvariant();
+            var path = (imagePath ?? "").ToLowerInvariant();
+            var file = string.IsNullOrEmpty(imagePath)
+                ? ""
+                : StringNet48.ReplaceIgnoreCase(Path.GetFileNameWithoutExtension(imagePath) ?? "", ".exe", "")
+                    .ToLowerInvariant();
+
+            string[] names =
+            {
+                "dxsetup", "dsetup", "dsetup32", "dxdllreg", "directx",
+                "vcredist", "vc_redist", "vcredist_x86", "vcredist_x64",
+                "xnafx40", "xnafx", "dotnetfx", "ndp48", "ndp48-x86",
+                "oalinst", "openal", "physx", "nvdx", "nvinst",
+            };
+            foreach (var s in names)
+            {
+                if (n == s || n.Contains(s) || file == s || file.Contains(s))
+                    return true;
+            }
+
+            // Steam/game redistributable layouts
+            if (path.Contains(@"\steamapps\common\") &&
+                (path.Contains(@"\directx") || path.Contains(@"\_commonredist") ||
+                 path.Contains(@"\redist") || path.Contains(@"\vcredist") ||
+                 path.Contains(@"\dxsetup")))
+                return true;
+
+            if (path.Contains(@"\directx\") || path.Contains(@"\microsoft directx"))
+                return true;
+
+            // File drops that are pure redist DLLs into System32 (attribution may be PID 0 / dxsetup)
+            string[] redistDllHints =
+            {
+                "d3dx", "d3dcompiler", "xinput", "xaudio", "xacteng", "xapofx",
+                "x3daudio", "d2d1", "dxgi", "vulkan-1", "nvcuda", "nvapi",
+                "nvencode", "openal32", "physx",
+            };
+            var leaf = Path.GetFileName(path);
+            if (!string.IsNullOrEmpty(leaf))
+            {
+                foreach (var h in redistDllHints)
+                {
+                    if (leaf.IndexOf(h) >= 0)
+                        return true;
+                }
+            }
 
             return false;
         }
@@ -250,7 +314,7 @@ namespace Sentinel.Core
         {
             if (string.IsNullOrWhiteSpace(name)) return "";
             var n = name.Trim();
-            if (n.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+            if (n.EndsWith(".exe"))
                 n = n[..^4];
             return n;
         }

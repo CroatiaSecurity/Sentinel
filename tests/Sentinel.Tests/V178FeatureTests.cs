@@ -124,7 +124,9 @@ namespace Sentinel.Tests
 
                 var threat = new ThreatReportService(new ThreatReportingConfig { Enabled = false },
                     NullLogger<ThreatReportService>.Instance);
-                var reporter = new AutoIncidentReporter(cfg, threat, NullLogger<AutoIncidentReporter>.Instance);
+                var sentinelCfg = new SentinelConfig { SilentObserve = false, ObserveUntilChain = false };
+                var reporter = new AutoIncidentReporter(cfg, threat, NullLogger<AutoIncidentReporter>.Instance,
+                    sentinelConfig: sentinelCfg);
 
                 var hash = new string('b', 64);
                 var detection = new DetectionEvent
@@ -155,12 +157,12 @@ namespace Sentinel.Tests
                 Assert.True(File.Exists(Path.Combine(dir, "evidence_manifest.json")));
                 Assert.True(File.Exists(Path.Combine(dir, "VERIFY.txt")));
 
-                var affidavit = await File.ReadAllTextAsync(Path.Combine(dir, "victim_affidavit.txt"));
+                var affidavit = File.ReadAllText(Path.Combine(dir, "victim_affidavit.txt"));
                 Assert.Contains("Test User", affidavit);
                 Assert.Contains("test@example.com", affidavit);
                 Assert.Contains("SIGNATURE", affidavit);
 
-                var body = await File.ReadAllTextAsync(Path.Combine(dir, "incident_report.txt"));
+                var body = File.ReadAllText(Path.Combine(dir, "incident_report.txt"));
                 Assert.Contains("REPORTABLE-GRADE", body);
                 Assert.Contains("Integrity", body, StringComparison.OrdinalIgnoreCase);
 
@@ -168,12 +170,12 @@ namespace Sentinel.Tests
                 Assert.True(result.Ok, result.Message);
 
                 // Affidavit edit must not break seal
-                await File.AppendAllTextAsync(Path.Combine(dir, "victim_affidavit.txt"), "\nI noticed ransomware.\n");
+                File.AppendAllText(Path.Combine(dir, "victim_affidavit.txt"), "\nI noticed ransomware.\n");
                 var result2 = AutoIncidentReporter.VerifyPackIntegrity(dir);
                 Assert.True(result2.Ok, result2.Message);
 
                 // Editing sealed report must fail verification
-                await File.AppendAllTextAsync(Path.Combine(dir, "incident_report.txt"), "\ntampered\n");
+                File.AppendAllText(Path.Combine(dir, "incident_report.txt"), "\ntampered\n");
                 var result3 = AutoIncidentReporter.VerifyPackIntegrity(dir);
                 Assert.False(result3.Ok);
 

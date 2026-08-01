@@ -2,6 +2,39 @@
 
 All notable changes to Sentinel are documented in this file.
 
+## [1.8.7] - 2026-08-01
+
+### Changed — Target framework: .NET Framework 4.8 (windows)
+- Retargeted **Core / Service / Agent / Tests** to `net48-windows`.
+- **Minimum installer** (`installer/build.ps1`): framework-dependent publish (no self-contained runtime bundle). Assumes **.NET Framework 4.8** on the PC; Setup detects it and offers the Microsoft download page if missing.
+- Added `Net48Compat` shims (async file I/O, hex, KillTree, ProcessPath, String helpers, ADS verdict sidecar fallback, etc.) and `IsExternalInit` for modern C# on net48.
+- **1000 / 1000** unit tests green on net48.
+
+### Fixed — Post-install error dialogs
+- Service registration moved out of Inno `[Run]` `sc create` / `sc start` (those exit non-zero on upgrade when the service already exists / is running → red error box).
+- Idempotent Pascal `InstallOrUpdateService` + silent agent launch on `ssPostInstall`.
+
+### Policy — Tier1 = kill-grade only
+- `ResponsePolicy.ApplyTierLaw`: **Tier1** only for high-confidence (≥ `MinTier1Confidence`, default **0.85**) **token theft / credential dump / reverse shell / C2 beaconing**, or multi-signal **composites** that prove those.
+- All other monitor signals demote to **Tier2 + LogOnly** observe fuel for correlation.
+- Critical score alone no longer promotes noise to kill.
+- Live pipeline: `DetectionEngine` always applies tier law; `AdvancedResponseEngine` re-applies when `ObserveUntilChain` is on.
+
+### Policy — DirectX / redistributables stay observe-only
+- Steam DirectX, VC++, GPU redistributable System32 writes: **Tier2 observe only** (maybe 1–2 signals).
+- Never Tier1, never chain seed, never composite legs (`IsBenignInstallerNoise` / `IsDirectXOrRuntimeRedist` / correlation skip).
+- `FileActivityMonitor` tags System32 redist writes with `BenignInstallerNoise` + low confidence.
+
+### Fixed — Tray icon after install
+- `AgentWatchdog`: removed **20s startup grace** and “delay before first check” loop order.
+- First agent liveness check runs **immediately** so the tray appears without a multi-second wait when the agent is missing.
+
+### Fixed — Cuckoo / app integrity observe gate
+- `ApplicationIntegrityMonitor` emits cuckoo eggs as **Tier2 LogOnly**; inline kill/quarantine/restore only when `MayPerformInlineHostMutation` allows (observe-until-chain default: no).
+
+### Constraints
+- Documented Tier1 kill-grade families and DirectX observe rule in `constraints.md`.
+
 ## [1.8.6] - 2026-08-01
 
 ### Policy — Observe-until-chain (rebuild)

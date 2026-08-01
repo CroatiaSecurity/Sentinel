@@ -100,7 +100,7 @@ namespace Sentinel.Core
 
                 if (circlResponse.IsSuccessStatusCode)
                 {
-                    var circlJson = await circlResponse.Content.ReadAsStringAsync(cancellationToken);
+                    var circlJson = await circlResponse.Content.ReadAsStringAsync();
                     // Parse "hashlookup:trust" field — values above 60 indicate known-good software
                     var trustMatch = System.Text.RegularExpressions.Regex.Match(
                         circlJson, @"""hashlookup:trust""\s*:\s*(\d+)");
@@ -143,7 +143,7 @@ namespace Sentinel.Core
 
                 if (response.IsSuccessStatusCode)
                 {
-                    var responseString = await response.Content.ReadAsStringAsync(cancellationToken);
+                    var responseString = await response.Content.ReadAsStringAsync();
                     if (responseString.Contains("\"query_status\": \"ok\"") || responseString.Contains("\"query_status\":\"ok\""))
                     {
                         return HashVerdict.Unsafe;

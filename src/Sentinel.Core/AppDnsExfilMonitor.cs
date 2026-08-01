@@ -386,7 +386,7 @@ namespace Sentinel.Core
                 var subject = signerCert.Subject ?? "";
                 foreach (var publisher in expectedPublishers)
                 {
-                    if (subject.Contains(publisher, StringComparison.OrdinalIgnoreCase))
+                    if (subject.Contains(publisher))
                         return true;
                 }
                 return false;

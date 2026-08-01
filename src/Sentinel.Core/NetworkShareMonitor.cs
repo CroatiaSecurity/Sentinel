@@ -204,11 +204,11 @@ namespace Sentinel.Core
 
                     // Determine severity based on what's being shared
                     bool isFullDrive = !string.IsNullOrEmpty(share.Path) &&
-                        share.Path.Length <= 3 && share.Path.Contains(':');
+                        share.Path.Length <= 3 && share.Path.IndexOf(':') >= 0;
                     bool isSystemPath = !string.IsNullOrEmpty(share.Path) &&
-                        (share.Path.StartsWith(@"C:\Windows", StringComparison.OrdinalIgnoreCase) ||
-                         share.Path.StartsWith(@"C:\Users", StringComparison.OrdinalIgnoreCase) ||
-                         share.Path.StartsWith(@"C:\Program", StringComparison.OrdinalIgnoreCase));
+                        (share.Path.StartsWith(@"C:\Windows") ||
+                         share.Path.StartsWith(@"C:\Users") ||
+                         share.Path.StartsWith(@"C:\Program"));
 
                     var confidence = isFullDrive ? 0.95 : isSystemPath ? 0.88 : 0.75;
 

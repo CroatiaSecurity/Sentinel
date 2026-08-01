@@ -39,7 +39,7 @@ namespace Sentinel.Core
                 try
                 {
                     using var fs = new FileStream(ntdllPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-                    _baselineNtdllHash = SHA256.HashData(fs);
+                    _baselineNtdllHash = System.Security.Cryptography.Sha256Net48.HashData(fs);
                 }
                 catch { /* access race */ }
             }
@@ -56,14 +56,14 @@ namespace Sentinel.Core
                         byte[] currentHash;
                         using (var fs = new FileStream(ntdllPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
                         {
-                            currentHash = SHA256.HashData(fs);
+                            currentHash = System.Security.Cryptography.Sha256Net48.HashData(fs);
                         }
                         if (!currentHash.SequenceEqual(_baselineNtdllHash))
                         {
                             await _detectionEngine.EmitAsync(new DetectionEvent
                             {
                                 RuleName = "ETW Tampering: ntdll.dll On-Disk Hash Changed",
-                                Evidence = $"ntdll.dll hash changed from {Convert.ToHexString(_baselineNtdllHash)} to {Convert.ToHexString(currentHash)}",
+                                Evidence = $"ntdll.dll hash changed from {ConvertHex.ToHexString(_baselineNtdllHash)} to {ConvertHex.ToHexString(currentHash)}",
                                 Reasoning = "The on-disk ntdll.dll hash changed, which should never happen during normal operation.",
                                 Confidence = 0.95, Tier = DetectionTier.Tier1Behavioral,
                                 AuthorizedResponse = ResponseAction.KillProcessTree,
