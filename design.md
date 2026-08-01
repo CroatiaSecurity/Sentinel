@@ -44,7 +44,7 @@ The fusion layer is PASSIVE — it never blocks, kills, or modifies telemetry.
 | Process | Session | Runs As | Purpose |
 |---------|---------|---------|---------|
 | `Sentinel.Service.exe` | Session 0 | SYSTEM | Core detection, response, ETW, network, file, registry monitoring |
-| `Sentinel.Agent.exe` | User session | Logged-in user | Tray icon, clipboard, keyboard hooks, screen/webcam, UI attack detection |
+| `Sentinel.Agent.exe` | User session | Logged-in user | Tray icon, keyboard hooks, screen/webcam, UI attack detection |
 
 The Service is the authority. The Agent provides user-session visibility and UI.
 `AgentWatchdog` (Service-side) monitors Agent liveness and relaunches it if killed.
@@ -200,7 +200,6 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 |-----------|-----------|-------|
 | `TrayIconService` | System tray NotifyIcon; context menu **Settings** opens Agent settings UI (Overview / Events / Report to Police / Quarantine). **No** `ShowBalloonTip` (WpnService removed by hardening deadlocks STA) | WinForms STA |
 | `AgentDashboardForm` | TrimKit-style dark sidebar Settings UI; affidavit editor + national portal open for evidence packs | WinForms STA |
-| `ClipboardSanitizer` | Strips zero-width chars, RTL overrides, Cyrillic homoglyphs, Unicode tags; ClickFix paste-run clear | 10s poll |
 | `ScreenCaptureMonitor` | Detects DXGI desktop duplication + transparent overlay phishing windows | 15–25s |
 | `WebcamMicMonitor` | Detects background camera/mic access via DLL analysis (Media Foundation, WASAPI) | 20s |
 | `AudioHijackMonitor` | Module-based detection of output-to-mic redirection (virtual audio cables) | periodic |
@@ -208,7 +207,7 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 | `NeuroBehaviorVisualMonitor` | Focus steals, cursor jumps, brightness oscillations, large transparent topmost overlays | 1s sample |
 | `BrowserExtensionMonitor` | Baselines extensions; detects new extensions with dangerous permissions | 30s |
 | `PhantomKeystrokeGuard` | WH_KEYBOARD_LL hook; blocks software-injected keystrokes | continuous |
-| `ClickjackingGuard` | Mouse hook; detects injected clicks, cursor teleport, fake UAC/credential prompts, clipboard crypto swap | continuous |
+| `ClickjackingGuard` | Mouse hook; detects injected clicks, cursor teleport, fake UAC/credential prompts | continuous |
 | `WebcamHijackMonitor` | Monitors ConsentStore for webcam/microphone access by new apps | periodic |
 | `ShellWatchdog` | Monitors explorer.exe responsiveness via SendMessageTimeout; auto-restarts shell | 5s |
 | `ScarewareWindowMonitor` | Window-title scareware / fake UAC / fake Defender dialogs (≥2 keywords) | 10s |

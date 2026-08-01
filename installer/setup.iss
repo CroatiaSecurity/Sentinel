@@ -13,6 +13,8 @@ SolidCompression=yes
 OutputDir=.
 OutputBaseFilename=SentinelSetup-1.8.4
 PrivilegesRequired=admin
+; One active Setup wizard at a time (elevation handoff still works: non-elevated exits first)
+SetupMutex=Global\SentinelSetupMutex
 ; Allow upgrading over existing install
 UsePreviousAppDir=yes
 CloseApplications=no
@@ -67,6 +69,110 @@ Type: filesandordirs; Name: "{commonpf32}\Sentinel"
 
 [Code]
 // Pascal Script for upgrade/uninstall logic
+//
+// Dual-process Inno flow (outer EXE + elevated/temp "2nd" setup):
+// After a successful install, close leftover sibling Setup processes and stamp
+// completion so a leftover first wizard cannot run install again.
+
+const
+  SetupStampKey = 'Software\Sentinel\Setup';
+  // How long a leftover first wizard is blocked after the real install finishes
+  SetupSiblingBlockMinutes = 30;
+
+function GetCurrentProcessId: Cardinal;
+  external 'GetCurrentProcessId@kernel32.dll stdcall';
+
+function GetTickCount: Cardinal;
+  external 'GetTickCount@kernel32.dll stdcall';
+
+procedure MarkInstallCompleted();
+var
+  Ver: String;
+begin
+  Ver := ExpandConstant('{#SetupSetting("AppVersion")}');
+  // Tick count is enough for "recent sibling" detection within one boot session
+  RegWriteStringValue(HKLM, SetupStampKey, 'LastCompletedVersion', Ver);
+  RegWriteDWordValue(HKLM, SetupStampKey, 'LastCompletedTicks', GetTickCount());
+end;
+
+procedure ClearInstallCompletedStamp();
+begin
+  RegDeleteValue(HKLM, SetupStampKey, 'LastCompletedVersion');
+  RegDeleteValue(HKLM, SetupStampKey, 'LastCompletedTicks');
+  RegDeleteKeyIfEmpty(HKLM, SetupStampKey);
+end;
+
+function WasSameVersionJustInstalled(): Boolean;
+var
+  Ver, CompletedVer: String;
+  Ticks, NowTicks, WindowMs, Elapsed: Cardinal;
+begin
+  Result := False;
+  Ver := ExpandConstant('{#SetupSetting("AppVersion")}');
+
+  if not RegQueryStringValue(HKLM, SetupStampKey, 'LastCompletedVersion', CompletedVer) then
+    Exit;
+  if not SameText(CompletedVer, Ver) then
+    Exit;
+  if not RegQueryDWordValue(HKLM, SetupStampKey, 'LastCompletedTicks', Ticks) then
+    Exit;
+
+  NowTicks := GetTickCount();
+  // Unsigned wrap-safe elapsed (GetTickCount wraps ~49 days)
+  Elapsed := NowTicks - Ticks;
+  WindowMs := SetupSiblingBlockMinutes * 60 * 1000;
+  if Elapsed <= WindowMs then
+    Result := True;
+end;
+
+// Close other SentinelSetup*.exe / *.tmp processes so a leftover first wizard
+// cannot continue after the elevated/temp install finished.
+procedure CloseSiblingSetupProcesses();
+var
+  ResultCode: Integer;
+  PsPath: String;
+  Cmd: String;
+  MyPid: String;
+begin
+  MyPid := IntToStr(GetCurrentProcessId());
+  PsPath := ExpandConstant('{sysnative}\WindowsPowerShell\v1.0\powershell.exe');
+  // Only SentinelSetup* images — do not touch unrelated Inno installers (Git, etc.)
+  Cmd :=
+    '-ExecutionPolicy Bypass -Command "' +
+    '$exclude = ' + MyPid + '; ' +
+    'Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object { ' +
+    '  $_.ProcessId -ne $exclude -and ( ' +
+    '    $_.Name -like ''SentinelSetup*'' -or ' +
+    '    ($_.ExecutablePath -and ($_.ExecutablePath -like ''*SentinelSetup*'')) ' +
+    '  ) ' +
+    '} | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"';
+  Exec(PsPath, Cmd, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
+function InitializeSetup(): Boolean;
+begin
+  Result := True;
+  // Leftover first wizard after a successful 2nd install: refuse to install again
+  if WasSameVersionJustInstalled() then
+  begin
+    MsgBox(
+      'Sentinel ' + ExpandConstant('{#SetupSetting("AppVersion")}') +
+      ' was already installed successfully.' + #13#10#13#10 +
+      'This leftover Setup window cannot install again. Click OK to close it.',
+      mbInformation, MB_OK);
+    Result := False;
+  end;
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  // After files/service are in place, stamp success and tear down sibling wizards
+  if CurStep = ssPostInstall then
+  begin
+    MarkInstallCompleted();
+    CloseSiblingSetupProcesses();
+  end;
+end;
 
 procedure StopServiceByName(const ServiceName: String);
 var
@@ -132,6 +238,17 @@ end;
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
   Result := '';
+
+  // Leftover first wizard already past InitializeSetup when the 2nd finished:
+  // block the actual install step (sibling kill should already have closed this).
+  if WasSameVersionJustInstalled() then
+  begin
+    Result :=
+      'Sentinel was already installed successfully by another Setup window. ' +
+      'Close this leftover Setup; do not install again from here.';
+    Exit;
+  end;
+
   // If upgrading (existing install present), stop service and reset ACLs
   if RegValueExists(HKLM, 'SOFTWARE\Microsoft\Windows\CurrentVersion\Run', 'SentinelAgent') or
      RegKeyExists(HKLM, 'SYSTEM\CurrentControlSet\Services\Sentinel') or
@@ -150,6 +267,9 @@ begin
   begin
     // Stop service before uninstall
     StopExistingService();
+
+    // Allow a fresh Setup after uninstall (clear sibling-block stamp)
+    ClearInstallCompletedStamp();
 
     // Remove Sentinel registry keys
     RegDeleteValue(HKLM, 'SOFTWARE\Microsoft\Windows\CurrentVersion\Run', 'SentinelAgent');

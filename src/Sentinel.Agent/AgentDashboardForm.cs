@@ -1341,7 +1341,7 @@ namespace Sentinel.Agent
                 $"Windows Sentinel v{_version}\n\n" +
                 "User-session agent for endpoint detection and response.\n" +
                 "The Sentinel service (SYSTEM) owns kills, quarantine, and hardening.\n" +
-                "This agent owns tray UI, clipboard/keyboard guards, and filing helpers.\n\n" +
+                "This agent owns tray UI, keyboard guards, and filing helpers.\n\n" +
                 "Reportable-grade attacks produce integrity-sealed evidence packs under:\n" +
                 $"  {GetReportRoot()}\n\n" +
                 "Police filing:\n" +

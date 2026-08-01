@@ -284,7 +284,6 @@ namespace Sentinel.Agent
                     services.AddHostedService<TrayIconService>();
 
                     // User-session monitors (require user desktop/registry hive)
-                    services.AddHostedService<ClipboardSanitizer>();
                     services.AddHostedService<ScreenCaptureMonitor>();
                     services.AddHostedService<WebcamMicMonitor>();
                     services.AddHostedService<AudioHijackMonitor>();

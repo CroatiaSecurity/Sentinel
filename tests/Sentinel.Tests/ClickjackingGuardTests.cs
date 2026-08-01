@@ -83,24 +83,5 @@ namespace Sentinel.Tests
                 try { Directory.Delete(tempDir, true); } catch { }
             }
         }
-
-        [Fact]
-        public void ClipboardSanitizer_SanitizeText_DetectsRtlOverride()
-        {
-            var input = "invoice\u202Eexe.doc";
-            var result = ClipboardSanitizer.SanitizeText(input, out bool modified);
-            Assert.True(modified);
-            // RTL override character should be stripped
-            Assert.Equal("invoiceexe.doc", result);
-        }
-
-        [Fact]
-        public void ClipboardSanitizer_SanitizeText_DetectsZeroWidth()
-        {
-            var input = "normal\u200Btext\u200C";
-            var result = ClipboardSanitizer.SanitizeText(input, out bool modified);
-            Assert.True(modified);
-            Assert.Equal("normaltext", result);
-        }
     }
 }

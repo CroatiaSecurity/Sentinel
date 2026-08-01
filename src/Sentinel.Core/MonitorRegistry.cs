@@ -335,7 +335,7 @@ namespace Sentinel.Core
         MemoryAnalysis,       // MemoryBehavior, DllEntropy, RuntimeModule, SyscallStub
         CredentialProtection, // LSASS canary, CredentialCanary, BrowserCred
         SystemIntegrity,      // AntiTamper, CriticalService, SecureBoot, FirewallIntegrity
-        UserProtection,       // Clickjacking, Clipboard, ScreenCapture, Webcam, Audio
+        UserProtection,       // Clickjacking, ScreenCapture, Webcam, Audio
         ThreatIntel,          // IoC, FileReputation, HashReputation
         ResponseEngine        // AdvancedResponse, ChainTracer, Quarantine, Isolation
     }

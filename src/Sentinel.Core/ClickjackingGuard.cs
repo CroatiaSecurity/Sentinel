@@ -19,9 +19,8 @@ namespace Sentinel.Core
     /// 2. Click redirection — detects SetCursorPos followed by synthetic click (cursor teleport + click)
     /// 3. Non-foreground overlays — enumerates ALL visible top-level windows for overlay patterns
     /// 4. Fake UAC/credential prompts — detects windows mimicking system UI from non-system processes
-    /// 5. Clipboard crypto swap — detects wallet address replacement in clipboard
-    /// 6. Semi-transparent overlays — detects partially transparent windows over sensitive areas
-    /// 
+    /// 5. Semi-transparent overlays — detects partially transparent windows over sensitive areas
+    ///
     /// Runs in the user session (Agent) since it needs desktop access.
     /// </summary>
     public sealed class ClickjackingGuard : BackgroundService
@@ -44,26 +43,8 @@ namespace Sentinel.Core
         private DateTime _lastCursorChange = DateTime.UtcNow;
         private int _teleportClickCount; // cursor jump + click within 50ms
 
-        // Clipboard crypto swap detection
-        private string? _lastClipboardText;
-        private DateTime _lastClipboardCheck = DateTime.MinValue;
-
         // Fake UAC dedup
         private readonly ConcurrentDictionary<int, DateTime> _fakeUacAlerted = new();
-
-        // Crypto address patterns — these detect clipper malware, NOT perform clipping.
-        // Patterns are constructed at runtime to avoid static heuristic signature matching
-        // by AV engines that flag "crypto regex + clipboard write" as ClipBanker.
-        private static readonly System.Text.RegularExpressions.Regex BtcAddressRegex =
-            BuildRegex(@"\b(bc1[a-zA-HJ-NP-Z0-9]{25,39}|[13][a-km-zA-HJ-NP-Z1-9]{25,34})\b");
-        private static readonly System.Text.RegularExpressions.Regex EthAddressRegex =
-            BuildRegex(@"\b0x[a-fA-F0-9]{40}\b");
-
-        private static System.Text.RegularExpressions.Regex BuildRegex(string pattern)
-        {
-            return new System.Text.RegularExpressions.Regex(
-                pattern, System.Text.RegularExpressions.RegexOptions.Compiled);
-        }
 
         #region P/Invoke
 
@@ -150,7 +131,7 @@ namespace Sentinel.Core
 
         protected override async Task ExecuteAsync(CancellationToken ct)
         {
-            _logger.LogInformation("[ClickjackingGuard] Started — monitoring for clickjacking, fake UAC, mouse injection, crypto clipboard swap");
+            _logger.LogInformation("[ClickjackingGuard] Started — monitoring for clickjacking, fake UAC, mouse injection");
 
             // Install low-level mouse hook on a dedicated STA thread
             var hookThread = new Thread(() => RunMouseHook(ct));
@@ -169,7 +150,6 @@ namespace Sentinel.Core
                     // Periodic checks (every 5s)
                     await CheckOverlayWindowsAsync();
                     await CheckFakeUacAsync();
-                    await CheckClipboardCryptoSwapAsync();
                     CheckCursorTeleportation();
                 }
                 catch (OperationCanceledException) { break; }
@@ -639,120 +619,6 @@ namespace Sentinel.Core
 
                 return true;
             }, IntPtr.Zero);
-        }
-
-        #endregion
-
-        #region Clipboard Crypto Address Swap Detection
-
-        private async Task CheckClipboardCryptoSwapAsync()
-        {
-            try
-            {
-                string? currentText = null;
-                var thread = new Thread(() =>
-                {
-                    try
-                    {
-                        if (System.Windows.Forms.Clipboard.ContainsText())
-                            currentText = System.Windows.Forms.Clipboard.GetText();
-                    }
-                    catch { }
-                });
-                thread.SetApartmentState(ApartmentState.STA);
-                thread.Start();
-                thread.Join(200);
-
-                if (string.IsNullOrEmpty(currentText)) return;
-                if (currentText == _lastClipboardText) return;
-
-                var previousText = _lastClipboardText;
-                _lastClipboardText = currentText;
-
-                if (string.IsNullOrEmpty(previousText)) return;
-
-                // Check if clipboard previously had a crypto address and now has a DIFFERENT one
-                bool prevHadBtc = BtcAddressRegex.IsMatch(previousText);
-                bool prevHadEth = EthAddressRegex.IsMatch(previousText);
-                bool currHasBtc = BtcAddressRegex.IsMatch(currentText);
-                bool currHasEth = EthAddressRegex.IsMatch(currentText);
-
-                // Swap detection: same type of address but different value
-                if (prevHadBtc && currHasBtc)
-                {
-                    var prevAddr = BtcAddressRegex.Match(previousText).Value;
-                    var currAddr = BtcAddressRegex.Match(currentText).Value;
-                    if (prevAddr != currAddr && currentText.Trim() == currAddr)
-                    {
-                        await EmitCryptoSwapAlert("BTC", prevAddr, currAddr);
-                    }
-                }
-                else if (prevHadEth && currHasEth)
-                {
-                    var prevAddr = EthAddressRegex.Match(previousText).Value;
-                    var currAddr = EthAddressRegex.Match(currentText).Value;
-                    if (prevAddr != currAddr && currentText.Trim() == currAddr)
-                    {
-                        await EmitCryptoSwapAlert("ETH", prevAddr, currAddr);
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogDebug(ex, "[ClickjackingGuard] Clipboard check error");
-            }
-        }
-
-        private async Task EmitCryptoSwapAlert(string coinType, string original, string replaced)
-        {
-            await _detectionEngine.EmitAsync(new DetectionEvent
-            {
-                RuleName = "Clipboard Hijack: Crypto Address Swap",
-                Evidence = $"Clipboard {coinType} address was silently replaced. " +
-                           $"Original: {original[..8]}...{original[^6..]} → " +
-                           $"Replaced: {replaced[..8]}...{replaced[^6..]}",
-                Reasoning = "A cryptocurrency address in the clipboard was silently replaced with a different address. " +
-                            "This is a clipboard hijacker (clipper malware) — it monitors the clipboard for crypto addresses " +
-                            "and swaps them with the attacker's address so funds are sent to the attacker.",
-                Confidence = 0.95,
-                Tier = DetectionTier.Tier1Behavioral,
-                AuthorizedResponse = ResponseAction.LogOnly, // Don't kill — identify the clipper first
-                ProcessName = "SYSTEM",
-                ProcessId = 0,
-                SignalType = SignalType.AntiTamper,
-                Metadata = new Dictionary<string, string>
-                {
-                    { "CoinType", coinType },
-                    { "OriginalAddress", original },
-                    { "ReplacedAddress", replaced }
-                }
-            });
-
-            // Restore the original address via a non-obvious code path.
-            // AV heuristics flag "crypto regex + Clipboard.SetText" in the same class as ClipBanker.
-            // Delegating the restore to an external call breaks the heuristic pattern.
-            RestoreClipboardContent(original);
-        }
-
-        /// <summary>
-        /// Restores clipboard text to a previous value.
-        /// Separated from crypto detection logic to avoid AV heuristic false positives
-        /// (anti-clipbanker detection pattern: regex match + clipboard write in same scope).
-        /// </summary>
-        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private static void RestoreClipboardContent(string text)
-        {
-            try
-            {
-                var thread = new Thread(() =>
-                {
-                    try { System.Windows.Forms.Clipboard.SetText(text); } catch { }
-                });
-                thread.SetApartmentState(ApartmentState.STA);
-                thread.Start();
-                thread.Join(200);
-            }
-            catch { }
         }
 
         #endregion

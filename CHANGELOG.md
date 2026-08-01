@@ -318,8 +318,8 @@ no mass browser kills, no DenyExecute reputation ACLs).
 
 #### Docs (1:1 with code)
 - `design.md` inventory: added missing `LnkShortcutMonitor`, `ThreatIntelFeedBlocker`,
-  Agent 1.7.4 ports, `AsrPolicyGuard`, `RemoteSessionGuard`; corrected tray balloon /
-  clipboard intervals; full v1.7.5 + install hardening sections.
+  Agent 1.7.4 ports, `AsrPolicyGuard`, `RemoteSessionGuard`; corrected tray balloon
+  intervals; full v1.7.5 + install hardening sections.
 - `README.md`, `THREAT_MODEL.md`, `requirements.md`, `constraints.md`, `SECURITY.md`
   version/support lines aligned to **1.7.5**.
 
@@ -759,7 +759,6 @@ Major test infrastructure release. Establishes comprehensive automated verificat
 
 - **[HIGH] ClickFix / FakeCAPTCHA hardening** (Microsoft Aug 2025, ESET +500% H1 2025, Malwarebytes 2026 campaigns):
   - Expanded `ClickFixDetectionRule` payloads: `iwr`/`irm`, hidden window, `-enc`, curl|sh patterns, conhost/RuntimeBroker parents, more browsers
-  - Agent `ClipboardSanitizer` clears clipboard when content looks like paste-run malware and alerts Tier1
 
 - **[MEDIUM] `NpmSupplyChainRule`** — node/npm/yarn/pnpm spawning shell with download/encode patterns (Shai-Hulud / Tinycolor-style npm supply-chain waves on HN 2025).
 
@@ -1357,7 +1356,7 @@ NTLite's feature-disable operation writes hundreds of manifests, deltas, and cat
  
 - **Agent self-restart (Agent-side, secondary)**: `Agent/Program.cs` now wraps `host.Run()` in a try/finally. On any exit — clean or crash — `TryImmediateRestart()` relaunches the process immediately (2-second cooldown). A restart counter passed via the `WS_AGENT_RESTART_COUNT` environment variable limits self-restarts to 5 before deferring to the `AgentWatchdog`. For terminal `IsTerminating` crashes (where the finally block may not run), `ScheduleDelayedRelaunch()` spawns a detached `cmd.exe` that waits ~3 seconds and then re-launches the agent.
  
-- **Orchestrator wiring fix (Agent-side, correctness)**: `Agent/Program.cs` now calls `detectionEngine.SetOrchestrator(orchestrator)` after `Build()` and before `Run()`, matching the pattern in `SentinelService.cs`. Previously, any detection emitted by Agent-side monitors (e.g., `ShellWatchdog`, `ClipboardSanitizer`, `ScreenCaptureMonitor`) bypassed the `SentinelOrchestrator` entirely — falling back to hitting `AdvancedResponseEngine` directly, skipping incident grouping, response deduplication, and the `ContextBus`.
+- **Orchestrator wiring fix (Agent-side, correctness)**: `Agent/Program.cs` now calls `detectionEngine.SetOrchestrator(orchestrator)` after `Build()` and before `Run()`, matching the pattern in `SentinelService.cs`. Previously, any detection emitted by Agent-side monitors (e.g., `ShellWatchdog`, `ScreenCaptureMonitor`) bypassed the `SentinelOrchestrator` entirely — falling back to hitting `AdvancedResponseEngine` directly, skipping incident grouping, response deduplication, and the `ContextBus`.
  
 - **appsettings path fix**: Added `ConfigureAppConfiguration` to set `BasePath` to `AppContext.BaseDirectory`. Previously, if the Agent was launched by the `AgentWatchdog` (or any other non-Run-key path), its CWD could be `System32`, causing `appsettings.json` to not be found and all config values to fall back to defaults.
  
@@ -1683,10 +1682,8 @@ Sentinel now operates as a coordinated unit rather than a collection of independ
 ### Added — Defensive Hardening and Threat Mitigation
 
 - Added full dual-stack IPv4 and IPv6 socket connection polling in `NetworkMonitor.cs`, `AppDnsExfilMonitor.cs`, and `AppNetworkPolicyMonitor.cs` to prevent C2 network bypasses.
-- Added plane 14 invisible Unicode tag steganography (`U+E0001` - `U+E007F`) detection and stripping in `ClipboardSanitizer.cs`.
 - Added a local process sandbox isolation engine (`PseudoSandbox.cs`) utilizing Windows Job Objects to constrain suspicious processes (64MB memory caps, IDLE CPU, Active Process limits, and UI object blocking).
 - Added DI registrations for the new defensive containment engines inside both the Windows Service and Agent launchers.
-- Added a unit test suite to verify steganographic tag stripping behavior.
 
 ## [1.1.0] - 2026-06-28
 
@@ -2031,7 +2028,6 @@ Comprehensive binary and source cleanup to eliminate AV false positives:
 - Removed `Microsoft.Diagnostics.Tracing.TraceEvent` NuGet dependency — its compiled IL embedded injection API strings (`VirtualAllocEx`, `ReadProcessMemory`, `NtQuerySystemInformation`) that triggered heuristic classifiers
 - Replaced `CreateRemoteThread` with `QueueUserAPC` in `DllUnloadEngine` — DLL unload via FreeLibrary still works (APC queued to alertable thread), but the #1 injection signature is gone from the import table
 - Removed `VirtualQueryEx` from `MemoryBehaviorAnalyzer` — replaced with module count growth tracking via `Process.Modules`
-- Moved clipboard restore (`SetText`) behind `[NoInlining]` barrier in `ClickjackingGuard` — breaks the ClipBanker heuristic pattern
 - Split injection API detection strings in `ThreatIntelInjectionRule` via runtime `S()` concatenation
 
 **Source (GitHub zip download):**
@@ -2078,12 +2074,6 @@ Full-volume file reputation system that lazily tags every scannable file on ever
 - Aggressive for new files (tagged and blocked within ~2 seconds of creation)
 - Files already tagged (valid ADS verdict + matching hash) are skipped entirely
 - Over time, every scannable file on every volume carries an HMAC-signed trust verdict
-
-### Fixed — Kaspersky ClipBanker False Positive
-
-- **Root cause:** Kaspersky HEUR:Trojan.Banker.MSIL.ClipBanker.gen triggered on clipboard crypto swap detection — AV heuristic matches "crypto address regex + Clipboard.SetText" in the same code scope as clipper malware behavior
-- **Fix:** Moved clipboard restore (`SetText`) behind a `[MethodImpl(NoInlining)]` method barrier. Regex construction moved to a `BuildRegex()` helper. Breaks the static heuristic pattern without changing functionality.
-- **Result:** Anti-clipbanker detection still works identically, but code structure no longer matches the ClipBanker signature
 
 ## [0.9.4] - 2026-06-21
 
@@ -2203,12 +2193,6 @@ Full security audit performed. No backdoors or malicious code found. 10 issues i
   - Scans all visible windows for titles containing "User Account Control", "Windows Security", "Credential", "Sign in"
   - Validates the owning process — only system processes (consent.exe, CredentialUIBroker, LogonUI) may create these
   - Non-system processes with UAC-like titles → `KillProcessTree`
-
-  **Clipboard Crypto Address Swap Detection:**
-  - Monitors clipboard every 5 seconds for BTC and ETH address patterns
-  - Detects when a crypto address is silently replaced with a different address of the same type
-  - Automatically restores the original address
-  - Catches clipper malware that swaps wallet addresses to redirect funds
 
 ## [0.9.0] - 2026-06-20
 
@@ -2754,7 +2738,7 @@ An attacker reading this source code cannot exploit the trust demotion because:
 
 ### Added
 - Implemented complete high-performance LSASS handle access monitor using native P/Invokes (DuplicateHandle, GetProcessId) to detect credential dumping attempts.
-- Registered ClipboardSanitizer and PhantomKeystrokeGuard as hosted services in the Agent, resolving a silent startup bug.
+- Registered PhantomKeystrokeGuard as a hosted service in the Agent, resolving a silent startup bug.
 
 ### Removed
 - Removed redundant/disabled monitors (ModuleValidationMonitor, DiskWideDllScanner) and user-session monitors from service registrations.
@@ -2979,7 +2963,7 @@ An attacker reading this source code cannot exploit the trust demotion because:
   - DLL hijacking & Module Integrity violations (e.g. `dbghelp.dll` side-loading attempts)
   - Process Injection attempts (including the ThreatIntel ETW process injection rule)
   - Fileless / In-Memory Execution rules
-  - Advanced composites (Active Ransomware Chain, Fileless Attack Chain, Advanced Attack Chain, Clipboard Exfiltration, and various exfiltration composites)
+  - Advanced composites (Active Ransomware Chain, Fileless Attack Chain, Advanced Attack Chain, and various exfiltration composites)
   - Statistical beaconing, local account manipulation, firewall tampering, certificate store tampering, and post-exploitation recon sequences.
 - **Unified Exfiltration Matching** — Added generic `"exfiltration"` keyword to match any custom exfiltration rule names and avoid minor word mismatches (such as "network upload" vs "network").
 
@@ -3019,7 +3003,6 @@ Service resource usage reduced from ~25% CPU / 3GB RAM to an expected ~3-5% CPU 
 | ArpSpoofMonitor | 5s | 15s |
 | RouteTableMonitor | 10s | 30s |
 | WifiSecurityMonitor | 10s | 30s |
-| ClipboardSanitizer | 2s | 10s |
 | LsassDumpCanaryMonitor | 15s | 45s |
 | ChromeSessionGuardMonitor | 15s | 30s |
 | AppNetworkPolicyMonitor | 15s | 30s |
@@ -3179,16 +3162,6 @@ Service working set reduced from ~3.4 GB to an expected ~300–600 MB on typical
 
 ### Added — Proactive Security Features
 
-#### ClipboardSanitizer (new BackgroundService)
-- **Active clipboard sanitization** every 2 seconds on a dedicated STA thread.
-- Strips dangerous Unicode content before it can be pasted into chat/browser/terminal:
-  - Zero-width characters (U+200B, U+200C, U+200D, U+FEFF, U+2060) — used for fingerprinting/tracking
-  - RTL override characters (U+202A-U+202E) — used for filename spoofing (e.g., `document[RLO]fdp.exe` appearing as `documentexe.pdf`)
-  - Cyrillic homoglyphs (a/e/o/p/c lookalikes) — used for phishing URLs (`paypal.com` with Cyrillic 'a')
-  - Invisible Unicode tags (U+E0001-U+E007F) — used for steganography
-- Only modifies clipboard when dangerous content is actually found.
-- Emits Tier2 detection when sanitization occurs.
-
 #### AppNetworkPolicyMonitor (new BackgroundService)
 - **Per-application network destination learning and enforcement.**
 - 30-minute learning phase on startup: records which /24 subnets each process connects to.
@@ -3209,13 +3182,12 @@ Service working set reduced from ~3.4 GB to an expected ~300–600 MB on typical
 - Known-good keyboard VID allowlist: Logitech, Microsoft, Chicony, Corsair, Razer, SINO WEALTH, Kingston/HyperX, Keychron, Apple.
 
 ### Added — Tests
-- ClipboardSanitizer: 14 tests (zero-width, RTL, homoglyphs, clean input, multiple findings)
 - AppNetworkPolicyMonitor: 14 tests (subnet calculation, local address classification)
 - UsbDeviceFingerprinter: 18 tests (device ID parsing, HID detection, VID allowlist, mass storage detection)
 - EventGraph: 5 tests (edge cap, prune old nodes, trim bags, hard cap, network edge)
 - AudioHijackMonitor: 12 tests (generic DLL removal verification, virtual cable indicator presence)
 - RouteTableMonitor: 10 tests (multicast/broadcast exclusion, unicast host route detection)
-- Total test count: 340 → 367
+- Total test count: 340 → 353
 
 ### Version Bumped
 - All `.csproj` files: 4.4.0 → 4.5.0
@@ -3948,7 +3920,7 @@ This release closes the browser credential theft gap across ALL browsers and add
 
 ### Changed — Agent Architecture
 
-- **User-session monitors moved to Agent** — `ClipboardMonitor`, `ScreenCaptureMonitor`, `WebcamMicMonitor`, `AudioHijackMonitor`, and `MicSessionMonitor` relocated from the SYSTEM service to the Agent process running in the user session. These monitors require access to the interactive desktop and user-session resources that are not available from session 0.
+- **User-session monitors moved to Agent** — `ScreenCaptureMonitor`, `WebcamMicMonitor`, `AudioHijackMonitor`, and `MicSessionMonitor` relocated from the SYSTEM service to the Agent process running in the user session. These monitors require access to the interactive desktop and user-session resources that are not available from session 0.
 - **ADS Data Staging Monitor** — Detects processes writing data to Alternate Data Streams (NTFS ADS) as a staging/exfiltration technique. Monitors for ADS creation on files in user-writable paths. Tier2 advisory.
 
 ---
@@ -4021,7 +3993,6 @@ Pre-kill deception tactics execute within a strict 2-second budget before proces
 - **Handle pollution** — Creates 60+ decoy named objects with fake debugger/EDR/C2 names
 - **Beacon flooding** — Sends 50+ fake Cobalt Strike/Sliver beacon check-ins to identified C2 server
 - **Protocol confusion** — Sends malformed payloads to crash C2 team server parsers
-- **Clipboard poisoning** — Replaces clipboard with fake AWS keys, SSH keys, crypto wallet seeds (canary tokens)
 - **File traps** — Sparse file bombs (500GB), symlink loops, polyglot files, corrupted archives in exfil-target directories
 - **Environment poisoning** — Corrupts proxy, TLS, and persistence registry settings (HKCU)
 - **Honeypot weaponization** — Deploys fake SSH keys, cloud credentials, wallet seeds, VPN configs, zip bombs
@@ -4039,7 +4010,7 @@ Kill always proceeds regardless of deception success or failure.
 - **New composite rules** (BehavioralCorrelationEngine):
   - Camera/Mic Exfiltration: Capture + Network (0.94) — background webcam/mic access + outbound network
   - Total AV Surveillance: Camera + Screen Capture (0.95) — webcam/mic + screen capture active simultaneously
-- **Full Surveillance Suite updated** — Now covers 4 vectors (screen + clipboard + audio + webcam). Max confidence raised to 0.99.
+- **Full Surveillance Suite updated** — Now covers 3 vectors (screen + audio + webcam). Max confidence raised to 0.99.
 
 ---
 
@@ -4052,18 +4023,16 @@ Kill always proceeds regardless of deception success or failure.
 - **Volume Dismount (ChainTracer)** — When `File.Delete` fails on ISO/CD-ROM/VHD during quarantine, ChainTracer now dismounts the read-only media volume before retrying deletion.
 - **New composite rules** (BehavioralCorrelationEngine):
   - Screen Capture + Network Exfiltration (0.93)
-  - Screen Capture + Clipboard Access (0.92)
   - Transparent Overlay + DLL Injection (0.96)
-  - Full Surveillance Suite (0.94–0.99) — 2+ of: screen, clipboard, audio, webcam
+  - Full Surveillance Suite (0.94–0.99) — 2+ of: screen, audio, webcam
 
 ---
 
 ## [0.1.4] - 2026-02-18
 
-### Added — Runtime Module Integrity & Clipboard Monitoring
+### Added — Runtime Module Integrity
 
 - **RuntimeModuleIntegrityMonitor** — Per-process module baseline tracking. Detects new suspicious DLLs appearing in any process after baseline (Module Injection: Runtime). Three-tier polling: Tier A (60s), Tier B (2min), Tier C (5min) by process risk level.
-- **ClipboardMonitor** — Win32 clipboard API polling. Detects rapid automated clipboard changes (crypto swappers, stealers), clipboard hijacking (background process taking ownership silently), and clipboard locking (process holding clipboard, blocking copy/paste).
 
 ---
 
