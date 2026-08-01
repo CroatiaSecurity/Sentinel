@@ -4,6 +4,11 @@ All notable changes to Sentinel are documented in this file.
 
 ## [1.8.5] - 2026-08-01
 
+### Fixed — Settings window not opening (ghost HWND)
+- **Root cause:** tray `Application.Run` main form used `WindowState = Minimized`, which could leave `AgentDashboardForm` with a live handle but `WS_VISIBLE` off after tray open / Explorer recovery — Settings looked like a no-op.
+- **`TrayIconService`:** message-pump form is off-screen/opacity-0 (not minimized); `ShowDashboard` always forces show + native `ShowWindow(SW_RESTORE/SW_SHOW)` + brief TopMost focus; disposes form on open failure.
+- **`AgentDashboardForm`:** event log load tail-reads last 512 KB of `events.jsonl` (full-file scan on STA froze open on large logs).
+
 ### Added — Offline PE/URL ML soft signals
 - `MlThreatScorer` (Microsoft.ML FastTree) scores PE binaries and URLs/hosts from offline models in `MlModels/`
 - Models trained from CroatiaSecurity/C datasets via `tools/Sentinel.MlTrainer` (`pe_model.zip`, `url_model.zip`)

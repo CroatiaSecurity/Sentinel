@@ -13,6 +13,18 @@ namespace Sentinel.Agent
 {
     public class TrayIconService : IHostedService, IDisposable
     {
+        private const int SwRestore = 9;
+        private const int SwShow = 5;
+
+        [DllImport("user32.dll")]
+        private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+        [DllImport("user32.dll")]
+        private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+        [DllImport("user32.dll")]
+        private static extern bool BringWindowToTop(IntPtr hWnd);
+
         private readonly AutoIncidentReportingConfig _reportConfig;
         private readonly QuarantineManager _quarantine;
         private NotifyIcon? _notifyIcon;
@@ -128,10 +140,20 @@ namespace Sentinel.Agent
                 _notifyIcon = notifyIcon;
                 _taskbarCreatedMsg = RegisterWindowMessage("TaskbarCreated");
 
-                this.ShowInTaskbar = false;
-                this.WindowState = FormWindowState.Minimized;
+                // Do NOT use WindowState=Minimized for the Application.Run main form.
+                // A minimized main form can leave modeless Settings windows in a
+                // "handle exists but WS_VISIBLE off" ghost state (Settings appears
+                // not to open after tray click / shell recovery).
+                ShowInTaskbar = false;
+                FormBorderStyle = FormBorderStyle.FixedToolWindow;
+                StartPosition = FormStartPosition.Manual;
+                Location = new System.Drawing.Point(-10000, -10000);
+                Size = new System.Drawing.Size(1, 1);
+                Opacity = 0;
+                ShowIcon = false;
+                Text = "Sentinel Agent";
 
-                var _ = this.Handle;
+                var _ = Handle;
             }
 
             protected override void WndProc(ref Message m)
@@ -161,23 +183,47 @@ namespace Sentinel.Agent
                 if (_dashboard == null || _dashboard.IsDisposed)
                 {
                     _dashboard = new AgentDashboardForm(_version, _reportConfig, _quarantine);
-                    _dashboard.FormClosed += (_, _) => _dashboard = null;
+                    var created = _dashboard;
+                    created.FormClosed += (_, _) =>
+                    {
+                        if (ReferenceEquals(_dashboard, created))
+                            _dashboard = null;
+                    };
                 }
 
-                if (!_dashboard.Visible)
-                    _dashboard.Show();
-
+                // Always force a real show. Checking Visible alone misses ghost HWNDs
+                // that still exist after shell death/recovery but have WS_VISIBLE off.
                 if (_dashboard.WindowState == FormWindowState.Minimized)
                     _dashboard.WindowState = FormWindowState.Normal;
 
+                _dashboard.Show();
+                _dashboard.Visible = true;
+                _dashboard.ShowInTaskbar = true;
+
+                // Native restore — recovers invisible-but-alive Settings windows.
+                var hwnd = _dashboard.Handle;
+                if (hwnd != IntPtr.Zero)
+                {
+                    ShowWindow(hwnd, SwRestore);
+                    ShowWindow(hwnd, SwShow);
+                    BringWindowToTop(hwnd);
+                    SetForegroundWindow(hwnd);
+                }
+
+                // Brief TopMost steals activation past full-screen / sticky focus apps.
+                _dashboard.TopMost = true;
                 _dashboard.BringToFront();
                 _dashboard.Activate();
+                _dashboard.Focus();
+                _dashboard.TopMost = false;
 
                 if (initialPage.HasValue)
                     _dashboard.SelectPage(initialPage.Value);
             }
             catch (Exception ex)
             {
+                try { _dashboard?.Dispose(); } catch { /* best-effort */ }
+                _dashboard = null;
                 MessageBox.Show($"Failed to open Settings: {ex.Message}", "Sentinel",
                     MessageBoxButtons.OK, MessageBoxIcon.Error);
             }

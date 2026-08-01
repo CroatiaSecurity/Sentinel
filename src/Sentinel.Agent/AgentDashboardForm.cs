@@ -1421,11 +1421,18 @@ namespace Sentinel.Agent
 
             try
             {
-                // Read tail without locking out the writer
+                // Tail-read only — full-file scan on the STA thread freezes Settings open
+                // when events.jsonl is large (and can leave the form in a half-shown state).
                 var lines = new List<string>();
                 using var fs = new FileStream(path, FileMode.Open, FileAccess.Read,
                     FileShare.ReadWrite | FileShare.Delete);
+                long keep = Math.Min(fs.Length, 512 * 1024); // last 512 KB
+                if (fs.Length > keep)
+                    fs.Seek(fs.Length - keep, SeekOrigin.Begin);
                 using var reader = new StreamReader(fs, Encoding.UTF8);
+                // If we sought mid-file, drop the first partial line
+                if (fs.Position > 0)
+                    reader.ReadLine();
                 string? line;
                 while ((line = reader.ReadLine()) != null)
                 {
