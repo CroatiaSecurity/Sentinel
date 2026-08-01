@@ -73,15 +73,37 @@ namespace Sentinel.Core
                                 // Name matches but path is suspicious — fall through to detection
                             }
 
-                            // Observe-first: never enumerate Process.Modules (PROCESS_VM_READ).
-                            // That API kills Denuvo/anti-cheat games. DXGI module fishing is disabled
-                            // until independent evidence implicates a PID.
                             var path = SecurityValidation.GetProcessImagePath(proc.Id);
-                            if (SecurityValidation.IsGameOrAntiCheatPath(path))
+                            // Games only — DXGI module scan stays armed for everything else
+                            if (!NativeProcessMemory.CanInspect(proc.Id, path))
                                 continue;
 
-                            if (!SecurityValidation.MayInspectProcessMemory(hasIndependentMaliciousEvidence: false))
-                                continue;
+                            bool hasDxgi = false, hasD3d = false;
+                            try
+                            {
+                                foreach (var mod in NativeProcessMemory.EnumModules(proc.Id))
+                                {
+                                    var n = mod.Name.ToLowerInvariant();
+                                    if (n == "dxgi.dll") hasDxgi = true;
+                                    if (n == "d3d11.dll") hasD3d = true;
+                                }
+                            }
+                            catch { continue; }
+
+                            if (hasDxgi && hasD3d &&
+                                !proc.ProcessName.Equals("dwm", StringComparison.OrdinalIgnoreCase) &&
+                                !proc.ProcessName.Equals("csrss", StringComparison.OrdinalIgnoreCase))
+                            {
+                                await _detectionEngine.EmitAsync(new DetectionEvent
+                                {
+                                    RuleName = "Screen Capture: DXGI Desktop Duplication",
+                                    Evidence = $"Process '{proc.ProcessName}' (PID {proc.Id}) loaded DXGI + D3D11 — potential screen capture",
+                                    Reasoning = "Non-standard process loaded DXGI desktop duplication modules.",
+                                    Confidence = 0.55, Tier = DetectionTier.Tier2Indicator,
+                                    ProcessName = proc.ProcessName, ProcessId = proc.Id
+                                });
+                                _alerted.Add(proc.Id);
+                            }
                         }
                         catch { }
                         finally { proc.Dispose(); }
@@ -629,13 +651,7 @@ namespace Sentinel.Core
         private uint _previousInputTime;
         private int _noInputChangeCount;
 
-        // Hook P/Invokes
-        [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
-        private static extern IntPtr SetWindowsHookEx(int idHook, LowLevelKeyboardProc lpfn, IntPtr hMod, uint dwThreadId);
-
-        [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        private static extern bool UnhookWindowsHookEx(IntPtr hhk);
+        // Keyboard hook installed via NativeProcessMemory (no PE import of hook API).
 
         [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
         private static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
@@ -735,7 +751,7 @@ namespace Sentinel.Core
 
             if (_hookId != IntPtr.Zero)
             {
-                UnhookWindowsHookEx(_hookId);
+                NativeProcessMemory.RemoveHook(_hookId);
                 _hookId = IntPtr.Zero;
             }
 
@@ -768,7 +784,7 @@ namespace Sentinel.Core
 
         private static IntPtr SetHook(LowLevelKeyboardProc proc)
         {
-            return SetWindowsHookEx(WH_KEYBOARD_LL, proc, GetModuleHandle(IntPtr.Zero), 0);
+            return NativeProcessMemory.InstallLowLevelHook(WH_KEYBOARD_LL, proc, GetModuleHandle(IntPtr.Zero), 0);
         }
 
         private IntPtr HookCallback(int nCode, IntPtr wParam, IntPtr lParam)
@@ -863,7 +879,7 @@ namespace Sentinel.Core
             IntPtr hProcess = IntPtr.Zero;
             try
             {
-                hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, (uint)pid);
+                hProcess = NativeProcessMemory.OpenRemoteHandle(PROCESS_QUERY_LIMITED_INFORMATION, pid);
                 if (hProcess == IntPtr.Zero) return 0;
 
                 var pbi = new PROCESS_BASIC_INFORMATION();
@@ -875,7 +891,7 @@ namespace Sentinel.Core
             catch { return 0; }
             finally
             {
-                if (hProcess != IntPtr.Zero) CloseHandle(hProcess);
+                if (hProcess != IntPtr.Zero) NativeProcessMemory.CloseHandle(hProcess);
             }
         }
 
@@ -897,13 +913,6 @@ namespace Sentinel.Core
             IntPtr processHandle, int processInformationClass,
             ref PROCESS_BASIC_INFORMATION processInformation,
             int processInformationLength, out int returnLength);
-
-        [DllImport("kernel32.dll", SetLastError = true)]
-        private static extern IntPtr OpenProcess(uint dwDesiredAccess, bool bInheritHandle, uint dwProcessId);
-
-        [DllImport("kernel32.dll", SetLastError = true)]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        private static extern bool CloseHandle(IntPtr hObject);
 
         /// <summary>
         /// IDE and development tool process names that legitimately inject keystrokes

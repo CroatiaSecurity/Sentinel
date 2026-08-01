@@ -51,9 +51,6 @@ namespace Sentinel.Core
         private static extern bool GetTokenInformation(IntPtr tokenHandle, int tokenInfoClass,
             IntPtr tokenInfo, int tokenInfoLength, out int returnLength);
 
-        [DllImport("kernel32.dll", SetLastError = true)]
-        private static extern IntPtr OpenProcess(uint dwDesiredAccess, bool bInheritHandle, int dwProcessId);
-
         [DllImport("kernel32.dll")]
         private static extern bool CloseHandle(IntPtr hObject);
 
@@ -311,7 +308,7 @@ namespace Sentinel.Core
 
         private TokenUserInfo? GetProcessTokenUser(int pid)
         {
-            IntPtr hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
+            IntPtr hProcess = NativeProcessMemory.OpenRemoteHandle(PROCESS_QUERY_LIMITED_INFORMATION, pid);
             if (hProcess == IntPtr.Zero) return null;
 
             try

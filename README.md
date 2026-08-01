@@ -2,16 +2,18 @@
 
 Real-time endpoint detection and response for Windows. Runs as a background service, monitors system behavior, and kills threats automatically when multiple signals correlate.
 
-**Current version: 1.8.5**
+**Current version: 1.8.6**
 
-### Product posture (v1.8.3+)
+### Product posture (v1.8.3+ / v1.8.6)
 
-**Protect when attacked. Don’t obstruct normal life.**
+**Protect when attacked. Don’t obstruct normal life. Full sensors; touch only when proven.**
 
-- **Confirmed attack** (LSASS dump, ransomware, injection, BYOVD, SYSTEM token theft, multi-signal composites) → kill / quarantine / isolate.
-- **Normal user work** (SSH, RDP, torrents, P2P, downloads, portable tools, rclone, databases) → **observe only** until malice is corroborated.
-- **Default IPSec** blocks only attack/legacy ports (Telnet, rsh, classic RAT ports, …). SSH/RDP/SMB/SOCKS/Docker stay open.
-- **`RestrictivePortHardening: true`** re-enables full lockdown (ports + service disables) for kiosk / locked-down hosts.
+- **Confirmed attack** (LSASS dump, ransomware, injection, Hell’s Gate stubs, ETW patch, loaded sideload plant, BYOVD, SYSTEM token theft, multi-signal composites) → kill / quarantine / isolate / FreeLibrary unload.
+- **Weak / single signals** (disk plant alone, module growth alone, shell+port, Downloads network, SeImpersonate alone) → **LogOnly** until malice is corroborated.
+- **Normal user work** (SSH, RDP, torrents, P2P, downloads, portable tools, rclone, databases, games) → observe; games skip process-memory handles only (Denuvo).
+- **Default IPSec** blocks only attack/legacy ports. SSH/RDP/SMB/SOCKS/Docker stay open.
+- **`RestrictivePortHardening: true`** re-enables full lockdown for kiosk / locked-down hosts.
+- **AV / VirusTotal:** see [docs/VIRUSTOTAL.md](docs/VIRUSTOTAL.md) (code hygiene + EV signing guidance).
 
 ---
 

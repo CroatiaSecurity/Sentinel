@@ -29,7 +29,7 @@ namespace Sentinel.Core
     /// 
     /// Response: Tier1 KillProcessTree for confirmed ETW/provider manipulation.
     ///           Tier2 for suspicious session enumeration patterns.
-    /// Scans every 30s. Does NOT use ReadProcessMemory (AV / anti-cheat safe).
+    /// Scans every 30s. Remote prologue reads via <see cref="NativeProcessMemory"/> (dynamic APIs).
     /// </summary>
     public sealed class EtwProviderTamperMonitor : BackgroundService
     {
@@ -102,7 +102,7 @@ namespace Sentinel.Core
                 {
                     await Task.Delay(30000, ct);
                     await CheckEtwSessionIntegrityAsync(ct);
-                    // Remote EtwEventWrite prologue checks removed (ReadProcessMemory → Mal/MSIL-AZ).
+                    await CheckProcessEtwPatchingAsync(ct);
                     await CheckEtwManipulationProcessesAsync(ct);
                 }
                 catch (OperationCanceledException) { break; }
@@ -149,6 +149,106 @@ namespace Sentinel.Core
             foreach (var session in currentSessions)
                 _baselineSessions.Add(session);
         }
+
+        /// <summary>
+        /// Check EtwEventWrite prologue in critical processes (lsass, EventLog host).
+        /// Uses dynamic ReadProcessMemory — never PE-imported.
+        /// </summary>
+        private async Task CheckProcessEtwPatchingAsync(CancellationToken ct)
+        {
+            IntPtr ntdll = GetModuleHandleW("ntdll.dll");
+            if (ntdll == IntPtr.Zero) return;
+            IntPtr etwAddr = GetProcAddress(ntdll, "EtwEventWrite");
+            if (etwAddr == IntPtr.Zero) return;
+
+            // Self reference (own process handle does not need OpenProcess)
+            byte[] ourPrologue = new byte[8];
+            if (!NativeProcessMemory.CopyRemote(Process.GetCurrentProcess().Handle, etwAddr, ourPrologue, out _))
+                return;
+
+            // RET / NOP / JMP short / JMP near — common ETW blind patches
+            byte[] patchedBytes = { 0xC3, 0x90, 0xEB, 0xE9 };
+
+            foreach (int pid in GetCriticalEtwProcesses())
+            {
+                if (ct.IsCancellationRequested) break;
+                string alertKey = $"patch:{pid}";
+                if (_alertedItems.Contains(alertKey)) continue;
+                if (!NativeProcessMemory.CanInspect(pid)) continue;
+
+                uint access = NativeProcessMemory.PROCESS_VM_READ | NativeProcessMemory.PROCESS_QUERY_LIMITED_INFORMATION;
+                IntPtr h = NativeProcessMemory.OpenRemoteHandle(access, pid);
+                if (h == IntPtr.Zero) continue;
+
+                try
+                {
+                    byte[] remote = new byte[8];
+                    if (!NativeProcessMemory.CopyRemote(h, etwAddr, remote, out int read) || read < 4)
+                        continue;
+
+                    bool isPatched = Array.IndexOf(patchedBytes, remote[0]) >= 0;
+                    if (!isPatched)
+                    {
+                        int diff = 0;
+                        for (int i = 0; i < Math.Min(read, ourPrologue.Length); i++)
+                            if (remote[i] != ourPrologue[i]) diff++;
+                        isPatched = diff >= 3;
+                    }
+
+                    if (!isPatched) continue;
+
+                    string processName = "unknown";
+                    try { using var p = Process.GetProcessById(pid); processName = p.ProcessName; } catch { }
+
+                    await _detectionEngine.EmitAsync(new DetectionEvent
+                    {
+                        RuleName = "Anti-Tamper: EtwEventWrite Patched in Critical Process",
+                        Evidence = $"ntdll!EtwEventWrite patched in '{processName}' (PID {pid}). " +
+                                   $"Bytes: [{string.Join(" ", remote.Take(4).Select(b => b.ToString("X2")))}]",
+                        Reasoning = "In-memory EtwEventWrite patch blinds ETW consumers (MITRE T1562.006).",
+                        Confidence = 0.95,
+                        Tier = DetectionTier.Tier1Behavioral,
+                        AuthorizedResponse = ResponseAction.KillProcessTree,
+                        SignalType = SignalType.AntiTamper,
+                        ProcessName = processName,
+                        ProcessId = pid,
+                    });
+                    _alertedItems.Add(alertKey);
+                }
+                finally
+                {
+                    NativeProcessMemory.CloseHandle(h);
+                }
+            }
+        }
+
+        private List<int> GetCriticalEtwProcesses()
+        {
+            var pids = new List<int>();
+            try
+            {
+                foreach (var proc in Process.GetProcessesByName("lsass"))
+                {
+                    pids.Add(proc.Id);
+                    proc.Dispose();
+                }
+                using var searcher = new System.Management.ManagementObjectSearcher(
+                    "SELECT ProcessId FROM Win32_Service WHERE Name = 'EventLog' AND State = 'Running'");
+                foreach (System.Management.ManagementObject obj in searcher.Get())
+                {
+                    int pid = Convert.ToInt32(obj["ProcessId"]);
+                    if (pid > 4 && !pids.Contains(pid)) pids.Add(pid);
+                }
+            }
+            catch { }
+            return pids;
+        }
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+        private static extern IntPtr GetModuleHandleW(string lpModuleName);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Ansi)]
+        private static extern IntPtr GetProcAddress(IntPtr hModule, string procName);
 
         /// <summary>
         /// Check running processes for ETW manipulation tools (logman, wevtutil with bad args).

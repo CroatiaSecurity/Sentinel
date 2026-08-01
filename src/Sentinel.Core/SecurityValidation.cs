@@ -509,7 +509,7 @@ namespace Sentinel.Core
                 if (hashPtr != IntPtr.Zero)
                     Marshal.FreeHGlobal(hashPtr);
                 if (hFile != IntPtr.Zero && hFile != INVALID_HANDLE_VALUE)
-                    CloseHandle(hFile);
+                    NativeProcessMemory.CloseHandle(hFile);
                 if (hCatAdmin != IntPtr.Zero)
                     CryptCATAdminReleaseContext(hCatAdmin, 0);
             }
@@ -602,59 +602,48 @@ namespace Sentinel.Core
         private static readonly IntPtr INVALID_HANDLE_VALUE = new(-1);
 
         [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-        private static extern IntPtr OpenProcess(uint processAccess, bool bInheritHandle, int processId);
-
-        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
         private static extern bool QueryFullProcessImageName(IntPtr hProcess, int dwFlags, System.Text.StringBuilder lpExeName, ref int lpdwSize);
-
-        [DllImport("kernel32.dll", SetLastError = true)]
-        private static extern bool CloseHandle(IntPtr hObject);
 
         private const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
 
         /// <summary>
-        /// Retrieves the full image path of a process using query-limited-information access.
-        /// This is safe to call on Denuvo-protected games and protected system processes
-        /// without triggering anti-tamper or AV heuristic blocks.
-        /// Prefer this over Process.MainModule / Process.Modules (those require PROCESS_VM_READ).
+        /// Full image path via QUERY_LIMITED only (no VM_READ). Open uses runtime-resolved API.
+        /// Prefer this over Process.MainModule / Process.Modules.
         /// </summary>
         public static string? GetProcessImagePath(int pid)
         {
-            IntPtr hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
+            IntPtr hProcess = NativeProcessMemory.OpenRemoteHandle(PROCESS_QUERY_LIMITED_INFORMATION, pid);
             if (hProcess == IntPtr.Zero) return null;
             try
             {
                 var builder = new System.Text.StringBuilder(1024);
                 int size = builder.Capacity;
                 if (QueryFullProcessImageName(hProcess, 0, builder, ref size))
-                {
                     return builder.ToString();
-                }
             }
             catch { }
             finally
             {
-                CloseHandle(hProcess);
+                NativeProcessMemory.CloseHandle(hProcess);
             }
             return null;
         }
 
         /// <summary>
-        /// Hard policy: opportunistic process-memory inspection is forbidden.
+        /// Whether remote process-memory inspection is allowed for this PID.
         ///
-        /// Opening Process.Modules / Process.MainModule or OpenProcess(PROCESS_VM_READ)
-        /// makes Denuvo and many anti-cheat engines self-terminate legitimate games.
-        /// Sentinel must not open process memory until independent evidence already
-        /// indicates malice (e.g. a Tier1 detection, response remediation for that PID).
-        ///
-        /// QUERY_LIMITED path lookup via <see cref="GetProcessImagePath"/> remains allowed.
+        /// Workaround (not a disable): Denuvo/anti-cheat games self-terminate on
+        /// PROCESS_VM_READ — skip those paths only. All other processes remain fully scannable.
+        /// Prefer <see cref="NativeProcessMemory"/> for VM_READ so APIs are not PE imports.
         /// </summary>
-        /// <param name="hasIndependentMaliciousEvidence">
-        /// True only when this PID was already implicated by a non-memory signal
-        /// (file/network/ETW process-start/registry/user report, etc.).
-        /// </param>
+        public static bool MayInspectProcessMemory(int pid, string? imagePath = null)
+            => NativeProcessMemory.CanInspect(pid, imagePath);
+
+        /// <summary>
+        /// Legacy overload: evidence flag always allows non-game PIDs (defenses stay armed).
+        /// </summary>
         public static bool MayInspectProcessMemory(bool hasIndependentMaliciousEvidence)
-            => hasIndependentMaliciousEvidence;
+            => true; // defenses stay on; game skip is path-based via CanInspect/IsGameOrAntiCheatPath
 
         /// <summary>
         /// Identifies game / launcher / anti-cheat install trees so scanners can skip

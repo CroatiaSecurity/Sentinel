@@ -165,7 +165,7 @@ namespace Sentinel.Core
                 var imagePath = SecurityValidation.GetProcessImagePath(pid);
                 if (SecurityValidation.IsGameOrAntiCheatPath(imagePath))
                     return result;
-                if (!SecurityValidation.MayInspectProcessMemory(hasIndependentMaliciousEvidence: true))
+                if (!NativeProcessMemory.CanInspect(pid))
                     return result;
 
                 using var proc = Process.GetProcessById(pid);

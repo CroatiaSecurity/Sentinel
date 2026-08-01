@@ -559,11 +559,10 @@ namespace Sentinel.Core
                     {
                         // Module inventory only if evidence-gated and not a game path
                         var offenderPath = SecurityValidation.GetProcessImagePath(offenderPid);
-                        if (SecurityValidation.MayInspectProcessMemory(true) &&
-                            !SecurityValidation.IsGameOrAntiCheatPath(offenderPath))
+                        if (NativeProcessMemory.CanInspect(offenderPid, offenderPath))
                         {
-                            foreach (ProcessModule mod in proc.Modules)
-                                modules.Add($"{mod.ModuleName}\t{mod.FileName}\t{mod.ModuleMemorySize}");
+                            foreach (var mod in NativeProcessMemory.EnumModules(offenderPid))
+                                modules.Add($"{mod.Name}\t{mod.Path}\t{mod.Size}");
                         }
                     }
                     catch { }

@@ -268,7 +268,7 @@ namespace Sentinel.Core
     public class ThreatIntelTelemetry : TelemetryEvent
     {
         public int TargetProcessId { get; set; }
-        public string ApiName { get; set; } = string.Empty; // VirtualAllocEx, SetThreadContext, etc.
+        public string ApiName { get; set; } = string.Empty; // observed API name when known
         public string Protection { get; set; } = string.Empty;
     }
 

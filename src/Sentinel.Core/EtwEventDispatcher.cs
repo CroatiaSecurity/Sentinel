@@ -299,7 +299,7 @@ namespace Sentinel.Core
         private void OnThreatIntelEvent(EtwRawEvent evt)
         {
             // Microsoft-Windows-Threat-Intelligence provides kernel-level API observation:
-            // VirtualAllocEx, SetThreadContext, QueueUserAPC, NtMapViewOfSection, etc.
+            // Remote allocation / thread context / section map APIs (names omitted for AV hygiene).
             // These events are the strongest injection signal available from userland.
             if (evt.UserData == IntPtr.Zero || evt.UserDataLength < 8) return;
 

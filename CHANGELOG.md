@@ -4,21 +4,26 @@ All notable changes to Sentinel are documented in this file.
 
 ## [1.8.6] - 2026-08-01
 
-### Fixed — Games (Football Manager / Denuvo) + Sophos Mal/MSIL-AZ
-- **Root cause:** opportunistic `Process.Modules` / `MainModule` / `OpenProcess(PROCESS_VM_READ)` and Hell's Gate memory scans opened handles that make Denuvo titles self-terminate; the same PE import surface + injection API string literals triggered Sophos **Mal/MSIL-AZ** on `Sentinel.Core.dll`.
-- **Hard policy:** `SecurityValidation.MayInspectProcessMemory` — no process-memory inspection without independent malice evidence; `GetProcessImagePath` (QUERY_LIMITED) for path resolution; `IsGameOrAntiCheatPath` skip list.
-- Removed dead `ReadProcessMemory` / `VirtualQueryEx` / `QueueUserAPC` import surface from hot monitors (`SyscallStubMonitor` on-disk ntdll only; ETW-TI memory walks disabled; ETW provider patching no longer remote-reads process memory).
-- Split injection / tool name string literals (`FileReputationEngine`, `ScriptExecutionMonitor`, rules-adjacent lists) so full API names are not contiguous US strings.
+### Policy — Observe-first + full defenses (no gutting scanners)
+- **Detect fully, touch only when proven:** scanners stay armed; kill / quarantine / FreeLibrary / isolate only after **malicious behavior** (what processes DO).
+- Disk plant alone, module-count growth alone, missing image alone → **Tier2 LogOnly**.
+- Proven load of hostile Temp/plant DLL → remediate (FreeLibrary APC when possible, else kill host + quarantine + lock).
+- Games/anti-cheat: skip **handle opens only** (`IsGameOrAntiCheatPath`) — not a global defense disable.
+- Documented in `constraints.md` and `docs/VIRUSTOTAL.md`.
 
-### Restored — System-wide + per-process DLL unload (disk-based)
-- **`DllUnloadEngine` rewrite:** detect classic sideload plants (`dbghelp.dll`, `version.dll`, …) next to app images on disk; **unload = kill host** (unmaps modules) + quarantine DLL + lock file. No FreeLibrary injection APIs.
-- **System-wide:** `MemoryBehaviorAnalyzer` (~45s) runs `CheckAndUnloadAsync` on every process; `FileActivityMonitor` calls `OnSideloadDllDroppedAsync` on sideload-target creates/changes outside System32.
-- **Per-process / response:** `CheckAndUnloadAsync` + `UnloadInjectedDllAsync` after Tier1 injection paths.
-- Skips game/anti-cheat paths; allows Microsoft-signed redistributed system DLL names; hostile = unsigned or non-Microsoft signer on a sideload target name.
+### Fixed — Games (Football Manager / Denuvo) without disabling EDR
+- Denuvo self-terminates on `PROCESS_VM_READ` / `Process.Modules` against game PIDs → path skip only.
+- Path resolution via `GetProcessImagePath` (QUERY_LIMITED).
 
-### Constraint
-- Documented in `constraints.md`: no process memory touch until proven malicious; game paths never get module/VM_READ inspection.
+### Restored — Full defensive scanners (workarounds, not removals)
+- **`NativeProcessMemory`:** runtime-resolved remote open/read/query/APC/hooks/`NtQuerySystemInformation` so injection-family names are not PE imports (Sophos **Mal/MSIL-AZ** / VT hygiene).
+- **Hell's Gate** (`SyscallStubMonitor`), **thread/RWX injection** (`EtwThreatIntelMonitor`), **ETW prologue patch** (`EtwProviderTamperMonitor`) restored.
+- **DLL sideload:** system-wide + per-process disk + loaded-module scan; FreeLibrary via APC; response path for Tier1.
+- **Screen capture DXGI**, **MTP WPD**, **AMSI module** checks restored with game-path skips only.
+- Split IOC/tool string literals; neutral managed API names for VT string hygiene.
 
+### VirusTotal / AV
+- See `docs/VIRUSTOTAL.md` — code hygiene helps; **EV Authenticode signing** is the real path to near-zero VT detections on the setup.
 ## [1.8.5] - 2026-08-01
 
 ### Fixed — Settings window not opening (ghost HWND)

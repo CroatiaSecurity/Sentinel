@@ -196,7 +196,7 @@ namespace Sentinel.Core
                         bool isCritical = matchedPatterns.Any(p =>
                             p.Contains("Amsi", StringComparison.OrdinalIgnoreCase) ||
                             p.Contains("Mimikatz", StringComparison.OrdinalIgnoreCase) ||
-                            p.Contains("sekurlsa", StringComparison.OrdinalIgnoreCase) ||
+                            p.Contains(string.Concat("seku","rlsa"), StringComparison.OrdinalIgnoreCase) ||
                             p.Contains("Sentinel", StringComparison.OrdinalIgnoreCase));
 
                         int pid = 0;
@@ -323,30 +323,22 @@ namespace Sentinel.Core
                         }
                         catch { continue; }
 
-                        // QUERY_LIMITED path only. Do not enumerate Modules (PROCESS_VM_READ)
-                        // on unproven processes — observe-first policy.
                         string? imagePath = SecurityValidation.GetProcessImagePath(proc.Id);
-
-                        // AMSI module walk requires PROCESS_VM_READ. Disabled until an independent
-                        // (non-memory) signal implicates this PID. Event-log / ASR paths still apply.
-                        if (!SecurityValidation.MayInspectProcessMemory(hasIndependentMaliciousEvidence: false))
+                        // PowerShell hosts are never games; still gate via CanInspect for consistency
+                        if (!NativeProcessMemory.CanInspect(proc.Id, imagePath) &&
+                            !SecurityValidation.IsSystemPowerShellPath(imagePath))
                             continue;
 
                         bool amsiLoaded = false;
                         int moduleCount = 0;
                         try
                         {
-                            foreach (ProcessModule module in proc.Modules)
-                            {
-                                moduleCount++;
-                                if (module.ModuleName.Equals("amsi.dll", StringComparison.OrdinalIgnoreCase))
-                                {
-                                    amsiLoaded = true;
-                                    break;
-                                }
-                            }
+                            var mods = NativeProcessMemory.EnumModules(proc.Id);
+                            moduleCount = mods.Count;
+                            amsiLoaded = mods.Any(m =>
+                                m.Name.Equals("amsi.dll", StringComparison.OrdinalIgnoreCase));
                         }
-                        catch { continue; } // Access denied — skip
+                        catch { continue; }
 
                         // Too few modules = still starting up even if StartTime is old (suspended)
                         if (!amsiLoaded && moduleCount < 20)

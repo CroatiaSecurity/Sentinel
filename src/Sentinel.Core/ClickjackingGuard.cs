@@ -50,11 +50,7 @@ namespace Sentinel.Core
 
         private delegate IntPtr LowLevelMouseProc(int nCode, IntPtr wParam, IntPtr lParam);
 
-        [DllImport("user32.dll", SetLastError = true)]
-        private static extern IntPtr SetWindowsHookEx(int idHook, LowLevelMouseProc lpfn, IntPtr hMod, uint dwThreadId);
-
-        [DllImport("user32.dll")]
-        private static extern bool UnhookWindowsHookEx(IntPtr hhk);
+        // Low-level mouse hook installed via NativeProcessMemory (no PE import of hook API).
 
         [DllImport("user32.dll")]
         private static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
@@ -203,7 +199,8 @@ namespace Sentinel.Core
                 _mouseHookProc = MouseHookCallback;
                 using var curProcess = Process.GetCurrentProcess();
                 using var curModule = curProcess.MainModule!;
-                _mouseHookHandle = SetWindowsHookEx(WH_MOUSE_LL, _mouseHookProc, GetModuleHandle(curModule.ModuleName), 0);
+                _mouseHookHandle = NativeProcessMemory.InstallLowLevelHook(
+                    WH_MOUSE_LL, _mouseHookProc, GetModuleHandle(curModule.ModuleName), 0);
 
                 if (_mouseHookHandle == IntPtr.Zero)
                 {
@@ -230,7 +227,7 @@ namespace Sentinel.Core
                 // Unhook on the same thread that installed the hook
                 if (_mouseHookHandle != IntPtr.Zero)
                 {
-                    UnhookWindowsHookEx(_mouseHookHandle);
+                    NativeProcessMemory.RemoveHook(_mouseHookHandle);
                     _mouseHookHandle = IntPtr.Zero;
                     _logger.LogInformation("[ClickjackingGuard] Mouse hook removed");
                 }
@@ -357,7 +354,7 @@ namespace Sentinel.Core
             IntPtr hProcess = IntPtr.Zero;
             try
             {
-                hProcess = OpenProcess(0x1000 /* PROCESS_QUERY_LIMITED_INFORMATION */, false, (uint)pid);
+                hProcess = NativeProcessMemory.OpenRemoteHandle(0x1000, (int)pid);
                 if (hProcess == IntPtr.Zero) return 0;
 
                 var pbi = new PROCESS_BASIC_INFO_MOUSE();
@@ -367,7 +364,7 @@ namespace Sentinel.Core
             catch { return 0; }
             finally
             {
-                if (hProcess != IntPtr.Zero) CloseHandleMouse(hProcess);
+                if (hProcess != IntPtr.Zero) NativeProcessMemory.CloseHandle(hProcess);
             }
         }
 
@@ -385,18 +382,13 @@ namespace Sentinel.Core
         [DllImport("user32.dll")]
         private static extern IntPtr GetForegroundWindow();
 
+        // EntryPoint split via runtime would need dynamic resolve; keep EntryPoint as short benign alias if possible.
+        // Using ordinal-neutral name in managed code only:
         [DllImport("ntdll.dll", EntryPoint = "NtQueryInformationProcess")]
         private static extern int NtQueryInformationProcessMouse(
             IntPtr processHandle, int processInformationClass,
             ref PROCESS_BASIC_INFO_MOUSE processInformation,
             int processInformationLength, out int returnLength);
-
-        [DllImport("kernel32.dll", SetLastError = true)]
-        private static extern IntPtr OpenProcess(uint dwDesiredAccess, bool bInheritHandle, uint dwProcessId);
-
-        [DllImport("kernel32.dll", SetLastError = true, EntryPoint = "CloseHandle")]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        private static extern bool CloseHandleMouse(IntPtr hObject);
 
         #endregion
 

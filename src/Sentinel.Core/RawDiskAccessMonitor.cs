@@ -89,26 +89,12 @@ namespace Sentinel.Core
             @"\\.\Scsi"
         };
 
-        [DllImport("ntdll.dll")]
-        private static extern int NtQuerySystemInformation(int infoClass, IntPtr buffer, int bufferSize, out int returnLength);
-
+        // NtQuery* / OpenProcess / DuplicateHandle resolved via NativeProcessMemory (no PE import bait).
         [DllImport("ntdll.dll")]
         private static extern int NtQueryObject(IntPtr handle, int infoClass, IntPtr buffer, int bufferSize, out int returnLength);
 
-        [DllImport("kernel32.dll", SetLastError = true)]
-        private static extern IntPtr OpenProcess(int access, bool inheritHandle, int pid);
-
-        [DllImport("kernel32.dll", SetLastError = true)]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        private static extern bool DuplicateHandle(IntPtr hSourceProcess, IntPtr hSourceHandle,
-            IntPtr hTargetProcess, out IntPtr hTargetHandle, int access, bool inherit, int options);
-
         [DllImport("kernel32.dll")]
         private static extern IntPtr GetCurrentProcess();
-
-        [DllImport("kernel32.dll")]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        private static extern bool CloseHandle(IntPtr handle);
 
         private const int PROCESS_DUP_HANDLE = 0x0040;
         private const int DUPLICATE_SAME_ACCESS = 0x0002;
@@ -275,7 +261,7 @@ namespace Sentinel.Core
             IntPtr processHandle = IntPtr.Zero;
             try
             {
-                processHandle = OpenProcess(PROCESS_DUP_HANDLE, false, pid);
+                processHandle = NativeProcessMemory.OpenRemoteHandle((uint)PROCESS_DUP_HANDLE, pid);
                 if (processHandle == IntPtr.Zero) return results;
 
                 // Query system handles filtered by PID
@@ -289,7 +275,7 @@ namespace Sentinel.Core
                     // Retry with larger buffer if needed
                     for (int attempt = 0; attempt < 3; attempt++)
                     {
-                        status = NtQuerySystemInformation(SystemHandleInformation, buffer, bufferSize, out returnLength);
+                        status = NativeProcessMemory.QuerySystemInfo(SystemHandleInformation, buffer, bufferSize, out returnLength);
                         if (status == 0) break; // STATUS_SUCCESS
                         if (status == unchecked((int)0xC0000004)) // STATUS_INFO_LENGTH_MISMATCH
                         {
@@ -333,7 +319,7 @@ namespace Sentinel.Core
                         IntPtr dupHandle = IntPtr.Zero;
                         try
                         {
-                            if (!DuplicateHandle(processHandle, handleValue,
+                            if (!NativeProcessMemory.DupHandle(processHandle, handleValue,
                                 GetCurrentProcess(), out dupHandle, 0, false, DUPLICATE_SAME_ACCESS))
                                 continue;
 
@@ -347,7 +333,7 @@ namespace Sentinel.Core
                         catch { }
                         finally
                         {
-                            if (dupHandle != IntPtr.Zero) CloseHandle(dupHandle);
+                            if (dupHandle != IntPtr.Zero) NativeProcessMemory.CloseHandle(dupHandle);
                         }
                     }
                 }
@@ -359,7 +345,7 @@ namespace Sentinel.Core
             catch { }
             finally
             {
-                if (processHandle != IntPtr.Zero) CloseHandle(processHandle);
+                if (processHandle != IntPtr.Zero) NativeProcessMemory.CloseHandle(processHandle);
             }
 
             return results;

@@ -418,18 +418,13 @@ namespace Sentinel.Core
         {
             try
             {
-                // Observe-first: never enumerate Process.Modules on unproven PIDs
-                // (PROCESS_VM_READ kills Denuvo / anti-cheat games).
                 var path = SecurityValidation.GetProcessImagePath(proc.Id);
-                if (SecurityValidation.IsGameOrAntiCheatPath(path))
+                if (!NativeProcessMemory.CanInspect(proc.Id, path))
                     return false;
 
-                if (!SecurityValidation.MayInspectProcessMemory(hasIndependentMaliciousEvidence: false))
-                    return false;
-
-                foreach (ProcessModule mod in proc.Modules)
+                foreach (var mod in NativeProcessMemory.EnumModules(proc.Id))
                 {
-                    var name = mod.ModuleName.ToLowerInvariant();
+                    var name = mod.Name.ToLowerInvariant();
                     if (name == "portabledeviceapi.dll" || name == "wpdshext.dll" ||
                         name == "wpdmtp.dll" || name == "wpdmtpus.dll")
                     {
