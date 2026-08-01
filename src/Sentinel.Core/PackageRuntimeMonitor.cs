@@ -217,7 +217,7 @@ namespace Sentinel.Core
                     var parent = _ancestryCache.GetParent(pid);
                     parentName = parent.name ?? "";
                     ppid = parent.parentId;
-                    try { path = p.MainModule?.FileName; } catch { /* deny */ }
+                    try { path = SecurityValidation.GetProcessImagePath(p.Id); } catch { /* deny */ }
                 }
                 catch { continue; }
 

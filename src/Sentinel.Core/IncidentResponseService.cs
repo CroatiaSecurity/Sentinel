@@ -121,7 +121,7 @@ namespace Sentinel.Core
             try
             {
                 using var proc = Process.GetProcessById(detection.ProcessId);
-                var imagePath = proc.MainModule?.FileName;
+                var imagePath = SecurityValidation.GetProcessImagePath(detection.ProcessId);
                 if (!string.IsNullOrEmpty(imagePath) && File.Exists(imagePath))
                 {
                     if (SecurityValidation.IsOsCriticalPath(imagePath))
@@ -130,6 +130,10 @@ namespace Sentinel.Core
                         _logger.LogWarning(
                             "[IncidentResponseService] Refusing quarantine of OS-critical path: {Path}",
                             imagePath);
+                    }
+                    else if (SecurityValidation.IsGameOrAntiCheatPath(imagePath))
+                    {
+                        evidence["QuarantineSkippedGamePath"] = imagePath;
                     }
                     else
                     {
@@ -156,6 +160,14 @@ namespace Sentinel.Core
             var result = new List<string>();
             try
             {
+                // Evidence collection only after a detection. Still refuse game/anti-cheat paths
+                // (PROCESS_VM_READ would kill the title during IR).
+                var imagePath = SecurityValidation.GetProcessImagePath(pid);
+                if (SecurityValidation.IsGameOrAntiCheatPath(imagePath))
+                    return result;
+                if (!SecurityValidation.MayInspectProcessMemory(hasIndependentMaliciousEvidence: true))
+                    return result;
+
                 using var proc = Process.GetProcessById(pid);
                 foreach (ProcessModule mod in proc.Modules)
                 {

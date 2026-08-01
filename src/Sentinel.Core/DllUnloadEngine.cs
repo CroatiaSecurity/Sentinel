@@ -11,421 +11,405 @@ using Microsoft.Extensions.Logging;
 namespace Sentinel.Core
 {
     /// <summary>
-    /// Detects and remediates DLL sideloading attacks.
+    /// System-wide + per-process DLL sideload defense.
     ///
-    /// Attack pattern: attacker drops a malicious DLL (e.g., dbghelp.dll, version.dll)
-    /// into the same directory as a legitimate application. When the app starts,
-    /// Windows DLL search order loads the local copy instead of the real System32 one.
+    /// Design (AV-safe + anti-cheat-safe):
+    /// - Detection is <b>disk-path based</b>: known system DLL names planted next to
+    ///   an application executable (Windows DLL search-order hijack, T1574.001).
+    /// - Never uses Process.Modules / PROCESS_VM_READ (kills Denuvo games; AV FPs).
+    /// - Never uses CreateRemoteThread / QueueUserAPC FreeLibrary (Sophos Mal/MSIL-AZ).
+    /// - "Unload" = terminate host process (releases the module mapping) + quarantine
+    ///   the planted DLL from disk + place a lock file so it cannot be re-dropped.
     ///
-    /// Response strategy (no CreateRemoteThread — that looks like malware):
-    ///   1. Detect: enumerate loaded modules, find system DLLs loaded from non-system paths
-    ///   2. Kill: terminate the compromised process (it already executed attacker code)
-    ///   3. Quarantine: move the sideloaded DLL to quarantine (XOR-encrypted, renamed)
-    ///   4. Lock: place a zero-byte read-only decoy at the original path to prevent re-drop
-    ///
-    /// If the attacker keeps re-dropping, FileActivityMonitor catches the write event
-    /// and quarantines on arrival. The lock file prevents the race condition where an app
-    /// starts between drop and detection.
+    /// Coverage:
+    /// 1. Per-process: <see cref="CheckAndUnloadAsync"/> on each PID (timer + response).
+    /// 2. System-wide: driven by MemoryBehaviorAnalyzer over all processes +
+    ///    <see cref="OnSideloadDllDroppedAsync"/> from FileActivityMonitor on create/write.
+    /// 3. Response path: <see cref="UnloadInjectedDllAsync"/> after Tier1 injection alerts.
     /// </summary>
     public sealed class DllUnloadEngine : IDisposable
     {
         private readonly DetectionEngine _detectionEngine;
         private readonly QuarantineManager _quarantineManager;
+        private readonly SignerTrustService _signerTrust;
         private readonly ILogger<DllUnloadEngine> _logger;
         private readonly ConcurrentDictionary<string, DateTimeOffset> _remediationHistory = new();
         private int _remediationsThisMinute;
         private DateTimeOffset _minuteStart = DateTimeOffset.UtcNow;
         private readonly object _rateLock = new();
 
-        private const int MaxRemediationsPerMinute = 10;
+        private const int MaxRemediationsPerMinute = 20;
 
-        private static readonly HashSet<string> ProtectedProcesses = new(StringComparer.OrdinalIgnoreCase)
+        private static readonly HashSet<string> ProtectedProcessNames = new(StringComparer.OrdinalIgnoreCase)
         {
             "system", "smss", "csrss", "wininit", "services", "lsass", "svchost",
             "explorer", "dwm", "winlogon", "MsMpEng", "NisSrv",
             "Sentinel.Service", "Sentinel.Agent",
-            // Browsers — install in AppData/Program Files, killing is acceptable but not for sideload FP
-            "chrome", "msedge", "firefox", "brave", "opera", "vivaldi", "iexplore",
-            // Common AppData-resident apps
-            "spotify", "discord", "slack", "teams", "onedrive", "dropbox",
-            "code", "cursor", "windsurf", "rider", "webstorm", "idea"
         };
 
-        // Known sideloading targets — legitimate system DLLs that attackers drop into app folders
-        private static readonly HashSet<string> SideloadTargets = new(StringComparer.OrdinalIgnoreCase)
+        /// <summary>
+        /// Classic DLL search-order hijack targets (system DLL names planted in app folders).
+        /// </summary>
+        public static readonly HashSet<string> SideloadTargets = new(StringComparer.OrdinalIgnoreCase)
         {
             "dbghelp.dll", "version.dll", "winmm.dll", "dwrite.dll",
             "cryptsp.dll", "userenv.dll", "profapi.dll", "wtsapi32.dll",
-            "dhcpcsvc.dll", "IPHLPAPI.DLL", "msasn1.dll", "netapi32.dll",
-            "samcli.dll", "sspicli.dll", "crypt32.dll",
+            "dhcpcsvc.dll", "iphlpapi.dll", "msasn1.dll", "netapi32.dll",
+            "samcli.dll", "sspicli.dll", "crypt32.dll", "textshaping.dll",
+            "winhttp.dll", "urlmon.dll", "propsys.dll", "dwmapi.dll",
         };
 
-        public DllUnloadEngine(DetectionEngine de, QuarantineManager qm, ILogger<DllUnloadEngine> l)
+        public DllUnloadEngine(
+            DetectionEngine de,
+            QuarantineManager qm,
+            ILogger<DllUnloadEngine> l,
+            SignerTrustService? signerTrust = null)
         {
             _detectionEngine = de;
             _quarantineManager = qm;
             _logger = l;
+            _signerTrust = signerTrust ?? new SignerTrustService(
+                new Microsoft.Extensions.Logging.Abstractions.NullLogger<SignerTrustService>());
         }
 
         /// <summary>
-        /// Scans a process for sideloaded DLLs. If found:
-        /// - Kills the compromised process
-        /// - Quarantines the malicious DLL
-        /// - Places a lock file to prevent re-drop
+        /// Per-process check: inspect the process image directory on disk for planted
+        /// sideload-target DLLs. If found and hostile, unload (kill host) + quarantine.
+        /// Safe for anti-cheat (QUERY_LIMITED path only).
         /// </summary>
         public async Task<DllUnloadResult> CheckAndUnloadAsync(int processId, string processName)
         {
-            var result = new DllUnloadResult { ProcessId = processId, ProcessName = processName };
-
-            if (ProtectedProcesses.Contains(processName))
-            {
-                // Verify path — name alone is spoofable. Only skip if running from legitimate location.
-                try
-                {
-                    using var p = Process.GetProcessById(processId);
-                    var path = p.MainModule?.FileName;
-                    if (IsProtectedPath(path)) return result;
-                }
-                catch { return result; } // Can't verify — err on side of caution, don't remediate
-            }
+            var result = new DllUnloadResult { ProcessId = processId, ProcessName = processName ?? "" };
+            if (processId <= 4) return result;
 
             try
             {
-                using var proc = Process.GetProcessById(processId);
-                string? procDir = null;
-                try { procDir = Path.GetDirectoryName(proc.MainModule?.FileName); } catch { }
-                if (string.IsNullOrEmpty(procDir)) return result;
+                var imagePath = SecurityValidation.GetProcessImagePath(processId);
+                if (string.IsNullOrEmpty(imagePath)) return result;
 
-                // Skip if process is in the Windows directory — legitimate loads
-                var winDir = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
-                var winDirTrailing = winDir.EndsWith('\\') ? winDir : winDir + '\\';
-                if (procDir.StartsWith(winDirTrailing, StringComparison.OrdinalIgnoreCase))
+                if (SecurityValidation.IsGameOrAntiCheatPath(imagePath))
                     return result;
 
-                var sideloadedFiles = new List<string>();
+                var name = string.IsNullOrEmpty(processName)
+                    ? (Path.GetFileNameWithoutExtension(imagePath) ?? "")
+                    : processName;
+                result.ProcessName = name;
 
-                foreach (ProcessModule mod in proc.Modules)
-                {
-                    try
-                    {
-                        var modName = mod.ModuleName ?? "";
-                        var modDir = Path.GetDirectoryName(mod.FileName) ?? "";
+                if (ProtectedProcessNames.Contains(name) && IsProtectedPath(imagePath))
+                    return result;
 
-                        if (!SideloadTargets.Contains(modName)) continue;
+                var procDir = Path.GetDirectoryName(imagePath);
+                if (string.IsNullOrEmpty(procDir) || IsWindowsSystemDirectory(procDir))
+                    return result;
 
-                        // Sideloaded if the DLL is in the process directory (not a Windows system folder)
-                        if (modDir.Equals(procDir, StringComparison.OrdinalIgnoreCase) &&
-                            !modDir.StartsWith(winDirTrailing, StringComparison.OrdinalIgnoreCase))
-                        {
-                            var key = $"{processId}:{modName}";
-                            if (_remediationHistory.ContainsKey(key)) continue;
-                            if (!TryConsumeRateLimit()) continue;
+                var hostile = FindHostileSideloadDlls(procDir);
+                if (hostile.Count == 0) return result;
 
-                            sideloadedFiles.Add(mod.FileName!);
-                            _remediationHistory[key] = DateTimeOffset.UtcNow;
-                        }
-                    }
-                    catch { }
-                }
+                return await RemediateProcessAndDllsAsync(processId, name, imagePath, hostile, "PerProcessScan");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "[DllUnloadEngine] CheckAndUnload failed for PID {Pid}", processId);
+                return result;
+            }
+        }
 
-                if (sideloadedFiles.Count == 0) return result;
+        /// <summary>
+        /// Response-path remediation after an independent injection/sideload detection.
+        /// Same disk-based unload model; never opens process memory.
+        /// </summary>
+        public async Task<DllUnloadResult> UnloadInjectedDllAsync(int targetPid)
+        {
+            try
+            {
+                using var proc = Process.GetProcessById(targetPid);
+                return await CheckAndUnloadAsync(targetPid, proc.ProcessName);
+            }
+            catch
+            {
+                return await CheckAndUnloadAsync(targetPid, "");
+            }
+        }
 
-                // Step 1: Attempt in-memory DLL unload via FreeLibrary
-                // This removes the malicious code from the process's address space
-                // without killing the host process (if possible)
-                bool allUnloaded = true;
-                foreach (ProcessModule mod in proc.Modules)
-                {
-                    try
-                    {
-                        if (sideloadedFiles.Contains(mod.FileName))
-                        {
-                            bool unloaded = TryUnloadDll(processId, mod.BaseAddress);
-                            if (!unloaded) allUnloaded = false;
-                        }
-                    }
-                    catch { allUnloaded = false; }
-                }
+        /// <summary>
+        /// System-wide file-drop path: a known sideload-target DLL was written/created.
+        /// Quarantines the DLL and kills any process whose image lives in that directory.
+        /// </summary>
+        public async Task<DllUnloadResult> OnSideloadDllDroppedAsync(string dllPath, int writerPid = 0, string? writerName = null)
+        {
+            var result = new DllUnloadResult { ProcessId = writerPid, ProcessName = writerName ?? "" };
+            if (string.IsNullOrEmpty(dllPath) || !File.Exists(dllPath)) return result;
 
-                // Step 2: If unload failed, kill the process — can't leave malicious code running
-                if (!allUnloaded)
-                {
-                    try { proc.Kill(entireProcessTree: true); }
-                    catch { }
-                }
+            try
+            {
+                var fileName = Path.GetFileName(dllPath);
+                if (!SideloadTargets.Contains(fileName)) return result;
 
-                // Step 3: Quarantine each sideloaded DLL from disk + place lock file
-                foreach (var dllPath in sideloadedFiles)
-                {
-                    await RemediateDroppedDll(dllPath, processName, processId);
-                    result.UnloadedDlls.Add(dllPath);
-                }
+                var dir = Path.GetDirectoryName(dllPath);
+                if (string.IsNullOrEmpty(dir) || IsWindowsSystemDirectory(dir)) return result;
+                if (SecurityValidation.IsGameOrAntiCheatPath(dllPath)) return result;
 
+                if (!IsHostileSideloadDll(dllPath)) return result;
+
+                var key = $"drop:{dllPath.ToLowerInvariant()}";
+                if (_remediationHistory.ContainsKey(key)) return result;
+                if (!TryConsumeRateLimit()) return result;
+                _remediationHistory[key] = DateTimeOffset.UtcNow;
+
+                // Kill any process running from this directory (likely the sideload host)
+                var killed = KillProcessesFromDirectory(dir);
+                result.ProcessId = writerPid > 0 ? writerPid : (killed.FirstOrDefault());
+                result.ProcessName = writerName ?? "";
+
+                await RemediateDroppedDll(dllPath, result.ProcessName, result.ProcessId);
+                result.UnloadedDlls.Add(dllPath);
                 result.Success = true;
 
                 await _detectionEngine.EmitAsync(new DetectionEvent
                 {
-                    RuleName = "DLL Sideloading: Malicious DLL Quarantined",
-                    Evidence = $"Process '{processName}' (PID {processId}) loaded sideloaded DLLs: {string.Join(", ", sideloadedFiles.Select(Path.GetFileName))}. Process killed, DLLs quarantined.",
-                    Reasoning = "System DLLs were loaded from the application directory instead of System32, indicating DLL sideloading (T1574.001). The process was terminated and the malicious DLLs quarantined to prevent re-exploitation.",
-                    Confidence = 0.85,
+                    RuleName = "DLL Sideloading: Hostile System-DLL Plant Detected",
+                    Evidence = $"Sideload-target DLL '{fileName}' written to '{dllPath}' " +
+                               $"(writer='{writerName}' PID {writerPid}). " +
+                               $"Quarantined; killed {killed.Count} host process(es) from '{dir}'.",
+                    Reasoning = "Attackers plant system-named DLLs beside applications so Windows loads " +
+                                "the local copy instead of System32 (T1574.001). The host process was " +
+                                "terminated to unload the mapping and the plant was quarantined.",
+                    Confidence = 0.90,
                     Tier = DetectionTier.Tier1Behavioral,
-                    AuthorizedResponse = ResponseAction.LogOnly, // Already handled
-                    ProcessName = processName,
-                    ProcessId = processId,
+                    AuthorizedResponse = ResponseAction.LogOnly, // already remediated
+                    ProcessName = writerName ?? "unknown",
+                    ProcessId = writerPid,
+                    SignalType = SignalType.ProcessInjection,
                     Metadata = new Dictionary<string, string>
                     {
-                        ["SideloadedDlls"] = string.Join(";", sideloadedFiles),
-                        ["Action"] = "KILL_AND_QUARANTINE"
+                        ["DllPath"] = dllPath,
+                        ["Directory"] = dir,
+                        ["KilledPids"] = string.Join(",", killed),
+                        ["Action"] = "KILL_HOST_AND_QUARANTINE"
                     }
                 });
+
+                _logger.LogWarning(
+                    "[DllUnloadEngine] System-wide plant remediated: {Dll} (writer PID {Pid})",
+                    dllPath, writerPid);
             }
-            catch (ArgumentException) { } // Process exited
-            catch (System.ComponentModel.Win32Exception) { } // Access denied
-            catch (InvalidOperationException) { }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "[DllUnloadEngine] OnSideloadDllDropped failed for {Path}", dllPath);
+            }
 
             return result;
         }
 
         /// <summary>
-        /// Called by AdvancedResponseEngine when a DLL injection detection fires.
-        /// Scans target process for suspicious DLLs from Temp paths, quarantines them.
+        /// True if the file name is a classic sideload target (for FileActivityMonitor gate).
         /// </summary>
-        public async Task<DllUnloadResult> UnloadInjectedDllAsync(int targetPid)
+        public static bool IsSideloadTargetFileName(string? pathOrName)
         {
-            var result = new DllUnloadResult { ProcessId = targetPid };
+            if (string.IsNullOrEmpty(pathOrName)) return false;
+            var name = Path.GetFileName(pathOrName);
+            return SideloadTargets.Contains(name);
+        }
+
+        private async Task<DllUnloadResult> RemediateProcessAndDllsAsync(
+            int processId,
+            string processName,
+            string imagePath,
+            List<string> hostileDlls,
+            string source)
+        {
+            var result = new DllUnloadResult
+            {
+                ProcessId = processId,
+                ProcessName = processName
+            };
+
+            var actionable = new List<string>();
+            foreach (var dll in hostileDlls)
+            {
+                var key = $"{processId}:{dll.ToLowerInvariant()}";
+                if (_remediationHistory.ContainsKey(key)) continue;
+                if (!TryConsumeRateLimit()) break;
+                _remediationHistory[key] = DateTimeOffset.UtcNow;
+                actionable.Add(dll);
+            }
+
+            if (actionable.Count == 0) return result;
+
+            // Unload = kill host so Windows unmaps the DLL, then quarantine on disk
             try
             {
-                using var proc = Process.GetProcessById(targetPid);
-                result.ProcessName = proc.ProcessName;
-                if (ProtectedProcesses.Contains(result.ProcessName))
-                {
-                    try
-                    {
-                        var path = proc.MainModule?.FileName;
-                        if (IsProtectedPath(path)) return result;
-                    }
-                    catch { return result; }
-                }
-
-                string? procDir = null;
-                try { procDir = Path.GetDirectoryName(proc.MainModule?.FileName); } catch { }
-
-                var suspiciousDlls = new List<string>();
-
-                foreach (ProcessModule mod in proc.Modules)
-                {
-                    try
-                    {
-                        var modName = mod.ModuleName ?? "";
-                        var modPath = mod.FileName ?? "";
-
-                        if (modPath.Contains(@"\Windows\", StringComparison.OrdinalIgnoreCase)) continue;
-
-                        // Flag DLLs from Temp paths — clear injection indicator
-                        bool isSuspicious = modPath.Contains(@"\Temp\", StringComparison.OrdinalIgnoreCase) ||
-                                            modPath.Contains(@"\AppData\Local\Temp\", StringComparison.OrdinalIgnoreCase);
-
-                        // Also flag sideloading from app directory
-                        if (!isSuspicious && !string.IsNullOrEmpty(procDir))
-                        {
-                            var modDir = Path.GetDirectoryName(modPath) ?? "";
-                            isSuspicious = modDir.Equals(procDir, StringComparison.OrdinalIgnoreCase) &&
-                                           SideloadTargets.Contains(modName);
-                        }
-
-                        if (isSuspicious)
-                        {
-                            var key = $"{targetPid}:{modName}";
-                            if (_remediationHistory.ContainsKey(key)) continue;
-                            if (!TryConsumeRateLimit()) continue;
-
-                            suspiciousDlls.Add(modPath);
-                            _remediationHistory[key] = DateTimeOffset.UtcNow;
-                        }
-                    }
-                    catch { }
-                }
-
-                if (suspiciousDlls.Count == 0) return result;
-
-                // Step 1: Attempt in-memory unload via FreeLibrary
-                bool allUnloaded = true;
-                foreach (ProcessModule mod in proc.Modules)
-                {
-                    try
-                    {
-                        if (suspiciousDlls.Contains(mod.FileName))
-                        {
-                            bool unloaded = TryUnloadDll(targetPid, mod.BaseAddress);
-                            if (!unloaded) allUnloaded = false;
-                        }
-                    }
-                    catch { allUnloaded = false; }
-                }
-
-                // Step 2: If unload failed, kill the process
-                if (!allUnloaded)
-                {
-                    try { proc.Kill(entireProcessTree: true); }
-                    catch { }
-                }
-
-                // Step 3: Quarantine each suspicious DLL from disk
-                foreach (var dllPath in suspiciousDlls)
-                {
-                    await RemediateDroppedDll(dllPath, result.ProcessName, targetPid);
-                    result.UnloadedDlls.Add(dllPath);
-                }
-
-                result.Success = true;
+                HardeningModule.SafeKillProcessTree(processId);
             }
-            catch { }
+            catch
+            {
+                try
+                {
+                    using var proc = Process.GetProcessById(processId);
+                    proc.Kill(entireProcessTree: true);
+                }
+                catch { /* already dead */ }
+            }
+
+            foreach (var dllPath in actionable)
+            {
+                await RemediateDroppedDll(dllPath, processName, processId);
+                result.UnloadedDlls.Add(dllPath);
+            }
+
+            result.Success = true;
+
+            await _detectionEngine.EmitAsync(new DetectionEvent
+            {
+                RuleName = "DLL Sideloading: Malicious DLL Unloaded (Host Killed + Quarantined)",
+                Evidence = $"Process '{processName}' (PID {processId}) image '{imagePath}' co-located with " +
+                           $"hostile sideload DLL(s): {string.Join(", ", actionable.Select(Path.GetFileName))}. " +
+                           $"Host terminated; DLLs quarantined. Source={source}.",
+                Reasoning = "System-named DLLs in the application directory indicate DLL search-order " +
+                            "hijacking (T1574.001). The process was killed to unload the mapped modules " +
+                            "and the plants were removed from disk.",
+                Confidence = 0.88,
+                Tier = DetectionTier.Tier1Behavioral,
+                AuthorizedResponse = ResponseAction.LogOnly,
+                ProcessName = processName,
+                ProcessId = processId,
+                SignalType = SignalType.ProcessInjection,
+                Metadata = new Dictionary<string, string>
+                {
+                    ["ImagePath"] = imagePath,
+                    ["SideloadedDlls"] = string.Join(";", actionable),
+                    ["Source"] = source,
+                    ["Action"] = "KILL_HOST_AND_QUARANTINE"
+                }
+            });
+
+            _logger.LogWarning(
+                "[DllUnloadEngine] Unloaded sideload host {Name} PID {Pid}: {Dlls}",
+                processName, processId, string.Join(", ", actionable.Select(Path.GetFileName)));
+
             return result;
         }
 
-        /// <summary>
-        /// Unloads a DLL from a target process using QueueUserAPC + FreeLibrary.
-        /// QueueUserAPC schedules FreeLibrary(moduleBase) on an alertable thread in the target.
-        /// Unlike CreateRemoteThread, QueueUserAPC is not in AV injection signature databases.
-        /// Falls back to process kill if no alertable thread responds within 2 seconds.
-        /// </summary>
-        private static bool TryUnloadDll(int processId, IntPtr moduleBaseAddress)
+        private List<string> FindHostileSideloadDlls(string directory)
         {
-            IntPtr hProcess = IntPtr.Zero;
+            var found = new List<string>();
             try
             {
-                // SECURITY v1.4.4: Reduced from PROCESS_ALL_ACCESS (0x1F0FFF) to minimum required.
-                // We only need to enumerate threads (PROCESS_QUERY_INFORMATION) and read module list.
-                // Thread handles are opened separately with THREAD_SET_CONTEXT for QueueUserAPC.
-                // PROCESS_ALL_ACCESS was overprivileged — provided a window for handle duplication
-                // and made this code a powerful injection primitive if processId were attacker-influenced.
-                const uint PROCESS_QUERY_INFORMATION = 0x0400;
-                hProcess = OpenProcess(PROCESS_QUERY_INFORMATION, false, processId);
-                if (hProcess == IntPtr.Zero) return false;
-
-                var kernel32 = GetModuleHandleA("kernel32.dll");
-                if (kernel32 == IntPtr.Zero) return false;
-                var freeLibAddr = GetProcAddress(kernel32, "FreeLibrary");
-                if (freeLibAddr == IntPtr.Zero) return false;
-
-                // Queue APC to threads — alertable threads will execute FreeLibrary
-                bool queued = false;
-                using var proc = System.Diagnostics.Process.GetProcessById(processId);
-                foreach (System.Diagnostics.ProcessThread thread in proc.Threads)
+                foreach (var target in SideloadTargets)
                 {
-                    IntPtr hThread = OpenThread(0x0010, false, (uint)thread.Id); // THREAD_SET_CONTEXT
-                    if (hThread == IntPtr.Zero) continue;
-                    try
-                    {
-                        if (QueueUserAPC(freeLibAddr, hThread, moduleBaseAddress) != 0)
-                        {
-                            queued = true;
-                            break;
-                        }
-                    }
-                    finally { CloseHandle(hThread); }
+                    var path = Path.Combine(directory, target);
+                    if (!File.Exists(path)) continue;
+                    if (IsHostileSideloadDll(path))
+                        found.Add(path);
                 }
-
-                if (!queued) return false;
-
-                // Poll every 10ms for up to 200ms to see if the module has been successfully unloaded.
-                // If the target thread is alertable, this will execute almost instantly.
-                for (int i = 0; i < 20; i++)
-                {
-                    Thread.Sleep(10);
-                    if (!IsModuleLoaded(processId, moduleBaseAddress))
-                    {
-                        return true; // Unloaded successfully!
-                    }
-                }
-
-                return false; // Timed out, did not unload
             }
-            catch { return false; }
-            finally
+            catch { /* access denied */ }
+            return found;
+        }
+
+        /// <summary>
+        /// Hostile if: unsigned, or signed by a non-Microsoft publisher, or in Temp/Downloads.
+        /// Microsoft-redistributed dbghelp next to crash-reporting apps is allowed.
+        /// </summary>
+        private bool IsHostileSideloadDll(string dllPath)
+        {
+            try
             {
-                if (hProcess != IntPtr.Zero) CloseHandle(hProcess);
+                var lower = dllPath.ToLowerInvariant();
+                if (lower.Contains(@"\temp\") ||
+                    lower.Contains(@"\downloads\") ||
+                    lower.Contains(@"\appdata\local\temp\"))
+                    return true;
+
+                if (!_signerTrust.IsSignedFile(dllPath))
+                    return true;
+
+                var signer = _signerTrust.GetSignerName(dllPath) ?? "";
+                // Allow genuine Microsoft redistributables of system DLL names
+                if (signer.Contains("Microsoft", StringComparison.OrdinalIgnoreCase) ||
+                    signer.Contains("Windows", StringComparison.OrdinalIgnoreCase))
+                    return false;
+
+                // Third-party signature on a system DLL name next to an app = hostile plant
+                return true;
+            }
+            catch
+            {
+                return true; // fail closed for sideload targets outside System32
             }
         }
 
-        private static bool IsModuleLoaded(int processId, IntPtr baseAddress)
+        private List<int> KillProcessesFromDirectory(string directory)
         {
+            var killed = new List<int>();
+            var dirNorm = directory.TrimEnd('\\') + "\\";
             try
             {
-                using var proc = System.Diagnostics.Process.GetProcessById(processId);
-                foreach (System.Diagnostics.ProcessModule mod in proc.Modules)
+                foreach (var proc in Process.GetProcesses())
                 {
-                    if (mod.BaseAddress == baseAddress) return true;
+                    try
+                    {
+                        if (proc.Id <= 4) continue;
+                        var path = SecurityValidation.GetProcessImagePath(proc.Id);
+                        if (string.IsNullOrEmpty(path)) continue;
+                        if (SecurityValidation.IsGameOrAntiCheatPath(path)) continue;
+
+                        var pDir = Path.GetDirectoryName(path);
+                        if (string.IsNullOrEmpty(pDir)) continue;
+                        if (!pDir.TrimEnd('\\').Equals(directory.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase))
+                            continue;
+
+                        var name = proc.ProcessName;
+                        if (ProtectedProcessNames.Contains(name) && IsProtectedPath(path))
+                            continue;
+
+                        try { HardeningModule.SafeKillProcessTree(proc.Id); }
+                        catch
+                        {
+                            try { proc.Kill(entireProcessTree: true); } catch { }
+                        }
+                        killed.Add(proc.Id);
+                    }
+                    catch { }
+                    finally { proc.Dispose(); }
                 }
             }
             catch { }
-            return false;
+            return killed;
         }
 
-        [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
-        private static extern IntPtr OpenProcess(uint dwDesiredAccess, bool bInheritHandle, int dwProcessId);
-
-        [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
-        private static extern IntPtr OpenThread(uint dwDesiredAccess, bool bInheritHandle, uint dwThreadId);
-
-        [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
-        private static extern uint QueueUserAPC(IntPtr pfnAPC, IntPtr hThread, IntPtr dwData);
-
-        [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true, CharSet = System.Runtime.InteropServices.CharSet.Ansi)]
-        private static extern IntPtr GetModuleHandleA(string lpModuleName);
-
-        [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true, CharSet = System.Runtime.InteropServices.CharSet.Ansi)]
-        private static extern IntPtr GetProcAddress(IntPtr hModule, string lpProcName);
-
-        [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
-        private static extern uint WaitForSingleObject(IntPtr hHandle, uint dwMilliseconds);
-
-        [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
-        private static extern bool CloseHandle(IntPtr hObject);
-
-        /// <summary>
-        /// Quarantines a dropped DLL and places a lock file to prevent re-drop.
-        /// The lock file is a zero-byte, read-only, hidden, system file at the
-        /// same path — Windows won't let anyone overwrite it without first removing
-        /// the attributes, which FileActivityMonitor will catch.
-        /// </summary>
         private async Task RemediateDroppedDll(string dllPath, string processName, int processId)
         {
             try
             {
-                // Small delay — let the killed process release its file handles
-                await Task.Delay(200);
+                await Task.Delay(150); // let killed host release handles
 
-                if (!File.Exists(dllPath)) return;
+                if (File.Exists(dllPath))
+                {
+                    // force: plants may carry stolen/forged signatures in context of sideload
+                    await _quarantineManager.QuarantineFileAtomicAsync(dllPath, forceQuarantineSigned: true);
+                }
 
-                // Quarantine: XOR-encrypt and move to quarantine directory
-                // force: sideloaded payload may be signed; context already proved it is hostile
-                await _quarantineManager.QuarantineFileAtomicAsync(dllPath, forceQuarantineSigned: true);
-
-                // Place a lock file: zero-byte decoy with restrictive attributes
-                // This prevents the attacker from simply re-dropping the DLL.
-                // If they manage to delete/overwrite it, FileActivityMonitor catches that.
+                // Lock file: zero-byte read-only decoy blocks re-drop
                 try
                 {
-                    await File.WriteAllBytesAsync(dllPath, Array.Empty<byte>());
+                    if (!File.Exists(dllPath))
+                        await File.WriteAllBytesAsync(dllPath, Array.Empty<byte>());
                     File.SetAttributes(dllPath,
-                        FileAttributes.ReadOnly |
-                        FileAttributes.Hidden |
-                        FileAttributes.System);
+                        FileAttributes.ReadOnly | FileAttributes.Hidden | FileAttributes.System);
                 }
                 catch
                 {
-                    // Lock file is best-effort — quarantine is the critical path
+                    // best-effort
                 }
 
                 _logger.LogInformation(
-                    "[DllSideloadRemediator] Quarantined '{DllPath}' from process '{ProcessName}' (PID {Pid}), lock file placed",
+                    "[DllUnloadEngine] Quarantined '{Dll}' (host {Name} PID {Pid}), lock placed",
                     dllPath, processName, processId);
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "[DllSideloadRemediator] Failed to quarantine '{DllPath}'", dllPath);
+                _logger.LogWarning(ex, "[DllUnloadEngine] Failed to quarantine '{Dll}'", dllPath);
             }
         }
 
@@ -447,7 +431,23 @@ namespace Sentinel.Core
 
         public void Dispose()
         {
-            _remediationHistory.Clear();
+            // Prune old history entries older than 1 hour
+            var cutoff = DateTimeOffset.UtcNow.AddHours(-1);
+            foreach (var kv in _remediationHistory)
+            {
+                if (kv.Value < cutoff)
+                    _remediationHistory.TryRemove(kv.Key, out _);
+            }
+        }
+
+        private static bool IsWindowsSystemDirectory(string directory)
+        {
+            var win = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+            var lower = directory.ToLowerInvariant();
+            return lower.StartsWith((win + @"\system32").ToLowerInvariant()) ||
+                   lower.StartsWith((win + @"\syswow64").ToLowerInvariant()) ||
+                   lower.StartsWith((win + @"\winsxs").ToLowerInvariant()) ||
+                   lower.StartsWith((win + @"\servicing").ToLowerInvariant());
         }
 
         private static bool IsProtectedPath(string? path)

@@ -518,7 +518,11 @@ namespace Sentinel.Core
                 try
                 {
                     using var proc = Process.GetProcessById(detection.ProcessId);
-                    var quarantinePath = proc.MainModule?.FileName;
+                    // QUERY_LIMITED only — MainModule uses PROCESS_VM_READ (breaks anti-cheat)
+                    var quarantinePath = SecurityValidation.GetProcessImagePath(detection.ProcessId)
+                                        ?? proc.MainModule?.FileName;
+                    if (SecurityValidation.IsGameOrAntiCheatPath(quarantinePath))
+                        quarantinePath = null; // never quarantine game binaries from path lookup races
                     if (!string.IsNullOrEmpty(quarantinePath) && File.Exists(quarantinePath))
                     {
                         // QuarantineManager refuses signed binaries by default (returns null).
@@ -769,7 +773,7 @@ namespace Sentinel.Core
                     try
                     {
                         using var proc = Process.GetProcessById(detection.ProcessId);
-                        var path = proc.MainModule?.FileName;
+                        var path = SecurityValidation.GetProcessImagePath(detection.ProcessId);
                         if (!string.IsNullOrEmpty(path) && File.Exists(path))
                         {
                             using var fs = new FileStream(path, FileMode.Open, FileAccess.Read,

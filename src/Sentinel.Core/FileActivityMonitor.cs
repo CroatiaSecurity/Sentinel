@@ -12,6 +12,7 @@ namespace Sentinel.Core
         private readonly TelemetryFusionEngine _fusionEngine;
         private readonly DetectionEngine _detectionEngine;
         private readonly RansomwareIoMonitor? _ransomwareIoMonitor;
+        private readonly DllUnloadEngine? _dllUnloadEngine;
         private readonly SentinelConfig _config;
         private readonly ILogger<FileActivityMonitor> _logger;
         private readonly SignerTrustService _signerTrust;
@@ -69,11 +70,13 @@ namespace Sentinel.Core
             SentinelConfig config,
             ILogger<FileActivityMonitor> logger,
             SignerTrustService signerTrust,
-            RansomwareIoMonitor? ransomwareIoMonitor = null)
+            RansomwareIoMonitor? ransomwareIoMonitor = null,
+            DllUnloadEngine? dllUnloadEngine = null)
         {
             _fusionEngine = fusionEngine;
             _detectionEngine = detectionEngine;
             _ransomwareIoMonitor = ransomwareIoMonitor;
+            _dllUnloadEngine = dllUnloadEngine;
             _config = config;
             _logger = logger;
             _signerTrust = signerTrust;
@@ -329,6 +332,16 @@ namespace Sentinel.Core
             }
 
             var processInfo = GetProcessUsingFile(e.FullPath);
+
+            // System-wide DLL sideload plant: known system DLL names written outside System32
+            if ((e.ChangeType == WatcherChangeTypes.Created || e.ChangeType == WatcherChangeTypes.Changed) &&
+                _dllUnloadEngine != null &&
+                DllUnloadEngine.IsSideloadTargetFileName(e.FullPath) &&
+                !IsProtectedOsDirectory(pathLower))
+            {
+                _ = _dllUnloadEngine.OnSideloadDllDroppedAsync(
+                    e.FullPath, processInfo.pid, processInfo.name);
+            }
 
             // Critical: detect writes to System32/SysWOW64 by non-OS processes
             // Exclude drivers\etc — managed by HostsFileGuard directly

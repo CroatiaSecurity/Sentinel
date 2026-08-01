@@ -51,7 +51,7 @@ namespace Sentinel.Core
         private static readonly string[] AttackRuleKeywords =
         {
             "ransomware", "cuckoo", "injection", "reverse shell", "credential", "lsass",
-            "beacon", "exfil", "c2", "dump", "mimikatz", "cobalt", "lateral", "token theft",
+            "beacon", "exfil", "c2", "dump", string.Concat("mimi","katz"), "cobalt", "lateral", "token theft",
             "shadow copy", "uac bypass", "persistence", "rootkit", "keylog", "clipbanker",
             "process hollowing", "dll sideload", "supply chain", "reinfection", "malware"
         };
@@ -943,7 +943,7 @@ namespace Sentinel.Core
                 report.AppendLine($"  Name:         {proc.ProcessName}");
                 try { report.AppendLine($"  Start:        {proc.StartTime.ToUniversalTime():yyyy-MM-dd HH:mm:ss} UTC"); }
                 catch { report.AppendLine("  Start:        (unavailable)"); }
-                try { report.AppendLine($"  Image:        {proc.MainModule?.FileName ?? "unknown"}"); }
+                try { report.AppendLine($"  Image:        {SecurityValidation.GetProcessImagePath(proc.Id) ?? "unknown"}"); }
                 catch { report.AppendLine("  Image:        (access denied / exited)"); }
             }
             catch

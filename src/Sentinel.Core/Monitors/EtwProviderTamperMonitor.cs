@@ -29,7 +29,7 @@ namespace Sentinel.Core
     /// 
     /// Response: Tier1 KillProcessTree for confirmed ETW/provider manipulation.
     ///           Tier2 for suspicious session enumeration patterns.
-    /// Scans every 30s. Requires read access to process memory (PROCESS_VM_READ) for stub checks.
+    /// Scans every 30s. Does NOT use ReadProcessMemory (AV / anti-cheat safe).
     /// </summary>
     public sealed class EtwProviderTamperMonitor : BackgroundService
     {
@@ -76,29 +76,6 @@ namespace Sentinel.Core
             uint propertyArrayCount,
             out uint sessionCount);
 
-        [DllImport("kernel32.dll", SetLastError = true)]
-        private static extern IntPtr OpenProcess(uint dwDesiredAccess, bool bInheritHandle, int dwProcessId);
-
-        [DllImport("kernel32.dll", SetLastError = true)]
-        private static extern bool ReadProcessMemory(IntPtr hProcess, IntPtr lpBaseAddress,
-            byte[] lpBuffer, int nSize, out int lpNumberOfBytesRead);
-
-        [DllImport("kernel32.dll")]
-        private static extern bool CloseHandle(IntPtr hObject);
-
-        [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
-        private static extern IntPtr GetModuleHandleW(string lpModuleName);
-
-        [DllImport("kernel32.dll", CharSet = CharSet.Ansi)]
-        private static extern IntPtr GetProcAddress(IntPtr hModule, string procName);
-
-        private const uint PROCESS_VM_READ = 0x0010;
-        private const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
-
-        // Expected EtwEventWrite prologue bytes (x64: mov r11, rsp / ... or sub rsp, ...)
-        // The key pattern: the function should NOT start with RET (0xC3), NOP (0x90), or JMP (0xE9/0xEB)
-        private static readonly byte[] PatchedPrologues = new byte[] { 0xC3, 0x90, 0xEB, 0xE9 };
-
         public EtwProviderTamperMonitor(
             DetectionEngine detectionEngine,
             ProcessAncestryCache ancestryCache,
@@ -125,7 +102,7 @@ namespace Sentinel.Core
                 {
                     await Task.Delay(30000, ct);
                     await CheckEtwSessionIntegrityAsync(ct);
-                    await CheckProcessEtwPatchingAsync(ct);
+                    // Remote EtwEventWrite prologue checks removed (ReadProcessMemory → Mal/MSIL-AZ).
                     await CheckEtwManipulationProcessesAsync(ct);
                 }
                 catch (OperationCanceledException) { break; }
@@ -171,83 +148,6 @@ namespace Sentinel.Core
             // Update baseline with current state (only add, never remove critical sessions)
             foreach (var session in currentSessions)
                 _baselineSessions.Add(session);
-        }
-
-        /// <summary>
-        /// Check EtwEventWrite function prologue in critical processes for patches.
-        /// </summary>
-        private async Task CheckProcessEtwPatchingAsync(CancellationToken ct)
-        {
-            // Get the expected EtwEventWrite address from our own ntdll
-            IntPtr ntdll = GetModuleHandleW("ntdll.dll");
-            if (ntdll == IntPtr.Zero) return;
-            IntPtr etwAddr = GetProcAddress(ntdll, "EtwEventWrite");
-            if (etwAddr == IntPtr.Zero) return;
-
-            // Read our own process's EtwEventWrite as reference (should be clean)
-            byte[] ourPrologue = new byte[8];
-            if (!ReadProcessMemory(Process.GetCurrentProcess().Handle, etwAddr, ourPrologue, 8, out _))
-                return;
-
-            // Check critical processes (lsass, svchost instances hosting EventLog)
-            var criticalPids = GetCriticalEtwProcesses();
-
-            foreach (int pid in criticalPids)
-            {
-                if (ct.IsCancellationRequested) break;
-
-                string alertKey = $"patch:{pid}";
-                if (_alertedItems.Contains(alertKey)) continue;
-
-                IntPtr hProcess = OpenProcess(PROCESS_VM_READ | PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
-                if (hProcess == IntPtr.Zero) continue;
-
-                try
-                {
-                    byte[] remotePrologue = new byte[8];
-                    if (!ReadProcessMemory(hProcess, etwAddr, remotePrologue, 8, out int bytesRead))
-                        continue;
-                    if (bytesRead < 4) continue;
-
-                    // Compare: if remote prologue starts with a patch byte (RET/NOP/JMP), it's been tampered
-                    bool isPatched = PatchedPrologues.Contains(remotePrologue[0]);
-
-                    // Also check if it differs significantly from our reference
-                    if (!isPatched)
-                    {
-                        int differences = 0;
-                        for (int i = 0; i < Math.Min(bytesRead, ourPrologue.Length); i++)
-                        {
-                            if (remotePrologue[i] != ourPrologue[i]) differences++;
-                        }
-                        isPatched = differences >= 3; // 3+ byte changes in first 8 bytes = likely patched
-                    }
-
-                    if (isPatched)
-                    {
-                        string processName = ResolveProcessName(pid);
-                        await _detectionEngine.EmitAsync(new DetectionEvent
-                        {
-                            RuleName = "Anti-Tamper: EtwEventWrite Patched in Critical Process",
-                            Evidence = $"ntdll!EtwEventWrite has been patched in process '{processName}' (PID {pid}). " +
-                                       $"First bytes: [{string.Join(" ", remotePrologue.Take(4).Select(b => b.ToString("X2")))}] " +
-                                       $"(expected: [{string.Join(" ", ourPrologue.Take(4).Select(b => b.ToString("X2")))}]). " +
-                                       $"This blinds all ETW telemetry from this process.",
-                            Reasoning = "The EtwEventWrite function in a critical process has been modified in memory. " +
-                                        "This is a technique used by advanced attackers to blind ETW consumers without stopping " +
-                                        "the trace session itself (MITRE T1562.006). All telemetry from this process is now unreliable.",
-                            Confidence = 0.95,
-                            Tier = DetectionTier.Tier1Behavioral,
-                            AuthorizedResponse = ResponseAction.KillProcessTree,
-                            SignalType = SignalType.AntiTamper,
-                            ProcessName = processName,
-                            ProcessId = pid,
-                        });
-                        _alertedItems.Add(alertKey);
-                    }
-                }
-                finally { CloseHandle(hProcess); }
-            }
         }
 
         /// <summary>
@@ -386,44 +286,6 @@ namespace Sentinel.Core
             }
 
             return sessions;
-        }
-
-        private List<int> GetCriticalEtwProcesses()
-        {
-            var pids = new List<int>();
-
-            try
-            {
-                // Find lsass.exe
-                foreach (var proc in Process.GetProcessesByName("lsass"))
-                {
-                    pids.Add(proc.Id);
-                    proc.Dispose();
-                }
-
-                // Find svchost instances hosting EventLog
-                using var searcher = new System.Management.ManagementObjectSearcher(
-                    "SELECT ProcessId FROM Win32_Service WHERE Name = 'EventLog' AND State = 'Running'");
-                foreach (System.Management.ManagementObject obj in searcher.Get())
-                {
-                    int pid = Convert.ToInt32(obj["ProcessId"]);
-                    if (pid > 4 && !pids.Contains(pid))
-                        pids.Add(pid);
-                }
-            }
-            catch { }
-
-            return pids;
-        }
-
-        private string ResolveProcessName(int pid)
-        {
-            try
-            {
-                using var proc = Process.GetProcessById(pid);
-                return proc.ProcessName;
-            }
-            catch { return $"PID:{pid}"; }
         }
 
         private static string Truncate(string s, int maxLen) =>

@@ -334,7 +334,7 @@ namespace Sentinel.Core
             {
                 using var proc = Process.GetProcessById(pid);
                 resolution.Name = proc.ProcessName;
-                try { resolution.ImagePath = proc.MainModule?.FileName; } catch { }
+                try { resolution.ImagePath = SecurityValidation.GetProcessImagePath(proc.Id); } catch { }
                 resolution.Source = "direct";
 
                 if (string.IsNullOrEmpty(resolution.Name))

@@ -236,7 +236,7 @@ namespace Sentinel.Core
                 {
                     if (proc.Id <= 4) continue;
                     string? imagePath = null;
-                    try { imagePath = proc.MainModule?.FileName; } catch { }
+                    try { imagePath = SecurityValidation.GetProcessImagePath(proc.Id); } catch { }
                     if (string.IsNullOrEmpty(imagePath) || !File.Exists(imagePath)) continue;
 
                     // Never alert on Windows system binaries

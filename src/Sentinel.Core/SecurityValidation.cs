@@ -616,6 +616,7 @@ namespace Sentinel.Core
         /// Retrieves the full image path of a process using query-limited-information access.
         /// This is safe to call on Denuvo-protected games and protected system processes
         /// without triggering anti-tamper or AV heuristic blocks.
+        /// Prefer this over Process.MainModule / Process.Modules (those require PROCESS_VM_READ).
         /// </summary>
         public static string? GetProcessImagePath(int pid)
         {
@@ -636,6 +637,71 @@ namespace Sentinel.Core
                 CloseHandle(hProcess);
             }
             return null;
+        }
+
+        /// <summary>
+        /// Hard policy: opportunistic process-memory inspection is forbidden.
+        ///
+        /// Opening Process.Modules / Process.MainModule or OpenProcess(PROCESS_VM_READ)
+        /// makes Denuvo and many anti-cheat engines self-terminate legitimate games.
+        /// Sentinel must not open process memory until independent evidence already
+        /// indicates malice (e.g. a Tier1 detection, response remediation for that PID).
+        ///
+        /// QUERY_LIMITED path lookup via <see cref="GetProcessImagePath"/> remains allowed.
+        /// </summary>
+        /// <param name="hasIndependentMaliciousEvidence">
+        /// True only when this PID was already implicated by a non-memory signal
+        /// (file/network/ETW process-start/registry/user report, etc.).
+        /// </param>
+        public static bool MayInspectProcessMemory(bool hasIndependentMaliciousEvidence)
+            => hasIndependentMaliciousEvidence;
+
+        /// <summary>
+        /// Identifies game / launcher / anti-cheat install trees so scanners can skip
+        /// even QUERY-level work when unnecessary, and so response code can avoid
+        /// collateral on interactive entertainment workloads.
+        /// Path-substring only — never a sole basis for trust of unknown binaries.
+        /// </summary>
+        public static bool IsGameOrAntiCheatPath(string? path)
+        {
+            if (string.IsNullOrEmpty(path)) return false;
+            var lower = path.ToLowerInvariant();
+
+            // Never treat staging dirs as "game" even if renamed steam/epic folders
+            if (lower.Contains(@"\temp\") ||
+                lower.Contains(@"\downloads\") ||
+                lower.Contains(@"\appdata\local\temp\"))
+                return false;
+
+            return lower.Contains(@"\steamapps\common\") ||
+                   lower.Contains(@"\steamapps\workshop\") ||
+                   lower.Contains(@"\steam\steamapps\") ||
+                   lower.Contains(@"\program files (x86)\steam\") ||
+                   lower.Contains(@"\program files\steam\") ||
+                   lower.Contains(@"\gog games\") ||
+                   lower.Contains(@"\gog galaxy\") ||
+                   lower.Contains(@"\epic games\") ||
+                   lower.Contains(@"\ea games\") ||
+                   lower.Contains(@"\origin games\") ||
+                   lower.Contains(@"\ubisoft\") ||
+                   lower.Contains(@"\ubisoft game launcher\") ||
+                   lower.Contains(@"\riot games\") ||
+                   lower.Contains(@"\battle.net\") ||
+                   lower.Contains(@"\blizzard\") ||
+                   lower.Contains(@"\xboxgames\") ||
+                   lower.Contains(@"\windowsapps\") ||
+                   lower.Contains(@"\sports interactive\") ||
+                   lower.Contains(@"\football manager\") ||
+                   lower.Contains(@"\sega\") ||
+                   lower.Contains(@"\rockstar games\") ||
+                   lower.Contains(@"\bethesda\") ||
+                   lower.Contains(@"\paradox interactive\") ||
+                   lower.Contains(@"\easyanticheat\") ||
+                   lower.Contains(@"\battleye\") ||
+                   lower.Contains(@"\vanguard\") ||
+                   lower.Contains(@"\denuvo\") ||
+                   lower.Contains(@"\common redist\") ||
+                   lower.Contains(@"\steamworks shared\");
         }
     }
 }

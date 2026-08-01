@@ -418,19 +418,14 @@ namespace Sentinel.Core
         {
             try
             {
-                // Skip scanning games/Steam apps to prevent anti-tamper/anti-cheat false triggers
+                // Observe-first: never enumerate Process.Modules on unproven PIDs
+                // (PROCESS_VM_READ kills Denuvo / anti-cheat games).
                 var path = SecurityValidation.GetProcessImagePath(proc.Id);
-                if (path != null)
-                {
-                    var lowerPath = path.ToLowerInvariant();
-                    if (lowerPath.Contains(@"\steamapps\common\") ||
-                        lowerPath.Contains(@"\steam\") ||
-                        lowerPath.Contains(@"\gog games\") ||
-                        lowerPath.Contains(@"\epic games\"))
-                    {
-                        return false;
-                    }
-                }
+                if (SecurityValidation.IsGameOrAntiCheatPath(path))
+                    return false;
+
+                if (!SecurityValidation.MayInspectProcessMemory(hasIndependentMaliciousEvidence: false))
+                    return false;
 
                 foreach (ProcessModule mod in proc.Modules)
                 {

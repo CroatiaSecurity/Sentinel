@@ -758,12 +758,9 @@ namespace Sentinel.Core
                                                    lowerPath.Contains(@"\downloads\") ||
                                                    lowerPath.Contains(@"\appdata\local\temp\");
                     if (!isSuspiciousDropLocation &&
-                        (lowerPath.StartsWith(@"c:\windows\") || 
+                        (lowerPath.StartsWith(@"c:\windows\") ||
                         lowerPath.StartsWith(@"c:\program files") ||
-                        lowerPath.Contains(@"\steamapps\common\") ||
-                        lowerPath.Contains(@"\steam\") ||
-                        lowerPath.Contains(@"\gog games\") ||
-                        lowerPath.Contains(@"\epic games\")))
+                        SecurityValidation.IsGameOrAntiCheatPath(exePath)))
                         continue;
 
                     // This is a recently-spawned, non-system, non-standard-path process.

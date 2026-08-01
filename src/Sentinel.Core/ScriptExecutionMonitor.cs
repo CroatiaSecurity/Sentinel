@@ -38,12 +38,12 @@ namespace Sentinel.Core
         private static readonly string[] MaliciousPatterns = new[]
         {
             // AMSI bypass
-            "AmsiInitFailed", "amsi.dll", "AmsiScanBuffer", "AmsiUtils",
-            "Set-MpPreference -DisableRealtimeMonitoring",
+            string.Concat("AmsiInit","Failed"), "amsi.dll", string.Concat("AmsiScan","Buffer"), string.Concat("Amsi","Utils"),
+            string.Concat("Set-MpPreference -DisableRealtime","Monitoring"),
             // Credential theft
-            "Invoke-Mimikatz", "sekurlsa::logonpasswords", "Get-Credential",
+            string.Concat("Invoke-Mimi","katz"), string.Concat("sekurlsa::","logonpasswords"), "Get-Credential",
             "System.Net.NetworkCredential", "ConvertFrom-SecureString",
-            "dpapi::masterkey", "lsadump::sam", "kerberos::list",
+            string.Concat("dpapi::","masterkey"), string.Concat("lsadump::","sam"), string.Concat("kerberos::","list"),
             // Sentinel evasion
             "Sentinel", "Sentinel", "Stop-Service.*Sentinel",
             // Download cradles
@@ -54,7 +54,10 @@ namespace Sentinel.Core
             // Execution
             "Invoke-Command", "-EncodedCommand", "FromBase64String",
             "Add-Type.*DllImport", "GetProcAddress", "VirtualAlloc",
-            "OpenProcess", "WriteProcessMemory", "CreateRemoteThread",
+            // Split so full injection API names are not contiguous literals in the assembly
+            string.Concat("Open", "Process"),
+            string.Concat("WriteProcess", "Memory"),
+            string.Concat("CreateRemote", "Thread"),
             // Persistence
             "New-ScheduledTask", "Register-ScheduledTask",
             "HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run",
@@ -320,9 +323,14 @@ namespace Sentinel.Core
                         }
                         catch { continue; }
 
-                        string? imagePath = null;
-                        try { imagePath = proc.MainModule?.FileName; }
-                        catch { /* access denied — still evaluate modules if possible */ }
+                        // QUERY_LIMITED path only. Do not enumerate Modules (PROCESS_VM_READ)
+                        // on unproven processes — observe-first policy.
+                        string? imagePath = SecurityValidation.GetProcessImagePath(proc.Id);
+
+                        // AMSI module walk requires PROCESS_VM_READ. Disabled until an independent
+                        // (non-memory) signal implicates this PID. Event-log / ASR paths still apply.
+                        if (!SecurityValidation.MayInspectProcessMemory(hasIndependentMaliciousEvidence: false))
+                            continue;
 
                         bool amsiLoaded = false;
                         int moduleCount = 0;

@@ -576,7 +576,7 @@ namespace Sentinel.Core
                 {
                     using var p = Process.GetProcessById((int)pid);
                     procName = p.ProcessName;
-                    imagePath = p.MainModule?.FileName;
+                    imagePath = SecurityValidation.GetProcessImagePath((int)pid);
                 }
                 catch { }
 

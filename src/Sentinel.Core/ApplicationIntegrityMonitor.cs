@@ -540,7 +540,7 @@ namespace Sentinel.Core
                     using var proc = Process.GetProcessById(offenderPid);
                     report.AppendLine($"  Process ID:     {offenderPid}");
                     report.AppendLine($"  Process Name:   {proc.ProcessName}");
-                    report.AppendLine($"  Image Path:     {proc.MainModule?.FileName ?? "UNKNOWN"}");
+                    report.AppendLine($"  Image Path:     {SecurityValidation.GetProcessImagePath(offenderPid) ?? "UNKNOWN"}");
                     report.AppendLine($"  Start Time:     {proc.StartTime.ToUniversalTime():yyyy-MM-dd HH:mm:ss} UTC");
                     report.AppendLine($"  Command Line:   {GetProcessCommandLine(offenderPid)}");
                     report.AppendLine();
@@ -557,8 +557,14 @@ namespace Sentinel.Core
                     var modules = new List<string>();
                     try
                     {
-                        foreach (ProcessModule mod in proc.Modules)
-                            modules.Add($"{mod.ModuleName}\t{mod.FileName}\t{mod.ModuleMemorySize}");
+                        // Module inventory only if evidence-gated and not a game path
+                        var offenderPath = SecurityValidation.GetProcessImagePath(offenderPid);
+                        if (SecurityValidation.MayInspectProcessMemory(true) &&
+                            !SecurityValidation.IsGameOrAntiCheatPath(offenderPath))
+                        {
+                            foreach (ProcessModule mod in proc.Modules)
+                                modules.Add($"{mod.ModuleName}\t{mod.FileName}\t{mod.ModuleMemorySize}");
+                        }
                     }
                     catch { }
 
@@ -830,7 +836,7 @@ namespace Sentinel.Core
                 {
                     try
                     {
-                        var imagePath = proc.MainModule?.FileName;
+                        var imagePath = SecurityValidation.GetProcessImagePath(proc.Id);
                         if (string.Equals(imagePath, executablePath, StringComparison.OrdinalIgnoreCase))
                         {
                             HardeningModule.SafeKillProcessTree(proc.Id);
@@ -859,7 +865,7 @@ namespace Sentinel.Core
                 {
                     try
                     {
-                        var imagePath = proc.MainModule?.FileName;
+                        var imagePath = SecurityValidation.GetProcessImagePath(proc.Id);
                         if (string.IsNullOrEmpty(imagePath)) { proc.Dispose(); continue; }
 
                         // Look for installer-like processes that started recently

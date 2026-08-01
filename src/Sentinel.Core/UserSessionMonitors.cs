@@ -73,50 +73,15 @@ namespace Sentinel.Core
                                 // Name matches but path is suspicious — fall through to detection
                             }
 
-                            // Skip games/Steam — verify with signature trust to prevent directory-name spoofing
+                            // Observe-first: never enumerate Process.Modules (PROCESS_VM_READ).
+                            // That API kills Denuvo/anti-cheat games. DXGI module fishing is disabled
+                            // until independent evidence implicates a PID.
                             var path = SecurityValidation.GetProcessImagePath(proc.Id);
-                            if (path != null)
-                            {
-                                var lowerPath = path.ToLowerInvariant();
-                                // Reject Temp/Downloads even if path contains "steam"
-                                bool isSuspiciousDir = lowerPath.Contains(@"\temp\") ||
-                                                      lowerPath.Contains(@"\downloads\");
-                                if (!isSuspiciousDir &&
-                                    (lowerPath.Contains(@"\steamapps\common\") ||
-                                     lowerPath.Contains(@"\steam\") ||
-                                     lowerPath.Contains(@"\gog games\") ||
-                                     lowerPath.Contains(@"\epic games\")))
-                                {
-                                    continue;
-                                }
-                            }
+                            if (SecurityValidation.IsGameOrAntiCheatPath(path))
+                                continue;
 
-                            // Check if process has loaded d3d11.dll + dxgi.dll (DXGI duplication)
-                            bool hasDxgi = false, hasD3d = false;
-                            try
-                            {
-                                foreach (ProcessModule mod in proc.Modules)
-                                {
-                                    var name = mod.ModuleName?.ToLowerInvariant() ?? "";
-                                    if (name == "dxgi.dll") hasDxgi = true;
-                                    if (name == "d3d11.dll") hasD3d = true;
-                                }
-                            }
-                            catch { continue; } // Access denied for system procs
-
-                            if (hasDxgi && hasD3d && proc.ProcessName != "dwm" && proc.ProcessName != "csrss")
-                            {
-                                // Non-standard process with DXGI desktop duplication capability
-                                await _detectionEngine.EmitAsync(new DetectionEvent
-                                {
-                                    RuleName = "Screen Capture: DXGI Desktop Duplication",
-                                    Evidence = $"Process '{proc.ProcessName}' (PID {proc.Id}) loaded DXGI + D3D11 — potential screen capture",
-                                    Reasoning = "A non-standard process loaded DXGI desktop duplication modules, enabling silent screen capture.",
-                                    Confidence = 0.55, Tier = DetectionTier.Tier2Indicator,
-                                    ProcessName = proc.ProcessName, ProcessId = proc.Id
-                                });
-                                _alerted.Add(proc.Id);
-                            }
+                            if (!SecurityValidation.MayInspectProcessMemory(hasIndependentMaliciousEvidence: false))
+                                continue;
                         }
                         catch { }
                         finally { proc.Dispose(); }

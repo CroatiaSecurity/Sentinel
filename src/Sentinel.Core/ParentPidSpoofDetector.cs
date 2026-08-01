@@ -77,8 +77,8 @@ namespace Sentinel.Core
 
                         // Get image path for trust verification (name alone is spoofable)
                         string? imagePath = null;
-                        try { imagePath = SecurityValidation.GetProcessImagePath(proc.Id) ?? proc.MainModule?.FileName; }
-                        catch { try { imagePath = proc.MainModule?.FileName; } catch { } }
+                        try { imagePath = SecurityValidation.GetProcessImagePath(proc.Id); }
+                        catch { imagePath = null; }
 
                         // Verify code signature for development tools and browser process exemptions
                         bool isDev = _allowlist.IsDevelopmentProcess(proc.ProcessName);

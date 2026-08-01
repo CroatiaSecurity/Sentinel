@@ -76,7 +76,7 @@ namespace Sentinel.Core
                                     {
                                         // Elevated process — check if it's from a user-writable path
                                          string? imagePath = null;
-                                         try { imagePath = proc.MainModule?.FileName; } catch { }
+                                         try { imagePath = SecurityValidation.GetProcessImagePath(proc.Id); } catch { }
 
                                          if (imagePath != null)
                                          {
