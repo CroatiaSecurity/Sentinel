@@ -8,6 +8,7 @@ using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
+using Sentinel.Core.Ml;
 
 namespace Sentinel.Core
 {
@@ -17,8 +18,9 @@ namespace Sentinel.Core
     ///
     ///   1. Hash reputation (CIRCL, MalwareBazaar, VirusTotal) — weighted consensus
     ///   2. Static PE analysis (entropy, suspicious imports, packer indicators)
-    ///   3. Signer trust (Authenticode verification + publisher reputation)
-    ///   4. Contextual risk (file origin path, age on disk, prevalence)
+    ///   3. Offline PE ML model (FastTree) — soft prior when models are present
+    ///   4. Signer trust (Authenticode verification + publisher reputation)
+    ///   5. Contextual risk (file origin path, age on disk, prevalence)
     ///
     /// Scoring: 0 = maximally trusted, 100 = confirmed malicious.
     ///   0-20:  Trusted (signed, known-good hash, established)
@@ -39,6 +41,7 @@ namespace Sentinel.Core
         private readonly ILogger<FileReputationEngine> _logger;
         private readonly ContextBus? _contextBus;
         private readonly ThreatReportingConfig? _reportingConfig;
+        private readonly MlThreatScorer? _mlScorer;
 
         // SECURITY v1.4.4: Shared static HttpClient instances to prevent socket exhaustion.
         // Each has appropriate timeout for its target API. Thread-safe, reuses connections.
@@ -85,7 +88,8 @@ namespace Sentinel.Core
             SecureCacheStore cacheStore,
             ILogger<FileReputationEngine> logger,
             ContextBus? contextBus = null,
-            ThreatReportingConfig? reportingConfig = null)
+            ThreatReportingConfig? reportingConfig = null,
+            MlThreatScorer? mlScorer = null)
         {
             _hashRepService = hashRepService;
             _signerTrust = signerTrust;
@@ -93,6 +97,7 @@ namespace Sentinel.Core
             _logger = logger;
             _contextBus = contextBus;
             _reportingConfig = reportingConfig;
+            _mlScorer = mlScorer;
         }
 
         /// <summary>
@@ -166,6 +171,14 @@ namespace Sentinel.Core
             // === Signal 2: Static PE Analysis (local, fast) ===
             var staticResult = AnalyzeStaticProperties(filePath, fileSize);
             result.StaticAnalysis = staticResult;
+
+            // === Signal 2b: Offline PE ML (soft prior; null when model absent) ===
+            if (staticResult.IsPe && _mlScorer != null)
+            {
+                result.MlPeMalwareProbability = _mlScorer.ScorePeFile(filePath);
+                if (result.MlPeMalwareProbability.HasValue)
+                    result.MlPeRiskScore = (int)Math.Round(result.MlPeMalwareProbability.Value * 100.0);
+            }
 
             // === Signal 3: Signer Trust ===
             bool isSigned = _signerTrust.IsSignedFile(filePath);
@@ -628,11 +641,12 @@ namespace Sentinel.Core
         private static int CalculateCompositeScore(FileReputationResult r)
         {
             double score = 0;
+            bool hasMl = r.MlPeRiskScore.HasValue;
 
-            // Hash reputation consensus (weight: 40%)
-            score += r.HashReputation.ConsensusScore * 0.40;
+            // Hash reputation consensus (weight: 35% with ML, 40% without)
+            score += r.HashReputation.ConsensusScore * (hasMl ? 0.35 : 0.40);
 
-            // Static analysis (weight: 25%)
+            // Static analysis (weight: 20% with ML, 25% without)
             double staticScore = 30; // Neutral baseline
             if (r.StaticAnalysis.IsPe)
             {
@@ -648,22 +662,32 @@ namespace Sentinel.Core
             {
                 staticScore = 20; // Non-PE files are lower risk by default
             }
-            score += staticScore * 0.25;
+            score += staticScore * (hasMl ? 0.20 : 0.25);
 
-            // Signer trust (weight: 20%)
+            // Offline PE ML (weight: 15%) — soft prior only; never sole kill signal
+            if (hasMl)
+            {
+                // Strongly signed Microsoft-class trust is not overridden by ML alone:
+                // cap ML contribution when Authenticode is present.
+                double ml = r.MlPeRiskScore!.Value;
+                if (r.IsSigned) ml = Math.Min(ml, 55);
+                score += ml * 0.15;
+            }
+
+            // Signer trust (weight: 18% with ML, 20% without)
             double signerScore = 50; // Neutral
             if (r.IsSigned) signerScore = 10; // Strong trust signal
             else signerScore = 60; // Unsigned = elevated risk
-            score += signerScore * 0.20;
+            score += signerScore * (hasMl ? 0.18 : 0.20);
 
-            // Contextual risk (weight: 15%)
+            // Contextual risk (weight: 12% with ML, 15% without)
             double contextScore = 30; // Neutral
             if (r.ContextualRisk.IsHighRiskPath) contextScore += 25;
             if (r.ContextualRisk.IsNewFile) contextScore += 15;
             if (r.ContextualRisk.IsProtectedPath) contextScore -= 20;
             if (r.ContextualRisk.Prevalence > 5) contextScore -= 15; // Widely seen = less suspicious
             contextScore = Math.Clamp(contextScore, 0, 100);
-            score += contextScore * 0.15;
+            score += contextScore * (hasMl ? 0.12 : 0.15);
 
             return (int)Math.Clamp(score, 0, 100);
         }
@@ -763,6 +787,12 @@ namespace Sentinel.Core
         public HashReputationResult HashReputation { get; set; } = new();
         public StaticAnalysisResult StaticAnalysis { get; set; } = new();
         public ContextualRiskResult ContextualRisk { get; set; } = new();
+
+        /// <summary>PE malware probability from offline FastTree model, if available.</summary>
+        public double? MlPeMalwareProbability { get; set; }
+
+        /// <summary>0–100 risk from PE ML model (null if model missing or non-PE).</summary>
+        public int? MlPeRiskScore { get; set; }
 
         public static FileReputationResult Unknown(string path) => new()
         {

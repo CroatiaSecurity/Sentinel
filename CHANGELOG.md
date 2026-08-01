@@ -2,6 +2,21 @@
 
 All notable changes to Sentinel are documented in this file.
 
+## [1.8.5] - 2026-08-01
+
+### Added — Offline PE/URL ML soft signals
+- `MlThreatScorer` (Microsoft.ML FastTree) scores PE binaries and URLs/hosts from offline models in `MlModels/`
+- Models trained from CroatiaSecurity/C datasets via `tools/Sentinel.MlTrainer` (`pe_model.zip`, `url_model.zip`)
+- `FileReputationEngine` blends PE ML into composite score (15% weight when model present; capped when Authenticode-signed)
+- `DnsQueryMonitor` emits Tier2 log-only `DNS: ML URL Model High Risk` above 90% probability (trusted domains skipped/dampened)
+- Soft signal only — ML never authorizes kill alone
+- Installer/build copies `MlModels\` next to service and agent
+
+### Removed — ClipBanker-triggering clipboard features
+- Removed `ClipboardSanitizer` (clipboard read/rewrite) — Defender `Trojan:MSIL/ClipBanker.GC!MTB`
+- Removed `ClickjackingGuard` crypto address swap detection/restore (`Clipboard.SetText`)
+- ClickFix remains covered via process-level `ClickFixDetectionRule`
+
 ## [1.8.4] - 2026-08-01
 
 ### Fixed — WinReducer killed via conhost PPID race

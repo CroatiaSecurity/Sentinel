@@ -7,6 +7,7 @@ using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
+using Sentinel.Core.Ml;
 
 namespace Sentinel.Core
 {
@@ -31,13 +32,17 @@ namespace Sentinel.Core
         private readonly PersistentConnectionMonitor? _persistentConnMon;
         private readonly ForumHrWatchMonitor? _forumHrWatch;
         private readonly ContextBus? _contextBus;
+        private readonly MlThreatScorer? _mlScorer;
         private readonly TimeSpan _pollInterval;
         private CancellationTokenSource? _cts;
         private Task? _monitorTask;
 
         private readonly ConcurrentDictionary<string, DomainStats> _domainStats = new(StringComparer.OrdinalIgnoreCase);
+        private readonly ConcurrentDictionary<string, byte> _mlAlertedDomains = new(StringComparer.OrdinalIgnoreCase);
         private const int RapidQueryThreshold = 50;
         private const double EntropyThreshold = 4.0;
+        /// <summary>ML URL score threshold for Tier2 log-only DNS alert (soft signal).</summary>
+        private const double MlUrlAlertThreshold = 0.90;
 
         private static readonly HashSet<string> TrustedBaseDomains = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -77,7 +82,8 @@ namespace Sentinel.Core
             ILogger<DnsQueryMonitor> logger,
             PersistentConnectionMonitor? persistentConnMon = null,
             ContextBus? contextBus = null,
-            ForumHrWatchMonitor? forumHrWatch = null)
+            ForumHrWatchMonitor? forumHrWatch = null,
+            MlThreatScorer? mlScorer = null)
         {
             _detectionEngine = detectionEngine;
             _config = config;
@@ -85,6 +91,7 @@ namespace Sentinel.Core
             _persistentConnMon = persistentConnMon;
             _contextBus = contextBus;
             _forumHrWatch = forumHrWatch;
+            _mlScorer = mlScorer;
             _pollInterval = TimeSpan.FromSeconds(config.DnsPollIntervalSeconds > 0 ? config.DnsPollIntervalSeconds : 15);
         }
 
@@ -220,6 +227,38 @@ namespace Sentinel.Core
                         AnomalyType = DnsAnomalyType.HighEntropySubdomain,
                         Entropy = entropy
                     });
+                }
+            }
+
+            // Offline URL/host ML — Tier2 log-only soft signal (never kill on ML alone)
+            if (_mlScorer != null && _mlScorer.UrlModelReady)
+            {
+                var key = baseDomain;
+                if (_mlAlertedDomains.Count < 5000 && _mlAlertedDomains.TryAdd(key, 0))
+                {
+                    var p = _mlScorer.ScoreUrlOrHost(domain);
+                    if (p.HasValue && p.Value >= MlUrlAlertThreshold)
+                    {
+                        _ = _detectionEngine.EmitAsync(new DetectionEvent
+                        {
+                            RuleName = "DNS: ML URL Model High Risk",
+                            Evidence = $"Domain '{domain}' scored {p.Value:P0} malicious probability on the offline URL FastTree model",
+                            Reasoning =
+                                "An offline lexical URL model (trained on a public malicious-URL corpus) scored this " +
+                                "hostname highly. This is a soft indicator only — Tier2 log/advisory. Corroborating " +
+                                "process or network signals are required for active response.",
+                            Confidence = Math.Min(0.70, 0.45 + p.Value * 0.25),
+                            Tier = DetectionTier.Tier2Indicator,
+                            AuthorizedResponse = ResponseAction.LogOnly,
+                            ProcessName = "SYSTEM",
+                            ProcessId = pid,
+                            Metadata = new Dictionary<string, string>
+                            {
+                                { "MlUrlProbability", p.Value.ToString("F3") },
+                                { "Domain", domain }
+                            }
+                        });
+                    }
                 }
             }
         }

@@ -218,6 +218,8 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 
 | Component | Role |
 |-----------|------|
+| `MlThreatScorer` | Offline FastTree models (`MlModels/pe_model.zip`, `url_model.zip`) for PE static malware prior and lexical URL/host risk. Soft signal only; never sole kill. Trained via `tools/Sentinel.MlTrainer` from C/datasets. |
+| `FileReputationEngine` | Multi-signal file score (hash TI + static PE + optional PE ML + signer + path context). Composite 0–100. |
 | `DetectionEngine` | Runs all `IDetectionRule` instances against incoming telemetry. **Bounded** channel (10k, DropOldest). Tiered deduplication (10s Tier1, 30s Tier2). Consultant signals sticky Tier2/LogOnly. Records metrics via `SentinelMetrics`. |
 | `AdvancedResponseEngine` | Single point of action enforcement. Tier2 is always log-only. Tier1 executes `AuthorizedResponse` when `ActiveResponse=true` (default; `EnforceActiveResponse` re-enables if tampered). CLI `--active-response` can force-enable. President's Law closed kill list. Private/LAN IPs never firewall-isolated. |
 | `TelemetryFusionEngine` | Correlates raw telemetry across all sources into per-process event chains. Produces `FusedTelemetryContext` with behavioral metrics. |

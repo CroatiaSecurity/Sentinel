@@ -55,6 +55,19 @@ Copy-Item $IconSource -Destination (Join-Path $PublishDir "service\Sentinel.ico"
 Copy-Item $VersionFile -Destination (Join-Path $PublishDir "agent\version.txt") -Force
 Copy-Item $VersionFile -Destination (Join-Path $PublishDir "service\version.txt") -Force
 
+# 3b. Offline PE/URL ML models (trained via tools/Sentinel.MlTrainer)
+$MlModelsSrc = Join-Path $PSScriptRoot "..\src\Sentinel.Core\MlModels"
+foreach ($target in @("service", "agent")) {
+    $dest = Join-Path $PublishDir "$target\MlModels"
+    if (Test-Path $MlModelsSrc) {
+        New-Item -ItemType Directory -Path $dest -Force | Out-Null
+        Get-ChildItem $MlModelsSrc -Filter "*.zip" -ErrorAction SilentlyContinue | ForEach-Object {
+            Copy-Item $_.FullName -Destination $dest -Force
+            Write-Host "Copied ML model $($_.Name) -> $target\MlModels" -ForegroundColor Yellow
+        }
+    }
+}
+
 # 4. Locate Inno Setup Compiler (ISCC.exe)
 Write-Host "Locating Inno Setup compiler..." -ForegroundColor Yellow
 $DefaultIsccPaths = @(

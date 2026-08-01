@@ -1,6 +1,6 @@
 [Setup]
 AppName=Sentinel
-AppVersion=1.8.4
+AppVersion=1.8.5
 AppPublisher=Gorstak
 AppPublisherURL=https://gorstak.eu
 SourceDir=.
@@ -11,7 +11,7 @@ UninstallDisplayIcon={app}\Sentinel.ico
 Compression=lzma2
 SolidCompression=yes
 OutputDir=.
-OutputBaseFilename=SentinelSetup-1.8.4
+OutputBaseFilename=SentinelSetup-1.8.5
 PrivilegesRequired=admin
 ; One active Setup wizard at a time (elevation handoff still works: non-elevated exits first)
 SetupMutex=Global\SentinelSetupMutex
@@ -27,6 +27,8 @@ Source: "..\publish\service\Sentinel.Service.exe"; DestDir: "{app}"; Flags: igno
 Source: "..\publish\agent\Sentinel.Agent.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\publish\service\appsettings.json"; DestDir: "{app}"; Flags: onlyifdoesntexist
 Source: "..\publish\service\version.txt"; DestDir: "{app}"; Flags: ignoreversion
+; Offline PE/URL ML models (optional — installer continues if missing at compile time)
+Source: "..\publish\service\MlModels\*"; DestDir: "{app}\MlModels"; Flags: ignoreversion skipifsourcedoesntexist recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\Sentinel Agent"; Filename: "{app}\Sentinel.Agent.exe"; IconFilename: "{app}\Sentinel.ico"

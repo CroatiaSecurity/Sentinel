@@ -3,7 +3,7 @@
     <TargetFramework>net10.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <Version>1.8.4</Version>
+    <Version>1.8.5</Version>
     <Platforms>AnyCPU;x64;ARM64</Platforms>
     <UseWindowsForms>true</UseWindowsForms>
   </PropertyGroup>
@@ -20,6 +20,8 @@
     <PackageReference Include="System.Management" Version="10.0.0" />
     <PackageReference Include="System.ServiceProcess.ServiceController" Version="10.0.0" />
     <PackageReference Include="NAudio" Version="2.2.1" />
+    <PackageReference Include="Microsoft.ML" Version="4.0.2" />
+    <PackageReference Include="Microsoft.ML.FastTree" Version="4.0.2" />
   </ItemGroup>
 
   <ItemGroup>
@@ -28,5 +30,11 @@
          No scripts (.ps1, .bat, .vbs) are embedded. -->
     <EmbeddedResource Include="HardeningResources\LGPO.exe" />
     <EmbeddedResource Include="HardeningResources\GSecurity.inf" />
+  </ItemGroup>
+
+  <!-- Offline PE/URL FastTree models (trained via tools/Sentinel.MlTrainer) -->
+  <ItemGroup>
+    <None Include="MlModels\pe_model.zip" Condition="Exists('MlModels\pe_model.zip')" CopyToOutputDirectory="PreserveNewest" Link="MlModels\pe_model.zip" />
+    <None Include="MlModels\url_model.zip" Condition="Exists('MlModels\url_model.zip')" CopyToOutputDirectory="PreserveNewest" Link="MlModels\url_model.zip" />
   </ItemGroup>
 </Project>

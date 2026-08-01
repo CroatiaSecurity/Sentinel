@@ -254,6 +254,7 @@ namespace Sentinel.Agent
                     services.AddSingleton<ScoringEngine>();
                     services.AddSingleton<ChainTracer>();
                     services.AddSingleton<DllUnloadEngine>();
+                    services.AddSingleton<Sentinel.Core.Ml.MlThreatScorer>();
                     services.AddSingleton<FileReputationEngine>();
                     services.AddSingleton<DetectionEngine>();
 

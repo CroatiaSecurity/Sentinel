@@ -200,6 +200,7 @@ namespace Sentinel.Service
                     services.AddSingleton<QuarantineManager>();
                     services.AddSingleton<SafeProcessExemptionRegistry>();
                     services.AddSingleton<FileVerdictAds>();
+                    services.AddSingleton<Sentinel.Core.Ml.MlThreatScorer>();
 
                     // Utility services (SYSTEM-session safe only)
                     services.AddSingleton<UsbDeviceFingerprinter>();
