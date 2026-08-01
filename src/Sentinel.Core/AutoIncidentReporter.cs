@@ -75,6 +75,7 @@ namespace Sentinel.Core
         };
 
         private readonly AutoIncidentReportingConfig _config;
+        private readonly SentinelConfig _sentinelConfig;
         private readonly ThreatReportService _threatReportService;
         private readonly ToastService? _toastService;
         private readonly ILogger<AutoIncidentReporter> _logger;
@@ -90,9 +91,11 @@ namespace Sentinel.Core
             AutoIncidentReportingConfig config,
             ThreatReportService threatReportService,
             ILogger<AutoIncidentReporter> logger,
-            ToastService? toastService = null)
+            ToastService? toastService = null,
+            SentinelConfig? sentinelConfig = null)
         {
             _config = config ?? new AutoIncidentReportingConfig();
+            _sentinelConfig = sentinelConfig ?? new SentinelConfig();
             _threatReportService = threatReportService;
             _toastService = toastService;
             _logger = logger;
@@ -120,6 +123,10 @@ namespace Sentinel.Core
 
             try
             {
+                // Silent observe: no evidence packs / TI / toasts until chain-confirmed terminal attack.
+                if (!ResponsePolicy.ShouldAutoReportIncident(detection, _sentinelConfig))
+                    return;
+
                 if (!ShouldReport(detection))
                     return;
 
@@ -153,8 +160,9 @@ namespace Sentinel.Core
                 if (_config.NotifyUser && _toastService != null && !string.IsNullOrEmpty(packPath))
                 {
                     var portal = LawEnforcementPortals.Resolve(_config.CountryCode);
-                    _toastService.ShowCriticalToast(
-                        "Sentinel: Sealed evidence pack ready",
+                    // Chain-confirmed only reaches here when SilentObserve allows reporting.
+                    _toastService.ShowChainConfirmedToast(
+                        "Sentinel: Attack chain confirmed — evidence pack ready",
                         $"{detection.RuleName} — integrity-sealed pack + affidavit template. " +
                         $"File with {portal.PrimaryPortalName}. Path: {packPath}");
                 }

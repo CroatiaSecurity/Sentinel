@@ -67,7 +67,7 @@ namespace Sentinel.Tests
         {
             var config = new SentinelConfig
             {
-                ActiveResponse = true,
+                ActiveResponse = true, ObserveUntilChain = false,
                 MaxKillsPerMinute = 2,
                 MaxNetworkIsolatesPerMinute = 100
             };
@@ -164,7 +164,7 @@ namespace Sentinel.Tests
         {
             var config = new SentinelConfig
             {
-                ActiveResponse = true,
+                ActiveResponse = true, ObserveUntilChain = false,
                 MaxNetworkIsolatesPerMinute = 2,
                 MaxKillsPerMinute = 100
             };

@@ -22,6 +22,12 @@ namespace Sentinel.Core
         /// </summary>
         public bool CriticalOnly { get; set; } = true;
 
+        /// <summary>
+        /// When true (default with SilentObserve), suppress ALL toasts including critical
+        /// unless the caller has already verified chain confirmation.
+        /// </summary>
+        public bool SuppressAllToasts { get; set; } = true;
+
         [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
         private static extern int SetCurrentProcessExplicitAppUserModelID([MarshalAs(UnmanagedType.LPWStr)] string appId);
 
@@ -44,18 +50,29 @@ namespace Sentinel.Core
         /// </summary>
         public void ShowToast(string title, string message, string? tag = null)
         {
-            if (CriticalOnly)
+            if (SuppressAllToasts || CriticalOnly)
             {
-                _logger.LogDebug("ToastService: Suppressed non-critical toast — {Title}", title);
+                _logger.LogDebug("ToastService: Suppressed toast — {Title}", title);
                 return;
             }
             ShowToastInternal(title, message);
         }
 
         /// <summary>
-        /// Always shows a toast regardless of CriticalOnly setting. Used for kills, blocks, quarantine.
+        /// Critical toast (kills / chain-confirmed packs). Still suppressed when SuppressAllToasts
+        /// is true — call ClearSuppressForChainNuke only after ResponsePolicy chain confirm.
         /// </summary>
         public void ShowCriticalToast(string title, string message)
+        {
+            if (SuppressAllToasts)
+            {
+                _logger.LogDebug("ToastService: Suppressed critical toast (silent observe) — {Title}", title);
+                return;
+            }
+            ShowToastInternal(title, message);
+        }
+
+        public void ShowChainConfirmedToast(string title, string message)
         {
             ShowToastInternal(title, message);
         }

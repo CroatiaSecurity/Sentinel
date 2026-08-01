@@ -323,8 +323,8 @@ namespace Sentinel.Core
 
                     await EmitCuckooDetection(baseline, "REPLACED", evidence, reasoning, offenderPid, currentHash, currentPublisher, currentProductName);
 
-                    // Active response: quarantine the impostor and restore backup
-                    if (_sentinelConfig.ActiveResponse)
+                    // Active response only when chain policy allows host mutation (observe-until-chain default: no).
+                    if (ResponsePolicy.MayPerformInlineHostMutation(_sentinelConfig))
                     {
                         await RespondToCuckooEgg(executablePath, baseline, offenderPid);
                     }

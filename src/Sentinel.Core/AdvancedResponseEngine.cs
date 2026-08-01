@@ -316,104 +316,137 @@ namespace Sentinel.Core
                 reason = "LogOnly (Suppressed by allowlist)";
             }
 
-            // v1.8.3 observe-first safety net: weak single-signal heuristics about user
-            // activity (SSH, path, SeImpersonate, rclone, unusual subnet) never kill/quarantine
-            // on their own. Confirmed attacks (LSASS, ransomware, injection, SYSTEM token theft,
-            // composites) still execute AuthorizedResponse. Composite rule names contain "Composite"
-            // / multi-signal wording and are not in the observe-only set.
-            if (IsObserveOnlyUserActivityHeuristic(detection.RuleName) &&
-                effectiveResponse is ResponseAction.KillProcess or ResponseAction.KillProcessTree
-                    or ResponseAction.Quarantine or ResponseAction.QuarantineAndKill
-                    or ResponseAction.NetworkIsolate)
+            // Global observe-until-chain: every monitor is silent LogOnly until multi-signal
+            // proof points at BYOVD / exfil / token theft / reverse shell / cred dump.
+            // DLL unload remediations are exempt (DllUnloadEngine still FreeLibrary/quarantines plants).
+            // When chain confirms → full nuke (quarantine+kill + isolate + chain tracer).
+            bool chainAuthorized = false;
+            bool dllExempt = ResponsePolicy.IsDllUnloadExempt(detection);
+            if (_config.ObserveUntilChain)
             {
+                chainAuthorized = ResponsePolicy.MayPerformDestructiveResponse(detection, _config);
+                if (!chainAuthorized && !dllExempt)
+                {
+                    effectiveTier = DetectionTier.Tier2Indicator;
+                    effectiveResponse = ResponseAction.LogOnly;
+                    effectiveKillAuthorized = false;
+                    reason = "LogOnly (observe-until-chain: no multi-signal terminal attack yet)";
+                }
+                else if (chainAuthorized && !dllExempt)
+                {
+                    // Nuke with everything once the chain is proven.
+                    effectiveTier = DetectionTier.Tier1Behavioral;
+                    effectiveResponse = ResponseAction.QuarantineAndKill;
+                    effectiveKillAuthorized = true;
+                    var outcome = detection.Metadata != null &&
+                                  detection.Metadata.TryGetValue(ResponsePolicy.TerminalOutcomeKey, out var o)
+                        ? o : "chain";
+                    reason = $"ChainConfirmed nuke ({outcome})";
+                }
+            }
+            else if (IsObserveOnlyUserActivityHeuristic(detection.RuleName) &&
+                     effectiveResponse is ResponseAction.KillProcess or ResponseAction.KillProcessTree
+                         or ResponseAction.Quarantine or ResponseAction.QuarantineAndKill
+                         or ResponseAction.NetworkIsolate)
+            {
+                // Legacy narrow safety net when ObserveUntilChain is explicitly off.
                 effectiveTier = DetectionTier.Tier2Indicator;
                 effectiveResponse = ResponseAction.LogOnly;
                 effectiveKillAuthorized = false;
                 reason = "LogOnly (observe-first: weak user-activity heuristic — no confirmed attack)";
             }
 
-            // HARDENING v1.3.0: Removed blanket demotion of non-President's-Law Tier1 detections.
-            // Previously, ANY Tier1 detection that wasn't in the President's Law categories was
-            // demoted to LogOnly — meaning C2 Beaconing, Ghost Process, DLL Sideloading, Attack Tools,
-            // and System Integrity detections all fired but never killed anything.
-            // Now: Tier1 detections execute their AuthorizedResponse as-is. The detection rules
-            // themselves are responsible for setting appropriate response levels.
+            bool ar = _config.ActiveResponse && (!_config.ObserveUntilChain || chainAuthorized || dllExempt);
 
             if (effectiveResponse == ResponseAction.QuarantineAndKill && effectiveTier == DetectionTier.Tier1Behavioral)
             {
-                if (_config.ActiveResponse)
+                if (ar)
                 {
                     shouldQuarantineAndKill = true;
-                    reason = $"QuarantineAndKill (AuthorizedResponse={effectiveResponse})";
+                    if (!reason.StartsWith("ChainConfirmed", StringComparison.Ordinal))
+                        reason = $"QuarantineAndKill (AuthorizedResponse={effectiveResponse})";
                 }
                 else
                 {
-                    reason = "LogOnly (ActiveResponse disabled)";
+                    reason = _config.ActiveResponse
+                        ? "LogOnly (observe-until-chain)"
+                        : "LogOnly (ActiveResponse disabled)";
                 }
             }
             else if (effectiveResponse == ResponseAction.RemoveCertAndKillAdder && effectiveTier == DetectionTier.Tier1Behavioral)
             {
-                if (_config.ActiveResponse)
+                if (ar)
                 {
                     shouldRemoveCertAndKillAdder = true;
                     reason = $"RemoveCertAndKillAdder (AuthorizedResponse={effectiveResponse})";
                 }
                 else
                 {
-                    reason = "LogOnly (ActiveResponse disabled)";
+                    reason = _config.ActiveResponse
+                        ? "LogOnly (observe-until-chain)"
+                        : "LogOnly (ActiveResponse disabled)";
                 }
             }
             else if (effectiveResponse == ResponseAction.RemoveRegistryEntry && effectiveTier == DetectionTier.Tier1Behavioral)
             {
-                if (_config.ActiveResponse)
+                if (ar)
                 {
                     shouldRemoveRegistryEntry = true;
                     reason = $"RemoveRegistryEntry (AuthorizedResponse={effectiveResponse})";
                 }
                 else
                 {
-                    reason = "LogOnly (ActiveResponse disabled)";
+                    reason = _config.ActiveResponse
+                        ? "LogOnly (observe-until-chain)"
+                        : "LogOnly (ActiveResponse disabled)";
                 }
             }
             else if (effectiveResponse == ResponseAction.RemoveCert && effectiveTier == DetectionTier.Tier1Behavioral)
             {
-                if (_config.ActiveResponse)
+                if (ar)
                 {
                     shouldRemoveCert = true;
                     reason = $"RemoveCert (AuthorizedResponse={effectiveResponse}, no process terminated)";
                 }
                 else
                 {
-                    reason = "LogOnly (ActiveResponse disabled)";
+                    reason = _config.ActiveResponse
+                        ? "LogOnly (observe-until-chain)"
+                        : "LogOnly (ActiveResponse disabled)";
                 }
             }
             else if (effectiveResponse == ResponseAction.NetworkIsolate && effectiveTier == DetectionTier.Tier1Behavioral)
             {
-                if (_config.ActiveResponse)
+                if (ar)
                 {
                     shouldIsolateNetwork = true;
                     reason = $"NetworkIsolate (AuthorizedResponse={effectiveResponse})";
                 }
                 else
                 {
-                    reason = "LogOnly (ActiveResponse disabled)";
+                    reason = _config.ActiveResponse
+                        ? "LogOnly (observe-until-chain)"
+                        : "LogOnly (ActiveResponse disabled)";
                 }
             }
             else if (effectiveKillAuthorized && effectiveTier == DetectionTier.Tier1Behavioral)
             {
-                if (_config.ActiveResponse)
+                if (ar)
                 {
                     shouldKill = true;
                     reason = $"Killed (AuthorizedResponse={effectiveResponse})";
                 }
                 else
                 {
-                    reason = "LogOnly (ActiveResponse disabled)";
+                    reason = _config.ActiveResponse
+                        ? "LogOnly (observe-until-chain)"
+                        : "LogOnly (ActiveResponse disabled)";
                 }
             }
             else if (effectiveTier == DetectionTier.Tier1Behavioral)
             {
-                reason = "LogOnly (Tier1 without kill authorization)";
+                if (reason == "LogOnly")
+                    reason = "LogOnly (Tier1 without kill authorization)";
             }
             else
             {
@@ -421,6 +454,15 @@ namespace Sentinel.Core
                 {
                     reason = "LogOnly (Tier2 Indicator)";
                 }
+            }
+
+            // Chain-confirmed: also isolate if we have a target IP (nuke with everything).
+            if (ar && chainAuthorized && !shouldIsolateNetwork &&
+                detection.Metadata != null &&
+                detection.Metadata.TryGetValue("TargetIP", out var tip) &&
+                !string.IsNullOrEmpty(tip))
+            {
+                shouldIsolateNetwork = true;
             }
 
             if (shouldRemoveCertAndKillAdder)

@@ -31,7 +31,7 @@ namespace Sentinel.Tests
             _ancestryCache = new ProcessAncestryCache();
             _quarantineManager = new QuarantineManager(Path.Combine(_tempDir, "quarantine"));
             _eventLogger = new JsonlEventLogger(Path.Combine(_tempDir, "events.jsonl"));
-            _config = new SentinelConfig { ActiveResponse = true };
+            _config = new SentinelConfig { ActiveResponse = true, ObserveUntilChain = false };
             _tracer = new ChainTracer(_ancestryCache, _quarantineManager, _eventLogger, _config, NullLogger<ChainTracer>.Instance);
         }
 

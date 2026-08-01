@@ -128,7 +128,7 @@ namespace Sentinel.Core
             foreach (var vol in GetMountedVolumes())
             {
                 // Check if this is a SUBST drive — if so, kill it immediately at startup
-                if (_config.ActiveResponse && !string.IsNullOrEmpty(vol.DriveLetter))
+                if (ResponsePolicy.MayPerformInlineHostMutation(_config) && !string.IsNullOrEmpty(vol.DriveLetter))
                 {
                     var startupClassification = ClassifyVolume(vol);
                     if (string.Equals(startupClassification, "SUBST", StringComparison.OrdinalIgnoreCase))
@@ -167,7 +167,7 @@ namespace Sentinel.Core
 
                         // Strip drive letters from EFI/boot partitions regardless of when they appear
                         // (USB re-enumeration after sleep, hot-plug, etc. can re-assign letters)
-                        if (_config.ActiveResponse && IsEfiPartition(vol))
+                        if (ResponsePolicy.MayPerformInlineHostMutation(_config) && IsEfiPartition(vol))
                         {
                             _baselineVolumes.Add(vol.DeviceId);
                             if (!string.IsNullOrEmpty(vol.DriveLetter))
@@ -231,7 +231,7 @@ namespace Sentinel.Core
                         {
                             // Even during cooldown, always kill SUBST drives
                             var quickClassification = ClassifyVolume(vol);
-                            if (_config.ActiveResponse &&
+                            if (ResponsePolicy.MayPerformInlineHostMutation(_config) &&
                                 string.Equals(quickClassification, "SUBST", StringComparison.OrdinalIgnoreCase) &&
                                 !string.IsNullOrEmpty(vol.DriveLetter))
                             {
@@ -250,7 +250,7 @@ namespace Sentinel.Core
                         // boot — these are the #1 attacker fallback technique for staging
                         // payloads after their primary C2 relay is cut off.
                         // No phantom device correlation required for SUBST — unconditional kill.
-                        if (_config.ActiveResponse &&
+                        if (ResponsePolicy.MayPerformInlineHostMutation(_config) &&
                             string.Equals(classification, "SUBST", StringComparison.OrdinalIgnoreCase) &&
                             !string.IsNullOrEmpty(vol.DriveLetter))
                         {
@@ -281,7 +281,7 @@ namespace Sentinel.Core
                         // require phantom device correlation to avoid dismounting legitimate
                         // developer VHDs or VeraCrypt containers.
                         bool isAttackerFallback = _phantomDeviceMonitor != null &&
-                            _config.ActiveResponse &&
+                            ResponsePolicy.MayPerformInlineHostMutation(_config) &&
                             _phantomDeviceMonitor.HasRecentBlock(PhantomCorrelationWindow) &&
                             !IsLikelyLegitimateVolume(vol, classification);
 

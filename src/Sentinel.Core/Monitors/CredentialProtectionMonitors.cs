@@ -656,7 +656,7 @@ namespace Sentinel.Core
                     _logger.LogWarning("[BuiltinAdminGuard] Built-in Administrator account is ENABLED (trigger: {Trigger}) — disabling immediately", trigger);
 
                     // Disable it
-                    if (_config.ActiveResponse)
+                    if (ResponsePolicy.MayPerformInlineHostMutation(_config))
                     {
                         DisableBuiltinAdmin();
                     }
@@ -665,7 +665,7 @@ namespace Sentinel.Core
                     {
                         RuleName = "Account Tampering: Built-in Administrator Enabled",
                         Evidence = $"The built-in Administrator account (RID 500) was found ACTIVE (trigger: {trigger}). " +
-                                   (_config.ActiveResponse ? "Account has been disabled." : "Active response is off — account remains enabled."),
+                                   (ResponsePolicy.MayPerformInlineHostMutation(_config) ? "Account has been disabled." : "Active response is off — account remains enabled."),
                         Reasoning = "The built-in Administrator account should never be active on a personal workstation. " +
                                     "It has no UAC restrictions, may have a blank password, and is a common attacker backdoor. " +
                                     "An attacker with admin/SYSTEM access enables it via 'net user Administrator /active:yes' " +
@@ -680,7 +680,7 @@ namespace Sentinel.Core
                         Metadata = new Dictionary<string, string>
                         {
                             ["Trigger"] = trigger,
-                            ["Action"] = _config.ActiveResponse ? "Disabled" : "AlertOnly",
+                            ["Action"] = ResponsePolicy.MayPerformInlineHostMutation(_config) ? "Disabled" : "AlertOnly",
                             ["AccountSID"] = "S-1-5-21-*-500"
                         }
                     });

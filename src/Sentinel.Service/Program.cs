@@ -206,7 +206,14 @@ namespace Sentinel.Service
                     services.AddSingleton<UsbDeviceFingerprinter>();
                     services.AddSingleton<IoCScanner>();
                     services.AddSingleton<ParentPidSpoofDetector>();
-                    services.AddSingleton<ToastService>();
+                    services.AddSingleton<ToastService>(sp =>
+                    {
+                        var log = sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<ToastService>>();
+                        var toast = new ToastService(log);
+                        var cfg = sp.GetRequiredService<SentinelConfig>();
+                        toast.SuppressAllToasts = cfg.SilentObserve;
+                        return toast;
+                    });
 
                     // Engines
                     services.AddSingleton<TelemetryFusionEngine>();

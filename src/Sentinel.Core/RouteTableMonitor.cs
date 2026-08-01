@@ -270,7 +270,7 @@ namespace Sentinel.Core
             });
 
             // Active response: delete the injected route
-            if (_config.ActiveResponse)
+            if (ResponsePolicy.MayPerformInlineHostMutation(_config))
             {
                 var row = new MIB_IPFORWARDROW
                 {
@@ -332,7 +332,7 @@ namespace Sentinel.Core
                     }
                 }
 
-                if (suspiciousRoutes.Count >= 3 && _config.ActiveResponse)
+                if (suspiciousRoutes.Count >= 3 && ResponsePolicy.MayPerformInlineHostMutation(_config))
                 {
                     foreach (var route in suspiciousRoutes)
                     {

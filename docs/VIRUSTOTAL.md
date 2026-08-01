@@ -16,9 +16,10 @@ inspection, service install, quarantine, hooks), not just malware signatures.
 3. **IOC / tool names split** — e.g. Rules `S()`, FileReputation `Api()`, script
    patterns use `string.Concat` so full strings are not US heap literals.
 4. **No TraceEvent NuGet** — previously embedded injection API strings.
-5. **Observe-first responses** — kill/quarantine only on proven malicious
-   *behavior*, reducing “EDR acts like malware” runtime telemetry that cloud
-   AVs also use.
+5. **Observe-until-chain responses** — kill/quarantine only after multi-signal
+   proof of terminal attack (C2/exfil/token/shell/cred-dump/BYOVD), reducing
+   “EDR acts like malware” runtime telemetry that cloud AVs also use. DirectX
+   / redistributable System32 writes never authorize kill.
 6. **Game / anti-cheat memory policy** — no `PROCESS_VM_READ` on Steam/Epic/…
    trees or known titles (e.g. Football Manager); fail-closed when path is
    unresolved. This is a handle-open skip only, not a defense disable.

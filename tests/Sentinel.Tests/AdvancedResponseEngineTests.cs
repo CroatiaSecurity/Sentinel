@@ -16,7 +16,7 @@ namespace Sentinel.Tests
             Directory.CreateDirectory(tempDir);
             try
             {
-                var config = new SentinelConfig { ActiveResponse = true };
+                var config = new SentinelConfig { ActiveResponse = true, ObserveUntilChain = false };
                 var metrics = new SentinelMetrics();
                 var logPath = Path.Combine(tempDir, "events.jsonl");
                 var logger = new JsonlEventLogger(logPath);
@@ -77,7 +77,7 @@ namespace Sentinel.Tests
             Directory.CreateDirectory(tempDir);
             try
             {
-                var config = new SentinelConfig { ActiveResponse = true };
+                var config = new SentinelConfig { ActiveResponse = true, ObserveUntilChain = false };
                 var metrics = new SentinelMetrics();
                 var logPath = Path.Combine(tempDir, "events.jsonl");
                 var logger = new JsonlEventLogger(logPath);
@@ -131,7 +131,7 @@ namespace Sentinel.Tests
             Directory.CreateDirectory(tempDir);
             try
             {
-                var config = new SentinelConfig { ActiveResponse = true };
+                var config = new SentinelConfig { ActiveResponse = true, ObserveUntilChain = false };
                 var metrics = new SentinelMetrics();
                 var logPath = Path.Combine(tempDir, "events.jsonl");
                 var logger = new JsonlEventLogger(logPath);
@@ -205,7 +205,7 @@ namespace Sentinel.Tests
         {
             _tempDir = Path.Combine(Path.GetTempPath(), "sentinel_are_ext_" + Guid.NewGuid().ToString("N")[..8]);
             Directory.CreateDirectory(_tempDir);
-            _config = new SentinelConfig { ActiveResponse = true };
+            _config = new SentinelConfig { ActiveResponse = true, ObserveUntilChain = false };
             _metrics = new SentinelMetrics();
             var logPath = Path.Combine(_tempDir, "events.jsonl");
             _logger = new JsonlEventLogger(logPath);

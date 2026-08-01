@@ -4,6 +4,17 @@ All notable changes to Sentinel are documented in this file.
 
 ## [1.8.6] - 2026-08-01
 
+### Policy — Observe-until-chain (rebuild)
+- **Default:** all monitors **LogOnly** until a multi-signal chain points at a terminal attack.
+- **Terminal outcomes (nuke):** C2 beaconing, exfil, token theft, reverse shell, credential dump, BYOVD.
+- **Nuke = everything:** quarantine + kill + network isolate + chain tracer.
+- **Still active immediately:** DLL unloaders only (`DllUnloadEngine` FreeLibrary / proven sideload load).
+- **Not terminal:** Steam DirectX / GPU redistributable System32 writes (`vulkan*`, `nvcuda`, D3D/DXGI, VC++ runtimes), PID‑0 attribution races → Tier2 LogOnly, never a chain seed.
+- **Silent observe:** no toasts / auto evidence packs until chain-confirmed.
+- **Config:** `ObserveUntilChain` (default true), `ChainConfirmMinSignals` (2), `ChainConfirmWindowSeconds` (300), `SilentObserve` (true), `EnforceActiveResponse` default **false**.
+- **Central gate:** `ResponsePolicy` + `AdvancedResponseEngine`; inline host mutations gated the same way.
+- **FileActivityMonitor:** System32 unauthorized-write demoted to Tier2 LogOnly (DirectX-safe).
+
 ### Fixed — Football Manager / Denuvo still dying on startup (path race)
 - **`CanInspect` fail-closed** when image path is unresolved (startup race / PPL) — no `PROCESS_VM_READ`.
 - **`OpenRemoteHandle`**: refuse `VM_READ` unless `CanInspect` passes (central gate).

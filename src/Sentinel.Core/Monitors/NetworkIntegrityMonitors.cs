@@ -1060,7 +1060,7 @@ namespace Sentinel.Core
                                 ProcessName = "SYSTEM", ProcessId = 0
                             });
 
-                            if (_config.ActiveResponse && confidence >= 0.85)
+                            if (ResponsePolicy.MayPerformInlineHostMutation(_config) && confidence >= 0.85)
                                 await BlockDevice(dev.Ip, dev.Mac, manufacturer, suspiciousService);
                         }
                         else

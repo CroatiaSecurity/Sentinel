@@ -84,11 +84,34 @@ namespace Sentinel.Core
         public int MaxNetworkIsolatesPerMinute { get; set; } = 10;
 
         /// <summary>
-        /// v1.6.0: When true (default), ActiveResponse=false at startup or in appsettings
-        /// is treated as tampering: force re-enable + Tier1 alert.
-        /// Set false only for intentional observation/lab mode.
+        /// When true, ActiveResponse=false at startup is treated as tampering and force re-enabled.
+        /// Default false: observe-until-chain is the product posture; operators may disable AR.
         /// </summary>
-        public bool EnforceActiveResponse { get; set; } = true;
+        public bool EnforceActiveResponse { get; set; } = false;
+
+        /// <summary>
+        /// When true (default): all monitors log only until a multi-signal chain points at a
+        /// terminal attack (BYOVD, exfil, token theft, reverse shell, credential dump).
+        /// DLL unload remediations remain active. When the chain confirms, full kill/quarantine/isolate.
+        /// </summary>
+        public bool ObserveUntilChain { get; set; } = true;
+
+        /// <summary>
+        /// Distinct rule names on the same PID required (within ChainConfirmWindowSeconds)
+        /// plus at least one terminal-outcome signal before destructive response.
+        /// </summary>
+        public int ChainConfirmMinSignals { get; set; } = 2;
+
+        /// <summary>
+        /// Rolling window for multi-signal chain confirmation (seconds).
+        /// </summary>
+        public int ChainConfirmWindowSeconds { get; set; } = 300;
+
+        /// <summary>
+        /// When true (default): no toasts and no auto evidence packs unless chain-confirmed nuke.
+        /// Detection still writes to events.jsonl for correlation.
+        /// </summary>
+        public bool SilentObserve { get; set; } = true;
 
         /// <summary>
         /// v1.8.3: When true, ThreatIntelFeedBlocker pre-creates Windows Firewall block rules

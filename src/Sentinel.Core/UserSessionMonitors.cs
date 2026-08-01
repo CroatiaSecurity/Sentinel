@@ -811,7 +811,7 @@ namespace Sentinel.Core
 
                     ReportInjectedKeystroke(kb.vkCode, isDeletion, keyName);
 
-                    if (_config.ActiveResponse && !IsRemoteSession())
+                    if (ResponsePolicy.MayPerformInlineHostMutation(_config) && !IsRemoteSession())
                     {
                         return (IntPtr)1; // Block software-injected key press
                     }

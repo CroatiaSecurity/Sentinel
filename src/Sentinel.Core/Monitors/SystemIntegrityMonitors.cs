@@ -296,7 +296,7 @@ namespace Sentinel.Core
                             // brick TLS by deleting real trust anchors.
                             ResponseAction? startupResponse = null;
                             if (analysis.Confidence >= 0.90
-                                && _config.ActiveResponse
+                                && ResponsePolicy.MayPerformInlineHostMutation(_config)
                                 && !analysis.IsPublicRootCa
                                 && !analysis.IsEnterpriseCa
                                 && !analysis.IsDevTool)
@@ -384,7 +384,7 @@ namespace Sentinel.Core
                     // unknowns when ActiveResponse is enabled. Otherwise log only.
                     ResponseAction response = ResponseAction.LogOnly;
                     if (!analysis.IsPublicRootCa && !analysis.IsEnterpriseCa && !analysis.IsDevTool
-                        && _config.ActiveResponse)
+                        && ResponsePolicy.MayPerformInlineHostMutation(_config))
                     {
                         if (analysis.Confidence >= 0.80)
                         {

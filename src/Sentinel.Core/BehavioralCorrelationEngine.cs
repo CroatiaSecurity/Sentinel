@@ -362,10 +362,15 @@ namespace Sentinel.Core
                 ProcessName = name,
                 Confidence = confidence,
                 Tier = DetectionTier.Tier1Behavioral,
-                AuthorizedResponse = ResponseAction.KillProcessTree,
+                AuthorizedResponse = ResponseAction.QuarantineAndKill,
                 Evidence = $"[COMPOSITE] {evidence} (PID {pid})",
                 Reasoning = reasoning,
-                Timestamp = DateTime.UtcNow
+                Timestamp = DateTime.UtcNow,
+                Metadata = new Dictionary<string, string>
+                {
+                    [ResponsePolicy.ChainConfirmedKey] = "true",
+                    [ResponsePolicy.TerminalOutcomeKey] = "Composite",
+                }
             };
 
             await _emitCallback!(compositeEvent);

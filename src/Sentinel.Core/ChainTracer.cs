@@ -161,7 +161,8 @@ namespace Sentinel.Core
                     ?? chain.LastOrDefault();
 
                 // 3. Kill chain if active response is enabled
-                if (_config.ActiveResponse && detection.KillAuthorized)
+                if (_config.ActiveResponse && detection.KillAuthorized &&
+                    ResponsePolicy.MayPerformDestructiveResponse(detection, _config))
                 {
                     // FP 2026-08-01: PPID mismatch on System32\conhost → chain walked to WinReducer and killed it.
                     // If the *detected* process is a stock Windows console host (or any OS-critical path),

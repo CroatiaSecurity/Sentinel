@@ -221,7 +221,8 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 | `MlThreatScorer` | Offline FastTree models (`MlModels/pe_model.zip`, `url_model.zip`) for PE static malware prior and lexical URL/host risk. Soft signal only; never sole kill. Trained via `tools/Sentinel.MlTrainer` from C/datasets. |
 | `FileReputationEngine` | Multi-signal file score (hash TI + static PE + optional PE ML + signer + path context). Composite 0–100. |
 | `DetectionEngine` | Runs all `IDetectionRule` instances against incoming telemetry. **Bounded** channel (10k, DropOldest). Tiered deduplication (10s Tier1, 30s Tier2). Consultant signals sticky Tier2/LogOnly. Records metrics via `SentinelMetrics`. |
-| `AdvancedResponseEngine` | Single point of action enforcement. Tier2 is always log-only. Tier1 executes `AuthorizedResponse` when `ActiveResponse=true` (default; `EnforceActiveResponse` re-enables if tampered). CLI `--active-response` can force-enable. President's Law closed kill list. Private/LAN IPs never firewall-isolated. |
+| `AdvancedResponseEngine` | Single point of action enforcement. Tier2 always log-only. With `ObserveUntilChain` (default), Tier1 destructive actions only after `ResponsePolicy` chain confirm (C2/exfil/token/shell/cred-dump/BYOVD) or DLL-unload exempt path; then full nuke. Private/LAN IPs never firewall-isolated. |
+| `ResponsePolicy` | Observe-until-chain classifier: terminal outcomes, benign System32 redistributable noise, multi-signal PID buffers, silent-observe gates. |
 | `TelemetryFusionEngine` | Correlates raw telemetry across all sources into per-process event chains. Produces `FusedTelemetryContext` with behavioral metrics. |
 | `EventGraph` | In-memory graph of processes, files, and network endpoints with temporal/causal edges. Supports incident timeline queries. |
 | `MemoryBehaviorAnalyzer` | Scans process modules every 90s via .NET Process.Modules. Detects process hollowing (missing MainModule), DLL injection (module count growth ≥3), and DLL sideloading via DllUnloadEngine. |
@@ -362,13 +363,19 @@ Emitted as Tier1 `DetectionEvent`s directly via `EmitAsync`. Requires signals fr
 | `RemoveCert` | Removes suspicious root certificates from store |
 | `RemoveCertAndKillAdder` | Removes planted certificate + kills the process that installed it (BYOVD cert-trace) |
 
-### ActiveResponse model (current)
+### ActiveResponse model (current — observe-until-chain)
 
 | Source | Behavior |
 |--------|----------|
-| `Sentinel:ActiveResponse` (default **true**) | Master switch for destructive Tier1 actions |
-| `Sentinel:EnforceActiveResponse` (default **true**) | `AntiTamperGuard` force-re-enables if config is flipped to false |
-| CLI `--active-response` | Optional force-enable at process start (legacy; not required in normal install) |
+| `Sentinel:ActiveResponse` (default **true**) | Master arming switch — destructive actions still require chain confirm when ObserveUntilChain is on |
+| `Sentinel:ObserveUntilChain` (default **true**) | Demote all kill/quarantine/isolate/host mutation to LogOnly until multi-signal proof of terminal attack (C2 beacon, exfil, token theft, reverse shell, cred dump, BYOVD) |
+| `Sentinel:ChainConfirmMinSignals` (default **2**) | Distinct rules on same PID within window + ≥1 terminal outcome → nuke |
+| `Sentinel:ChainConfirmWindowSeconds` (default **300**) | Rolling correlation window |
+| `Sentinel:SilentObserve` (default **true**) | No toasts / auto evidence packs until chain-confirmed |
+| `Sentinel:EnforceActiveResponse` (default **false**) | When true, `AntiTamperGuard` force-re-enables ActiveResponse if flipped off |
+| DLL unload exemption | `DllUnloadEngine` FreeLibrary/quarantine on proven hostile load may act immediately |
+| CLI `--active-response` | Optional force-enable at process start (legacy) |
+| Central gate | `ResponsePolicy` + `AdvancedResponseEngine`; composites tagged `ChainConfirmed=true` |
 
 ---
 

@@ -364,16 +364,20 @@ namespace Sentinel.Core
                         !processInfo.name.Contains("WinStore", StringComparison.OrdinalIgnoreCase))
                     {
                         var changeVerb = e.ChangeType == WatcherChangeTypes.Created ? "created" : "changed";
+                        // Observe-only: Steam DirectX / GPU redistributables write here constantly.
+                        // Kill only if a multi-signal chain later ties the same PID to C2/exfil/etc.
+                        // Unresolved writer (PID 0) is never kill-class — attribution race, not BYOVD.
+                        bool attributed = processInfo.pid > 4;
                         _ = _detectionEngine.EmitAsync(new DetectionEvent
                         {
                             RuleName = "System Integrity: Unauthorized Write to System Directory",
                             Evidence = $"File '{e.FullPath}' was {changeVerb} by process '{processInfo.name}' (PID {processInfo.pid})",
                             Reasoning = "A non-system process wrote to a protected OS directory (System32/SysWOW64). " +
-                                        "Only Windows Update (TrustedInstaller) and Defender should write here. " +
-                                        "Unauthorized writes indicate DLL planting, backdoor installation, or system binary replacement.",
-                            Confidence = 0.92,
-                            Tier = DetectionTier.Tier1Behavioral,
-                            AuthorizedResponse = ResponseAction.KillProcessTree,
+                                        "Logged for correlation only — installers (DirectX, VC++, GPU runtimes) do this legitimately. " +
+                                        "Destructive response requires a multi-signal chain to C2/exfil/token/cred-dump/BYOVD.",
+                            Confidence = attributed ? 0.55 : 0.40,
+                            Tier = DetectionTier.Tier2Indicator,
+                            AuthorizedResponse = ResponseAction.LogOnly,
                             ProcessName = processInfo.name,
                             ProcessId = processInfo.pid,
                             Metadata = new Dictionary<string, string>

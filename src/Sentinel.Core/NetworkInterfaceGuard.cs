@@ -209,7 +209,7 @@ namespace Sentinel.Core
                 }
 
                 // Active response: remove the bridge device via SetupAPI
-                if (_config.ActiveResponse)
+                if (ResponsePolicy.MayPerformInlineHostMutation(_config))
                 {
                     RemoveNetworkBridge();
                 }
@@ -292,7 +292,7 @@ namespace Sentinel.Core
                             ProcessName = "SYSTEM", ProcessId = 0
                         });
 
-                        if (_config.ActiveResponse)
+                        if (ResponsePolicy.MayPerformInlineHostMutation(_config))
                         {
                             _logger.LogWarning("[NetworkInterfaceGuard] Active Response: Re-enabling network adapter '{Name}' (Index {Index})", name, index);
                             obj.InvokeMethod("Enable", null);
@@ -327,7 +327,7 @@ namespace Sentinel.Core
                                 ProcessName = "SYSTEM", ProcessId = 0
                             });
 
-                            if (_config.ActiveResponse)
+                            if (ResponsePolicy.MayPerformInlineHostMutation(_config))
                             {
                                 SetRegistryDns(ni.Id, baselineDns);
                             }

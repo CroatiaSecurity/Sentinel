@@ -763,7 +763,7 @@ namespace Sentinel.Core
         {
             try
             {
-                using var key = hive.OpenSubKey(path, _config.ActiveResponse);
+                using var key = hive.OpenSubKey(path, ResponsePolicy.MayPerformInlineHostMutation(_config));
                 if (key == null) return;
 
                 foreach (var valueName in new[] { "ProxyEnable", "ProxyServer", "AutoConfigURL" })
@@ -784,7 +784,7 @@ namespace Sentinel.Core
                             Reasoning = reasoning,
                             Confidence = 0.85,
                             Tier = DetectionTier.Tier1Behavioral,
-                            AuthorizedResponse = _config.ActiveResponse ? ResponseAction.RemoveRegistryEntry : ResponseAction.LogOnly,
+                            AuthorizedResponse = ResponsePolicy.MayPerformInlineHostMutation(_config) ? ResponseAction.RemoveRegistryEntry : ResponseAction.LogOnly,
                             ProcessName = "Unknown",
                             ProcessId = 0,
                             Metadata = new Dictionary<string, string>
@@ -800,7 +800,7 @@ namespace Sentinel.Core
                         _ = _detectionEngine.EmitAsync(detection);
                         _toastService.ShowToast("Sentinel Alert: Proxy Hijack", $"Proxy '{valueName}' changed under {prefix}");
 
-                        if (_config.ActiveResponse)
+                        if (ResponsePolicy.MayPerformInlineHostMutation(_config))
                         {
                             try
                             {
@@ -873,7 +873,7 @@ namespace Sentinel.Core
         {
             try
             {
-                using var key = hive.OpenSubKey(path, _config.ActiveResponse);
+                using var key = hive.OpenSubKey(path, ResponsePolicy.MayPerformInlineHostMutation(_config));
                 if (key == null) return;
 
                 foreach (var valueName in key.GetValueNames())
@@ -895,7 +895,7 @@ namespace Sentinel.Core
                             Reasoning = reasoning,
                             Confidence = 0.90,
                             Tier = DetectionTier.Tier1Behavioral,
-                            AuthorizedResponse = _config.ActiveResponse ? ResponseAction.RemoveRegistryEntry : ResponseAction.LogOnly,
+                            AuthorizedResponse = ResponsePolicy.MayPerformInlineHostMutation(_config) ? ResponseAction.RemoveRegistryEntry : ResponseAction.LogOnly,
                             ProcessName = "Unknown",
                             ProcessId = 0,
                             Metadata = new Dictionary<string, string>
@@ -910,7 +910,7 @@ namespace Sentinel.Core
                         _ = _detectionEngine.EmitAsync(detection);
                         _toastService.ShowToast("Sentinel Alert: Browser Policy Hijack", $"New force-installed extension in {browserName}");
 
-                        if (_config.ActiveResponse)
+                        if (ResponsePolicy.MayPerformInlineHostMutation(_config))
                         {
                             try
                             {

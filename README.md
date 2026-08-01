@@ -4,16 +4,19 @@ Real-time endpoint detection and response for Windows. Runs as a background serv
 
 **Current version: 1.8.6**
 
-### Product posture (v1.8.3+ / v1.8.6)
+### Product posture (v1.8.6 — observe-until-chain)
 
-**Protect when attacked. Don’t obstruct normal life. Full sensors; touch only when proven.**
+**Full sensors. Silent until a real attack chain. Then nuke.**
 
-- **Confirmed attack** (LSASS dump, ransomware, injection, Hell’s Gate stubs, ETW patch, loaded sideload plant, BYOVD, SYSTEM token theft, multi-signal composites) → kill / quarantine / isolate / FreeLibrary unload.
-- **Weak / single signals** (disk plant alone, module growth alone, shell+port, Downloads network, SeImpersonate alone) → **LogOnly** until malice is corroborated.
-- **Normal user work** (SSH, RDP, torrents, P2P, downloads, portable tools, rclone, databases, games) → observe; games skip process-memory handles only (Denuvo) — path + process-name (`fm`, Steam, EAC/BE, …) and **fail-closed** when the image path is not yet resolvable (startup race).
+- **Observe by default** (`ObserveUntilChain: true`): every monitor logs to `events.jsonl`; **no kill / quarantine / isolate / host rewrite / toast / evidence pack** on single-signal noise.
+- **Nuke only** when multi-signal / composite chain points at: **C2 beaconing**, **exfil**, **token theft**, **reverse shell**, **credential dump**, or **BYOVD** → quarantine + kill + isolate + chain tracer.
+- **DLL unloaders stay armed** (`DllUnloadEngine`): FreeLibrary / quarantine on **proven** hostile Temp/plant module loads only.
+- **Not an attack:** Steam DirectX, Vulkan/CUDA, GPU driver redistributables writing System32/SysWOW64 (and PID‑0 writer races) → LogOnly, never a kill seed.
+- **Silent observe** (`SilentObserve: true`): no peeps until chain-confirmed.
+- **Games / Denuvo:** skip process-memory handles only (`CanInspect` fail-closed when path unresolved) — not a global disable.
 - **Default IPSec** blocks only attack/legacy ports. SSH/RDP/SMB/SOCKS/Docker stay open.
-- **`RestrictivePortHardening: true`** re-enables full lockdown for kiosk / locked-down hosts.
-- **AV / VirusTotal:** see [docs/VIRUSTOTAL.md](docs/VIRUSTOTAL.md) (code hygiene + EV signing guidance).
+- **`RestrictivePortHardening: true`** for kiosk / locked-down hosts.
+- **AV / VirusTotal:** see [docs/VIRUSTOTAL.md](docs/VIRUSTOTAL.md).
 
 ---
 
@@ -58,7 +61,7 @@ Sentinel is honest about its limits:
 - **Kernel implants already loaded and active** — Sentinel runs in userland. A kernel driver that is already executing can suppress any user-mode process. However, Sentinel detects the *entire attack chain leading up to driver load* (privilege escalation, driver file drop, service creation, cert planting) and can neutralize attacks before they reach kernel. See "BYOVD Defense" below.
 - **Nation-state zero-days with novel kernel implants** — Custom kernel exploits targeting unknown vulnerabilities are difficult for any behavioral tool to catch at the moment of exploitation. Sentinel still shrinks classic lateral-movement surface (attack-only IPSec, ASR, service/registry hardening, reactive threat-intel isolate) without pre-breaking SSH/RDP for normal users. For kiosk-style lockdown, set `RestrictivePortHardening: true`.
 - **Pre-boot attacks** — Sentinel starts after Windows. It detects boot config changes (BCD, EFI, boot drivers) after the fact via `BootIntegrityGuard`.
-- **Weak single signals alone** — Shell using SSH, a download from `Downloads\`, or SeImpersonate on a portable tool is **logged**, not killed, until multi-signal attack is confirmed. That is intentional (v1.8.3).
+- **Weak / non-terminal signals alone** — Shell using SSH, Downloads network, SeImpersonate alone, System32 redistributable writes (DirectX/GPU), netsh noise: **logged**, not killed. Destructive response requires a multi-signal chain to C2/exfil/token/shell/cred-dump/BYOVD (`ObserveUntilChain`, v1.8.6).
 
 ---
 
