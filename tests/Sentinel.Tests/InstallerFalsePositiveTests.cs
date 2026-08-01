@@ -68,5 +68,33 @@ namespace Sentinel.Tests
         {
             Assert.Equal(expected, ChainTracer.IsLegitimateBrowserHost(path, name));
         }
+
+        /// <summary>
+        /// Production FP 2026-08-01: WinReducerEX110 → System32\conhost PPID race → chain kill.
+        /// Stock console hosts and OS paths must demote to LogOnly (no KillProcess).
+        /// </summary>
+        [Theory]
+        [InlineData("conhost", @"C:\Windows\System32\conhost.exe", true)]
+        [InlineData("conhost.exe", @"C:\Windows\SysWOW64\conhost.exe", true)]
+        [InlineData("conhost", null, true)]
+        [InlineData("conhost", "", true)]
+        [InlineData("conhost", @"C:\Users\Alice\AppData\Local\Temp\conhost.exe", false)]
+        [InlineData("WinReducerEX110_x64", @"D:\WinReducerEX110\WinReducerEX110_x64.exe", false)]
+        [InlineData("openconsole", @"C:\Windows\System32\OpenConsole.exe", true)]
+        public void IsStockWindowsConsoleHost_WinReducerConhostFp(string name, string? path, bool expected)
+        {
+            Assert.Equal(expected, ParentPidSpoofDetector.IsStockWindowsConsoleHost(name, path));
+        }
+
+        [Theory]
+        [InlineData("conhost", @"C:\Windows\System32\conhost.exe", false, true)]
+        [InlineData("conhost", null, false, true)]
+        [InlineData("evil", @"C:\Temp\evil.exe", false, false)]
+        [InlineData("evil", @"C:\Temp\evil.exe", true, true)] // signed → demote
+        [InlineData("payload", @"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe", false, true)] // OS path
+        public void ShouldDemotePpidToLogOnly_WinReducerCase(string name, string? path, bool selfSigned, bool expected)
+        {
+            Assert.Equal(expected, ParentPidSpoofDetector.ShouldDemotePpidToLogOnly(name, path, selfSigned));
+        }
     }
 }

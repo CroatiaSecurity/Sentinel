@@ -163,6 +163,29 @@ namespace Sentinel.Core
                 // 3. Kill chain if active response is enabled
                 if (_config.ActiveResponse && detection.KillAuthorized)
                 {
+                    // FP 2026-08-01: PPID mismatch on System32\conhost → chain walked to WinReducer and killed it.
+                    // If the *detected* process is a stock Windows console host (or any OS-critical path),
+                    // never walk-up kill user tools. Log/response engine should already demote these;
+                    // this is defense-in-depth if KillAuthorized was set incorrectly.
+                    // Prefer ancestry path for the detection PID (DetectionEvent has no ImagePath).
+                    string? detectionPath = chain.FirstOrDefault(n => n.ProcessId == detection.ProcessId)?.ImagePath
+                        ?? chain.FirstOrDefault()?.ImagePath;
+                    if (string.IsNullOrEmpty(detectionPath))
+                        detectionPath = SecurityValidation.GetProcessImagePath(detection.ProcessId);
+
+                    if (ParentPidSpoofDetector.IsStockWindowsConsoleHost(detection.ProcessName, detectionPath) ||
+                        (!string.IsNullOrEmpty(detectionPath) && SecurityValidation.IsOsCriticalPath(detectionPath) &&
+                         detection.RuleName.StartsWith("PPID Spoofing", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        _logger.LogInformation(
+                            "[ChainTracer] Skipping chain kill — detection is stock OS console/host PPID race (PID {Pid} {Name} path={Path})",
+                            detection.ProcessId, detection.ProcessName, detectionPath);
+                        result.EndTime = DateTimeOffset.UtcNow;
+                        result.Success = true;
+                        await LogChainEvidenceAsync(result);
+                        return result;
+                    }
+
                     foreach (var node in chain)
                     {
                         var cleanName = node.ProcessName.Replace(".exe", "", StringComparison.OrdinalIgnoreCase);
@@ -176,6 +199,10 @@ namespace Sentinel.Core
                             if (string.IsNullOrEmpty(node.ImagePath) || IsSystemBinary(node.ImagePath, node.ProcessName))
                                 continue;
                         }
+
+                        // Stock conhost/openconsole under Windows: never kill as chain member
+                        if (ParentPidSpoofDetector.IsStockWindowsConsoleHost(node.ProcessName, node.ImagePath))
+                            continue;
 
                         // Preserve browser / signed browser-installer ancestors.
                         // If the *detected* process itself is a browser (extension compromise,

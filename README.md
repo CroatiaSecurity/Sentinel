@@ -2,9 +2,9 @@
 
 Real-time endpoint detection and response for Windows. Runs as a background service, monitors system behavior, and kills threats automatically when multiple signals correlate.
 
-**Current version: 1.8.3**
+**Current version: 1.8.4**
 
-### Product posture (v1.8.3)
+### Product posture (v1.8.3+)
 
 **Protect when attacked. Don’t obstruct normal life.**
 

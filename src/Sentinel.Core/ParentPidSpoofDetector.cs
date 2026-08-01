@@ -16,6 +16,11 @@ namespace Sentinel.Core
     /// Installer extractors (Inno Setup, NSIS, etc.) frequently race ETW/WMI
     /// ancestry or re-parent during elevation — that is NOT T1134.004. Killing
     /// them chain-quarantines Git/Chrome/VS installers (observed in production).
+    ///
+    /// Production FP 2026-08-01: WinReducerEX110 spawned System32\conhost with an
+    /// ETW/kernel parent mismatch → KillProcess + ChainTracer walked up and killed
+    /// WinReducer. Stock console hosts and other System32 binaries must never be
+    /// kill-authorized on PPID race alone.
     /// </summary>
     public sealed class ParentPidSpoofDetector : IDisposable
     {
@@ -121,25 +126,37 @@ namespace Sentinel.Core
                                 continue;
                             }
 
-                            // Signed process with PPID race: log only — never kill/quarantine chain
-                            bool selfSigned = !string.IsNullOrEmpty(imagePath) && _signerTrust.IsSignedFile(imagePath);
-                            var response = selfSigned
+                            // Kill only when the mismatched process is a non-OS, unsigned binary.
+                            // Signed / stock System32 hosts (esp. conhost) race ETW constantly —
+                            // kill-class response chain-kills legitimate tools (WinReducer, installers).
+                            bool selfSigned = !string.IsNullOrEmpty(imagePath) &&
+                                (_signerTrust.IsSignedFile(imagePath) ||
+                                 SecurityValidation.VerifyAuthenticodeSignature(imagePath));
+                            bool demote = ShouldDemotePpidToLogOnly(proc.ProcessName, imagePath, selfSigned);
+                            var response = demote
                                 ? ResponseAction.LogOnly
                                 : ResponseAction.KillProcess;
-                            var tier = selfSigned
+                            var tier = demote
                                 ? DetectionTier.Tier2Indicator
                                 : DetectionTier.Tier1Behavioral;
+                            string demoteTag = demote
+                                ? (IsStockWindowsConsoleHost(proc.ProcessName, imagePath)
+                                    ? " [stock console host — LogOnly]"
+                                    : selfSigned
+                                        ? " [signed — LogOnly]"
+                                        : " [OS path — LogOnly]")
+                                : "";
 
                             _ = _detectionEngine.EmitAsync(new DetectionEvent
                             {
                                 RuleName = "PPID Spoofing: Parent PID Mismatch",
                                 Evidence = $"Process '{proc.ProcessName}' (PID {proc.Id}) kernel parent PID={kernelParentPid}, cached parent PID={cachedParentPid}" +
-                                           (selfSigned ? " [signed — LogOnly]" : ""),
+                                           demoteTag,
                                 Reasoning = "The process's kernel-reported parent PID does not match the parent recorded via ETW process creation events, indicating PPID spoofing (T1134.004)." +
-                                            (selfSigned
-                                                ? " Binary is Authenticode-signed; treated as possible ancestry race rather than kill-authorized spoof."
+                                            (demote
+                                                ? " Treated as ancestry race (signed binary, stock console host, or OS-protected path) — LogOnly, no chain kill."
                                                 : ""),
-                                Confidence = selfSigned ? 0.55 : 0.85,
+                                Confidence = demote ? 0.55 : 0.85,
                                 Tier = tier,
                                 AuthorizedResponse = response,
                                 ProcessName = proc.ProcessName,
@@ -181,6 +198,56 @@ namespace Sentinel.Core
             }
             catch { }
             return false;
+        }
+
+        /// <summary>
+        /// PPID races on these must never authorize kill/chain-trace (production FP: WinReducer + conhost).
+        /// </summary>
+        internal static bool ShouldDemotePpidToLogOnly(string processName, string? imagePath, bool selfSigned)
+        {
+            if (selfSigned) return true;
+            if (IsStockWindowsConsoleHost(processName, imagePath)) return true;
+            // Any binary under the Windows tree (WRP) — ancestry races are common; kill chain is not.
+            if (!string.IsNullOrEmpty(imagePath) && SecurityValidation.IsOsCriticalPath(imagePath))
+                return true;
+            return false;
+        }
+
+        /// <summary>
+        /// True for stock console hosts. Path must be under System32/SysWOW64 when known;
+        /// name-only "conhost" with empty path is demoted (path often unresolved at scan time).
+        /// Impostor conhost.exe outside Windows is NOT demoted.
+        /// </summary>
+        internal static bool IsStockWindowsConsoleHost(string processName, string? imagePath)
+        {
+            var stem = (processName ?? string.Empty)
+                .Replace(".exe", "", StringComparison.OrdinalIgnoreCase)
+                .Trim();
+            if (stem.Length == 0) return false;
+
+            bool nameIsConsole =
+                stem.Equals("conhost", StringComparison.OrdinalIgnoreCase) ||
+                stem.Equals("openconsole", StringComparison.OrdinalIgnoreCase);
+
+            if (!nameIsConsole) return false;
+
+            if (string.IsNullOrWhiteSpace(imagePath))
+                return stem.Equals("conhost", StringComparison.OrdinalIgnoreCase);
+
+            try
+            {
+                var lower = Path.GetFullPath(imagePath).ToLowerInvariant();
+                var file = Path.GetFileName(lower);
+                if (file is not ("conhost.exe" or "openconsole.exe")) return false;
+
+                return lower.Contains(@"\windows\system32\") ||
+                       lower.Contains(@"\windows\syswow64\") ||
+                       SecurityValidation.IsOsCriticalPath(imagePath);
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         public void Dispose() => _timer.Dispose();

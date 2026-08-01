@@ -73,13 +73,12 @@ namespace Sentinel.Agent
                 Font = new System.Drawing.Font(System.Drawing.SystemFonts.MenuFont!, System.Drawing.FontStyle.Bold)
             };
             _contextMenu.Items.Add(openItem);
-            _contextMenu.Items.Add("Report to Police…", null, OnOpenReportPage);
             _contextMenu.Items.Add(new ToolStripSeparator());
             _contextMenu.Items.Add("Open Quarantine Folder", null, OnOpenQuarantine);
             _contextMenu.Items.Add("Open Event Log", null, OnOpenEventLog);
-            _contextMenu.Items.Add(new ToolStripSeparator());
-            // SECURITY: No ActiveResponse toggle — service (SYSTEM) is sole authority.
-            _contextMenu.Items.Add("Exit Agent", null, OnExit);
+            _contextMenu.Items.Add("Open Data Folder", null, OnOpenDataFolder);
+            // No Exit Agent — service owns lifetime; tray exit was a soft self-stop that confused users.
+            // No Report to Police — filing UI removed; evidence packs stay under ProgramData.
 
             System.Drawing.Icon? appIcon = null;
             try
@@ -155,11 +154,6 @@ namespace Sentinel.Agent
             ShowDashboard(initialPage: null);
         }
 
-        private void OnOpenReportPage(object? sender, EventArgs e)
-        {
-            ShowDashboard(initialPage: 2); // Report to Police tab
-        }
-
         private void ShowDashboard(int? initialPage)
         {
             try
@@ -189,13 +183,14 @@ namespace Sentinel.Agent
             }
         }
 
+        private static string ProgramDataRoot =>
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "Sentinel");
+
         private void OnOpenQuarantine(object? sender, EventArgs e)
         {
             try
             {
-                var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
-                var qDir = Path.Combine(programData, "Sentinel", "Quarantine");
-                // v1.8.1 RT-NEW-4: never create quarantine as interactive user (weak ACL race)
+                var qDir = Path.Combine(ProgramDataRoot, "Quarantine");
                 if (!Directory.Exists(qDir))
                 {
                     MessageBox.Show(
@@ -204,13 +199,12 @@ namespace Sentinel.Agent
                     return;
                 }
 
-                var psi = new ProcessStartInfo
+                Process.Start(new ProcessStartInfo
                 {
                     FileName = "explorer.exe",
                     UseShellExecute = false,
                     ArgumentList = { qDir }
-                };
-                Process.Start(psi);
+                });
             }
             catch (Exception ex)
             {
@@ -222,17 +216,15 @@ namespace Sentinel.Agent
         {
             try
             {
-                var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
-                var logFile = Path.Combine(programData, "Sentinel", "events.jsonl");
+                var logFile = Path.Combine(ProgramDataRoot, "events.jsonl");
                 if (File.Exists(logFile))
                 {
-                    var psi = new ProcessStartInfo
+                    Process.Start(new ProcessStartInfo
                     {
                         FileName = "notepad.exe",
                         UseShellExecute = false,
                         ArgumentList = { logFile }
-                    };
-                    Process.Start(psi);
+                    });
                 }
                 else
                 {
@@ -246,9 +238,30 @@ namespace Sentinel.Agent
             }
         }
 
-        private void OnExit(object? sender, EventArgs e)
+        private void OnOpenDataFolder(object? sender, EventArgs e)
         {
-            Application.Exit();
+            try
+            {
+                var root = ProgramDataRoot;
+                if (!Directory.Exists(root))
+                {
+                    MessageBox.Show(
+                        "Sentinel data folder does not exist yet. It is created when the service starts.",
+                        "Sentinel", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = "explorer.exe",
+                    UseShellExecute = false,
+                    ArgumentList = { root }
+                });
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Failed to open data folder: {ex.Message}");
+            }
         }
 
         public void Dispose()
@@ -265,8 +278,7 @@ namespace Sentinel.Agent
         /// </summary>
         private void WatchLogFileSync(CancellationToken cancellationToken)
         {
-            var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
-            var logFile = Path.Combine(programData, "Sentinel", "events.jsonl");
+            var logFile = Path.Combine(ProgramDataRoot, "events.jsonl");
 
             while (!File.Exists(logFile) && !cancellationToken.IsCancellationRequested)
             {
@@ -360,8 +372,6 @@ namespace Sentinel.Agent
                                             }
                                             shownCache[cacheKey] = DateTime.UtcNow;
 
-                                            // Balloon tips removed — WpnService disabled by hardening.
-                                            // Update tray tooltip briefly with last action context.
                                             try
                                             {
                                                 if (_notifyIcon != null)
