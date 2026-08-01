@@ -10,7 +10,7 @@ Real-time endpoint detection and response for Windows. Runs as a background serv
 
 - **Confirmed attack** (LSASS dump, ransomware, injection, Hell’s Gate stubs, ETW patch, loaded sideload plant, BYOVD, SYSTEM token theft, multi-signal composites) → kill / quarantine / isolate / FreeLibrary unload.
 - **Weak / single signals** (disk plant alone, module growth alone, shell+port, Downloads network, SeImpersonate alone) → **LogOnly** until malice is corroborated.
-- **Normal user work** (SSH, RDP, torrents, P2P, downloads, portable tools, rclone, databases, games) → observe; games skip process-memory handles only (Denuvo).
+- **Normal user work** (SSH, RDP, torrents, P2P, downloads, portable tools, rclone, databases, games) → observe; games skip process-memory handles only (Denuvo) — path + process-name (`fm`, Steam, EAC/BE, …) and **fail-closed** when the image path is not yet resolvable (startup race).
 - **Default IPSec** blocks only attack/legacy ports. SSH/RDP/SMB/SOCKS/Docker stay open.
 - **`RestrictivePortHardening: true`** re-enables full lockdown for kiosk / locked-down hosts.
 - **AV / VirusTotal:** see [docs/VIRUSTOTAL.md](docs/VIRUSTOTAL.md) (code hygiene + EV signing guidance).

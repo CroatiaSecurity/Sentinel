@@ -98,12 +98,22 @@ namespace Sentinel.Core
         public static bool CanInspect(int pid, string? imagePath = null)
         {
             if (pid <= 4) return false;
+            // Name-first: Denuvo titles self-terminate on VM_READ even when path resolve races.
+            if (SecurityValidation.IsGameOrAntiCheatProcess(pid, imagePath))
+                return false;
             imagePath ??= SecurityValidation.GetProcessImagePath(pid);
+            // Fail closed: unresolved path → no VM_READ (PPL / anti-cheat / startup race).
+            // Prefer missing a scan over killing interactive games.
+            if (string.IsNullOrEmpty(imagePath))
+                return false;
             return !SecurityValidation.IsGameOrAntiCheatPath(imagePath);
         }
 
         public static IntPtr OpenRemoteHandle(uint access, int pid)
         {
+            // Central gate: never grant VM_READ to game / unresolved PIDs.
+            if ((access & AccessVmRead) != 0 && !CanInspect(pid))
+                return IntPtr.Zero;
             var fn = FnOpen.Value;
             return fn == null ? IntPtr.Zero : fn(access, false, pid);
         }

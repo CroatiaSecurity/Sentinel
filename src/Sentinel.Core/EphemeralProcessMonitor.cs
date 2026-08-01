@@ -205,6 +205,12 @@ namespace Sentinel.Core
                 return;
             }
 
+            // Games (esp. Denuvo / Football Manager): crash or anti-cheat self-exit looks like
+            // "self-deleted dropper" because FindExecutable does not walk Steam library roots.
+            // Name skip only suppresses this Prefetch false positive — not a trust grant.
+            if (IsKnownGameEphemeralName(baseName) || IsKnownGameEphemeralName(exeName))
+                return;
+
             // Check cooldown
             if (_alertedExecutables.TryGetValue(exeName, out var lastAlert) &&
                 DateTimeOffset.UtcNow - lastAlert < AlertCooldown)
@@ -368,6 +374,24 @@ namespace Sentinel.Core
             return parts[0]; // Everything before the hash
         }
 
+        /// <summary>
+        /// Prefetch basenames that are interactive games, not flash droppers.
+        /// FM.EXE under D:\Steam\... was misclassified as self-deleted (path not in system dirs).
+        /// </summary>
+        private static bool IsKnownGameEphemeralName(string? name)
+        {
+            if (string.IsNullOrEmpty(name)) return false;
+            var n = name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
+                ? Path.GetFileNameWithoutExtension(name)
+                : name;
+            if (n.Equals("fm", StringComparison.OrdinalIgnoreCase)) return true;
+            if (n.StartsWith("fm20", StringComparison.OrdinalIgnoreCase)) return true;
+            if (n.StartsWith("footballmanager", StringComparison.OrdinalIgnoreCase)) return true;
+            if (n.Equals("steam", StringComparison.OrdinalIgnoreCase)) return true;
+            if (n.Equals("gameoverlayui", StringComparison.OrdinalIgnoreCase)) return true;
+            return false;
+        }
+
         private static string? FindExecutable(string exeName)
         {
             // Search common locations for the executable
@@ -389,7 +413,76 @@ namespace Sentinel.Core
                 if (File.Exists(candidate)) return candidate;
             }
 
+            // Steam libraries (fixed + libraryfolders.vdf) — games are not "self-deleted droppers"
+            foreach (var steamRoot in EnumerateSteamLibraryRoots())
+            {
+                try
+                {
+                    var common = Path.Combine(steamRoot, "steamapps", "common");
+                    if (!Directory.Exists(common)) continue;
+                    foreach (var gameDir in Directory.EnumerateDirectories(common))
+                    {
+                        var candidate = Path.Combine(gameDir, exeName);
+                        if (File.Exists(candidate)) return candidate;
+                        // one level deeper (e.g. bin\win64\game.exe)
+                        try
+                        {
+                            foreach (var sub in Directory.EnumerateDirectories(gameDir))
+                            {
+                                var nested = Path.Combine(sub, exeName);
+                                if (File.Exists(nested)) return nested;
+                            }
+                        }
+                        catch { }
+                    }
+                }
+                catch { }
+            }
+
             return null;
+        }
+
+        private static IEnumerable<string> EnumerateSteamLibraryRoots()
+        {
+            var roots = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var candidates = new[]
+            {
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Steam"),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Steam"),
+                @"D:\Steam",
+                @"E:\Steam",
+                @"D:\SteamLibrary",
+                @"E:\SteamLibrary",
+            };
+            foreach (var c in candidates)
+            {
+                if (!string.IsNullOrEmpty(c) && Directory.Exists(c))
+                    roots.Add(c);
+            }
+
+            foreach (var steam in roots.ToArray())
+            {
+                var vdf = Path.Combine(steam, "steamapps", "libraryfolders.vdf");
+                if (!File.Exists(vdf)) continue;
+                try
+                {
+                    foreach (var line in File.ReadLines(vdf))
+                    {
+                        // "path"		"D:\\SteamLibrary"
+                        var t = line.Trim();
+                        if (!t.Contains("path", StringComparison.OrdinalIgnoreCase)) continue;
+                        var parts = t.Split('"', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                        foreach (var p in parts)
+                        {
+                            if (p.Contains(':') && Directory.Exists(p.Replace(@"\\", @"\")))
+                                roots.Add(p.Replace(@"\\", @"\"));
+                        }
+                    }
+                }
+                catch { }
+            }
+
+            return roots;
         }
 
         private static string ExtractFieldFromEvent(string message, string fieldName)

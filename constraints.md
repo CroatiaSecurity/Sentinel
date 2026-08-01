@@ -1,6 +1,6 @@
 # Sentinel — Constraints
 
-**Version: 1.8.3**
+**Version: 1.8.6**
 
 ---
 
@@ -20,7 +20,7 @@
 | Active response on by default | Ships in killing mode for **confirmed** attacks. President's Law / composites fire immediately. |
 | Observe-first for user activity (v1.8.3) | Weak single-signal heuristics (shell+port, Downloads network, SeImpersonate alone, cloud-sync tools) MUST be LogOnly. IPSec default MUST be attack-only ports — not SSH/RDP/SMB. Full lockdown only via `RestrictivePortHardening`. |
 | Observe-first: no touch until proven malicious | Detection scanners stay fully armed. Kill / quarantine / FreeLibrary / isolate ONLY after proven malicious **behavior** (what processes DO — injection, Hell's Gate stubs, ETW patch, loaded sideload plant, President's Law, composites). Disk plants alone, module-count growth alone, missing image alone → LogOnly Tier2. Never act on identity alone (name/path/“is a game”). |
-| Process-memory defenses stay armed | Do not disable Hell's Gate, injection, ETW-patch, or DLL unload **capability**. Workaround for Denuvo: skip `IsGameOrAntiCheatPath` for handle opens only. Workaround for AV PE-import heuristics: `NativeProcessMemory` dynamic resolve — never gut the feature. |
+| Process-memory defenses stay armed | Do not disable Hell's Gate, injection, ETW-patch, or DLL unload **capability**. Workaround for Denuvo: skip handle opens via `IsGameOrAntiCheatPath` / `IsGameOrAntiCheatProcess` only — **fail closed** when image path is unresolved (no `PROCESS_VM_READ` on unknown PIDs). `OpenRemoteHandle` must refuse `VM_READ` unless `CanInspect` passes. Name/path skips are **not** trust grants. Workaround for AV PE-import heuristics: `NativeProcessMemory` dynamic resolve — never gut the feature. |
 | All file reads use `FileShare.Delete` | All file I/O opens with `FileShare.ReadWrite | FileShare.Delete` — Sentinel never blocks user file deletion, even during active scanning or hashing. Only exception: intentional DLL lock files from response actions. |
 | Monitors registered in groups | All background monitors must be registered via `MonitorGroup` with appropriate priority, start delay, and restart policy — no flat `AddHostedService` for monitors. |
 | Monitor source files match groups | Each monitor class lives in the group file it belongs to under `Monitors/` (CriticalMonitors.cs, CoreDetectionMonitors.cs, etc.). No monolith files — new monitors go into their group file. |

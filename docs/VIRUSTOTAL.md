@@ -19,6 +19,9 @@ inspection, service install, quarantine, hooks), not just malware signatures.
 5. **Observe-first responses** — kill/quarantine only on proven malicious
    *behavior*, reducing “EDR acts like malware” runtime telemetry that cloud
    AVs also use.
+6. **Game / anti-cheat memory policy** — no `PROCESS_VM_READ` on Steam/Epic/…
+   trees or known titles (e.g. Football Manager); fail-closed when path is
+   unresolved. This is a handle-open skip only, not a defense disable.
 
 ## What actually gets you near 0/70
 

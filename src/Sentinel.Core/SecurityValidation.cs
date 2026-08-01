@@ -692,5 +692,47 @@ namespace Sentinel.Core
                    lower.Contains(@"\common redist\") ||
                    lower.Contains(@"\steamworks shared\");
         }
+
+        /// <summary>
+        /// Process basenames that commonly host Denuvo / anti-cheat and self-terminate
+        /// on PROCESS_VM_READ. Used when image path is not yet resolvable (startup race).
+        /// Name-only — not trust; only skips memory inspection, never authorizes allow.
+        /// </summary>
+        private static readonly HashSet<string> GameOrAntiCheatProcessNames = new(StringComparer.OrdinalIgnoreCase)
+        {
+            // Football Manager family
+            "fm", "fm2015", "fm2016", "fm2017", "fm2018", "fm2019", "fm2020",
+            "fm2021", "fm2022", "fm2023", "fm2024", "fm2025", "fm2026",
+            "football manager",
+            // Common launchers / overlays / anti-cheat agents
+            "steam", "steamwebhelper", "gameoverlayui", "steamerrorreporter",
+            "easyanticheat", "easyanticheat_eos", "beclient", "beclient_x64",
+            "beservice", "vgc", "vgtray", "riotclientservices",
+            "epicgameslauncher", "eadesktop", "ubisoftconnect",
+            "galaxyclient"
+        };
+
+        /// <summary>
+        /// True if path and/or live process name indicate a game / anti-cheat workload
+        /// that must not receive PROCESS_VM_READ (Denuvo self-exit).
+        /// </summary>
+        public static bool IsGameOrAntiCheatProcess(int pid, string? imagePath = null)
+        {
+            if (IsGameOrAntiCheatPath(imagePath))
+                return true;
+
+            try
+            {
+                using var proc = System.Diagnostics.Process.GetProcessById(pid);
+                var name = proc.ProcessName;
+                if (!string.IsNullOrEmpty(name) && GameOrAntiCheatProcessNames.Contains(name))
+                    return true;
+            }
+            catch { }
+
+            // Path may still resolve when name is generic (e.g. custom launcher)
+            imagePath ??= GetProcessImagePath(pid);
+            return IsGameOrAntiCheatPath(imagePath);
+        }
     }
 }

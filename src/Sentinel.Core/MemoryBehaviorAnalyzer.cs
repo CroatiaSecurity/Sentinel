@@ -66,7 +66,9 @@ namespace Sentinel.Core
                         var path = SecurityValidation.GetProcessImagePath(proc.Id);
 
                         // Workaround only: never open memory of game/anti-cheat processes
-                        if (SecurityValidation.IsGameOrAntiCheatPath(path))
+                        // (path + name + fail-closed when path unresolved — Denuvo / FM)
+                        if (SecurityValidation.IsGameOrAntiCheatProcess(proc.Id, path) ||
+                            !NativeProcessMemory.CanInspect(proc.Id, path))
                             continue;
 
                         // System-wide + per-process DLL unload (disk + FreeLibrary APC)
@@ -74,9 +76,6 @@ namespace Sentinel.Core
                             .CheckAndUnloadAsync(proc.Id, name)
                             .GetAwaiter().GetResult();
                         if (unloadResult.Success)
-                            continue;
-
-                        if (!NativeProcessMemory.CanInspect(proc.Id, path))
                             continue;
 
                         // Module count growth → DLL injection

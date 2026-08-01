@@ -4,6 +4,13 @@ All notable changes to Sentinel are documented in this file.
 
 ## [1.8.6] - 2026-08-01
 
+### Fixed — Football Manager / Denuvo still dying on startup (path race)
+- **`CanInspect` fail-closed** when image path is unresolved (startup race / PPL) — no `PROCESS_VM_READ`.
+- **`OpenRemoteHandle`**: refuse `VM_READ` unless `CanInspect` passes (central gate).
+- **`IsGameOrAntiCheatProcess`**: path + process-name check (`fm`, Steam overlay, EAC/BE, …).
+- **`MemoryBehaviorAnalyzer`**: skip games before DLL unload / module enum.
+- **`EphemeralProcessMonitor`**: do not treat `FM.EXE` short-lived Prefetch as self-deleting dropper; resolve Steam library roots in `FindExecutable`.
+
 ### Policy — Observe-first + full defenses (no gutting scanners)
 - **Detect fully, touch only when proven:** scanners stay armed; kill / quarantine / FreeLibrary / isolate only after **malicious behavior** (what processes DO).
 - Disk plant alone, module-count growth alone, missing image alone → **Tier2 LogOnly**.
