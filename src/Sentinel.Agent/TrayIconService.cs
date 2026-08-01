@@ -78,7 +78,7 @@ namespace Sentinel.Agent
             _contextMenu.Items.Add("Open Event Log", null, OnOpenEventLog);
             _contextMenu.Items.Add("Open Data Folder", null, OnOpenDataFolder);
             // No Exit Agent — service owns lifetime; tray exit was a soft self-stop that confused users.
-            // No Report to Police — filing UI removed; evidence packs stay under ProgramData.
+            // No Report to Police on tray — filing stays under Settings → Report to Police.
 
             System.Drawing.Icon? appIcon = null;
             try

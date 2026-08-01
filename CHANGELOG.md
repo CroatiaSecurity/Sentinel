@@ -4,19 +4,17 @@ All notable changes to Sentinel are documented in this file.
 
 ## [1.8.4] - 2026-08-01
 
-### Changed — Agent tray & Settings UX
-- Tray menu: removed **Exit Agent** and **Report to Police…**
-- Tray: **Open Data Folder** (`%ProgramData%\Sentinel`)
-- Settings sidebar: removed **Report to Police** filing UI
-- New **Tools** page: open data/events/quarantine/evidence/startup log/install folder, copy diagnostics
-- Overview: service status, log size, pack/quarantine counts, latest detection, quick actions
-
 ### Fixed — WinReducer killed via conhost PPID race
 Production: `PPID Spoofing: Parent PID Mismatch` on `System32\conhost` (ETW vs kernel parent mismatch while WinReducerEX110 was running) authorized **KillProcess**; ChainTracer walked the parent chain and killed **WinReducerEX110_x64**.
 
 - `ParentPidSpoofDetector`: demote stock console hosts (`conhost` / `openconsole` under System32/SysWOW64, or conhost with unresolved path), Authenticode-signed binaries, and any **OS-critical path** to **LogOnly** (no kill/chain).
 - `ChainTracer`: defense-in-depth — skip chain kill when the detection is a stock OS console host or PPID rule on an OS-critical path.
 - Regression tests in `InstallerFalsePositiveTests`.
+
+### Changed — Agent tray & Settings UX
+- **Tray only:** removed **Exit Agent** and **Report to Police…**; added **Open Data Folder**
+- **Settings:** **Report to Police** page kept; added **Tools** (folders, diagnostics)
+- Overview: service status, log size, pack/quarantine counts, latest detection, quick actions
 
 ## [1.8.3] - 2026-08-01
 
