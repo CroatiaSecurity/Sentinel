@@ -336,7 +336,13 @@ namespace Sentinel.Core
                 TokenTheftMonitor.IsLegitimateSystemTokenHolder(name))
                 return true;
 
+            // v1.8.3: UUP dump aria2c / portable archive tools from Downloads are not LE pack material
             var evidence = detection.Evidence ?? "";
+            if (InstallerHeuristics.IsPortableDownloadOrArchiveTool(name) ||
+                InstallerHeuristics.IsPortableDownloadOrArchiveTool(null, evidence) ||
+                InstallerHeuristics.IsOfflineImageWorkPath(evidence))
+                return true;
+
             // Classic FP wording when image path is inaccessible
             if (evidence.Contains("at ''", StringComparison.Ordinal) &&
                 (evidence.Contains("Memory Compression", StringComparison.OrdinalIgnoreCase) ||

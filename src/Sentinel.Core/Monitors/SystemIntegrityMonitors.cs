@@ -290,10 +290,16 @@ namespace Sentinel.Core
                             _logger.LogWarning("[TlsCertificateMonitor] Startup: suspicious pre-existing cert in {Store}: {Subject} (confidence {Conf:F2})",
                                 storeLabel, cert.Subject, analysis.Confidence);
 
-                            // Very high confidence at startup (>=0.90): actively remove
-                            // These are almost certainly attacker MitM certs planted before Sentinel started
+                            // Very high confidence at startup (>=0.90): actively remove only
+                            // when ActiveResponse is on AND not a public/enterprise/dev CA.
+                            // Pre-existing store pollution from Microsoft root updates must not
+                            // brick TLS by deleting real trust anchors.
                             ResponseAction? startupResponse = null;
-                            if (analysis.Confidence >= 0.90 && _config.ActiveResponse)
+                            if (analysis.Confidence >= 0.90
+                                && _config.ActiveResponse
+                                && !analysis.IsPublicRootCa
+                                && !analysis.IsEnterpriseCa
+                                && !analysis.IsDevTool)
                             {
                                 startupResponse = ResponseAction.RemoveCert;
                                 _logger.LogWarning("[TlsCertificateMonitor] REMOVING malicious pre-existing cert: {Subject}", cert.Subject);
@@ -374,18 +380,24 @@ namespace Sentinel.Core
                     _logger.LogWarning("[TlsCertificateMonitor] New cert in {Store}: Subject={Subject}, Confidence={Conf:F2}",
                         storeLabel, cert.Subject, analysis.Confidence);
 
-                    ResponseAction response;
-                    if (analysis.Confidence >= 0.80)
+                    // Observe-first: never remove public roots; only remove high-confidence
+                    // unknowns when ActiveResponse is enabled. Otherwise log only.
+                    ResponseAction response = ResponseAction.LogOnly;
+                    if (!analysis.IsPublicRootCa && !analysis.IsEnterpriseCa && !analysis.IsDevTool
+                        && _config.ActiveResponse)
                     {
-                        response = adderInfo != null ? ResponseAction.RemoveCertAndKillAdder : ResponseAction.RemoveCert;
-                    }
-                    else if (analysis.Confidence >= 0.65 && !analysis.IsEnterpriseCa && !analysis.IsDevTool)
-                    {
-                        response = ResponseAction.RemoveCert;
-                    }
-                    else
-                    {
-                        response = ResponseAction.LogOnly;
+                        if (analysis.Confidence >= 0.80)
+                        {
+                            response = adderInfo != null
+                                ? ResponseAction.RemoveCertAndKillAdder
+                                : ResponseAction.RemoveCert;
+                        }
+                        else if (analysis.Confidence >= 0.75)
+                        {
+                            // Raised from 0.65 — single weak signals (e.g. missing CRL on a
+                            // legitimate but unknown CA) must not delete trust anchors.
+                            response = ResponseAction.RemoveCert;
+                        }
                     }
 
                     await EmitCertDetectionAsync(cert, analysis, adderInfo, isStartupScan: false, response);
@@ -511,14 +523,23 @@ namespace Sentinel.Core
             catch { return null; }
         }
 
-        // Known legitimate public root CA patterns — these are trusted global CAs
+        // Known legitimate public root CA patterns — these are trusted global CAs.
+        // Keep in sync with common Microsoft AuthRoot / browser root store names.
+        // Missing entries cause false "suspicious root" alerts when Windows updates the store.
         private static readonly string[] KnownPublicRootCAs =
         {
             "DigiCert", "GlobalSign", "VeriSign", "Verizon", "Entrust", "GeoTrust",
             "GoDaddy", "Thawte", "Comodo", "Sectigo", "Starfield", "Let's Encrypt",
-            "ISRG Root", "IdenTrust", "Baltimore", "CyberTrust", "QuoVadis",
-            "Trustwave", "GTS Root", "GlobalTrust", "SwissSign", "Certum",
-            "AffirmTrust", "Amazon Root", "Apple Root", "Microsoft Root", "Microsoft Corporation",
+            "ISRG Root", "Internet Security Research Group", "IdenTrust", "Baltimore",
+            "CyberTrust", "QuoVadis",
+            "Trustwave", "GTS Root", "Google Trust Services", "Google Trust", "GlobalTrust",
+            "SwissSign", "Certum",
+            "AffirmTrust", "Amazon Root", "Amazon", "Apple Root", "Microsoft Root",
+            "Microsoft Corporation", "Microsoft RSA", "Microsoft ECC",
+            // Common web PKI roots that Windows installs via automatic root updates
+            "SSL.com", "SSL Corporation", "Cloudflare", "Certainly", "ZeroSSL",
+            "HARICA", "Actalis", "NAVER", "SecureTrust", "XRamp", "Secure Global",
+            "COMODO", "AAA Certificate Services", "USERTrust RSA", "USERTrust ECC",
             "Chunghwa Telecom", "Hongkong Post", "Japan Registry", "WISeKey",
             "Buypass", "D-TRUST", "Telia", "Telekom", "Deutsche Telekom",
             "Staat der", "Government", "eID", "Network Solutions",
@@ -527,7 +548,9 @@ namespace Sentinel.Core
             "ANF", "A-Trust", "BGC", "BNA", "CFCA", "China Internet", "CNNIC",
             "E-Tugra", "GDCA", "Hellenic", "HongKong Post", "Izenpe", "KISA",
             "KOICA", "Microsec", "NetLock", "OISTE", "PSC", "SK ID", "SSC",
-            "StartCom", "TÜB", "TWCA", "VRK", "WoSign", "SecureSign", "Macao"
+            "StartCom", "TÜB", "TWCA", "VRK", "WoSign", "SecureSign", "Macao",
+            "Atos", "TWCA Root", "emSign", "vTrus", "UCA Global", "TrustAsia",
+            "BJCA", "CFCA EV ROOT", "GDCA TrustAUTH"
         };
 
         /// <summary>
@@ -600,7 +623,10 @@ namespace Sentinel.Core
                     reasons.Add("Extremely short validity (<90 days)");
                 }
 
-                // 7. No CRL Distribution Points or Authority Info Access (OCSP) — suspicious for a real CA
+                // 7. No CRL Distribution Points or Authority Info Access (OCSP)
+                // IMPORTANT: Many legitimate *root* CAs intentionally omit CRL/AIA (they are
+                // the trust anchor; revocation is for intermediates/leaves). Only score this
+                // against short-lived or non-self-signed certs that look like MitM injects.
                 bool hasCrl = false;
                 bool hasOcsp = false;
                 foreach (var ext in cert.Extensions)
@@ -611,9 +637,11 @@ namespace Sentinel.Core
                     if (ext.Oid?.Value == "1.3.6.1.5.5.7.1.1") hasOcsp = true;
                 }
 
-                if (!hasCrl && !hasOcsp)
+                // Long-lived self-signed roots (≥5y) commonly have no CRL/AIA — do not score.
+                bool looksLikeLongLivedRoot = isSelfSigned && validity.TotalDays >= 365 * 5;
+                if (!hasCrl && !hasOcsp && !looksLikeLongLivedRoot)
                 {
-                    confidence += 0.15; // Increased from 0.10 — missing revocation is serious
+                    confidence += 0.15;
                     reasons.Add("No CRL/OCSP distribution points");
                 }
 
@@ -1409,6 +1437,7 @@ namespace Sentinel.Core
     public sealed class HostsFileGuard : BackgroundService
     {
         private readonly DetectionEngine _detectionEngine;
+        private readonly SentinelConfig _config;
         private readonly ILogger<HostsFileGuard> _logger;
         private FileSystemWatcher? _watcher;
 
@@ -1427,18 +1456,23 @@ namespace Sentinel.Core
 
         // Precomputed SHA-256 of the trusted content for fast comparison
         private readonly string _trustedHash;
+        private readonly string _trustedContent;
 
-        public HostsFileGuard(DetectionEngine de, ILogger<HostsFileGuard> l)
+        public HostsFileGuard(DetectionEngine de, SentinelConfig config, ILogger<HostsFileGuard> l)
         {
             _detectionEngine = de;
+            _config = config;
             _logger = l;
+            _trustedContent = BuildTrustedHostsContent(config.BlockFcmPushChannel);
             using var sha = SHA256.Create();
-            _trustedHash = Convert.ToHexString(sha.ComputeHash(new UTF8Encoding(false).GetBytes(TrustedHostsContent)));
+            _trustedHash = Convert.ToHexString(sha.ComputeHash(new UTF8Encoding(false).GetBytes(_trustedContent)));
         }
 
         protected override async Task ExecuteAsync(CancellationToken ct)
         {
-            _logger.LogInformation("[HostsFileGuard] Started — enforcing hosts content and purging unauthorized files in {Path}", DriversEtcPath);
+            _logger.LogInformation(
+                "[HostsFileGuard] Started — enforcing hosts (FCM mtalk block={Fcm}) in {Path}",
+                _config.BlockFcmPushChannel, DriversEtcPath);
 
             if (!Directory.Exists(DriversEtcPath))
             {
@@ -1512,7 +1546,7 @@ namespace Sentinel.Core
                 {
                     try
                     {
-                        File.WriteAllText(HostsFilePath, TrustedHostsContent, new UTF8Encoding(false));
+                        File.WriteAllText(HostsFilePath, _trustedContent, new UTF8Encoding(false));
                         reverted = true;
                     }
                     catch (IOException) when (i < 2)
@@ -1732,7 +1766,29 @@ namespace Sentinel.Core
         }
 
         // ── Embedded trusted hosts file content (no external file dependency) ──
-        private const string TrustedHostsContent =
+        // v1.8.3: FCM mtalk lines only when BlockFcmPushChannel=true (see BuildTrustedHostsContent).
+        private static string BuildTrustedHostsContent(bool blockFcmPushChannel)
+        {
+            var sb = new System.Text.StringBuilder(TrustedHostsContentBase);
+            if (blockFcmPushChannel)
+            {
+                sb.Append(
+                    "# Google FCM push channel (blocks 443 fallback for Send Tab to Self attack)\r\n" +
+                    "0.0.0.0 mtalk.google.com\r\n" +
+                    "0.0.0.0 mobile-gtalk.l.google.com\r\n" +
+                    "0.0.0.0 alt1-mtalk.google.com\r\n" +
+                    "0.0.0.0 alt2-mtalk.google.com\r\n" +
+                    "0.0.0.0 alt3-mtalk.google.com\r\n" +
+                    "0.0.0.0 alt4-mtalk.google.com\r\n" +
+                    "0.0.0.0 alt5-mtalk.google.com\r\n" +
+                    "0.0.0.0 alt6-mtalk.google.com\r\n" +
+                    "0.0.0.0 alt7-mtalk.google.com\r\n" +
+                    "0.0.0.0 alt8-mtalk.google.com\r\n");
+            }
+            return sb.ToString();
+        }
+
+        private const string TrustedHostsContentBase =
             "# Sentinel hosts file\r\n" +
             "127.0.0.1 localhost\r\n" +
             "127.0.0.1 localhost.localdomain\r\n" +
@@ -1878,18 +1934,7 @@ namespace Sentinel.Core
             "0.0.0.0 analytics.tiktok.com\r\n" +
             "0.0.0.0 ads.tiktok.com\r\n" +
             "0.0.0.0 analytics-sg.tiktok.com\r\n" +
-            "0.0.0.0 ads-sg.tiktok.com\r\n" +
-            "# Google FCM push channel (blocks 443 fallback for Send Tab to Self attack)\r\n" +
-            "0.0.0.0 mtalk.google.com\r\n" +
-            "0.0.0.0 mobile-gtalk.l.google.com\r\n" +
-            "0.0.0.0 alt1-mtalk.google.com\r\n" +
-            "0.0.0.0 alt2-mtalk.google.com\r\n" +
-            "0.0.0.0 alt3-mtalk.google.com\r\n" +
-            "0.0.0.0 alt4-mtalk.google.com\r\n" +
-            "0.0.0.0 alt5-mtalk.google.com\r\n" +
-            "0.0.0.0 alt6-mtalk.google.com\r\n" +
-            "0.0.0.0 alt7-mtalk.google.com\r\n" +
-            "0.0.0.0 alt8-mtalk.google.com\r\n";
+            "0.0.0.0 ads-sg.tiktok.com\r\n";
     }
 
 

@@ -18,6 +18,12 @@ namespace Sentinel.Core
 
         private const uint LOAD_LIBRARY_SEARCH_SYSTEM32 = 0x00000800;
 
+        /// <summary>
+        /// v1.8.3: When false (default), IPSec = attack-only ports (Telnet/RAT/etc.).
+        /// When true, also block SSH/RDP/SMB/DB/… (locked-down host).
+        /// </summary>
+        public static bool RestrictivePortHardeningEnabled { get; set; } = false;
+
         public static bool ApplyOrFail()
         {
             try
@@ -32,13 +38,14 @@ namespace Sentinel.Core
                 // Restrict DLL search to %SystemRoot%\System32
                 bool res2 = SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32);
 
-                // Apply IPSec policy registry settings
+                // v1.8.3: Always apply attack-only IPSec (malware/legacy ports nobody needs).
+                // Full lockdown (SSH/RDP/SMB/DB/…) only when RestrictivePortHardeningEnabled.
                 ApplyIPSecPolicy();
 
                 // v1.4.2: Register for Safe Mode boot — ensures Sentinel runs even in Safe Mode
                 RegisterForSafeMode();
 
-                // v1.4.2: Block remote access to RPC ephemeral ports
+                // v1.4.2: Block remote access to RPC ephemeral ports (inbound LAN lateral movement)
                 BlockRemoteRpcEphemeralPorts();
 
                 // Apply custom hardening from setup scripts folder
@@ -59,69 +66,104 @@ namespace Sentinel.Core
             public string Protocol; // "TCP", "UDP", or "TCPUDP"
         }
 
-        private static readonly PortDef[] PortDefinitions = new PortDef[]
+        /// <summary>
+        /// v1.8.3 DEFAULT IPSec set: ports normal users never need, attackers do.
+        /// Does NOT include SSH, RDP, SMB, VNC, WinRM, FTP, databases, SOCKS, Docker, torrents.
+        /// </summary>
+        private static readonly PortDef[] AttackOnlyPortDefinitions =
         {
-            new PortDef { Port = 21, Name = "FTP", Protocol = "TCP" },
-            new PortDef { Port = 69, Name = "TFTP", Protocol = "UDP" },
-            new PortDef { Port = 111, Name = "RPCBind", Protocol = "TCPUDP" },
+            // Legacy remote shells (superseded by SSH; pure attack surface)
+            new PortDef { Port = 23, Name = "Telnet", Protocol = "TCP" },
             new PortDef { Port = 512, Name = "rexec", Protocol = "TCP" },
             new PortDef { Port = 513, Name = "rlogin", Protocol = "TCP" },
             new PortDef { Port = 514, Name = "rsh", Protocol = "TCP" },
-            new PortDef { Port = 548, Name = "AFP", Protocol = "TCP" },
-            new PortDef { Port = 873, Name = "rsync", Protocol = "TCP" },
-            new PortDef { Port = 2049, Name = "NFS", Protocol = "TCPUDP" },
-            new PortDef { Port = 22, Name = "SSH", Protocol = "TCP" },
-            new PortDef { Port = 23, Name = "Telnet", Protocol = "TCP" },
-            new PortDef { Port = 3389, Name = "RDP", Protocol = "TCPUDP" },
-            new PortDef { Port = 5900, Name = "VNC", Protocol = "TCP" },
-            new PortDef { Port = 5985, Name = "WinRM_HTTP", Protocol = "TCP" },
-            new PortDef { Port = 5986, Name = "WinRM_HTTPS", Protocol = "TCP" },
-            new PortDef { Port = 135, Name = "RPC_DCOM", Protocol = "TCPUDP" },
-            new PortDef { Port = 137, Name = "NetBIOS_NS", Protocol = "TCPUDP" },
-            new PortDef { Port = 138, Name = "NetBIOS_DGM", Protocol = "UDP" },
-            new PortDef { Port = 139, Name = "NetBIOS_SSN", Protocol = "TCP" },
-            new PortDef { Port = 445, Name = "SMB", Protocol = "TCP" },
-            new PortDef { Port = 1900, Name = "SSDP", Protocol = "UDP" },
-            new PortDef { Port = 2869, Name = "UPnP", Protocol = "TCP" },
-            new PortDef { Port = 5353, Name = "mDNS", Protocol = "UDP" },
-            new PortDef { Port = 5355, Name = "LLMNR", Protocol = "UDP" },
-            new PortDef { Port = 389, Name = "LDAP", Protocol = "TCPUDP" },
-            new PortDef { Port = 636, Name = "LDAPS", Protocol = "TCP" },
-            new PortDef { Port = 161, Name = "SNMP", Protocol = "UDP" },
-            new PortDef { Port = 162, Name = "SNMP_Trap", Protocol = "UDP" },
-            new PortDef { Port = 1433, Name = "MSSQL", Protocol = "TCP" },
-            new PortDef { Port = 1434, Name = "MSSQL_Browser", Protocol = "UDP" },
-            new PortDef { Port = 1521, Name = "OracleDB", Protocol = "TCP" },
-            new PortDef { Port = 3306, Name = "MySQL", Protocol = "TCP" },
-            new PortDef { Port = 5432, Name = "PostgreSQL", Protocol = "TCP" },
-            new PortDef { Port = 6379, Name = "Redis", Protocol = "TCP" },
-            new PortDef { Port = 9042, Name = "Cassandra", Protocol = "TCP" },
-            new PortDef { Port = 9200, Name = "Elasticsearch", Protocol = "TCP" },
-            new PortDef { Port = 11211, Name = "Memcached", Protocol = "TCPUDP" },
-            new PortDef { Port = 27017, Name = "MongoDB", Protocol = "TCP" },
-            new PortDef { Port = 2375, Name = "Docker_Unenc", Protocol = "TCP" },
-            new PortDef { Port = 2376, Name = "Docker_TLS", Protocol = "TCP" },
-            new PortDef { Port = 5000, Name = "DockerRegistry", Protocol = "TCP" },
-            new PortDef { Port = 8291, Name = "MikroTik_Winbox", Protocol = "TCP" },
-            new PortDef { Port = 9090, Name = "Prometheus", Protocol = "TCP" },
-            new PortDef { Port = 50070, Name = "Hadoop_HDFS", Protocol = "TCP" },
-            new PortDef { Port = 1099, Name = "Java_RMI", Protocol = "TCP" },
-            new PortDef { Port = 5601, Name = "Kibana", Protocol = "TCP" },
-            new PortDef { Port = 8888, Name = "Jupyter", Protocol = "TCP" },
-            new PortDef { Port = 1080, Name = "SOCKS", Protocol = "TCP" },
+            // Rarely used, high-abuse discovery/transfer
+            new PortDef { Port = 69, Name = "TFTP", Protocol = "UDP" },
+            new PortDef { Port = 111, Name = "RPCBind", Protocol = "TCPUDP" },
+            // Classic malware / RAT / implant defaults (not legitimate apps)
             new PortDef { Port = 666, Name = "Trojan_666", Protocol = "TCP" },
             new PortDef { Port = 1234, Name = "RAT_1234", Protocol = "TCP" },
             new PortDef { Port = 1337, Name = "Backdoor_1337", Protocol = "TCP" },
             new PortDef { Port = 4444, Name = "Meterpreter_4444", Protocol = "TCP" },
-            new PortDef { Port = 5555, Name = "Android_ADB", Protocol = "TCP" },
-            new PortDef { Port = 6666, Name = "IRC_Backdoor", Protocol = "TCP" },
-            new PortDef { Port = 6667, Name = "IRC_C2", Protocol = "TCP" },
             new PortDef { Port = 7777, Name = "Backdoor_7777", Protocol = "TCP" },
             new PortDef { Port = 12345, Name = "NetBus", Protocol = "TCP" },
             new PortDef { Port = 31337, Name = "BackOrifice", Protocol = "TCPUDP" },
             new PortDef { Port = 54321, Name = "BackOrifice2K", Protocol = "TCP" },
-            new PortDef { Port = 5040, Name = "CDP_UserSvc", Protocol = "TCP" }
         };
+
+        /// <summary>
+        /// Extra ports only when RestrictivePortHardening=true (locked-down host).
+        /// These are services real users may run (SSH, RDP, SMB, DBs, proxies, Docker…).
+        /// </summary>
+        private static readonly PortDef[] RestrictiveExtraPortDefinitions =
+        {
+            new PortDef { Port = 21, Name = "FTP", Protocol = "TCP" },
+            new PortDef { Port = 22, Name = "SSH", Protocol = "TCP" },
+            new PortDef { Port = 135, Name = "RPC_DCOM", Protocol = "TCPUDP" },
+            new PortDef { Port = 137, Name = "NetBIOS_NS", Protocol = "TCPUDP" },
+            new PortDef { Port = 138, Name = "NetBIOS_DGM", Protocol = "UDP" },
+            new PortDef { Port = 139, Name = "NetBIOS_SSN", Protocol = "TCP" },
+            new PortDef { Port = 161, Name = "SNMP", Protocol = "UDP" },
+            new PortDef { Port = 162, Name = "SNMP_Trap", Protocol = "UDP" },
+            new PortDef { Port = 389, Name = "LDAP", Protocol = "TCPUDP" },
+            new PortDef { Port = 445, Name = "SMB", Protocol = "TCP" },
+            new PortDef { Port = 548, Name = "AFP", Protocol = "TCP" },
+            new PortDef { Port = 636, Name = "LDAPS", Protocol = "TCP" },
+            new PortDef { Port = 873, Name = "rsync", Protocol = "TCP" },
+            new PortDef { Port = 1080, Name = "SOCKS", Protocol = "TCP" },
+            new PortDef { Port = 1099, Name = "Java_RMI", Protocol = "TCP" },
+            new PortDef { Port = 1433, Name = "MSSQL", Protocol = "TCP" },
+            new PortDef { Port = 1434, Name = "MSSQL_Browser", Protocol = "UDP" },
+            new PortDef { Port = 1521, Name = "OracleDB", Protocol = "TCP" },
+            new PortDef { Port = 1900, Name = "SSDP", Protocol = "UDP" },
+            new PortDef { Port = 2049, Name = "NFS", Protocol = "TCPUDP" },
+            new PortDef { Port = 2375, Name = "Docker_Unenc", Protocol = "TCP" },
+            new PortDef { Port = 2376, Name = "Docker_TLS", Protocol = "TCP" },
+            new PortDef { Port = 2869, Name = "UPnP", Protocol = "TCP" },
+            new PortDef { Port = 3306, Name = "MySQL", Protocol = "TCP" },
+            new PortDef { Port = 3389, Name = "RDP", Protocol = "TCPUDP" },
+            new PortDef { Port = 5000, Name = "DockerRegistry", Protocol = "TCP" },
+            new PortDef { Port = 5040, Name = "CDP_UserSvc", Protocol = "TCP" },
+            new PortDef { Port = 5353, Name = "mDNS", Protocol = "UDP" },
+            new PortDef { Port = 5355, Name = "LLMNR", Protocol = "UDP" },
+            new PortDef { Port = 5432, Name = "PostgreSQL", Protocol = "TCP" },
+            new PortDef { Port = 5555, Name = "Android_ADB", Protocol = "TCP" },
+            new PortDef { Port = 5601, Name = "Kibana", Protocol = "TCP" },
+            new PortDef { Port = 5900, Name = "VNC", Protocol = "TCP" },
+            new PortDef { Port = 5985, Name = "WinRM_HTTP", Protocol = "TCP" },
+            new PortDef { Port = 5986, Name = "WinRM_HTTPS", Protocol = "TCP" },
+            new PortDef { Port = 6379, Name = "Redis", Protocol = "TCP" },
+            new PortDef { Port = 6666, Name = "IRC_6666", Protocol = "TCP" },
+            new PortDef { Port = 6667, Name = "IRC_6667", Protocol = "TCP" },
+            new PortDef { Port = 8291, Name = "MikroTik_Winbox", Protocol = "TCP" },
+            new PortDef { Port = 8888, Name = "Jupyter", Protocol = "TCP" },
+            new PortDef { Port = 9042, Name = "Cassandra", Protocol = "TCP" },
+            new PortDef { Port = 9090, Name = "Prometheus", Protocol = "TCP" },
+            new PortDef { Port = 9200, Name = "Elasticsearch", Protocol = "TCP" },
+            new PortDef { Port = 11211, Name = "Memcached", Protocol = "TCPUDP" },
+            new PortDef { Port = 27017, Name = "MongoDB", Protocol = "TCP" },
+            new PortDef { Port = 50070, Name = "Hadoop_HDFS", Protocol = "TCP" },
+        };
+
+        /// <summary>Ports currently enforced by IPSec (attack-only, or attack + restrictive extra).</summary>
+        private static PortDef[] GetActivePortDefinitions()
+        {
+            if (!RestrictivePortHardeningEnabled)
+                return AttackOnlyPortDefinitions;
+
+            var list = new List<PortDef>(AttackOnlyPortDefinitions.Length + RestrictiveExtraPortDefinitions.Length);
+            list.AddRange(AttackOnlyPortDefinitions);
+            list.AddRange(RestrictiveExtraPortDefinitions);
+            return list.ToArray();
+        }
+
+        /// <summary>True if this port is in the default attack-only block set (public for monitors).</summary>
+        public static bool IsAttackOnlyBlockedPort(int port)
+        {
+            foreach (var def in AttackOnlyPortDefinitions)
+                if (def.Port == port) return true;
+            return false;
+        }
 
         private static void RunNetsh(string args)
         {
@@ -171,20 +213,24 @@ namespace Sentinel.Core
         }
 
         /// <summary>
-        /// Re-applies the IPSec policy unconditionally. Called by the self-healing loop
-        /// when the policy is detected as missing or unassigned.
-        /// v1.4.1: Extracted from ApplyIPSecPolicy for reuse by IPSecIntegrityGuard.
+        /// Re-applies the IPSec policy from scratch (attack-only by default, full set if
+        /// RestrictivePortHardeningEnabled). Always rebuilds so upgrades drop SSH/RDP/etc. blocks.
         /// </summary>
         public static void ReapplyIPSecPolicy()
         {
             try
             {
-                // Delete and recreate from scratch — handles partial corruption
+                var ports = GetActivePortDefinitions();
+                string mode = RestrictivePortHardeningEnabled
+                    ? "attack-only + restrictive lockdown"
+                    : "attack-only (malware/legacy; SSH/RDP/SMB/DB free)";
+
+                // Delete and recreate — handles partial corruption and profile changes
                 RunNetsh("ipsec static delete policy name=GSecurity");
-                RunNetsh("ipsec static add policy name=GSecurity description=\"Blocks dangerous/unnecessary ports. Managed by Sentinel.\" assign=yes");
+                RunNetsh($"ipsec static add policy name=GSecurity description=\"Sentinel IPSec: {mode}.\" assign=yes");
                 RunNetsh("ipsec static add filteraction name=BlockAction action=block description=\"Block traffic\"");
 
-                foreach (var def in PortDefinitions)
+                foreach (var def in ports)
                 {
                     var protocols = new List<string>();
                     if (def.Protocol == "TCPUDP")
@@ -306,17 +352,24 @@ namespace Sentinel.Core
         {
             try
             {
-                // v1.4.1: Check actual policy state instead of relying on flag file.
-                // An attacker can delete the flag file to force re-application (benign),
-                // or create it before first run to prevent application (critical).
-                // Now we verify the policy is actually active in the IPSec engine.
-                if (IsIPSecPolicyActive())
-                {
-                    return; // Policy confirmed active — no action needed
-                }
-
-                // Policy is missing or unassigned — apply it
+                // Always rebuild on startup so upgrades shrink the block list
+                // (old installs blocked SSH/RDP; default is now attack-only).
                 ReapplyIPSecPolicy();
+            }
+            catch
+            {
+                // Non-fatal
+            }
+        }
+
+        /// <summary>
+        /// Tear down GSecurity entirely (lab/uninstall). Normal operation uses ReapplyIPSecPolicy.
+        /// </summary>
+        public static void RemoveIPSecPolicyIfPresent()
+        {
+            try
+            {
+                RunNetsh("ipsec static delete policy name=GSecurity");
             }
             catch
             {
@@ -610,38 +663,29 @@ namespace Sentinel.Core
         #region Hardening: Service Disablement
 
         /// <summary>
-        /// Disables remote access and network services that are common attack vectors
-        /// on workstations. Uses ServiceController API — no sc.exe shell-out.
-        /// 
-        /// Only targets services that:
-        ///   - Provide remote access (RDP vector, lateral movement)
-        ///   - Are never needed on a standard workstation
-        ///   - Can be re-enabled by an admin if needed
+        /// v1.8.3: Default disables only services users almost never run that attackers abuse.
+        /// Does NOT disable RDP, SSH, WinRM, FTP, UPnP, TeamViewer/AnyDesk, etc.
+        /// Full lockdown list applies only when RestrictivePortHardeningEnabled is true.
         /// </summary>
         private static void DisableRemoteAccessServices()
         {
-            // Remote access tools — primary lateral movement vectors
-            var remoteAccessServices = new[]
+            // Always: pure attack surface / legacy, not normal desktop use
+            var attackOnlyServices = new[]
             {
-                ("TermService",     "Remote Desktop Services"),
-                ("WinRM",           "Windows Remote Management"),
-                ("RemoteRegistry",  "Remote Registry"),
-                ("sshd",            "OpenSSH Server"),
                 ("TlntSvr",         "Telnet Server"),
-                ("SNMP",            "SNMP Service"),
-                ("ftpsvc",          "FTP Publishing Service"),
+                ("RemoteRegistry",  "Remote Registry"), // lateral movement; rare legitimate use
             };
 
-            // Discovery/broadcast services — device enumeration vectors
-            var discoveryServices = new[]
+            // Restrictive lockdown only — users may want these
+            var restrictiveServices = new[]
             {
-                ("SsdpSrv",   "SSDP Discovery (UPnP)"),
-                ("upnphost",  "UPnP Device Host"),
-            };
-
-            // Third-party remote tools (if installed)
-            var thirdPartyRemote = new[]
-            {
+                ("TermService",      "Remote Desktop Services"),
+                ("WinRM",            "Windows Remote Management"),
+                ("sshd",             "OpenSSH Server"),
+                ("SNMP",             "SNMP Service"),
+                ("ftpsvc",           "FTP Publishing Service"),
+                ("SsdpSrv",          "SSDP Discovery (UPnP)"),
+                ("upnphost",         "UPnP Device Host"),
                 ("TeamViewer",       "TeamViewer"),
                 ("AnyDesk",          "AnyDesk"),
                 ("LogMeIn",          "LogMeIn"),
@@ -650,9 +694,13 @@ namespace Sentinel.Core
                 ("FileZilla Server", "FileZilla FTP Server"),
             };
 
-            foreach (var (name, _) in remoteAccessServices.Concat(discoveryServices).Concat(thirdPartyRemote))
-            {
+            foreach (var (name, _) in attackOnlyServices)
                 DisableServiceSafe(name);
+
+            if (RestrictivePortHardeningEnabled)
+            {
+                foreach (var (name, _) in restrictiveServices)
+                    DisableServiceSafe(name);
             }
         }
 
@@ -699,11 +747,13 @@ namespace Sentinel.Core
             // Prevent LM hash storage (CIS 2.3.11.7, MITRE T1003.001)
             SetRegistryDword(@"SYSTEM\CurrentControlSet\Control\LSA", "NoLMHash", 1);
 
-            // --- Remote Access Restrictions ---
-            // Disable remote WMI (MITRE T1047 — WMI lateral movement)
-            SetRegistryDword(@"SOFTWARE\Microsoft\Wbem", "EnableRemoteWmi", 0);
-            // Disable WS-Management remote requests (MITRE T1021.006 — WinRM)
-            SetRegistryDword(@"Software\Microsoft\Windows\CurrentVersion\WSMAN\Service", "allow_remote_requests", 0);
+            // --- Remote Access Restrictions (restrictive lockdown only) ---
+            // v1.8.3: Do not break remote WMI/WinRM for admins by default.
+            if (RestrictivePortHardeningEnabled)
+            {
+                SetRegistryDword(@"SOFTWARE\Microsoft\Wbem", "EnableRemoteWmi", 0);
+                SetRegistryDword(@"Software\Microsoft\Windows\CurrentVersion\WSMAN\Service", "allow_remote_requests", 0);
+            }
 
             // --- TLS Hardening ---
             // Enable TLS 1.3 client support

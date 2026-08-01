@@ -62,6 +62,21 @@ namespace Sentinel.Tests
         }
 
         [Fact]
+        public void BlockFcmPushChannel_DefaultsOff()
+        {
+            // v1.8.3: do not break Chrome push for normal users until opted in post-incident
+            Assert.False(new SentinelConfig().BlockFcmPushChannel);
+        }
+
+        [Fact]
+        public void TrustedCastDevices_EmptyMeansObserveNotKill()
+        {
+            // v1.8.3 docs in Models: empty allowlist is observe-only
+            var cfg = new SentinelConfig();
+            Assert.Empty(cfg.TrustedCastDevices);
+        }
+
+        [Fact]
         public async Task HostsFileGuard_StartsAndStopsCleanly()
         {
             var tempDir = Path.Combine(Path.GetTempPath(), "sentinel_hosts_test_" + Guid.NewGuid().ToString("N")[..8]);
@@ -90,7 +105,7 @@ namespace Sentinel.Tests
                     NullLogger<DetectionEngine>.Instance
                 );
 
-                var guard = new HostsFileGuard(engine, NullLogger<HostsFileGuard>.Instance);
+                var guard = new HostsFileGuard(engine, config, NullLogger<HostsFileGuard>.Instance);
 
                 await guard.StartAsync(CancellationToken.None);
                 await Task.Delay(100);

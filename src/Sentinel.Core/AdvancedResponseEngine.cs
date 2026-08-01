@@ -187,6 +187,36 @@ namespace Sentinel.Core
             return ScoringEngine.IsPresidentsLawRule(detection.RuleName);
         }
 
+        /// <summary>
+        /// v1.8.3: Single-signal heuristics that fire during normal user work (SSH, torrents,
+        /// portable tools in Downloads, rclone backups, shell networking). These must never
+        /// kill/quarantine alone. Confirmed attacks and multi-signal composites are excluded.
+        /// </summary>
+        internal static bool IsObserveOnlyUserActivityHeuristic(string? ruleName)
+        {
+            if (string.IsNullOrWhiteSpace(ruleName)) return false;
+            var r = ruleName;
+
+            // Composites / confirmed campaigns always act
+            if (r.Contains("Composite", StringComparison.OrdinalIgnoreCase) ||
+                r.Contains("Fileless Attack", StringComparison.OrdinalIgnoreCase) ||
+                r.Contains("Covert RAT", StringComparison.OrdinalIgnoreCase) ||
+                r.Contains("Dropped Payload", StringComparison.OrdinalIgnoreCase) ||
+                r.Contains("Confirmed C2", StringComparison.OrdinalIgnoreCase) ||
+                r.Contains("SYSTEM Token", StringComparison.OrdinalIgnoreCase) ||
+                r.Contains("Non-Service Process with SYSTEM", StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            return r.Contains("Reverse Shell: Suspicious Outbound", StringComparison.OrdinalIgnoreCase) ||
+                   r.Contains("Connection on Blocked Port", StringComparison.OrdinalIgnoreCase) ||
+                   r.Contains("Classic Malware Port", StringComparison.OrdinalIgnoreCase) ||
+                   r.Contains("Attack Tool: Connection from Suspicious Path", StringComparison.OrdinalIgnoreCase) ||
+                   r.Contains("Network Policy: Unusual Destination", StringComparison.OrdinalIgnoreCase) ||
+                   r.Contains("SeImpersonatePrivilege from Suspicious Path", StringComparison.OrdinalIgnoreCase) ||
+                   r.Contains("Cloud Sync Tool Running", StringComparison.OrdinalIgnoreCase) ||
+                   r.Contains("Data Exfiltration: Cloud Sync", StringComparison.OrdinalIgnoreCase);
+        }
+
         public async Task HandleAsync(DetectionEvent detection)
         {
             var stopwatch = Stopwatch.StartNew();
@@ -285,6 +315,23 @@ namespace Sentinel.Core
                 effectiveKillAuthorized = false;
                 reason = "LogOnly (Suppressed by allowlist)";
             }
+
+            // v1.8.3 observe-first safety net: weak single-signal heuristics about user
+            // activity (SSH, path, SeImpersonate, rclone, unusual subnet) never kill/quarantine
+            // on their own. Confirmed attacks (LSASS, ransomware, injection, SYSTEM token theft,
+            // composites) still execute AuthorizedResponse. Composite rule names contain "Composite"
+            // / multi-signal wording and are not in the observe-only set.
+            if (IsObserveOnlyUserActivityHeuristic(detection.RuleName) &&
+                effectiveResponse is ResponseAction.KillProcess or ResponseAction.KillProcessTree
+                    or ResponseAction.Quarantine or ResponseAction.QuarantineAndKill
+                    or ResponseAction.NetworkIsolate)
+            {
+                effectiveTier = DetectionTier.Tier2Indicator;
+                effectiveResponse = ResponseAction.LogOnly;
+                effectiveKillAuthorized = false;
+                reason = "LogOnly (observe-first: weak user-activity heuristic — no confirmed attack)";
+            }
+
             // HARDENING v1.3.0: Removed blanket demotion of non-President's-Law Tier1 detections.
             // Previously, ANY Tier1 detection that wasn't in the President's Law categories was
             // demoted to LogOnly — meaning C2 Beaconing, Ghost Process, DLL Sideloading, Attack Tools,

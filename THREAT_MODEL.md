@@ -1,6 +1,6 @@
 # Sentinel — Threat Model
 
-**Version: 1.8.2**
+**Version: 1.8.3**
 
 This document assumes the attacker has read the source code.
 
@@ -64,6 +64,7 @@ See [design.md](design.md) for the full component inventory (all MonitorGroups +
 - **AsrPolicyGuard** (v1.7.5) — Self-healing Defender ASR Block rules
 - **RemoteSessionGuard** (v1.7.5) — Force-logoff unauthorized RDP/remote sessions
 - **ForumHrWatchMonitor** (v1.7.6) — Dedicated forum.hr abuse watch (site no longer hosts-blocked)
+- **Observe-first posture (v1.8.3)** — Weak path/port/shell heuristics LogOnly; IPSec attack-only by default; `RestrictivePortHardening` for full lockdown
 
 ### Group 1: Critical (Self-Protection)
 | Monitor | Purpose |
@@ -389,7 +390,7 @@ See [design.md](design.md) for the full component inventory (all MonitorGroups +
 
 Fundamental limitations, not bugs:
 
-1. **Kernel-level attacks with novel implants** — No visibility below ring 3; however, attack surface is drastically reduced (WinRM, RDP, SMB, remote WMI, Remote Registry, SSH all disabled with self-healing IPSec; 50+ ports blocked; DEP/SEHOP/Spectre mitigations enforced). Cozy Bear (APT29) relies on WinRM and WMI for lateral movement — both are dead on a Sentinel-hardened machine.
+1. **Kernel-level attacks with novel implants** — No visibility below ring 3. Default (v1.8.3) IPSec is **attack-only** (Telnet/rsh/classic RAT ports; Remote Registry/Telnet services off) so users keep SSH/RDP/SMB. Full port/service lockdown is opt-in (`RestrictivePortHardening: true`). DEP/SEHOP/Spectre mitigations and ASR still apply.
 2. **Hardware implants** — No firmware/UEFI visibility (but detects Secure Boot disabled)
 3. **Pre-boot attacks** — Sentinel starts after Windows boots (detects boot config tampering)
 4. **Attacker with physical access + offline disk** — Can boot from USB, modify disk (but detects post-idle hardware changes)

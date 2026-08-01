@@ -14,14 +14,14 @@ using Microsoft.Extensions.Logging;
 namespace Sentinel.Core
 {
     /// <summary>
-    /// Kills ALL browser connections to Cast protocol ports (8008/8009) on the LAN
-    /// unless the target IP is in the explicit allowlist.
+    /// Watches browser connections to Cast protocol ports (8008/8009) on the LAN.
     ///
-    /// No baseline. No OUI trust. No "probably legitimate" logic.
-    /// Empty allowlist = every Cast port connection on the LAN gets killed.
+    /// v1.8.3 observe-first:
+    ///   - Empty TrustedCastDevices → LogOnly (do not firewall-block). Normal Chromecast works.
+    ///   - Non-empty TrustedCastDevices → enforce allowlist (block unknown LAN Cast IPs).
     ///
-    /// If you have a real Chromecast, add its IP to appsettings.json:
-    ///   "Sentinel": { "TrustedCastDevices": ["192.168.1.50"] }
+    /// Post-incident zero-trust: list only known device IPs (or leave empty to observe).
+    /// Inbound "Cast to Device" OS rules are still removed (attack surface; not user traffic).
     ///
     /// v1.0.4: Rewritten from baseline-based to allowlist-only.
     /// </summary>
@@ -33,10 +33,12 @@ namespace Sentinel.Core
 
         private readonly ConcurrentDictionary<string, DateTimeOffset> _alertedConnections = new();
         private readonly ConcurrentDictionary<string, string> _blockedIps = new();
+        private bool _legacyCastBlocksCleaned;
 
         private static readonly TimeSpan ScanInterval = TimeSpan.FromSeconds(5);
         private static readonly TimeSpan AlertCooldown = TimeSpan.FromMinutes(5);
         private static readonly int[] CastPorts = { 8008, 8009 };
+        private const string CastBlockRulePrefix = "Sentinel-CastGuard-Block-";
 
         private static readonly HashSet<string> BrowserProcesses = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -71,15 +73,24 @@ namespace Sentinel.Core
         protected override async Task ExecuteAsync(CancellationToken ct)
         {
             var trusted = _config.TrustedCastDevices ?? Array.Empty<string>();
+            bool enforce = trusted.Length > 0;
             _logger.LogInformation(
-                "[CastDeviceGuard] Started — allowlist mode. Trusted: {Count} ({IPs})",
+                "[CastDeviceGuard] Started — mode={Mode}. Trusted: {Count} ({IPs})",
+                enforce ? "ENFORCE-ALLOWLIST" : "OBSERVE-ONLY",
                 trusted.Length,
-                trusted.Length > 0 ? string.Join(", ", trusted) : "NONE — all Cast connections killed");
+                trusted.Length > 0 ? string.Join(", ", trusted) : "none — log Cast traffic, no preemptive blocks");
 
             // v1.4.2: Delete Windows built-in "Cast to Device" inbound firewall rules.
             // These allow ANY LAN device to push RTSP/HTTP streams INTO this machine.
             // A rogue Cast device uses exactly these rules to connect inbound.
             DeleteCastToDeviceInboundRules();
+
+            // v1.8.3: empty allowlist must not leave residual CastGuard blocks from older builds
+            if (!enforce && !_legacyCastBlocksCleaned)
+            {
+                RemoveLegacyCastGuardBlocks();
+                _legacyCastBlocksCleaned = true;
+            }
 
             while (!ct.IsCancellationRequested)
             {
@@ -90,6 +101,49 @@ namespace Sentinel.Core
                 }
                 catch (OperationCanceledException) { break; }
                 catch (Exception ex) { _logger.LogDebug(ex, "[CastDeviceGuard] Error"); }
+            }
+        }
+
+        /// <summary>
+        /// Removes Sentinel-CastGuard-Block-* rules when running in observe-only mode
+        /// so upgrades stop obstructing normal Chromecast use.
+        /// </summary>
+        private void RemoveLegacyCastGuardBlocks()
+        {
+            try
+            {
+                var policyType = Type.GetTypeFromProgID("HNetCfg.FwPolicy2");
+                if (policyType == null) return;
+                dynamic? policy = Activator.CreateInstance(policyType);
+                if (policy == null) return;
+
+                var toRemove = new List<string>();
+                foreach (dynamic rule in policy.Rules)
+                {
+                    try
+                    {
+                        string? name = rule.Name as string;
+                        if (name != null && name.StartsWith(CastBlockRulePrefix, StringComparison.OrdinalIgnoreCase))
+                            toRemove.Add(name);
+                    }
+                    catch { }
+                }
+
+                foreach (var name in toRemove)
+                {
+                    try { policy.Rules.Remove(name); } catch { }
+                }
+
+                if (toRemove.Count > 0)
+                {
+                    _logger.LogWarning(
+                        "[CastDeviceGuard] Removed {Count} leftover CastGuard firewall rules (observe-only mode)",
+                        toRemove.Count);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "[CastDeviceGuard] Legacy Cast block cleanup failed");
             }
         }
 
@@ -145,6 +199,7 @@ namespace Sentinel.Core
         private async Task ScanAndKillCastConnections(CancellationToken ct)
         {
             var trusted = _config.TrustedCastDevices ?? Array.Empty<string>();
+            bool enforceAllowlist = trusted.Length > 0;
             var connections = GetEstablishedTcpConnections();
 
             foreach (var conn in connections)
@@ -154,10 +209,55 @@ namespace Sentinel.Core
                 if (!IsPrivateIp(conn.RemoteAddress)) continue;
 
                 // Explicitly trusted by user? Leave it alone.
-                if (trusted.Contains(conn.RemoteAddress, StringComparer.OrdinalIgnoreCase))
+                if (enforceAllowlist &&
+                    trusted.Contains(conn.RemoteAddress, StringComparer.OrdinalIgnoreCase))
                     continue;
 
-                // NOT trusted. Block at firewall and alert.
+                // Observe-only when no allowlist configured — do not obstruct normal Cast.
+                if (!enforceAllowlist)
+                {
+                    var observeKey = $"obs:{conn.RemoteAddress}:{conn.RemotePort}";
+                    if (_alertedConnections.TryGetValue(observeKey, out var lastObs) &&
+                        DateTimeOffset.UtcNow - lastObs < AlertCooldown)
+                        continue;
+                    _alertedConnections[observeKey] = DateTimeOffset.UtcNow;
+
+                    string obsProc;
+                    try
+                    {
+                        using var proc = Process.GetProcessById(conn.OwnerPid);
+                        obsProc = proc.ProcessName;
+                    }
+                    catch { continue; }
+
+                    await _detectionEngine.EmitAsync(new DetectionEvent
+                    {
+                        RuleName = "Cast Device Guard: Cast Connection Observed",
+                        Evidence = $"Process '{obsProc}' (PID {conn.OwnerPid}) → " +
+                                   $"{conn.RemoteAddress}:{conn.RemotePort}. " +
+                                   "TrustedCastDevices empty — observe-only (no firewall block).",
+                        Reasoning = "Cast-port traffic on the LAN was observed. With an empty allowlist " +
+                                    "Sentinel logs only so Chromecast/Nest casting keeps working. " +
+                                    "Set TrustedCastDevices to known IPs to enforce an allowlist after " +
+                                    "a rogue Cast/phantom device incident.",
+                        Confidence = 0.55,
+                        Tier = DetectionTier.Tier2Indicator,
+                        AuthorizedResponse = ResponseAction.LogOnly,
+                        ProcessName = obsProc,
+                        ProcessId = conn.OwnerPid,
+                        SignalType = SignalType.NetworkC2,
+                        Metadata = new Dictionary<string, string>
+                        {
+                            ["RemoteIP"] = conn.RemoteAddress,
+                            ["RemotePort"] = conn.RemotePort.ToString(),
+                            ["Mode"] = "observe-only",
+                            ["FirewallBlocked"] = "False"
+                        }
+                    });
+                    continue;
+                }
+
+                // Enforce mode: NOT in allowlist → block at firewall and alert.
                 string procName;
                 try
                 {
@@ -178,14 +278,13 @@ namespace Sentinel.Core
 
                 await _detectionEngine.EmitAsync(new DetectionEvent
                 {
-                    RuleName = "Cast Device Guard: Unauthorized Cast Connection Killed",
+                    RuleName = "Cast Device Guard: Unauthorized Cast Connection Blocked",
                     Evidence = $"Process '{procName}' (PID {conn.OwnerPid}) → " +
                                $"{conn.RemoteAddress}:{conn.RemotePort}. " +
                                $"NOT in TrustedCastDevices. Firewall block applied.",
                     Reasoning = "A process connected to a LAN device on Cast port (8008/8009). " +
-                                "The IP is not in the explicit allowlist. All unapproved Cast " +
-                                "connections are killed — rogue LAN devices use Cast protocol " +
-                                "to stream screen content and relay C2 through the browser.",
+                                "TrustedCastDevices is non-empty and this IP is not listed. " +
+                                "Rogue LAN devices use Cast protocol as a C2 relay through the browser.",
                     Confidence = 0.92,
                     Tier = DetectionTier.Tier1Behavioral,
                     AuthorizedResponse = ResponseAction.LogOnly,
@@ -197,6 +296,7 @@ namespace Sentinel.Core
                         ["RemoteIP"] = conn.RemoteAddress,
                         ["RemotePort"] = conn.RemotePort.ToString(),
                         ["IsBrowser"] = isBrowser.ToString(),
+                        ["Mode"] = "enforce-allowlist",
                         ["FirewallBlocked"] = "True"
                     }
                 });

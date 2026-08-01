@@ -2,7 +2,16 @@
 
 Real-time endpoint detection and response for Windows. Runs as a background service, monitors system behavior, and kills threats automatically when multiple signals correlate.
 
-**Current version: 1.8.2**
+**Current version: 1.8.3**
+
+### Product posture (v1.8.3)
+
+**Protect when attacked. Don’t obstruct normal life.**
+
+- **Confirmed attack** (LSASS dump, ransomware, injection, BYOVD, SYSTEM token theft, multi-signal composites) → kill / quarantine / isolate.
+- **Normal user work** (SSH, RDP, torrents, P2P, downloads, portable tools, rclone, databases) → **observe only** until malice is corroborated.
+- **Default IPSec** blocks only attack/legacy ports (Telnet, rsh, classic RAT ports, …). SSH/RDP/SMB/SOCKS/Docker stay open.
+- **`RestrictivePortHardening: true`** re-enables full lockdown (ports + service disables) for kiosk / locked-down hosts.
 
 ---
 
@@ -14,13 +23,13 @@ Sentinel is effective against:
 
 - **Living-off-the-land attacks (LOLBins)** — PowerShell abuse, WMI lateral movement, MSHTA/rundll32 proxy execution, scheduled task persistence, UAC bypasses. Sentinel watches what trusted binaries *do*, not just that they exist.
 
-- **Credential theft** — LSASS dumps (dbghelp.dll sideloading, direct syscall variants), browser credential store access (Chrome/Edge/Firefox), honeypot credential tripwires, Credential Guard disablement monitoring, token theft / impersonation (SYSTEM token from user process, SeImpersonatePrivilege abuse). Install-time LSASS PPL (`RunAsPPL`) + password rotation + UAC credential-only elevation.
+- **Credential theft** — LSASS dumps (dbghelp.dll sideloading, direct syscall variants), browser credential store access (Chrome/Edge/Firefox), honeypot credential tripwires, Credential Guard disablement monitoring, token theft / impersonation (SYSTEM token from user process; SeImpersonate alone is LogOnly — kill on confirmed SYSTEM-token / composite). Install-time LSASS PPL (`RunAsPPL`) + password rotation + UAC credential-only elevation.
 
 - **Browser-based C2** — Headless Chrome used as a proxy, Chrome DevTools Protocol session hijacking, malicious extensions with debugger/nativeMessaging/proxy permissions. Correlates with beaconing for high-confidence composite kills.
 
 - **Physical access attacks** — BadUSB/Rubber Ducky devices (HID whitelist), post-idle hardware change detection, new Bluetooth devices, rogue USB drives.
 
-- **Network attacks** — ARP spoofing, DNS poisoning, rogue Wi-Fi, unauthorized Cast/screen-share devices, C2 beaconing (statistical), DNS tunneling/exfiltration, phantom network devices, proactive block of Spamhaus/Feodo/EmergingThreats IPs (`ThreatIntelFeedBlocker`). Unauthorized RDP/remote sessions are force-logged-off (`RemoteSessionGuard`).
+- **Network attacks** — ARP spoofing, DNS poisoning, rogue Wi-Fi, unauthorized Cast/screen-share devices, C2 beaconing (statistical), DNS tunneling/exfiltration, phantom network devices. Threat-intel feeds are **observe + reactive isolate** by default (`ThreatIntelProactiveFirewall: false`); optional proactive FW block. Unauthorized RDP/remote sessions can be force-logged-off (`RemoteSessionGuard`).
 
 - **Malicious shortcuts** — Real-time `.lnk` monitoring on Desktop/Start Menu/Taskbar/Startup (all user profiles). Quarantines UNC targets, `search-ms:`/`ms-msdt:` protocol abuse, and LOLBin+remote URL/UNC argument patterns (CVE-2024-21412 / T1566.002).
 
@@ -38,15 +47,16 @@ Sentinel is effective against:
 
 - **Hardware security downgrade** — Detects if someone disables TPM, Secure Boot, BitLocker, or Credential Guard.
 
-- **Attack surface reduction** — Self-healing Defender ASR Block rules (Office macro/child abuse, LSASS steal, USB untrusted exec, WMI persistence, vulnerable drivers, and more). Drift is re-applied by `AsrPolicyGuard`. Chrome Remote Desktop host and WebRTC local-IP leak policies are hardened at install.
+- **Attack surface reduction** — Self-healing Defender ASR Block rules; DEP/SEHOP/Spectre mitigations; AlwaysInstallElevated stripped; attack-only IPSec + Telnet/Remote Registry disable by default. Optional full port/service lockdown via `RestrictivePortHardening`.
 
 ## What it does NOT protect against
 
 Sentinel is honest about its limits:
 
 - **Kernel implants already loaded and active** — Sentinel runs in userland. A kernel driver that is already executing can suppress any user-mode process. However, Sentinel detects the *entire attack chain leading up to driver load* (privilege escalation, driver file drop, service creation, cert planting) and can neutralize attacks before they reach kernel. See "BYOVD Defense" below.
-- **Nation-state zero-days with novel kernel implants** — Custom kernel exploits targeting unknown vulnerabilities are difficult for any behavioral tool to catch at the moment of exploitation. However, Sentinel significantly reduces the attack surface that nation-state tools depend on: it disables WinRM, RDP, SMB, remote WMI, Remote Registry, SSH, and 50+ inbound ports via self-healing IPSec policy; disables discovery protocols (SSDP, UPnP, LLMNR, mDNS); enforces DEP AlwaysOn, SEHOP, and Spectre/Meltdown mitigations; strips AlwaysInstallElevated; and kills lateral movement services at the kernel level. Even APT tooling that relies on WMI lateral movement, WinRM, or SMB will find those services disabled and re-disabled every 30 seconds if re-enabled. Cozy Bear (APT29) relies on WinRM and WMI for lateral movement — both are dead on a Sentinel-hardened machine.
+- **Nation-state zero-days with novel kernel implants** — Custom kernel exploits targeting unknown vulnerabilities are difficult for any behavioral tool to catch at the moment of exploitation. Sentinel still shrinks classic lateral-movement surface (attack-only IPSec, ASR, service/registry hardening, reactive threat-intel isolate) without pre-breaking SSH/RDP for normal users. For kiosk-style lockdown, set `RestrictivePortHardening: true`.
 - **Pre-boot attacks** — Sentinel starts after Windows. It detects boot config changes (BCD, EFI, boot drivers) after the fact via `BootIntegrityGuard`.
+- **Weak single signals alone** — Shell using SSH, a download from `Downloads\`, or SeImpersonate on a portable tool is **logged**, not killed, until multi-signal attack is confirmed. That is intentional (v1.8.3).
 
 ---
 
@@ -79,7 +89,9 @@ Full transparency in [THREAT_MODEL.md](THREAT_MODEL.md).
 **Probably not, if:**
 - You need enterprise-grade management console, centralized reporting, or fleet deployment
 - You expect kernel-level protection (that requires signed drivers and Microsoft certification)
-- You want set-and-forget antivirus — Sentinel is opinionated and may kill processes aggressively
+- You want set-and-forget antivirus that never needs a glance at the Events log
+
+**v1.8.3 note:** Sentinel is still opinionated about *attacks*, but default mode no longer kills processes solely for looking like “network from Downloads” or using SSH/torrents/portable tools.
 
 ---
 

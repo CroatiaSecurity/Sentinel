@@ -23,6 +23,46 @@ namespace Sentinel.Tests.Monitors
         }
 
         [Fact]
+        public void AnalyzeCert_SslComRoot_IsKnownPublicRoot()
+        {
+            // Regression: SSL.com EV Root was false-flagged as "suspicious" (no CRL on real roots)
+            using var cert = CreateTestCert(
+                "CN=SSL.com EV Root Certification Authority RSA R2, O=SSL Corporation, L=Houston, S=Texas, C=US",
+                "CN=SSL.com EV Root Certification Authority RSA R2, O=SSL Corporation, L=Houston, S=Texas, C=US",
+                3650 * 5);
+            var result = TlsCertificateMonitor.AnalyzeCert(cert);
+
+            Assert.True(result.IsPublicRootCa);
+            Assert.True(result.Confidence <= 0.50, $"SSL.com root must stay ≤0.50, got {result.Confidence}");
+            Assert.DoesNotContain(result.Reasons, r => r.Contains("No CRL/OCSP"));
+        }
+
+        [Fact]
+        public void AnalyzeCert_LongLivedSelfSignedRoot_MissingCrl_NotScored()
+        {
+            // Unknown but long-lived self-signed root without CRL/AIA — do not treat as MitM
+            using var cert = CreateTestCert("CN=Some New National Root CA", "CN=Some New National Root CA", 3650 * 10);
+            var result = TlsCertificateMonitor.AnalyzeCert(cert);
+
+            Assert.True(result.IsSelfSigned);
+            Assert.DoesNotContain(result.Reasons, r => r.Contains("No CRL/OCSP"));
+            Assert.True(result.Confidence < 0.65, $"Long-lived root should stay below remove threshold, got {result.Confidence}");
+        }
+
+        [Fact]
+        public void AnalyzeCert_GoogleTrustServices_IsKnownPublicRoot()
+        {
+            using var cert = CreateTestCert(
+                "CN=GTS Root R4, O=Google Trust Services LLC, C=US",
+                "CN=GTS Root R4, O=Google Trust Services LLC, C=US",
+                3650 * 10);
+            var result = TlsCertificateMonitor.AnalyzeCert(cert);
+
+            Assert.True(result.IsPublicRootCa);
+            Assert.True(result.Confidence <= 0.50);
+        }
+
+        [Fact]
         public void AnalyzeCert_ShortValidity_IncreasesConfidence()
         {
             // Short validity: < 365 days (0.40 base + 0.15 short + 0.10 very-short = 0.65)

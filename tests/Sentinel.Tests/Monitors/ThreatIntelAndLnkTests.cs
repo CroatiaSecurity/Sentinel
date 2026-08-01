@@ -11,8 +11,11 @@ namespace Sentinel.Tests.Monitors
         [InlineData("1.2.3.4", true)]
         [InlineData("10.0.0.1", true)]
         [InlineData("1.2.3.4/24", true)]
-        [InlineData("1.2.3.4/8", true)]
+        [InlineData("1.2.3.4/16", true)]   // minimum allowed prefix (v1.8.3)
         [InlineData("1.2.3.4/32", true)]
+        [InlineData("1.2.3.4/8", false)]   // v1.8.3: /8–/15 too broad (CDN/OCSP collateral)
+        [InlineData("1.2.3.4/12", false)]  // too broad
+        [InlineData("1.2.3.4/15", false)]  // too broad
         [InlineData("1.2.3.4/7", false)]   // too broad
         [InlineData("1.2.3.4/33", false)]  // invalid prefix
         [InlineData("not-an-ip", false)]
@@ -22,6 +25,22 @@ namespace Sentinel.Tests.Monitors
         public void ThreatIntel_IsValidIpOrCidr(string value, bool expected)
         {
             Assert.Equal(expected, ThreatIntelFeedBlocker.IsValidIpOrCidr(value));
+        }
+
+        [Theory]
+        [InlineData("1.2.3.10", "1.2.3.0/24", true)]
+        [InlineData("1.2.4.1", "1.2.3.0/24", false)]
+        [InlineData("10.0.5.9", "10.0.0.0/16", true)]
+        public void ThreatIntel_IpInCidr(string ip, string cidr, bool expected)
+        {
+            Assert.Equal(expected, ThreatIntelFeedBlocker.IpInCidr(ip, cidr));
+        }
+
+        [Fact]
+        public void ThreatIntel_ProactiveFirewall_DefaultsOff()
+        {
+            var cfg = new SentinelConfig();
+            Assert.False(cfg.ThreatIntelProactiveFirewall);
         }
 
         [Fact]

@@ -1,6 +1,6 @@
 # Sentinel — Constraints
 
-**Version: 1.8.1**
+**Version: 1.8.3**
 
 ---
 
@@ -17,7 +17,8 @@
 | No static mutable state | All shared state via `ConcurrentDictionary`, `Channel<T>`, or `SemaphoreSlim` |
 | No shelling out to system tools | No `Process.Start("cmd.exe", ...)` for detection or response logic |
 | Tier2 can never trigger action | Enforced unconditionally in `AdvancedResponseEngine.HandleAsync` â€” no exceptions, no config override |
-| Active response on by default | Ships in killing mode. President's Law rules fire immediately. |
+| Active response on by default | Ships in killing mode for **confirmed** attacks. President's Law / composites fire immediately. |
+| Observe-first for user activity (v1.8.3) | Weak single-signal heuristics (shell+port, Downloads network, SeImpersonate alone, cloud-sync tools) MUST be LogOnly. IPSec default MUST be attack-only ports — not SSH/RDP/SMB. Full lockdown only via `RestrictivePortHardening`. |
 | All file reads use `FileShare.Delete` | All file I/O opens with `FileShare.ReadWrite | FileShare.Delete` — Sentinel never blocks user file deletion, even during active scanning or hashing. Only exception: intentional DLL lock files from response actions. |
 | Monitors registered in groups | All background monitors must be registered via `MonitorGroup` with appropriate priority, start delay, and restart policy — no flat `AddHostedService` for monitors. |
 | Monitor source files match groups | Each monitor class lives in the group file it belongs to under `Monitors/` (CriticalMonitors.cs, CoreDetectionMonitors.cs, etc.). No monolith files — new monitors go into their group file. |

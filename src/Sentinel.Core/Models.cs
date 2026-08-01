@@ -55,8 +55,10 @@ namespace Sentinel.Core
         public string? WatchPath { get; set; }
         /// <summary>
         /// Explicit allowlist of Cast device IPs on the LAN.
-        /// Empty = no Cast devices trusted = all Cast connections killed.
-        /// Add your Chromecast/Nest IP here if you have one.
+        /// v1.8.3: Empty = observe-only (log Cast traffic, do not firewall-block).
+        /// Non-empty = enforce allowlist (block LAN Cast IPs not listed).
+        /// Post-incident hosts that need zero-trust Cast should list only known devices
+        /// (or use a deliberate block after a phantom Cast IP is confirmed).
         /// </summary>
         public string[] TrustedCastDevices { get; set; } = Array.Empty<string>();
 
@@ -87,6 +89,29 @@ namespace Sentinel.Core
         /// Set false only for intentional observation/lab mode.
         /// </summary>
         public bool EnforceActiveResponse { get; set; } = true;
+
+        /// <summary>
+        /// v1.8.3: When true, ThreatIntelFeedBlocker pre-creates Windows Firewall block rules
+        /// for every feed IP/CIDR. Default <c>false</c> — observe connections to listed IPs
+        /// and only act reactively (NetworkIsolate on live hit when ActiveResponse is on).
+        /// Pre-blocking thousands of ranges breaks legitimate TLS/OCSP/CDN traffic.
+        /// </summary>
+        public bool ThreatIntelProactiveFirewall { get; set; } = false;
+
+        /// <summary>
+        /// v1.8.3: When true, permanently block Google FCM (TCP 5228 + mtalk hosts).
+        /// Default <c>false</c> — do not break Chrome push for normal users.
+        /// Enable after confirmed MitM / Chrome sync token theft (see CHANGELOG 0.8.6 June 13–14 chain).
+        /// </summary>
+        public bool BlockFcmPushChannel { get; set; } = false;
+
+        /// <summary>
+        /// v1.8.3: When false (default), IPSec only blocks attack/legacy ports nobody needs
+        /// (Telnet, rsh, TFTP, Meterpreter/BackOrifice-class ports). SSH, RDP, SMB, VNC,
+        /// databases, SOCKS, Docker stay open. When true, also block that broader service set
+        /// (locked-down host / kiosk mode).
+        /// </summary>
+        public bool RestrictivePortHardening { get; set; } = false;
 
         /// <summary>
         /// v1.6.3: Trusted USB devices as VID:PID (hex, e.g. "0951:1666" for Kingston DataTraveler).

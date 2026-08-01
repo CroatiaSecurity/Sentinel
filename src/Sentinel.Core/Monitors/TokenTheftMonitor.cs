@@ -251,6 +251,15 @@ namespace Sentinel.Core
                             continue;
                         }
 
+                        // v1.8.3: SeImpersonate + Downloads/Temp alone is NOT confirmed potato.
+                        // Portable tools, UUP aria2c, torrents, and elevated shells inherit this
+                        // privilege constantly. Observe-only; kill when SYSTEM-token theft or
+                        // known token-theft modules corroborate (other branches / correlation).
+                        if (InstallerHeuristics.IsBenignPortableWorkContext(processName, imagePath))
+                        {
+                            continue;
+                        }
+
                         if (IsSuspiciousPath(imagePath))
                         {
                             if (WasRecentlyAlerted(pid, "seimpersonate"))
@@ -260,17 +269,19 @@ namespace Sentinel.Core
                             {
                                 RuleName = "Token Theft: SeImpersonatePrivilege from Suspicious Path",
                                 Evidence = $"Process '{processName}' (PID {pid}) at '{Truncate(imagePath, 120)}' has SeImpersonatePrivilege enabled. " +
-                                           $"Running from a user-writable path suggests a privilege escalation tool (Potato family, PrintSpoofer).",
-                                Reasoning = "SeImpersonatePrivilege from a user-writable directory is the classic signature of potato-class privilege escalation tools " +
-                                            "(GodPotato, JuicyPotato, SweetPotato, PrintSpoofer) that abuse Windows service account tokens (MITRE T1134.001).",
-                                Confidence = 0.85,
-                                Tier = DetectionTier.Tier1Behavioral,
-                                AuthorizedResponse = ResponseAction.KillProcessTree,
+                                           $"Running from a user-writable path — weak potato-class indicator only.",
+                                Reasoning = "SeImpersonatePrivilege from a user-writable path can indicate potato tools " +
+                                            "(GodPotato, JuicyPotato, PrintSpoofer) but is also normal for many portable apps. " +
+                                            "Observe-first: LogOnly until confirmed (SYSTEM token theft, token-theft modules, composite).",
+                                Confidence = 0.55,
+                                Tier = DetectionTier.Tier2Indicator,
+                                AuthorizedResponse = ResponseAction.LogOnly,
                                 SignalType = SignalType.CredentialTheft,
                                 ProcessName = processName,
                                 ProcessId = pid,
                             });
 
+                            // Still publish for correlation — multi-signal attack can escalate
                             _contextBus?.Publish(new TokenTheftSignal
                             {
                                 ProcessId = pid,

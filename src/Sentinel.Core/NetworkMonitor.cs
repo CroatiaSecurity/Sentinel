@@ -41,58 +41,44 @@ namespace Sentinel.Core
         private static readonly HashSet<int> StandardPorts = new() { 80, 443, 53, 8080, 8443 };
 
         /// <summary>
-        /// Ports that are blocked by the IPSec policy (IPSecPolicy.ps1). Any active connection
-        /// on these ports means the policy was disabled/removed/bypassed. These are remote access,
-        /// lateral movement, database, and known backdoor ports that should never be in use.
+        /// v1.8.3: Align with default IPSec attack-only set — ports users never need that
+        /// malware/legacy remote shells use. SSH/RDP/SMB/DB are NOT listed (legitimate use).
+        /// Connections here are LogOnly indicators unless multi-signal attack corroborates.
         /// </summary>
         private static readonly HashSet<int> KnownMaliciousPorts = new()
         {
-            21,    // FTP
-            22,    // SSH
             23,    // Telnet
+            69,    // TFTP
             111,   // RPCBind/Portmapper
-            135,   // RPC/DCOM
-            137,   // NetBIOS Name Service
-            138,   // NetBIOS Datagram
-            139,   // NetBIOS Session
-            445,   // SMB
-            666,   // Known trojan port
-            1337,  // Known backdoor port
-            1433,  // MSSQL
-            2049,  // NFS
-            3306,  // MySQL
-            3389,  // RDP
-            4444,  // Meterpreter/Metasploit default
-            5432,  // PostgreSQL
-            5900,  // VNC
-            5985,  // WinRM HTTP
-            5986,  // WinRM HTTPS
-            31337  // BackOrifice
+            512,   // rexec
+            513,   // rlogin
+            514,   // rsh
+            666,   // Trojan
+            1234,  // RAT default
+            1337,  // Backdoor
+            4444,  // Meterpreter
+            7777,  // Backdoor
+            12345, // NetBus
+            31337, // BackOrifice
+            54321  // BackOrifice 2000
         };
 
         private static string GetPortDescription(int port) => port switch
         {
-            21 => "FTP",
-            22 => "SSH",
             23 => "Telnet",
+            69 => "TFTP",
             111 => "RPCBind/Portmapper",
-            135 => "RPC/DCOM",
-            137 => "NetBIOS Name",
-            138 => "NetBIOS Datagram",
-            139 => "NetBIOS Session",
-            445 => "SMB",
+            512 => "rexec",
+            513 => "rlogin",
+            514 => "rsh",
             666 => "Trojan",
+            1234 => "RAT",
             1337 => "Backdoor",
-            1433 => "MSSQL",
-            2049 => "NFS",
-            3306 => "MySQL",
-            3389 => "RDP",
             4444 => "Meterpreter",
-            5432 => "PostgreSQL",
-            5900 => "VNC",
-            5985 => "WinRM-HTTP",
-            5986 => "WinRM-HTTPS",
+            7777 => "Backdoor",
+            12345 => "NetBus",
             31337 => "BackOrifice",
+            54321 => "BackOrifice2K",
             _ => $"Port {port}"
         };
 
@@ -263,18 +249,24 @@ namespace Sentinel.Core
                         // 1.5. Record connection in behavioral baseline
                         _behavioralBaseline?.RecordNetworkConnection(processName, remoteIp, remotePort);
 
-                        // 2. Behavioral checks
-                        // A. Shell process outbound to non-standard port
+                        // 2. Behavioral checks — v1.8.3 observe-first:
+                        // Single-signal path/port/shell heuristics are LogOnly. Users may use
+                        // SSH, RDP, torrents, P2P, portable tools freely. Kill only when a
+                        // multi-signal composite or confirmed attack rule fires elsewhere.
+
+                        // A. Shell process outbound to non-standard port (ssh, scp, git, etc.)
                         if (ShellProcesses.Contains(processName) && !StandardPorts.Contains(remotePort))
                         {
                             _ = _detectionEngine.EmitAsync(new DetectionEvent
                             {
                                 RuleName = "Reverse Shell: Suspicious Outbound Connection",
                                 Evidence = $"Shell process '{processName}' (PID {owningPid}) connected to non-standard remote port {remotePort} ({remoteIp}:{remotePort})",
-                                Reasoning = "A shell process initiated an outbound network connection to a non-standard port, indicating a potential active reverse shell or remote access tool session.",
-                                Confidence = 0.85,
-                                Tier = DetectionTier.Tier1Behavioral,
-                                AuthorizedResponse = ResponseAction.KillProcessTree,
+                                Reasoning = "A shell opened a non-HTTP(S) outbound connection. Often legitimate (ssh, scp, custom tools). " +
+                                            "Logged as an indicator; kill requires corroborating attack signals (injection, token theft, AMSI bypass, etc.).",
+                                Confidence = 0.45,
+                                Tier = DetectionTier.Tier2Indicator,
+                                AuthorizedResponse = ResponseAction.LogOnly,
+                                SignalType = SignalType.ReverseShell,
                                 ProcessName = processName,
                                 ProcessId = owningPid,
                                 Metadata = new Dictionary<string, string>
@@ -287,15 +279,18 @@ namespace Sentinel.Core
                             });
                         }
 
-                        // B. Outbound connection from temp/downloads path
-                        if (IsSuspiciousPath(imagePath) && !IsKnownBrowser(processName, imagePath))
+                        // B. Outbound connection from temp/downloads path — observe only
+                        if (IsSuspiciousPath(imagePath) &&
+                            !IsKnownBrowser(processName, imagePath) &&
+                            !InstallerHeuristics.IsBenignPortableWorkContext(processName, imagePath))
                         {
                             _ = _detectionEngine.EmitAsync(new DetectionEvent
                             {
                                 RuleName = "Attack Tool: Connection from Suspicious Path",
                                 Evidence = $"Process '{processName}' (PID {owningPid}) running from '{imagePath}' connected to {remoteIp}:{remotePort}",
-                                Reasoning = "A binary running from a temporary or downloads directory initiated an outbound network connection. Logged as an indicator — legitimate portable tools also do this. Kill only if corroborated by hash reputation (Unsafe) or additional behavioral signals.",
-                                Confidence = 0.50,
+                                Reasoning = "A binary from Temp/Downloads initiated outbound network activity. Common for portable tools, " +
+                                            "UUP dump, torrents, and installers. Logged only — never kill on path alone.",
+                                Confidence = 0.40,
                                 Tier = DetectionTier.Tier2Indicator,
                                 AuthorizedResponse = ResponseAction.LogOnly,
                                 ProcessName = processName,
@@ -311,9 +306,8 @@ namespace Sentinel.Core
                             });
                         }
 
-                        // C. Connection on known-malicious/attack ports (IPSec policy bypass detection)
-                        // If IPSec policy is disabled or removed, these ports should never have active
-                        // connections. Detect both inbound (listening) and outbound (established).
+                        // C. Attack-only ports (Telnet, Meterpreter defaults, etc.) — LogOnly indicator.
+                        // IPSec already blocks these; traffic here means bypass/tamper or residual.
                         if (KnownMaliciousPorts.Contains(remotePort) || KnownMaliciousPorts.Contains(localPort))
                         {
                             int suspiciousPort = KnownMaliciousPorts.Contains(remotePort) ? remotePort : localPort;
@@ -323,15 +317,15 @@ namespace Sentinel.Core
 
                             _ = _detectionEngine.EmitAsync(new DetectionEvent
                             {
-                                RuleName = "Network Policy Violation: Connection on Blocked Port",
+                                RuleName = "Network Indicator: Classic Malware Port",
                                 Evidence = $"Process '{processName}' (PID {owningPid}) has {direction} {targetAddr}:{suspiciousPort}. " +
-                                           $"This port should be blocked by IPSec policy. Full connection: {localIp}:{localPort} → {remoteIp}:{remotePort}",
-                                Reasoning = $"Port {suspiciousPort} ({GetPortDescription(suspiciousPort)}) is blocked by the system IPSec policy. " +
-                                            "An active connection on this port indicates the IPSec policy was disabled, removed, or bypassed. " +
-                                            "These ports are associated with remote access, lateral movement, or known backdoor tools.",
-                                Confidence = 0.85,
-                                Tier = DetectionTier.Tier1Behavioral,
-                                AuthorizedResponse = ResponseAction.KillProcessTree,
+                                           $"Full connection: {localIp}:{localPort} → {remoteIp}:{remotePort}",
+                                Reasoning = $"Port {suspiciousPort} ({GetPortDescription(suspiciousPort)}) is in the attack-only " +
+                                            "block set (legacy shells / classic RAT ports). Logged as a weak indicator; " +
+                                            "kill requires corroborating attack signals.",
+                                Confidence = 0.55,
+                                Tier = DetectionTier.Tier2Indicator,
+                                AuthorizedResponse = ResponseAction.LogOnly,
                                 ProcessName = processName,
                                 ProcessId = owningPid,
                                 SignalType = SignalType.NetworkC2,

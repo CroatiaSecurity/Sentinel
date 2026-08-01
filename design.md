@@ -1,6 +1,6 @@
 # Sentinel — Design Document
 
-**Version: 1.8.2**
+**Version: 1.8.3**
 
 ---
 
@@ -62,7 +62,7 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 | Component | Mechanism | Interval |
 |-----------|-----------|----------|
 | `AntiTamperGuard` | Service self-reinstall, anti-suspend timing, binary integrity, FIPS enforcement | 2s timing / 10s integrity |
-| `IPSecIntegrityGuard` | Verifies GSecurity IPSec policy is active; re-applies if deleted | 30s |
+| `IPSecIntegrityGuard` | Self-heals GSecurity IPSec: **attack-only** ports by default; full lockdown if `RestrictivePortHardening` | 30s |
 | `AsrPolicyGuard` | Verifies Defender ASR Block rules (Policy hive); re-applies on drift/tamper | 60s |
 | `AgentWatchdog` | Polls for Agent process; relaunches via CreateProcessAsUser if absent | 10s |
 | `SyscallStubMonitor` | Compares ntdll/amsi function prologues against startup baseline; indirect syscall pattern detection | 30s |
@@ -107,7 +107,7 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 | `BrowserCredentialGuard` | Monitors Chromium + Firefox credential files (Login Data, Cookies, key4.db, logins.json) | 30s |
 | `BrowserC2Guard` | Headless chrome-as-proxy detection, CDP session hijacking, extension manifest integrity scanning | 30s |
 | `MicrosoftAccountGuardMonitor` | TokenBroker cache, PRT extraction, Azure AD token theft tool detection | 30s |
-| `NullSessionGuard` | Enforces LimitBlankPasswordUse, RestrictAnonymous, EveryoneIncludesAnonymous | 60s |
+| `NullSessionGuard` | Enforces LimitBlankPasswordUse, RestrictAnonymous, EveryoneIncludesAnonymous; optional FCM TCP 5228 block when `BlockFcmPushChannel=true` | 60s |
 | `BuiltinAdminGuard` | Monitors built-in Administrator account (RID 500); disables if found active | 15s |
 | `PasswordRotationGuard` | Rotates local account passwords every 10 min; UAC=5; auto-logon via LSA secret | 10 min |
 | `RemoteSessionGuard` | WTSEnumerateSessions; force-logoff non-console remote sessions (RDP etc.); never session 0 / console | 5s |
@@ -129,7 +129,7 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 | `TrafficVolumeBaseline` | Monitors raw NetworkInterface BytesSent; alerts on 3x baseline upload volume | 30s |
 | `OutboundConnectionWhitelist` | Monitors/enforces outbound connections against allowed IP subnets | periodic |
 | `RemoteAccessMonitor` | Scans for 35+ remote access tools; Tier2 presence / Tier1 tunnels from staging paths | 60s |
-| `ThreatIntelFeedBlocker` | Spamhaus DROP + Feodo + EmergingThreats IP blocklists → firewall rules; active-conn check | 4h refresh / 30s conn |
+| `ThreatIntelFeedBlocker` | Spamhaus/Feodo/ET feeds in memory; **observe-only by default** (no proactive FW); reactive `NetworkIsolate` on live hit when `ActiveResponse`; optional `ThreatIntelProactiveFirewall` | 4h refresh / 30s conn |
 | `ForumHrWatchMonitor` | Dedicated forum.hr watch (site not blocked): non-browser DNS/TCP + persistent sessions → kill; browsers allowed | 10s / 15m DNS refresh |
 
 #### Group 5: SystemIntegrity (10s start delay, max 3 restarts)
@@ -147,7 +147,7 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 | `WorkFoldersExfilMonitor` | Detects unauthorized Work Folders activation; active response: kills service | 15s |
 | `TlsCertificateMonitor` | Monitors LocalMachine\Root + TrustedPublisher; baselines at startup. BYOVD follow-up: exact cert **thumbprint** match only → stop service + delete SCM key (does **not** delete `System32\drivers\*.sys`) | 60s |
 | `UacBypassSurfaceMonitor` | Detects COM AutoElevation vectors and manifest autoElevate + copy-drop | periodic |
-| `HostsFileGuard` | Enforces embedded hosts file content (SHA-256 verified); deletes other files in drivers\etc | FSW + 30s |
+| `HostsFileGuard` | Enforces embedded hosts (ads baseline SHA-256); FCM `mtalk.*` lines only when `BlockFcmPushChannel=true`; purges other files in drivers\etc | FSW + 30s |
 | `BrowserDnsPolicyGuard` | Disables DoH system-wide across all browsers; 15s self-healing | 15s |
 | `BootIntegrityGuard` | Monitors BCD, boot drivers, EFI partition for bootkit indicators | 60s |
 | `CveShieldHardener` | Fetches CISA KEV feed; maps against local assets; generates block rules | 4h |
@@ -166,7 +166,7 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 | `DeviceInstallMonitor` | Baselines PnP devices/drivers; detects new device installs and BYOVD | 15s + WMI event |
 | `MtpTransferGuard` | Blocks non-media file transfers to/from MTP devices (phones/tablets) | 5s |
 | `VolumeMountMonitor` | Detects RAM disks, PMEM, VeraCrypt, VHD; extends FileActivityMonitor dynamically | 5s |
-| `CastDeviceGuard` | Kills Cast port connections to non-allowlisted IPs; self-healing firewall rules | 5s |
+| `CastDeviceGuard` | Empty `TrustedCastDevices` = **observe-only** (log Cast traffic); non-empty = enforce allowlist + FW block; removes OS inbound Cast rules | 5s |
 | `WslMonitor` | Monitors WSL process spawns, suspicious commands, new distro installs | 10s |
 | `RawDiskAccessMonitor` | Detects processes opening raw disk device paths via NtQuerySystemInformation handles | 20s |
 | `PrintSpoolerMonitor` | Monitors print spooler for bulk spool file creation and XPS exfiltration | 15s |
@@ -668,14 +668,24 @@ AV-safe PowerShell residual ports. **Not** included (high AV heuristic risk): Ke
 Applied once at service start (best-effort, non-fatal failures):
 
 1. DLL search path restriction (`SetDllDirectory` / `SetDefaultDllDirectories`)
-2. IPSec GSecurity policy (50+ dangerous ports) + Safe Mode registration + RPC ephemeral block
-3. Remote access service disablement (TermService, WinRM, RemoteRegistry, sshd, discovery, third-party RATs)
-4. Registry security (LSA, TLS 1.3, SEHOP, Spectre/Meltdown, AlwaysInstallElevated, firewall profiles, QUIC off)
-5. DEP AlwaysOn (`bcdedit /set nx AlwaysOn`)
-6. LGPO import of embedded `GSecurity.inf` (only remaining intentional shell-out for policy template)
-7. **v1.7.5:** ASR Block rules, credential hardening residual, browser/CRD policy hardening
+2. **IPSec GSecurity (v1.8.3):**
+   - **Default:** attack-only ports (Telnet, rsh/rlogin/rexec, TFTP, RPCBind, classic RAT ports 666/1337/4444/31337/…). **Not** SSH/RDP/SMB/SOCKS/Docker/DB.
+   - **`RestrictivePortHardening: true`:** also blocks the broader service set (SSH, RDP, SMB, WinRM, DBs, discovery, …).
+3. Safe Mode registration + inbound RPC ephemeral block (lateral movement)
+4. **Service disable (v1.8.3):** always Telnet + Remote Registry; RDP/SSH/WinRM/TeamViewer/UPnP only if restrictive
+5. Registry security (LSA, TLS 1.3, SEHOP, Spectre/Meltdown, AlwaysInstallElevated, firewall profiles). Remote WMI/WinRM registry clamps only if restrictive
+6. DEP AlwaysOn (`bcdedit /set nx AlwaysOn`)
+7. LGPO import of embedded `GSecurity.inf` (only remaining intentional shell-out for policy template)
+8. ASR Block rules, credential hardening residual, browser/CRD policy hardening
 
-Self-heal loops: `IPSecIntegrityGuard` (30s), `AsrPolicyGuard` (60s), plus various integrity monitors.
+Self-heal loops: `IPSecIntegrityGuard` (30s, rebuilds current profile), `AsrPolicyGuard` (60s), plus various integrity monitors.
+
+### Response posture (v1.8.3)
+
+| Class | Behavior |
+|-------|----------|
+| Confirmed attack (LSASS, ransomware, injection, BYOVD, SYSTEM token, composites) | Authorized kill/quarantine/isolate when `ActiveResponse` |
+| Weak user-activity heuristics (shell+port, Downloads net, SeImpersonate alone, rclone, unusual subnet) | **LogOnly** at emit + `AdvancedResponseEngine.IsObserveOnlyUserActivityHeuristic` safety net |
 
 ---
 

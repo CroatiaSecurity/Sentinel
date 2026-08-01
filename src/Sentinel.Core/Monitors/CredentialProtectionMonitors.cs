@@ -279,9 +279,11 @@ namespace Sentinel.Core
     public sealed class NullSessionGuard : BackgroundService
     {
         private readonly DetectionEngine _detectionEngine;
+        private readonly SentinelConfig _config;
         private readonly ILogger<NullSessionGuard> _logger;
         private bool _policyApplied;
         private bool _fcmBlocked;
+        private bool _fcmCleanupDone;
 
         private const string LimitBlankPasswordUseKey = @"SYSTEM\CurrentControlSet\Control\Lsa";
         private const string LimitBlankPasswordUseValue = "LimitBlankPasswordUse";
@@ -292,18 +294,22 @@ namespace Sentinel.Core
         // Google FCM/GCM IPs use port 5228. Blocking this port via Windows Firewall
         // prevents push-triggered tab opens ("Send Tab to Self") that attackers can
         // abuse after stealing Chrome session tokens via MitM cert interception.
+        // v1.8.3: only when Sentinel:BlockFcmPushChannel=true (post-incident opt-in).
         private const string FcmFirewallRuleName = "Sentinel-FCM-Push-Block";
         private const int FcmPort = 5228;
 
-        public NullSessionGuard(DetectionEngine de, ILogger<NullSessionGuard> l)
+        public NullSessionGuard(DetectionEngine de, SentinelConfig config, ILogger<NullSessionGuard> l)
         {
             _detectionEngine = de;
+            _config = config;
             _logger = l;
         }
 
         protected override async Task ExecuteAsync(CancellationToken ct)
         {
-            _logger.LogInformation("[NullSessionGuard] Started — enforcing blank-password network restrictions and FCM push protection");
+            _logger.LogInformation(
+                "[NullSessionGuard] Started — blank-password network restrictions; FCM block={Fcm}",
+                _config.BlockFcmPushChannel ? "ON (post-incident)" : "OFF (observe-only default)");
 
             // Initial delay to let other monitors start
             await Task.Delay(15000, ct);
@@ -313,13 +319,56 @@ namespace Sentinel.Core
                 try
                 {
                     await EnforceNullSessionProtection(ct);
-                    await EnforceFcmPushBlock(ct);
+                    if (_config.BlockFcmPushChannel)
+                        await EnforceFcmPushBlock(ct);
+                    else if (!_fcmCleanupDone)
+                        RemoveFcmPushBlockIfPresent();
                 }
                 catch (OperationCanceledException) { break; }
                 catch (Exception ex) { _logger.LogDebug(ex, "[NullSessionGuard] Error"); }
 
                 // Re-check every 60s (policy may be reverted by attacker/GPO)
                 await Task.Delay(60000, ct);
+            }
+        }
+
+        /// <summary>
+        /// v1.8.3: When BlockFcmPushChannel is false, remove leftover FCM firewall rules
+        /// from older installs so Chrome push works again for normal users.
+        /// </summary>
+        private void RemoveFcmPushBlockIfPresent()
+        {
+            try
+            {
+                var policyType = Type.GetTypeFromProgID("HNetCfg.FwPolicy2");
+                if (policyType != null)
+                {
+                    dynamic? policy = Activator.CreateInstance(policyType);
+                    if (policy != null)
+                    {
+                        bool removed = false;
+                        try
+                        {
+                            policy.Rules.Remove(FcmFirewallRuleName);
+                            removed = true;
+                        }
+                        catch { /* rule may not exist */ }
+
+                        if (removed)
+                            _logger.LogWarning(
+                                "[NullSessionGuard] Removed leftover {Rule} (BlockFcmPushChannel=false — no preemptive FCM block)",
+                                FcmFirewallRuleName);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "[NullSessionGuard] FCM rule cleanup failed");
+            }
+            finally
+            {
+                _fcmCleanupDone = true;
+                _fcmBlocked = false;
             }
         }
 

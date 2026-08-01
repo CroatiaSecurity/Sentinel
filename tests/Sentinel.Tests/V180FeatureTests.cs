@@ -129,5 +129,100 @@ namespace Sentinel.Tests
 
             Assert.False(AutoIncidentReporter.IsTokenTheftOsFalsePositive(det));
         }
+
+        // --- v1.8.3: UUP dump / aria2c must not be treated as potato token theft ---
+
+        [Theory]
+        [InlineData("aria2c")]
+        [InlineData("aria2c.exe")]
+        [InlineData("7z")]
+        [InlineData("wimlib-imagex")]
+        public void InstallerHeuristics_PortableDownloadTools_Recognized(string name)
+        {
+            Assert.True(InstallerHeuristics.IsPortableDownloadOrArchiveTool(name));
+        }
+
+        [Theory]
+        [InlineData(@"C:\Users\Admin\Downloads\28000.2608_amd64_en-us_professional_81988c5b_convert\files\aria2c.exe")]
+        [InlineData(@"D:\work\uupdump\files\aria2c.exe")]
+        [InlineData(@"C:\ISO\UUPs\payload.esd")]
+        public void InstallerHeuristics_OfflineImageWorkPaths_Recognized(string path)
+        {
+            Assert.True(InstallerHeuristics.IsOfflineImageWorkPath(path));
+        }
+
+        [Fact]
+        public void InstallerHeuristics_BenignPortableWork_Aria2cFromUupConvert()
+        {
+            var path = @"C:\Users\Admin\Downloads\28000.2608_amd64_en-us_professional_81988c5b_convert\files\aria2c.exe";
+            Assert.True(InstallerHeuristics.IsBenignPortableWorkContext("aria2c", path));
+            Assert.True(InstallerHeuristics.IsBenignPortableWorkContext(null, path));
+        }
+
+        [Fact]
+        public void InstallerHeuristics_RandomMalwareInUupsFolder_NotBenignWithoutKnownToolName()
+        {
+            // Path matches offline-image layout but binary is not a known tool — no free pass
+            var path = @"C:\Users\Admin\Downloads\evil_convert\files\malware.exe";
+            Assert.False(InstallerHeuristics.IsBenignPortableWorkContext("malware", path));
+            Assert.False(InstallerHeuristics.IsPortableDownloadOrArchiveTool("malware", path));
+        }
+
+        [Fact]
+        public void AutoIncident_ShouldNotPack_Aria2c_TokenTheft_UupPath()
+        {
+            var det = new DetectionEvent
+            {
+                RuleName = "Token Theft: SeImpersonatePrivilege from Suspicious Path",
+                ProcessName = "aria2c",
+                ProcessId = 70968,
+                Confidence = 0.85,
+                Tier = DetectionTier.Tier1Behavioral,
+                AuthorizedResponse = ResponseAction.KillProcessTree,
+                SignalType = SignalType.CredentialTheft,
+                Evidence = @"Process 'aria2c' (PID 70968) at 'C:\Users\Admin\Downloads\28000.2608_amd64_en-us_professional_81988c5b_convert\files\aria2c.exe' has SeImpersonatePrivilege enabled."
+            };
+
+            Assert.True(AutoIncidentReporter.IsTokenTheftOsFalsePositive(det));
+        }
+
+        [Theory]
+        [InlineData(23)]    // Telnet
+        [InlineData(4444)]  // Meterpreter
+        [InlineData(31337)] // BackOrifice
+        public void Hardening_AttackOnlyPorts_AreBlockedByDefault(int port)
+        {
+            Assert.True(HardeningModule.IsAttackOnlyBlockedPort(port));
+        }
+
+        [Theory]
+        [InlineData(22)]   // SSH
+        [InlineData(3389)] // RDP
+        [InlineData(445)]  // SMB
+        [InlineData(3306)] // MySQL
+        [InlineData(1080)] // SOCKS
+        public void Hardening_UserServicePorts_NotInAttackOnlySet(int port)
+        {
+            Assert.False(HardeningModule.IsAttackOnlyBlockedPort(port));
+        }
+
+        [Theory]
+        [InlineData("Reverse Shell: Suspicious Outbound Connection")]
+        [InlineData("Token Theft: SeImpersonatePrivilege from Suspicious Path")]
+        [InlineData("Data Exfiltration: Cloud Sync Tool Running")]
+        [InlineData("Attack Tool: Connection from Suspicious Path")]
+        public void Response_WeakUserActivityHeuristics_AreObserveOnly(string rule)
+        {
+            Assert.True(AdvancedResponseEngine.IsObserveOnlyUserActivityHeuristic(rule));
+        }
+
+        [Theory]
+        [InlineData("Composite: Covert RAT: Unsigned + Hidden + Network")]
+        [InlineData("Token Theft: Non-Service Process with SYSTEM Token")]
+        [InlineData("Ransomware: Mass Encryption")]
+        public void Response_ConfirmedAttackRules_NotObserveOnly(string rule)
+        {
+            Assert.False(AdvancedResponseEngine.IsObserveOnlyUserActivityHeuristic(rule));
+        }
     }
 }

@@ -178,13 +178,11 @@ namespace Sentinel.Core
 
                     string imagePath = SecurityValidation.GetProcessImagePath(pid) ?? "";
 
-                    // rclone from temp/downloads/staging paths = high confidence exfil tool
+                    // v1.8.3: rclone/megasync/etc. are also legitimate backup/sync tools.
+                    // Observe-only — kill only if a composite/confirmed exfil attack rule fires.
                     bool fromSuspiciousPath = IsSuspiciousPath(imagePath);
-                    double confidence = fromSuspiciousPath ? 0.88 : 0.65;
-                    var tier = fromSuspiciousPath ? DetectionTier.Tier1Behavioral : DetectionTier.Tier2Indicator;
-                    var response = fromSuspiciousPath ? ResponseAction.KillProcessTree : ResponseAction.LogOnly;
+                    double confidence = fromSuspiciousPath ? 0.55 : 0.40;
 
-                    // Check command line for remote destinations
                     string? cmdLine = GetCommandLine(pid);
                     bool hasRemoteTarget = !string.IsNullOrEmpty(cmdLine) &&
                         (cmdLine.Contains(":", StringComparison.OrdinalIgnoreCase) &&
@@ -192,7 +190,7 @@ namespace Sentinel.Core
                           cmdLine.Contains("copy", StringComparison.OrdinalIgnoreCase) ||
                           cmdLine.Contains("move", StringComparison.OrdinalIgnoreCase)));
 
-                    if (hasRemoteTarget) confidence = Math.Min(confidence + 0.1, 0.95);
+                    if (hasRemoteTarget) confidence = Math.Min(confidence + 0.1, 0.65);
 
                     await _detectionEngine.EmitAsync(new DetectionEvent
                     {
@@ -200,12 +198,11 @@ namespace Sentinel.Core
                         Evidence = $"Exfiltration-capable sync tool '{name}' (PID {pid}) running from '{Truncate(imagePath, 100)}'. " +
                                    $"{(hasRemoteTarget ? "Command line suggests active remote transfer. " : "")}" +
                                    $"CmdLine: {Truncate(cmdLine ?? "(unavailable)", 150)}",
-                        Reasoning = "A file synchronization tool commonly used for data exfiltration (rclone, megasync, etc.) is running. " +
-                                    "These tools can efficiently upload large data volumes to attacker-controlled cloud storage, " +
-                                    "bypassing network monitoring that watches for raw TCP volume (MITRE T1567.002, T1048).",
+                        Reasoning = "A cloud sync tool (rclone, megasync, etc.) is running. Users legitimately use these for backup. " +
+                                    "Observe-first: LogOnly. Kill requires corroborating attack signals (mass staging + C2, etc.).",
                         Confidence = confidence,
-                        Tier = tier,
-                        AuthorizedResponse = response,
+                        Tier = DetectionTier.Tier2Indicator,
+                        AuthorizedResponse = ResponseAction.LogOnly,
                         SignalType = SignalType.Generic,
                         ProcessName = name,
                         ProcessId = pid,

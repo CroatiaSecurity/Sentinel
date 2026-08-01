@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Text.RegularExpressions;
 
@@ -165,6 +166,93 @@ namespace Sentinel.Core
                 return true;
 
             return false;
+        }
+
+        /// <summary>
+        /// Portable download / archive / offline-image tools used by UUP dump converters,
+        /// Chocolatey, winget scripts, MSMG Toolkit, NTLite, etc.
+        /// These commonly run from Downloads/Temp and may inherit SeImpersonatePrivilege from
+        /// an elevated parent shell — that is NOT potato-class token theft.
+        /// Name alone is weak trust: pair with path checks when granting broad exemptions.
+        /// </summary>
+        private static readonly HashSet<string> PortableDownloadArchiveTools = new(StringComparer.OrdinalIgnoreCase)
+        {
+            // Downloaders
+            "aria2c", "aria2", "curl", "wget",
+            // Archives
+            "7z", "7za", "7zr", "cabextract",
+            // WIM / ISO / offline Windows image tooling (UUP dump convert scripts)
+            "wimlib-imagex", "imagex", "oscdimg", "cdimage", "bfi",
+            "psfextractor", "sxsexpand", "offlinereg", "dism", "dismhost"
+        };
+
+        public static bool IsPortableDownloadOrArchiveTool(string? processName, string? imagePath = null)
+        {
+            var n = NormalizeProcessStem(processName);
+            if (!string.IsNullOrEmpty(n) && PortableDownloadArchiveTools.Contains(n))
+                return true;
+
+            if (!string.IsNullOrEmpty(imagePath))
+            {
+                var file = NormalizeProcessStem(Path.GetFileNameWithoutExtension(imagePath));
+                if (!string.IsNullOrEmpty(file) && PortableDownloadArchiveTools.Contains(file))
+                    return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// UUP dump / offline ISO converter worktrees: multi-GB Microsoft CDN pulls via aria2,
+        /// WIM extraction, etc. Matches both official "uupdump" layouts and generated
+        /// "*_convert\files\aria2c.exe" folders under Downloads.
+        /// </summary>
+        public static bool IsOfflineImageWorkPath(string? path)
+        {
+            if (string.IsNullOrWhiteSpace(path)) return false;
+            var lower = path.ToLowerInvariant();
+
+            if (lower.Contains(@"\uupdump\") ||
+                lower.Contains(@"\uups\") ||
+                lower.Contains(@"\uup\") ||
+                lower.Contains(@"\ntlite\") ||
+                lower.Contains(@"\msmg toolkit\") ||
+                lower.Contains(@"\msmgtoolkit\"))
+                return true;
+
+            // uup.dump generated package: ...\28000...._convert\files\aria2c.exe
+            if (lower.Contains(@"_convert\") &&
+                (lower.Contains(@"\files\") || lower.Contains(@"\uups\") || lower.Contains(@"\bin\")))
+                return true;
+
+            return false;
+        }
+
+        /// <summary>
+        /// True when this process should not be kill-scored solely for network-from-Downloads
+        /// or SeImpersonate-from-Downloads heuristics (UUP / portable tooling).
+        /// </summary>
+        public static bool IsBenignPortableWorkContext(string? processName, string? imagePath)
+        {
+            if (IsPortableDownloadOrArchiveTool(processName, imagePath))
+                return true;
+
+            // Only trust offline-image path exemption when the binary itself is a known tool
+            // (prevents malware.exe under a folder named "uups" from full bypass).
+            if (IsOfflineImageWorkPath(imagePath) &&
+                IsPortableDownloadOrArchiveTool(null, imagePath))
+                return true;
+
+            return false;
+        }
+
+        private static string NormalizeProcessStem(string? name)
+        {
+            if (string.IsNullOrWhiteSpace(name)) return "";
+            var n = name.Trim();
+            if (n.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+                n = n[..^4];
+            return n;
         }
     }
 }

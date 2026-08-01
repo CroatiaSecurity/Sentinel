@@ -213,6 +213,13 @@ namespace Sentinel.Core
             if (NetworkAllowlist.Contains(stem) && IsVerifiedAllowlistProcess(pid, stem))
                 return;
 
+            // v1.8.3: UUP dump / portable download tools (often unsigned aria2c under Downloads)
+            // pull from many Microsoft CDN /24s. Do not treat as unusual-destination policy noise.
+            string? imagePathForPortable = null;
+            try { imagePathForPortable = SecurityValidation.GetProcessImagePath(pid); } catch { /* ignore */ }
+            if (InstallerHeuristics.IsBenignPortableWorkContext(stem, imagePathForPortable))
+                return;
+
             // Determine /24 subnet (IPv4) or /32 prefix (IPv6)
             string subnet;
             if (remoteAddress.Contains(':'))
@@ -395,6 +402,11 @@ namespace Sentinel.Core
 
                 // If the binary is Authenticode-signed, allow it into the learning phase
                 if (_signerTrust != null && _signerTrust.IsSignedFile(imagePath))
+                    return false;
+
+                // v1.8.3: known portable UUP/download tools may be unsigned under Downloads —
+                // still allow subnet learning so enforcement does not alert-storm mid-download.
+                if (InstallerHeuristics.IsBenignPortableWorkContext(null, imagePath))
                     return false;
 
                 // Unsigned binary — check if it's in a suspicious staging location

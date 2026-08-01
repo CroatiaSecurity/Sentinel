@@ -1,13 +1,17 @@
-// ThreatIntelFeedBlocker — Proactive IP blocking from threat intelligence feeds
-// Pulls known-bad IPs from Spamhaus DROP, Feodo Tracker, and EmergingThreats on startup
-// and periodically, then creates Windows Firewall block rules via COM API.
-// Also monitors active connections and emits Tier1 detections if a process connects
-// to a feed-listed IP (the firewall should have blocked it, so a connection means bypass).
+// ThreatIntelFeedBlocker — Threat intelligence feed observation + optional proactive block
+//
+// Default (v1.8.3+): OBSERVE ONLY
+//   - Loads Spamhaus DROP, Feodo Tracker, EmergingThreats into memory
+//   - Watches established TCP connections against the list
+//   - Emits detections on hits; NetworkIsolate only when ActiveResponse is on
+//   - Does NOT pre-install thousands of firewall rules (that meddles with legitimate traffic)
+//
+// Optional: Sentinel:ThreatIntelProactiveFirewall=true re-enables legacy pre-block mode
+// for high-security air-gapped style deployments that accept collateral risk.
 
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
@@ -22,12 +26,13 @@ namespace Sentinel.Core
     {
         private readonly DetectionEngine _detectionEngine;
         private readonly JsonlEventLogger _eventLogger;
+        private readonly SentinelConfig _config;
         private readonly ILogger<ThreatIntelFeedBlocker> _logger;
 
         // All IPs/CIDRs loaded from feeds — used for connection checking
         private readonly ConcurrentDictionary<string, string> _blockedIps = new(StringComparer.OrdinalIgnoreCase);
 
-        // Track which IPs already have firewall rules to avoid duplicates
+        // Track which IPs already have firewall rules (proactive mode only)
         private readonly HashSet<string> _rulesCreated = new(StringComparer.OrdinalIgnoreCase);
 
         // Dedup alerts (don't spam detection engine for the same IP)
@@ -51,23 +56,62 @@ namespace Sentinel.Core
         private const int NET_FW_ACTION_BLOCK = 0;
         private const int ALL_PROFILES = 0x7FFFFFFF;
 
-        // Max IPs to block per feed (prevent memory/rule exhaustion)
+        // Max IPs to track per feed (prevent memory exhaustion)
         private const int MaxIpsPerFeed = 2000;
         private const int MaxTotalRules = 5000;
+
+        // Minimum CIDR prefix length — /8–/15 ranges are far too broad and hit legitimate CDNs/OCSP
+        private const int MinCidrPrefix = 16;
+
+        private const string RuleNamePrefix = "Sentinel-ThreatIntel-";
 
         public ThreatIntelFeedBlocker(
             DetectionEngine detectionEngine,
             JsonlEventLogger eventLogger,
+            SentinelConfig config,
             ILogger<ThreatIntelFeedBlocker> logger)
         {
             _detectionEngine = detectionEngine;
             _eventLogger = eventLogger;
+            _config = config;
             _logger = logger;
         }
 
         protected override async Task ExecuteAsync(CancellationToken ct)
         {
-            _logger.LogInformation("[ThreatIntelFeedBlocker] Starting — initial delay {Delay}s", InitialDelay.TotalSeconds);
+            bool proactive = _config.ThreatIntelProactiveFirewall && _config.ActiveResponse;
+            _logger.LogInformation(
+                "[ThreatIntelFeedBlocker] Starting — mode={Mode} (ProactiveFirewall={Proactive}, ActiveResponse={AR}), initial delay {Delay}s",
+                proactive ? "PROACTIVE-FIREWALL" : "OBSERVE-ONLY",
+                _config.ThreatIntelProactiveFirewall,
+                _config.ActiveResponse,
+                InitialDelay.TotalSeconds);
+
+            // Always scrub leftover proactive rules when not in proactive mode so
+            // upgrades leave the host without thousands of residual block rules.
+            if (!proactive)
+            {
+                try
+                {
+                    int removed = RemoveProactiveFirewallRules();
+                    if (removed > 0)
+                    {
+                        _logger.LogWarning(
+                            "[ThreatIntelFeedBlocker] Removed {Count} leftover proactive ThreatIntel firewall rules (observe-only mode)",
+                            removed);
+                        await _eventLogger.LogEventAsync("threat_intel_firewall_cleanup", new
+                        {
+                            RulesRemoved = removed,
+                            Mode = "observe-only",
+                            Timestamp = DateTime.UtcNow
+                        });
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "[ThreatIntelFeedBlocker] Failed to clean leftover ThreatIntel firewall rules");
+                }
+            }
 
             try { await Task.Delay(InitialDelay, ct); }
             catch (OperationCanceledException) { return; }
@@ -109,7 +153,7 @@ namespace Sentinel.Core
             _logger.LogInformation("[ThreatIntelFeedBlocker] Refreshing threat intelligence feeds...");
 
             using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
-            http.DefaultRequestHeaders.UserAgent.ParseAdd("Sentinel-EDR/1.7 (ThreatIntelFeedBlocker)");
+            http.DefaultRequestHeaders.UserAgent.ParseAdd("Sentinel-EDR/1.8 (ThreatIntelFeedBlocker)");
 
             int totalNewIps = 0;
 
@@ -143,8 +187,10 @@ namespace Sentinel.Core
                 }
             }
 
-            // Create firewall rules for new IPs
-            if (totalNewIps > 0)
+            bool proactive = _config.ThreatIntelProactiveFirewall && _config.ActiveResponse;
+
+            // Create firewall rules for new IPs ONLY in explicit proactive mode
+            if (proactive && totalNewIps > 0)
             {
                 CreateFirewallRules();
 
@@ -153,12 +199,25 @@ namespace Sentinel.Core
                     TotalBlockedIps = _blockedIps.Count,
                     NewIpsAdded = totalNewIps,
                     FirewallRulesCreated = _rulesCreated.Count,
+                    Mode = "proactive",
+                    Timestamp = DateTime.UtcNow
+                });
+            }
+            else if (totalNewIps > 0)
+            {
+                await _eventLogger.LogEventAsync("threat_intel_feed_refresh", new
+                {
+                    TotalBlockedIps = _blockedIps.Count,
+                    NewIpsAdded = totalNewIps,
+                    FirewallRulesCreated = 0,
+                    Mode = "observe-only",
                     Timestamp = DateTime.UtcNow
                 });
             }
 
-            _logger.LogInformation("[ThreatIntelFeedBlocker] Feed refresh complete — {Total} IPs/CIDRs in blocklist, {Rules} firewall rules active",
-                _blockedIps.Count, _rulesCreated.Count);
+            _logger.LogInformation(
+                "[ThreatIntelFeedBlocker] Feed refresh complete — {Total} IPs/CIDRs tracked, proactiveRules={Rules}, mode={Mode}",
+                _blockedIps.Count, _rulesCreated.Count, proactive ? "proactive" : "observe-only");
         }
 
         /// <summary>Parse a threat-intel feed body. Internal for unit tests.</summary>
@@ -193,7 +252,10 @@ namespace Sentinel.Core
             return results;
         }
 
-        /// <summary>Validate dotted-quad IPv4 or CIDR (/8–/32). Internal for unit tests.</summary>
+        /// <summary>
+        /// Validate dotted-quad IPv4 or CIDR. Prefix must be /16–/32 (reject /0–/15 — too broad).
+        /// Internal for unit tests.
+        /// </summary>
         internal static bool IsValidIpOrCidr(string value)
         {
             if (string.IsNullOrWhiteSpace(value)) return false;
@@ -205,7 +267,7 @@ namespace Sentinel.Core
                 if (parts.Length != 2) return false;
                 if (!IsDottedQuadIPv4(parts[0])) return false;
                 if (!int.TryParse(parts[1], out int prefix)) return false;
-                return prefix >= 8 && prefix <= 32; // Don't allow overly broad blocks
+                return prefix >= MinCidrPrefix && prefix <= 32;
             }
 
             return IsDottedQuadIPv4(value);
@@ -246,7 +308,7 @@ namespace Sentinel.Core
                 var ruleType = Type.GetTypeFromProgID("HNetCfg.FWRule");
                 if (ruleType == null) return;
 
-                // Batch IPs into groups of 100 for fewer firewall rules (Windows supports comma-separated RemoteAddresses)
+                // Batch IPs into groups of 100 for fewer firewall rules
                 var newIps = _blockedIps.Keys.Where(ip => !_rulesCreated.Contains(ip)).ToList();
                 if (newIps.Count == 0) return;
 
@@ -257,11 +319,10 @@ namespace Sentinel.Core
                 {
                     var batch = newIps.Skip(i).Take(batchSize).ToList();
                     var remoteAddresses = string.Join(",", batch);
-                    var ruleName = $"Sentinel-ThreatIntel-{batchIndex++}";
+                    var ruleName = $"{RuleNamePrefix}{batchIndex++}";
 
                     try
                     {
-                        // Outbound block
                         dynamic? outRule = Activator.CreateInstance(ruleType);
                         if (outRule != null)
                         {
@@ -275,7 +336,6 @@ namespace Sentinel.Core
                             fwPolicy.Rules.Add(outRule);
                         }
 
-                        // Inbound block
                         dynamic? inRule = Activator.CreateInstance(ruleType);
                         if (inRule != null)
                         {
@@ -298,7 +358,7 @@ namespace Sentinel.Core
                     }
                 }
 
-                _logger.LogInformation("[ThreatIntelFeedBlocker] Created firewall rules — total rules: {Count}", _rulesCreated.Count);
+                _logger.LogInformation("[ThreatIntelFeedBlocker] Created firewall rules — total tracked IPs with rules: {Count}", _rulesCreated.Count);
             }
             catch (Exception ex)
             {
@@ -307,9 +367,90 @@ namespace Sentinel.Core
         }
 
         /// <summary>
+        /// Removes all Sentinel-ThreatIntel-* firewall rules left from older proactive mode.
+        /// Returns number of rules removed.
+        /// </summary>
+        internal static int RemoveProactiveFirewallRules()
+        {
+            int removed = 0;
+            try
+            {
+                var fwPolicyType = Type.GetTypeFromProgID("HNetCfg.FwPolicy2");
+                if (fwPolicyType == null) return 0;
+                dynamic? fwPolicy = Activator.CreateInstance(fwPolicyType);
+                if (fwPolicy == null) return 0;
+
+                var toRemove = new List<string>();
+                foreach (dynamic rule in fwPolicy.Rules)
+                {
+                    try
+                    {
+                        string? name = rule.Name as string;
+                        if (name != null && name.StartsWith(RuleNamePrefix, StringComparison.OrdinalIgnoreCase))
+                            toRemove.Add(name);
+                    }
+                    catch { /* skip malformed rule */ }
+                }
+
+                foreach (var name in toRemove)
+                {
+                    try
+                    {
+                        fwPolicy.Rules.Remove(name);
+                        removed++;
+                    }
+                    catch { /* rule may already be gone */ }
+                }
+            }
+            catch
+            {
+                // Fallback: netsh (some hosts have broken firewall COM)
+                try
+                {
+                    var psi = new System.Diagnostics.ProcessStartInfo("netsh.exe",
+                        "advfirewall firewall show rule name=all")
+                    {
+                        CreateNoWindow = true,
+                        UseShellExecute = false,
+                        RedirectStandardOutput = true
+                    };
+                    using var proc = System.Diagnostics.Process.Start(psi);
+                    if (proc == null) return removed;
+                    var output = proc.StandardOutput.ReadToEnd();
+                    proc.WaitForExit(15000);
+
+                    foreach (var line in output.Split('\n'))
+                    {
+                        // "Rule Name:                            Sentinel-ThreatIntel-0-OUT"
+                        if (!line.Contains(RuleNamePrefix, StringComparison.OrdinalIgnoreCase))
+                            continue;
+                        var idx = line.IndexOf(':');
+                        if (idx < 0) continue;
+                        var name = line[(idx + 1)..].Trim();
+                        if (!name.StartsWith(RuleNamePrefix, StringComparison.OrdinalIgnoreCase))
+                            continue;
+
+                        var del = new System.Diagnostics.ProcessStartInfo("netsh.exe",
+                            $"advfirewall firewall delete rule name=\"{name}\"")
+                        {
+                            CreateNoWindow = true,
+                            UseShellExecute = false
+                        };
+                        using var d = System.Diagnostics.Process.Start(del);
+                        d?.WaitForExit(5000);
+                        if (d is { ExitCode: 0 }) removed++;
+                    }
+                }
+                catch { /* best effort */ }
+            }
+
+            return removed;
+        }
+
+        /// <summary>
         /// Checks active TCP connections against the blocklist.
-        /// If a connection is found, it means the firewall rule was bypassed or not yet applied —
-        /// emit a Tier1 detection and kill the offending process.
+        /// Observe-first: always emit a detection on hit.
+        /// NetworkIsolate only when ActiveResponse is enabled (reactive single-IP block).
         /// </summary>
         private void CheckActiveConnections()
         {
@@ -321,10 +462,9 @@ namespace Sentinel.Core
 
                 foreach (var (pid, remoteIp) in connections)
                 {
-                    if (pid <= 4) continue;
+                    if (pid > 0 && pid <= 4) continue;
 
-                    // Check exact IP match
-                    if (!_blockedIps.TryGetValue(remoteIp, out var feedSource))
+                    if (!TryMatchBlocked(remoteIp, out var feedSource))
                         continue;
 
                     // Dedup: don't alert on the same IP+PID within cooldown
@@ -337,12 +477,21 @@ namespace Sentinel.Core
 
                     // Resolve process name
                     string processName = "unknown";
-                    try
+                    if (pid > 0)
                     {
-                        using var proc = System.Diagnostics.Process.GetProcessById(pid);
-                        processName = proc.ProcessName;
+                        try
+                        {
+                            using var proc = System.Diagnostics.Process.GetProcessById(pid);
+                            processName = proc.ProcessName;
+                        }
+                        catch { }
                     }
-                    catch { }
+
+                    // Observe-first: act only when ActiveResponse is on AND something is
+                    // actually talking to a listed IP. Never pre-block the rest of the internet.
+                    var response = _config.ActiveResponse
+                        ? ResponseAction.NetworkIsolate
+                        : ResponseAction.LogOnly;
 
                     _ = _detectionEngine.EmitAsync(new DetectionEvent
                     {
@@ -352,26 +501,76 @@ namespace Sentinel.Core
                         SignalType = SignalType.NetworkC2,
                         Confidence = 0.92,
                         Tier = DetectionTier.Tier1Behavioral,
-                        AuthorizedResponse = ResponseAction.NetworkIsolate,
+                        AuthorizedResponse = response,
                         Evidence = $"Process '{processName}' (PID {pid}) connected to threat-intel-listed IP: {remoteIp} (Feed: {feedSource})",
                         Reasoning = "Active TCP connection to an IP address listed in public threat intelligence feeds " +
-                                    "(Spamhaus DROP, Feodo Tracker, or EmergingThreats). This indicates the firewall block rule " +
-                                    "was bypassed or the connection was established before rules were applied. Likely C2 communication.",
+                                    "(Spamhaus DROP, Feodo Tracker, or EmergingThreats). " +
+                                    (response == ResponseAction.NetworkIsolate
+                                        ? "ActiveResponse on — isolating this IP only (reactive)."
+                                        : "Observation mode — logged only; no firewall change."),
                         Metadata = new Dictionary<string, string>
                         {
                             { "RemoteIp", remoteIp },
                             { "FeedSource", feedSource },
-                            { "Detection", "ProactiveFeedMatch" }
+                            { "Detection", "ReactiveFeedMatch" },
+                            { "Mode", _config.ActiveResponse ? "active" : "observe" }
                         }
                     });
 
-                    _logger.LogWarning("[ThreatIntelFeedBlocker] ACTIVE connection to blocked IP: {Process} (PID {Pid}) -> {Ip} (Feed: {Feed})",
-                        processName, pid, remoteIp, feedSource);
+                    _logger.LogWarning(
+                        "[ThreatIntelFeedBlocker] Connection to listed IP: {Process} (PID {Pid}) -> {Ip} (Feed: {Feed}, response={Response})",
+                        processName, pid, remoteIp, feedSource, response);
                 }
             }
             catch (Exception ex)
             {
                 _logger.LogDebug(ex, "[ThreatIntelFeedBlocker] Connection check failed");
+            }
+        }
+
+        /// <summary>Exact IP or CIDR membership match against the in-memory feed set.</summary>
+        private bool TryMatchBlocked(string remoteIp, out string feedSource)
+        {
+            if (_blockedIps.TryGetValue(remoteIp, out feedSource!))
+                return true;
+
+            foreach (var kv in _blockedIps)
+            {
+                if (!kv.Key.Contains('/')) continue;
+                if (IpInCidr(remoteIp, kv.Key))
+                {
+                    feedSource = kv.Value;
+                    return true;
+                }
+            }
+
+            feedSource = string.Empty;
+            return false;
+        }
+
+        internal static bool IpInCidr(string ip, string cidr)
+        {
+            try
+            {
+                var parts = cidr.Split('/');
+                if (parts.Length != 2) return false;
+                if (!IPAddress.TryParse(parts[0], out var network)) return false;
+                if (!IPAddress.TryParse(ip, out var address)) return false;
+                if (!int.TryParse(parts[1], out int prefix) || prefix < 0 || prefix > 32) return false;
+
+                var netBytes = network.GetAddressBytes();
+                var addrBytes = address.GetAddressBytes();
+                if (netBytes.Length != 4 || addrBytes.Length != 4) return false;
+
+                // Network byte order → host uint
+                uint net = ((uint)netBytes[0] << 24) | ((uint)netBytes[1] << 16) | ((uint)netBytes[2] << 8) | netBytes[3];
+                uint addr = ((uint)addrBytes[0] << 24) | ((uint)addrBytes[1] << 16) | ((uint)addrBytes[2] << 8) | addrBytes[3];
+                uint mask = prefix == 0 ? 0u : uint.MaxValue << (32 - prefix);
+                return (addr & mask) == (net & mask);
+            }
+            catch
+            {
+                return false;
             }
         }
 
@@ -381,7 +580,7 @@ namespace Sentinel.Core
 
             try
             {
-                // Use .NET's built-in IPGlobalProperties for simplicity (no P/Invoke needed for periodic checks)
+                // IPGlobalProperties lacks PID; still useful for IP-level observe/alert.
                 var properties = System.Net.NetworkInformation.IPGlobalProperties.GetIPGlobalProperties();
                 var connections = properties.GetActiveTcpConnections();
 
@@ -395,11 +594,14 @@ namespace Sentinel.Core
                     // Skip private/loopback
                     if (remoteIp.StartsWith("127.") || remoteIp.StartsWith("10.") ||
                         remoteIp.StartsWith("192.168.") || remoteIp.StartsWith("169.254.") ||
-                        remoteIp == "::1" || remoteIp.StartsWith("fe80"))
+                        remoteIp == "::1" || remoteIp.StartsWith("fe80") ||
+                        remoteIp.StartsWith("172.16.") || remoteIp.StartsWith("172.17.") ||
+                        remoteIp.StartsWith("172.18.") || remoteIp.StartsWith("172.19.") ||
+                        remoteIp.StartsWith("172.2") || remoteIp.StartsWith("172.30.") ||
+                        remoteIp.StartsWith("172.31."))
                         continue;
 
-                    // IPGlobalProperties doesn't give us PID — store PID=0 to indicate "unknown PID".
-                    // The detection alert will still fire (IP match is the primary signal).
+                    // PID unknown via this API
                     results.Add((0, remoteIp));
                 }
             }

@@ -23,7 +23,23 @@ namespace Sentinel.Service
             AppendDiagnostic("startup_trace.log",
                 $"[{DateTime.UtcNow:O}] Main() entered. Args: {string.Join(" ", args)}\n");
 
-            // Apply DLL search path hardening early
+            // v1.8.3: Load RestrictivePortHardening before any IPSec apply (default = off =
+            // do not pre-block SSH/RDP/torrents/etc.; remove leftover GSecurity if present).
+            try
+            {
+                var earlyCfg = new ConfigurationBuilder()
+                    .SetBasePath(AppContext.BaseDirectory)
+                    .AddJsonFile("appsettings.json", optional: true, reloadOnChange: false)
+                    .Build();
+                HardeningModule.RestrictivePortHardeningEnabled =
+                    earlyCfg.GetSection("Sentinel").GetValue("RestrictivePortHardening", false);
+            }
+            catch
+            {
+                HardeningModule.RestrictivePortHardeningEnabled = false;
+            }
+
+            // Apply DLL search path hardening early (IPSec only if RestrictivePortHardening)
             HardeningModule.ApplyOrFail();
 
             // Secure Sentinel's installation directory permissions
@@ -139,6 +155,8 @@ namespace Sentinel.Service
                     // Configuration
                     var config = new SentinelConfig();
                     hostContext.Configuration.GetSection("Sentinel").Bind(config);
+                    // Keep static hardening flag in sync with bound config (host may re-read settings)
+                    HardeningModule.RestrictivePortHardeningEnabled = config.RestrictivePortHardening;
 
                     var threatReportingConfig = new ThreatReportingConfig();
                     hostContext.Configuration.GetSection("ThreatReporting").Bind(threatReportingConfig);

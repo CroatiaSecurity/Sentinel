@@ -1,6 +1,6 @@
 # Sentinel — Requirements
 
-**Version: 1.8.1**
+**Version: 1.8.3**
 
 ---
 
@@ -241,3 +241,4 @@ The user-session Agent must provide a Settings window (tray menu + double-click)
 |---------|--------|
 | 1.7.9 | Agent Settings UI requirements added |
 | 1.8.1 | ActiveResponse defaults, response matrix, proxy auth, quarantine ACL, no DeceptionEngine, dedup windows, isolate private-IP deny |
+| 1.8.3 | Observe-first: protect on confirmed attack; weak path/port/shell heuristics LogOnly; IPSec attack-only by default; `RestrictivePortHardening` opt-in full lockdown |

@@ -336,26 +336,43 @@ namespace Sentinel.Core
     public sealed class IPSecIntegrityGuard : BackgroundService
     {
         private readonly DetectionEngine _detectionEngine;
+        private readonly SentinelConfig _config;
         private readonly ILogger<IPSecIntegrityGuard> _logger;
         private int _consecutiveFailures;
+        private bool _cleanedObserveMode;
 
-        public IPSecIntegrityGuard(DetectionEngine de, ILogger<IPSecIntegrityGuard> l)
+        public IPSecIntegrityGuard(DetectionEngine de, SentinelConfig config, ILogger<IPSecIntegrityGuard> l)
         {
             _detectionEngine = de;
+            _config = config;
             _logger = l;
         }
 
         protected override async Task ExecuteAsync(CancellationToken ct)
         {
-            _logger.LogInformation("[IPSecIntegrityGuard] Started — verifying GSecurity IPSec policy every 30s");
+            HardeningModule.RestrictivePortHardeningEnabled = _config.RestrictivePortHardening;
 
-            // Initial delay to allow HardeningModule to apply first
+            _logger.LogInformation(
+                "[IPSecIntegrityGuard] Started — IPSec profile={Mode} (self-heal every 30s)",
+                _config.RestrictivePortHardening
+                    ? "restrictive (attack + SSH/RDP/SMB/DB lockdown)"
+                    : "attack-only (malware/legacy ports; user services free)");
+
+            // Once after upgrade: rebuild so old full-block policies drop SSH/RDP/etc.
+            if (!_cleanedObserveMode)
+            {
+                HardeningModule.ReapplyIPSecPolicy();
+                _cleanedObserveMode = true;
+            }
+
             await Task.Delay(15000, ct);
 
             while (!ct.IsCancellationRequested)
             {
                 try
                 {
+                    HardeningModule.RestrictivePortHardeningEnabled = _config.RestrictivePortHardening;
+
                     if (!HardeningModule.IsIPSecPolicyActive())
                     {
                         _consecutiveFailures++;
@@ -365,7 +382,6 @@ namespace Sentinel.Core
 
                         HardeningModule.ReapplyIPSecPolicy();
 
-                        // Verify it actually applied
                         await Task.Delay(2000, ct);
                         bool reapplied = HardeningModule.IsIPSecPolicyActive();
 
@@ -374,12 +390,10 @@ namespace Sentinel.Core
                             RuleName = "Anti-Tamper: IPSec Policy Deleted and Re-Applied",
                             Evidence = $"GSecurity IPSec policy was found missing/unassigned. " +
                                        $"Re-application {(reapplied ? "SUCCEEDED" : "FAILED")}. " +
-                                       $"Consecutive failures: {_consecutiveFailures}",
-                            Reasoning = "The IPSec policy that blocks dangerous ports (FTP, SSH, RDP, SMB, etc.) " +
-                                        "was removed or unassigned. This is a critical security tampering event — " +
-                                        "an attacker with admin privileges likely ran 'netsh ipsec static delete policy' " +
-                                        "to re-enable blocked network protocols for lateral movement or data exfiltration. " +
-                                        "Sentinel has re-applied the policy.",
+                                       $"Consecutive failures: {_consecutiveFailures}. " +
+                                       $"Profile: {(_config.RestrictivePortHardening ? "restrictive" : "attack-only")}",
+                            Reasoning = "The IPSec policy that blocks attack-only (or restrictive) ports was removed. " +
+                                        "Sentinel re-applied the current profile. Default profile does not block SSH/RDP/SMB.",
                             Confidence = 0.95,
                             Tier = DetectionTier.Tier1Behavioral,
                             AuthorizedResponse = ResponseAction.LogOnly,
@@ -389,7 +403,8 @@ namespace Sentinel.Core
                             Metadata = new Dictionary<string, string>
                             {
                                 ["Reapplied"] = reapplied.ToString(),
-                                ["ConsecutiveFailures"] = _consecutiveFailures.ToString()
+                                ["ConsecutiveFailures"] = _consecutiveFailures.ToString(),
+                                ["Restrictive"] = _config.RestrictivePortHardening.ToString()
                             }
                         });
 

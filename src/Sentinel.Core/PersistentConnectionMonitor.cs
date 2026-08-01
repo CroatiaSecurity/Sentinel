@@ -211,11 +211,12 @@ namespace Sentinel.Core
                         _alertDedup[dedupKey] = now;
                         var targets = string.Join(", ", newConnFromSamePid.Take(5).Select(c => $"{c.RemoteIp}:{c.RemotePort}"));
 
-                        // Signed binaries get demoted to Tier2 (log-only). Unsigned get full Tier1 kill.
+                        // v1.8.3: Failover reconnect is common for torrents/P2P/game clients.
+                        // Observe-only unless multi-signal composite escalates elsewhere.
                         bool isSigned = _signerTrust?.IsSignedProcess(drop.State.Pid) ?? false;
-                        var effectiveTier = isSigned ? DetectionTier.Tier2Indicator : DetectionTier.Tier1Behavioral;
-                        var effectiveResponse = isSigned ? ResponseAction.LogOnly : ResponseAction.KillProcessTree;
-                        var effectiveConfidence = isSigned ? 0.45 : 0.90;
+                        var effectiveTier = DetectionTier.Tier2Indicator;
+                        var effectiveResponse = ResponseAction.LogOnly;
+                        var effectiveConfidence = isSigned ? 0.40 : 0.55;
 
                         _ = _detectionEngine.EmitAsync(new DetectionEvent
                         {
@@ -283,11 +284,11 @@ namespace Sentinel.Core
                                 catch { return "unknown"; }
                             }));
 
-                            // Signed binaries get demoted to Tier2 (log-only)
+                            // v1.8.3: child spawn after drop alone is not enough to kill
                             bool isSignedSpawn = _signerTrust?.IsSignedProcess(drop.State.Pid) ?? false;
-                            var spawnTier = isSignedSpawn ? DetectionTier.Tier2Indicator : DetectionTier.Tier1Behavioral;
-                            var spawnResponse = isSignedSpawn ? ResponseAction.LogOnly : ResponseAction.KillProcessTree;
-                            var spawnConfidence = isSignedSpawn ? 0.42 : 0.85;
+                            var spawnTier = DetectionTier.Tier2Indicator;
+                            var spawnResponse = ResponseAction.LogOnly;
+                            var spawnConfidence = isSignedSpawn ? 0.40 : 0.55;
 
                             _ = _detectionEngine.EmitAsync(new DetectionEvent
                             {

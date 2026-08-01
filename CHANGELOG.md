@@ -1,6 +1,59 @@
 # Changelog
- 
+
 All notable changes to Sentinel are documented in this file.
+
+## [1.8.3] - 2026-08-01
+
+### Product posture — protect on attack, don’t block normal life
+
+**Rule:** If something is attacking the host, kill/quarantine/isolate. If the user is just working (SSH, torrents, P2P, downloads, rclone, portable tools, databases), **watch only** until multi-signal malice is confirmed.
+
+#### IPSec / hardening (default)
+| Blocked by default (attack-only) | **Not** blocked (user services) |
+|----------------------------------|----------------------------------|
+| Telnet, rsh/rlogin/rexec, TFTP, RPCBind | SSH, RDP, VNC, WinRM |
+| Classic RAT ports (666, 1337, 4444, 31337, NetBus, …) | SMB, FTP, SOCKS, Docker, ADB |
+| Inbound RPC ephemeral lateral (firewall rule) | MySQL/Postgres/Mongo/…, Jupyter, mDNS |
+
+`RestrictivePortHardening: true` re-enables the old full lockdown (SSH/RDP/SMB/DB ports + disable RDP/SSH/WinRM/TeamViewer/UPnP services). Default is `false`. Startup always rebuilds GSecurity so old full-block policies are replaced. Default service disables are only **Telnet** + **Remote Registry**.
+
+#### Weak single-signal heuristics → LogOnly (no kill)
+- Shell + non-HTTP port (ssh/scp from cmd)
+- Connection from Downloads/Temp
+- SeImpersonatePrivilege + user-writable path alone (was killing UUP `aria2c`)
+- rclone / cloud sync tools running
+- Unusual destination / C2-failover reconnect alone
+- Response-engine safety net demotes those rule names even if mis-tagged Tier1
+
+#### Still kills / acts on confirmed attack
+LSASS dump, ransomware IO, injection (ETW), BYOVD, SYSTEM-token theft, AMSI impostors, multi-signal composites (Covert RAT, Dropped Payload, Fileless chain), self-protection, etc.
+
+### Fixed — UUP dump window killed (instance of the above)
+Production: `Token Theft: SeImpersonate…` → KillProcessTree + quarantine of `Downloads\…\aria2c.exe` mid-UUP download. Portable/UUP tools + observe-first SeImpersonate fix that path.
+
+### Tests
+- Extended `V180FeatureTests` (UUP/aria2c + malware-in-`_convert` negative cases)
+
+### Changed — Observe-first networking (stop obstructing normal work)
+
+Default product posture: **watch until something does something bad**, then act. Do not pre-break Chrome Cast/FCM or pre-block thousands of IPs for every install.
+
+| Control | Before | After (default) |
+|---------|--------|-----------------|
+| `ThreatIntelProactiveFirewall` | always on | **off** — feed watch + reactive isolate only |
+| `BlockFcmPushChannel` | always on (5228 + mtalk hosts) | **off** — set `true` after confirmed MitM/token theft (CHANGELOG 0.8.6) |
+| `TrustedCastDevices` empty | kill all LAN Cast | **observe-only** (log); non-empty = enforce allowlist |
+| Upgrade cleanup | left residual FCM/Cast FW rules | removes leftover `Sentinel-FCM-Push-Block` and `Sentinel-CastGuard-Block-*` when disabled/observe |
+| TLS public roots | SSL.com / GTS false-flag risk | known public CA list expanded; long-lived roots not scored for missing CRL |
+
+**Post-incident host (this machine's June 13–14 chain):** set `"BlockFcmPushChannel": true` and/or list only trusted Cast IPs. That remains the correct permanent mitigation after Chrome sync token theft — it is no longer forced on every user.
+
+### Fixed
+- ThreatIntelFeedBlocker: no proactive firewall by default; min CIDR `/16`; residual rule cleanup
+- HostsFileGuard: FCM mtalk.* entries only when `BlockFcmPushChannel` is true
+- NullSessionGuard: FCM firewall is opt-in
+- CastDeviceGuard: empty allowlist no longer firewall-blocks Chromecast traffic
+- TlsCertificateMonitor: do not treat legitimate public roots as MitM
 
 ## [1.8.2] - 2026-07-30
 
