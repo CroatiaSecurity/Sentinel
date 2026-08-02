@@ -2,6 +2,17 @@
 
 All notable changes to Sentinel are documented in this file.
 
+## [1.9.0] - 2026-08-02
+
+### Changed — Tray / toast restored to pre-freeze-rewrite baseline
+- **`TrayIconService`:** restored to the v1.8.4 implementation (minimized message-pump form, simple `TaskbarCreated` re-show, log-watcher tip updates). Removes the 1.8.5–1.8.9 STA-marshal / flood-cap / `ShowWindow` Settings-recovery rewrites that still left some hosts with taskbar freezes.
+- **`ToastService`:** restored to v1.8.4 API (`CriticalOnly` only). Removed `SuppressAllToasts` and `ShowChainConfirmedToast`.
+- **Wiring:** service DI no longer gates toast construction on `SilentObserve`; evidence-pack user notify uses `ShowCriticalToast` again.
+- **net48:** tray `Process.Start` helpers keep `UseShellExecute` + `Arguments` (no `ArgumentList` on Framework).
+
+### Notes
+- Cross-thread `NotifyIcon.Text` from the log watcher is back (same as 1.8.4). If shell lag returns under detection storms, investigate host load / log flood rather than re-applying the 1.8.9 tray rewrite blindly.
+
 ## [1.8.9] - 2026-08-02
 
 ### Fixed — Tray / taskbar freeze under load

@@ -160,8 +160,8 @@ namespace Sentinel.Core
                 if (_config.NotifyUser && _toastService != null && !string.IsNullOrEmpty(packPath))
                 {
                     var portal = LawEnforcementPortals.Resolve(_config.CountryCode);
-                    // Chain-confirmed only reaches here when SilentObserve allows reporting.
-                    _toastService.ShowChainConfirmedToast(
+                    // 1.8.4 API: ShowCriticalToast (always delivers; CriticalOnly does not suppress)
+                    _toastService.ShowCriticalToast(
                         "Sentinel: Attack chain confirmed — evidence pack ready",
                         $"{detection.RuleName} — integrity-sealed pack + affidavit template. " +
                         $"File with {portal.PrimaryPortalName}. Path: {packPath}");
