@@ -167,5 +167,65 @@ namespace Sentinel.Tests
                 try { Directory.Delete(tempDir, true); } catch { }
             }
         }
+
+        [Fact]
+        public void FileVerdictAds_PurgeLegacySidecarFiles_DeletesOnlySidecars()
+        {
+            var root = Path.Combine(Path.GetTempPath(), "sentinel_purge_test_" + Guid.NewGuid().ToString("N")[..8]);
+            var nested = Path.Combine(root, "a", "b");
+            Directory.CreateDirectory(nested);
+
+            var keep = Path.Combine(nested, "real.exe");
+            var side1 = keep + ".sentinel_verdict";
+            var side2 = Path.Combine(root, "orphan.sentinel_verdict");
+            var other = Path.Combine(root, "notes.txt");
+
+            try
+            {
+                File.WriteAllText(keep, "exe");
+                File.WriteAllText(side1, "legacy");
+                File.WriteAllText(side2, "legacy2");
+                File.WriteAllText(other, "keep me");
+
+                var deleted = FileVerdictAds.PurgeLegacySidecarFiles(new[] { root });
+                Assert.Equal(2, deleted);
+                Assert.False(File.Exists(side1));
+                Assert.False(File.Exists(side2));
+                Assert.True(File.Exists(keep));
+                Assert.True(File.Exists(other));
+            }
+            finally
+            {
+                try { Directory.Delete(root, true); } catch { }
+            }
+        }
+
+        [Fact]
+        public void FileVerdictAds_PurgeLegacySidecarsOnce_IsIdempotentViaMarker()
+        {
+            var secure = Path.Combine(Path.GetTempPath(), "sentinel_purge_once_" + Guid.NewGuid().ToString("N")[..8]);
+            Directory.CreateDirectory(secure);
+
+            try
+            {
+                var ads = new FileVerdictAds(secure);
+                // Pre-create marker as if a prior upgrade pass already completed
+                File.WriteAllText(ads.LegacySidecarPurgeMarkerPath, "prior");
+
+                var skipped = ads.PurgeLegacySidecarsOnce(force: false);
+                Assert.Equal(0, skipped);
+                Assert.True(File.Exists(ads.LegacySidecarPurgeMarkerPath));
+
+                // force=true re-runs and rewrites marker (may delete 0 files if no sidecars on fixed drives)
+                var forced = ads.PurgeLegacySidecarsOnce(force: true);
+                Assert.True(forced >= 0);
+                Assert.True(File.Exists(ads.LegacySidecarPurgeMarkerPath));
+            }
+            finally
+            {
+                try { Directory.Delete(secure, true); } catch { }
+            }
+        }
     }
 }
+

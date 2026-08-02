@@ -2,6 +2,13 @@
 
 All notable changes to Sentinel are documented in this file.
 
+## [1.9.2] - 2026-08-02
+
+### Added — Force-remove legacy `*.sentinel_verdict` on upgrade
+- **`LegacyVerdictSidecarPurgeService`:** ~60s after service start, one-shot walk of all ready **fixed** drives deletes leftover `*.sentinel_verdict` sidecars from pre-1.8.8 pollution (for users who installed earlier builds).
+- **`FileVerdictAds.PurgeLegacySidecarsOnce` / `PurgeLegacySidecarFiles`:** best-effort recursive delete; skips WinSxS/Installer/junctions/reparse points; does **not** touch central `%ProgramData%\Sentinel\Secure\VerdictCache`.
+- Marker `%ProgramData%\Sentinel\Secure\legacy_sidecar_purge_1_9_2.done` prevents re-scan every boot; `force: true` re-runs.
+
 ## [1.9.1] - 2026-08-02
 
 ### Fixed — Settings not opening after 1.9.0 tray restore

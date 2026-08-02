@@ -275,6 +275,8 @@ namespace Sentinel.Service
                     // Startup & Health (always start immediately, outside groups)
                     services.AddHostedService<StartupSelfTest>();
                     services.AddHostedService<SentinelHealthCheck>();
+                    // One-shot upgrade cleanup: force-delete pre-1.8.8 *.sentinel_verdict pollution
+                    services.AddHostedService<LegacyVerdictSidecarPurgeService>();
 
                     // Core SentinelService (manages IMonitor lifecycle + ProcessAncestryCache)
                     services.AddHostedService<SentinelService>();

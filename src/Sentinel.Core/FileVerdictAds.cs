@@ -1,8 +1,10 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
+using System.Threading;
 
 namespace Sentinel.Core
 {
@@ -281,6 +283,218 @@ namespace Sentinel.Core
 
         /// <summary>Expose cache root for tests / cleanup tools.</summary>
         public string VerdictCacheDirectory => Path.Combine(_secureDir, "VerdictCache");
+
+        /// <summary>
+        /// Marker written after a successful one-shot legacy-sidecar purge (upgrade cleanup).
+        /// </summary>
+        public string LegacySidecarPurgeMarkerPath =>
+            Path.Combine(_secureDir, "legacy_sidecar_purge_1_9_2.done");
+
+        /// <summary>
+        /// One-shot (per machine): walk fixed local drives and delete every visible
+        /// <c>*.sentinel_verdict</c> sidecar left by pre-1.8.8 builds. Central
+        /// <see cref="VerdictCacheDirectory"/> entries are left intact.
+        /// Safe to call repeatedly; subsequent calls no-op when the marker exists
+        /// unless <paramref name="force"/> is true.
+        /// </summary>
+        /// <returns>Number of sidecar files deleted (0 if skipped via marker).</returns>
+        public int PurgeLegacySidecarsOnce(
+            bool force = false,
+            Action<string>? log = null,
+            CancellationToken cancellationToken = default)
+        {
+            var marker = LegacySidecarPurgeMarkerPath;
+            if (!force && File.Exists(marker))
+            {
+                log?.Invoke("Legacy *.sentinel_verdict purge already completed (marker present).");
+                return 0;
+            }
+
+            var deleted = PurgeLegacySidecarFiles(roots: null, log, cancellationToken);
+
+            try
+            {
+                var dir = Path.GetDirectoryName(marker);
+                if (dir != null && !Directory.Exists(dir))
+                    Directory.CreateDirectory(dir);
+                File.WriteAllText(marker,
+                    $"utc={DateTime.UtcNow:O}{Environment.NewLine}deleted={deleted}{Environment.NewLine}");
+            }
+            catch (Exception ex)
+            {
+                log?.Invoke("Could not write purge marker: " + ex.Message);
+            }
+
+            return deleted;
+        }
+
+        /// <summary>
+        /// Force-delete all <c>*.sentinel_verdict</c> files under <paramref name="roots"/>
+        /// (or all ready fixed drives when roots is null). Does not touch central VerdictCache.
+        /// </summary>
+        public static int PurgeLegacySidecarFiles(
+            IEnumerable<string>? roots = null,
+            Action<string>? log = null,
+            CancellationToken cancellationToken = default)
+        {
+            var deleted = 0;
+            IEnumerable<string> scanRoots;
+            if (roots != null)
+            {
+                scanRoots = roots;
+            }
+            else
+            {
+                var drives = new List<string>();
+                try
+                {
+                    foreach (var d in DriveInfo.GetDrives())
+                    {
+                        try
+                        {
+                            if (d.DriveType != DriveType.Fixed || !d.IsReady)
+                                continue;
+                            drives.Add(d.RootDirectory.FullName);
+                        }
+                        catch { }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    log?.Invoke("Drive enumeration failed: " + ex.Message);
+                }
+                scanRoots = drives;
+            }
+
+            foreach (var root in scanRoots)
+            {
+                if (cancellationToken.IsCancellationRequested)
+                    break;
+                if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
+                    continue;
+
+                log?.Invoke("Purging legacy *.sentinel_verdict under " + root);
+                try
+                {
+                    WalkAndDeleteLegacySidecars(root, ref deleted, log, cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    log?.Invoke("Purge walk failed for " + root + ": " + ex.Message);
+                }
+            }
+
+            log?.Invoke($"Legacy *.sentinel_verdict purge finished: deleted={deleted}");
+            return deleted;
+        }
+
+        private static readonly string[] SkipDirNameExact =
+        {
+            "System Volume Information",
+            "$Recycle.Bin",
+            "Recovery",
+            "Config.Msi",
+            "WindowsApps",
+        };
+
+        private static readonly string[] SkipDirNameContains =
+        {
+            // Avoid multi-hour / high-IO walks that do not host user pollution
+            "\\Windows\\WinSxS",
+            "\\Windows\\Installer",
+            "\\Windows\\SoftwareDistribution",
+            "\\Windows\\servicing",
+            "\\Windows\\CSC",
+            "\\$Windows.~BT",
+            "\\$Windows.~WS",
+        };
+
+        private static bool ShouldSkipDirectory(string path)
+        {
+            try
+            {
+                var name = Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+                foreach (var skip in SkipDirNameExact)
+                {
+                    if (string.Equals(name, skip, StringComparison.OrdinalIgnoreCase))
+                        return true;
+                }
+
+                // Normalize for contains checks
+                var full = path.Replace('/', '\\');
+                foreach (var skip in SkipDirNameContains)
+                {
+                    if (full.IndexOf(skip, StringComparison.OrdinalIgnoreCase) >= 0)
+                        return true;
+                }
+
+                var di = new DirectoryInfo(path);
+                if ((di.Attributes & FileAttributes.ReparsePoint) != 0)
+                    return true;
+            }
+            catch
+            {
+                return true;
+            }
+            return false;
+        }
+
+        private static void WalkAndDeleteLegacySidecars(
+            string directory,
+            ref int deleted,
+            Action<string>? log,
+            CancellationToken cancellationToken)
+        {
+            if (cancellationToken.IsCancellationRequested)
+                return;
+            if (ShouldSkipDirectory(directory))
+                return;
+
+            try
+            {
+                foreach (var file in Directory.EnumerateFiles(directory, "*.sentinel_verdict"))
+                {
+                    if (cancellationToken.IsCancellationRequested)
+                        return;
+                    try
+                    {
+                        // Extra guard: only delete the exact legacy suffix pollution
+                        if (!file.EndsWith(".sentinel_verdict", StringComparison.OrdinalIgnoreCase))
+                            continue;
+                        File.SetAttributes(file, FileAttributes.Normal);
+                        File.Delete(file);
+                        deleted++;
+                        if (deleted <= 20 || deleted % 100 == 0)
+                            log?.Invoke($"Deleted legacy verdict sidecar ({deleted}): {file}");
+                    }
+                    catch
+                    {
+                        // locked / ACL — best effort
+                    }
+                }
+            }
+            catch
+            {
+                // no list permission
+            }
+
+            string[]? children = null;
+            try
+            {
+                children = Directory.GetDirectories(directory);
+            }
+            catch
+            {
+                return;
+            }
+
+            foreach (var child in children)
+            {
+                if (cancellationToken.IsCancellationRequested)
+                    return;
+                WalkAndDeleteLegacySidecars(child, ref deleted, log, cancellationToken);
+            }
+        }
 
         private void TryWriteVerdictPayload(string filePath, string fileSha256, string payload)
         {
