@@ -2,6 +2,13 @@
 
 All notable changes to Sentinel are documented in this file.
 
+## [1.9.1] - 2026-08-02
+
+### Fixed — Settings not opening after 1.9.0 tray restore
+- **Root cause:** 1.9.0 restored the 1.8.4 tray pump with `WindowState=Minimized`, which can leave `AgentDashboardForm` with a live handle but `WS_VISIBLE` off — Settings looked like a no-op.
+- **`TrayIconService`:** message-pump form is off-screen / opacity-0 (not minimized); `ShowDashboard` always forces `Show` + `Visible=true` + native `ShowWindow(SW_RESTORE/SW_SHOW)` + brief TopMost focus.
+- Freeze-safe 1.9.0 tray path kept (no re-introduction of 1.8.9 STA tip marshaling / log flood caps).
+
 ## [1.9.0] - 2026-08-02
 
 ### Changed — Tray / toast restored to pre-freeze-rewrite baseline
