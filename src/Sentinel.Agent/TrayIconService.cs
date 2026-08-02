@@ -30,10 +30,15 @@ namespace Sentinel.Agent
         private NotifyIcon? _notifyIcon;
         private ContextMenuStrip? _contextMenu;
         private Thread? _uiThread;
+        private HiddenForm? _messagePump;
         private readonly CancellationTokenSource _cts = new();
         private readonly string _version;
         private (string RuleName, string ProcessName, double Confidence, string Evidence)? _pendingDetection;
         private AgentDashboardForm? _dashboard;
+
+        // Log storms (false-positive floods) must not freeze the tray STA pump.
+        private const int MaxLinesPerTick = 80;
+        private const long MaxCatchUpBytes = 256 * 1024;
 
         public TrayIconService(
             AutoIncidentReportingConfig reportConfig,
@@ -124,20 +129,67 @@ namespace Sentinel.Agent
             };
             watchThread.Start();
 
-            Application.Run(new HiddenForm(_notifyIcon));
+            // Keep a form reference so background work can marshal onto the STA pump.
+            _messagePump = new HiddenForm(_notifyIcon, OnTaskbarCreated);
+            Application.Run(_messagePump);
+        }
+
+        /// <summary>
+        /// Shell restart (explorer crash/recovery) recreates the notification area.
+        /// Must run on the STA UI thread — never touch NotifyIcon from the log watcher.
+        /// </summary>
+        private void OnTaskbarCreated()
+        {
+            try
+            {
+                if (_notifyIcon == null) return;
+                _notifyIcon.Visible = false;
+                _notifyIcon.Visible = true;
+                // Restore default tip after shell recovery (avoids stale truncated tip)
+                var tip = $"Sentinel v{_version} — Protection Active";
+                if (tip.Length > 63) tip = tip[..63];
+                _notifyIcon.Text = tip;
+            }
+            catch { }
+        }
+
+        /// <summary>Marshal NotifyIcon.Text updates onto the STA message pump.</summary>
+        private void SetTrayTipSafe(string tip)
+        {
+            if (string.IsNullOrEmpty(tip)) return;
+            if (tip.Length > 63) tip = tip[..63];
+
+            try
+            {
+                var form = _messagePump;
+                var icon = _notifyIcon;
+                if (icon == null) return;
+
+                if (form != null && form.IsHandleCreated && !form.IsDisposed)
+                {
+                    form.BeginInvoke(new Action(() =>
+                    {
+                        try { icon.Text = tip; } catch { }
+                    }));
+                }
+                // If the pump is not ready yet, skip — never call NotifyIcon from a worker thread.
+            }
+            catch { }
         }
 
         private class HiddenForm : Form
         {
-            private readonly NotifyIcon _notifyIcon;
             private readonly int _taskbarCreatedMsg;
+            private readonly Action _onTaskbarCreated;
 
             [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
             private static extern int RegisterWindowMessage(string lpString);
 
-            public HiddenForm(NotifyIcon notifyIcon)
+            public HiddenForm(NotifyIcon notifyIcon, Action onTaskbarCreated)
             {
-                _notifyIcon = notifyIcon;
+                // notifyIcon is owned by TrayIconService; form only pumps TaskbarCreated.
+                if (notifyIcon == null) throw new ArgumentNullException(nameof(notifyIcon));
+                _onTaskbarCreated = onTaskbarCreated;
                 _taskbarCreatedMsg = RegisterWindowMessage("TaskbarCreated");
 
                 // Do NOT use WindowState=Minimized for the Application.Run main form.
@@ -153,19 +205,15 @@ namespace Sentinel.Agent
                 ShowIcon = false;
                 Text = "Sentinel Agent";
 
-                var _ = Handle;
+                // Force handle create so BeginInvoke works as soon as the pump runs
+                _ = Handle;
             }
 
             protected override void WndProc(ref Message m)
             {
                 if (m.Msg == _taskbarCreatedMsg)
                 {
-                    try
-                    {
-                        _notifyIcon.Visible = false;
-                        _notifyIcon.Visible = true;
-                    }
-                    catch { }
+                    try { _onTaskbarCreated(); } catch { }
                 }
                 base.WndProc(ref m);
             }
@@ -320,7 +368,8 @@ namespace Sentinel.Agent
 
         /// <summary>
         /// Synchronous log watcher on a dedicated background thread.
-        /// Never touches the STA message pump.
+        /// Never touches NotifyIcon / UI controls directly — only via SetTrayTipSafe.
+        /// Caps catch-up so detection floods cannot starve the process for seconds.
         /// </summary>
         private void WatchLogFileSync(CancellationToken cancellationToken)
         {
@@ -338,6 +387,7 @@ namespace Sentinel.Agent
                 {
                     using var fs = new FileStream(logFile, FileMode.Open, FileAccess.Read,
                         FileShare.ReadWrite | FileShare.Delete);
+                    // Start at EOF — never replay historical storms on agent start
                     lastOffset = fs.Length;
                 }
             }
@@ -368,11 +418,21 @@ namespace Sentinel.Agent
 
                         if (fs.Length > lastOffset)
                         {
+                            // Drop backlog during floods — only process a trailing window
+                            if (fs.Length - lastOffset > MaxCatchUpBytes)
+                                lastOffset = fs.Length - MaxCatchUpBytes;
+
                             fs.Seek(lastOffset, SeekOrigin.Begin);
                             using var reader = new StreamReader(fs, System.Text.Encoding.UTF8, false, 4096, true);
+                            // Mid-file seek may land mid-line
+                            if (lastOffset > 0 && fs.Position > 0)
+                                reader.ReadLine();
+
+                            int linesThisTick = 0;
                             string? line;
                             while ((line = reader.ReadLine()) != null)
                             {
+                                linesThisTick++;
                                 if (line.Contains("\"type\":\"detection\"", StringComparison.OrdinalIgnoreCase))
                                 {
                                     try
@@ -388,6 +448,7 @@ namespace Sentinel.Agent
                                         if (data.TryGetProperty("Tier", out var tierProp))
                                             tierVal = tierProp.GetInt32();
 
+                                        // Tier0 = Tier1Behavioral in models (kill-grade candidates only)
                                         if (tierVal == 0)
                                             _pendingDetection = (ruleName, processName, confidence, evidence);
                                     }
@@ -413,26 +474,23 @@ namespace Sentinel.Agent
                                                 if (DateTime.UtcNow - lastShown < TimeSpan.FromSeconds(30))
                                                 {
                                                     _pendingDetection = null;
+                                                    if (linesThisTick >= MaxLinesPerTick)
+                                                        break;
                                                     continue;
                                                 }
                                             }
                                             shownCache[cacheKey] = DateTime.UtcNow;
 
-                                            try
-                                            {
-                                                if (_notifyIcon != null)
-                                                {
-                                                    var tip = $"Sentinel v{_version} — last: {ruleName}";
-                                                    if (tip.Length > 63) tip = tip[..63];
-                                                    _notifyIcon.Text = tip;
-                                                }
-                                            }
-                                            catch { }
+                                            // STA-safe — never touch NotifyIcon on this worker thread
+                                            SetTrayTipSafe($"Sentinel v{_version} — last: {ruleName}");
                                         }
                                         _pendingDetection = null;
                                     }
                                     catch { _pendingDetection = null; }
                                 }
+
+                                if (linesThisTick >= MaxLinesPerTick)
+                                    break;
                             }
                             lastOffset = fs.Position;
                         }

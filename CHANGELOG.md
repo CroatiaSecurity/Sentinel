@@ -2,6 +2,14 @@
 
 All notable changes to Sentinel are documented in this file.
 
+## [1.8.9] - 2026-08-02
+
+### Fixed — Tray / taskbar freeze under load
+- **`TrayIconService`:** never touch `NotifyIcon` from the log-watcher worker thread (STA-marshal tip updates via the hidden message-pump form). Cross-thread tray updates were a classic freeze/crash under detection storms.
+- **Log catch-up caps:** skip backlog over 256 KB; process at most 80 lines per second so `events.jsonl` floods cannot starve the agent.
+- **`TaskbarCreated`:** re-show tray + restore default tip after explorer/shell recovery (on the UI thread).
+- **`ShellWatchdog`:** track only the shell-window owner PID (no dual-explorer thrash); hang probe timeout 800 ms without `SMTO_BLOCK`; require 5 consecutive hangs; rate-limit hang emits to once per 5 minutes.
+
 ## [1.8.8] - 2026-08-02
 
 ### Fixed — Host load / shell lag (false-positive storms)

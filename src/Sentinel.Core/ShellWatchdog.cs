@@ -1,8 +1,5 @@
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Diagnostics;
-using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -42,18 +39,22 @@ namespace Sentinel.Core
         private int _crashCount;
         private DateTimeOffset _lastCrashTime = DateTimeOffset.MinValue;
         private DateTimeOffset _lastRestartTime = DateTimeOffset.MinValue;
+        private DateTimeOffset _lastHangEmitUtc = DateTimeOffset.MinValue;
         private int _explorerPid;
         private bool _shellAbsent;
 
         private static readonly TimeSpan ScanInterval = TimeSpan.FromSeconds(5);
-        private static readonly TimeSpan HangTimeout = TimeSpan.FromSeconds(3);
+        // Short timeout — SMTO_BLOCK freezes *this* thread for the full timeout when the shell is busy.
+        // Under CPU storms, a 3s block every 5s made the agent (and tray) feel dead.
+        private static readonly TimeSpan HangTimeout = TimeSpan.FromMilliseconds(800);
         private static readonly TimeSpan RestartCooldown = TimeSpan.FromSeconds(15);
         private static readonly TimeSpan CrashWindowReset = TimeSpan.FromMinutes(10);
+        private static readonly TimeSpan HangEmitCooldown = TimeSpan.FromMinutes(5);
 
         // If explorer crashes more than this in the window, something is actively attacking it
         private const int CrashThresholdForAlert = 3;
-        // Consecutive hang checks before alerting (15s of unresponsiveness)
-        private const int HangThresholdForAlert = 3;
+        // Consecutive hang checks before alerting (~25s of unresponsiveness at 5s interval)
+        private const int HangThresholdForAlert = 5;
 
         public ShellWatchdog(
             DetectionEngine detectionEngine,
@@ -196,31 +197,37 @@ namespace Sentinel.Core
 
                 if (_consecutiveHangs >= HangThresholdForAlert)
                 {
-                    await _detectionEngine.EmitAsync(new DetectionEvent
+                    // Rate-limit: under load SendMessageTimeout fails often; do not flood events.jsonl
+                    // (flood → agent log watcher → tray STA pressure → worse shell lag).
+                    if (DateTimeOffset.UtcNow - _lastHangEmitUtc >= HangEmitCooldown)
                     {
-                        RuleName = "Shell Watchdog: Explorer Unresponsive",
-                        Evidence = $"Explorer.exe (PID {currentPid}) has been unresponsive for " +
-                                   $"{_consecutiveHangs * ScanInterval.TotalSeconds}s " +
-                                   $"({_consecutiveHangs} consecutive failed message checks).",
-                        Reasoning = "Explorer.exe is not responding to window messages. " +
-                                    "This indicates a deadlock, cross-process hang (AppHangXProcB1), " +
-                                    "or thread injection that blocked the UI thread. " +
-                                    "Cross-process hangs occur when explorer calls into an injected/corrupted " +
-                                    "COM server (e.g., TokenBroker) that never returns.",
-                        Confidence = 0.72,
-                        Tier = DetectionTier.Tier2Indicator,
-                        AuthorizedResponse = ResponseAction.LogOnly,
-                        ProcessName = "explorer",
-                        ProcessId = currentPid,
-                        Metadata = new Dictionary<string, string>
+                        _lastHangEmitUtc = DateTimeOffset.UtcNow;
+                        await _detectionEngine.EmitAsync(new DetectionEvent
                         {
-                            ["HangDurationSec"] = (_consecutiveHangs * ScanInterval.TotalSeconds).ToString("F0"),
-                            ["ConsecutiveHangs"] = _consecutiveHangs.ToString()
-                        }
-                    });
+                            RuleName = "Shell Watchdog: Explorer Unresponsive",
+                            Evidence = $"Explorer.exe (PID {currentPid}) has been unresponsive for " +
+                                       $"{_consecutiveHangs * ScanInterval.TotalSeconds}s " +
+                                       $"({_consecutiveHangs} consecutive failed message checks).",
+                            Reasoning = "Explorer.exe is not responding to window messages. " +
+                                        "This indicates a deadlock, cross-process hang (AppHangXProcB1), " +
+                                        "or thread injection that blocked the UI thread. " +
+                                        "Cross-process hangs occur when explorer calls into an injected/corrupted " +
+                                        "COM server (e.g., TokenBroker) that never returns.",
+                            Confidence = 0.72,
+                            Tier = DetectionTier.Tier2Indicator,
+                            AuthorizedResponse = ResponseAction.LogOnly,
+                            ProcessName = "explorer",
+                            ProcessId = currentPid,
+                            Metadata = new Dictionary<string, string>
+                            {
+                                ["HangDurationSec"] = (_consecutiveHangs * ScanInterval.TotalSeconds).ToString("F0"),
+                                ["ConsecutiveHangs"] = _consecutiveHangs.ToString()
+                            }
+                        });
+                    }
 
-                    // Reset to avoid flooding — will re-alert if it persists another full window
-                    _consecutiveHangs = 0;
+                    // Floor so we re-check soon without full threshold reset storms
+                    _consecutiveHangs = HangThresholdForAlert - 1;
                 }
             }
             else
@@ -259,39 +266,21 @@ namespace Sentinel.Core
             }, ct);
         }
 
+        /// <summary>
+        /// Only the shell-window owner counts as the desktop shell.
+        /// Never fall back to a random File Explorer window — that caused dual-explorer
+        /// PID thrash (false "crashes") and bad hang targeting.
+        /// </summary>
         private static int GetExplorerPid()
         {
             try
             {
-                var explorers = Process.GetProcessesByName("explorer");
-                if (explorers.Length == 0) return 0;
-
-                // Return the one that owns the shell window
                 var shellWindow = GetShellWindow();
-                foreach (var proc in explorers)
-                {
-                    try
-                    {
-                        if (shellWindow != IntPtr.Zero)
-                        {
-                            GetWindowThreadProcessId(shellWindow, out uint shellPid);
-                            if (proc.Id == shellPid)
-                            {
-                                var pid = proc.Id;
-                                proc.Dispose();
-                                // Dispose others
-                                foreach (var p in explorers.Where(p => p.Id != pid)) p.Dispose();
-                                return pid;
-                            }
-                        }
-                    }
-                    catch { }
-                }
+                if (shellWindow == IntPtr.Zero)
+                    return 0;
 
-                // Fallback: return the first one
-                var fallbackPid = explorers[0].Id;
-                foreach (var p in explorers) p.Dispose();
-                return fallbackPid;
+                GetWindowThreadProcessId(shellWindow, out uint shellPid);
+                return shellPid == 0 ? 0 : (int)shellPid;
             }
             catch
             {
@@ -303,26 +292,26 @@ namespace Sentinel.Core
         {
             try
             {
-                // Find a top-level explorer window and send it a message with timeout
                 var shellWindow = GetShellWindow();
                 if (shellWindow == IntPtr.Zero)
                 {
                     // No shell window — explorer might be starting up
-                    return true; // Give benefit of doubt
+                    return true;
                 }
 
-                // Verify it belongs to our explorer PID
                 GetWindowThreadProcessId(shellWindow, out uint ownerPid);
-                if (ownerPid != pid) return true; // Different process, skip check
+                if (ownerPid != (uint)pid)
+                    return true; // Different process, skip check
 
-                // SendMessageTimeout with SMTO_ABORTIFHUNG — returns 0 if hung
+                // SMTO_ABORTIFHUNG only — avoid SMTO_BLOCK so a sluggish shell does not
+                // freeze the agent thread for the full timeout (tray freeze under load).
                 IntPtr result;
                 var success = SendMessageTimeout(
                     shellWindow,
-                    0x0000, // WM_NULL — lightweight message that requires no processing
+                    0x0000, // WM_NULL
                     IntPtr.Zero,
                     IntPtr.Zero,
-                    SMTO_ABORTIFHUNG | SMTO_BLOCK,
+                    SMTO_ABORTIFHUNG | SMTO_NORMAL,
                     (uint)HangTimeout.TotalMilliseconds,
                     out result);
 
@@ -330,7 +319,7 @@ namespace Sentinel.Core
             }
             catch
             {
-                return true; // Assume responsive on error
+                return true;
             }
         }
 
@@ -347,8 +336,8 @@ namespace Sentinel.Core
             IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam,
             uint fuFlags, uint uTimeout, out IntPtr lpdwResult);
 
+        private const uint SMTO_NORMAL = 0x0000;
         private const uint SMTO_ABORTIFHUNG = 0x0002;
-        private const uint SMTO_BLOCK = 0x0001;
 
         #endregion
     }
