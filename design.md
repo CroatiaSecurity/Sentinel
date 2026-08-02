@@ -1,14 +1,15 @@
 # Sentinel — Design Document
 
-**Version: 1.8.7**
+**Version: 1.8.8**
 
 ---
 
 ## Platform
 
-- .NET 10, Windows only (`net10.0-windows`)
-- Self-contained single-file publish for distribution
-- Targets win-x64 self-contained single-file (installer ships x64)
+- **Product (Core / Service / Agent / Tests):** .NET Framework 4.8, Windows only (`net48-windows`)
+- **Installer:** framework-dependent publish via `installer/build.ps1` (requires .NET Framework 4.8 on the target PC; Setup offers the Microsoft download if missing)
+- **Optional tooling:** `tools/Sentinel.MlTrainer` targets `net10.0-windows` (build host needs .NET SDK 10)
+- Architecture: win-x64
 
 ---
 

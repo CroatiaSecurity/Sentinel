@@ -234,6 +234,14 @@ namespace Sentinel.Core
         private readonly ILogger<IPSecIntegrityGuard> _logger;
         private int _consecutiveFailures;
         private bool _cleanedObserveMode;
+        private DateTimeOffset _nextAttemptUtc = DateTimeOffset.MinValue;
+        private DateTimeOffset _lastEmitUtc = DateTimeOffset.MinValue;
+
+        // After repeated re-apply failures, back off aggressively so we do not
+        // burn CPU/disk and flood events.jsonl (was every 30s forever).
+        private const int SoftFailThreshold = 3;
+        private const int HardFailThreshold = 8;
+        private static readonly TimeSpan MinEmitInterval = TimeSpan.FromMinutes(15);
 
         public IPSecIntegrityGuard(DetectionEngine de, SentinelConfig config, ILogger<IPSecIntegrityGuard> l)
         {
@@ -247,7 +255,7 @@ namespace Sentinel.Core
             HardeningModule.RestrictivePortHardeningEnabled = _config.RestrictivePortHardening;
 
             _logger.LogInformation(
-                "[IPSecIntegrityGuard] Started — IPSec profile={Mode} (self-heal every 30s)",
+                "[IPSecIntegrityGuard] Started — IPSec profile={Mode} (self-heal with backoff)",
                 _config.RestrictivePortHardening
                     ? "restrictive (attack + SSH/RDP/SMB/DB lockdown)"
                     : "attack-only (malware/legacy ports; user services free)");
@@ -267,47 +275,82 @@ namespace Sentinel.Core
                 {
                     HardeningModule.RestrictivePortHardeningEnabled = _config.RestrictivePortHardening;
 
-                    if (!HardeningModule.IsIPSecPolicyActive())
+                    if (HardeningModule.IsIPSecPolicyActive())
+                    {
+                        if (_consecutiveFailures > 0)
+                            _logger.LogInformation(
+                                "[IPSecIntegrityGuard] IPSec policy GSecurity active again after {Count} failure(s)",
+                                _consecutiveFailures);
+                        _consecutiveFailures = 0;
+                        _nextAttemptUtc = DateTimeOffset.MinValue;
+                    }
+                    else if (DateTimeOffset.UtcNow >= _nextAttemptUtc)
                     {
                         _consecutiveFailures++;
                         _logger.LogWarning(
                             "[IPSecIntegrityGuard] IPSec policy GSecurity is MISSING or UNASSIGNED — re-applying (failure #{Count})",
                             _consecutiveFailures);
 
-                        HardeningModule.ReapplyIPSecPolicy();
-
-                        await Task.Delay(2000, ct);
-                        bool reapplied = HardeningModule.IsIPSecPolicyActive();
-
-                        await _detectionEngine.EmitAsync(new DetectionEvent
+                        // Stop hammering netsh after hard threshold; only re-check periodically.
+                        bool skipReapply = _consecutiveFailures > HardFailThreshold;
+                        bool reapplied = false;
+                        if (!skipReapply)
                         {
-                            RuleName = "Anti-Tamper: IPSec Policy Deleted and Re-Applied",
-                            Evidence = $"GSecurity IPSec policy was found missing/unassigned. " +
-                                       $"Re-application {(reapplied ? "SUCCEEDED" : "FAILED")}. " +
-                                       $"Consecutive failures: {_consecutiveFailures}. " +
-                                       $"Profile: {(_config.RestrictivePortHardening ? "restrictive" : "attack-only")}",
-                            Reasoning = "The IPSec policy that blocks attack-only (or restrictive) ports was removed. " +
-                                        "Sentinel re-applied the current profile. Default profile does not block SSH/RDP/SMB.",
-                            Confidence = 0.95,
-                            Tier = DetectionTier.Tier1Behavioral,
-                            AuthorizedResponse = ResponseAction.LogOnly,
-                            ProcessName = "SYSTEM",
-                            ProcessId = 0,
-                            SignalType = SignalType.AntiTamper,
-                            Metadata = new Dictionary<string, string>
+                            HardeningModule.ReapplyIPSecPolicy();
+                            await Task.Delay(2000, ct);
+                            reapplied = HardeningModule.IsIPSecPolicyActive();
+                        }
+                        else
+                        {
+                            reapplied = HardeningModule.IsIPSecPolicyActive();
+                        }
+
+                        // Emit on first failure, state change to success, or every MinEmitInterval
+                        // while still failing — not on every poll.
+                        bool shouldEmit = !reapplied
+                            ? (_consecutiveFailures == 1
+                               || DateTimeOffset.UtcNow - _lastEmitUtc >= MinEmitInterval)
+                            : true;
+
+                        if (shouldEmit)
+                        {
+                            _lastEmitUtc = DateTimeOffset.UtcNow;
+                            await _detectionEngine.EmitAsync(new DetectionEvent
                             {
-                                ["Reapplied"] = reapplied.ToString(),
-                                ["ConsecutiveFailures"] = _consecutiveFailures.ToString(),
-                                ["Restrictive"] = _config.RestrictivePortHardening.ToString()
-                            }
-                        });
+                                RuleName = "Anti-Tamper: IPSec Policy Deleted and Re-Applied",
+                                Evidence = $"GSecurity IPSec policy was found missing/unassigned. " +
+                                           $"Re-application {(skipReapply ? "SKIPPED (backoff)" : reapplied ? "SUCCEEDED" : "FAILED")}. " +
+                                           $"Consecutive failures: {_consecutiveFailures}. " +
+                                           $"Profile: {(_config.RestrictivePortHardening ? "restrictive" : "attack-only")}",
+                                Reasoning = "The IPSec policy that blocks attack-only (or restrictive) ports was removed. " +
+                                            "Sentinel re-applied the current profile. Default profile does not block SSH/RDP/SMB. " +
+                                            "Repeated failures indicate netsh/IPSec stack issues or policy API unavailable — " +
+                                            "backoff is applied to avoid resource exhaustion.",
+                                Confidence = 0.95,
+                                Tier = DetectionTier.Tier1Behavioral,
+                                AuthorizedResponse = ResponseAction.LogOnly,
+                                ProcessName = "SYSTEM",
+                                ProcessId = 0,
+                                SignalType = SignalType.AntiTamper,
+                                Metadata = new Dictionary<string, string>
+                                {
+                                    ["Reapplied"] = reapplied.ToString(),
+                                    ["ConsecutiveFailures"] = _consecutiveFailures.ToString(),
+                                    ["Restrictive"] = _config.RestrictivePortHardening.ToString(),
+                                    ["BackedOff"] = skipReapply.ToString()
+                                }
+                            });
+                        }
 
                         if (reapplied)
+                        {
                             _consecutiveFailures = 0;
-                    }
-                    else
-                    {
-                        _consecutiveFailures = 0;
+                            _nextAttemptUtc = DateTimeOffset.MinValue;
+                        }
+                        else
+                        {
+                            _nextAttemptUtc = DateTimeOffset.UtcNow + ComputeBackoff(_consecutiveFailures);
+                        }
                     }
                 }
                 catch (OperationCanceledException) { break; }
@@ -315,6 +358,22 @@ namespace Sentinel.Core
 
                 await Task.Delay(30000, ct);
             }
+        }
+
+        /// <summary>
+        /// Exponential-ish backoff: 30s → 2m → 5m → 15m → 1h (capped).
+        /// </summary>
+        private static TimeSpan ComputeBackoff(int consecutiveFailures)
+        {
+            if (consecutiveFailures <= SoftFailThreshold)
+                return TimeSpan.FromSeconds(30);
+            if (consecutiveFailures <= 5)
+                return TimeSpan.FromMinutes(2);
+            if (consecutiveFailures <= HardFailThreshold)
+                return TimeSpan.FromMinutes(5);
+            if (consecutiveFailures <= 15)
+                return TimeSpan.FromMinutes(15);
+            return TimeSpan.FromHours(1);
         }
     }
 

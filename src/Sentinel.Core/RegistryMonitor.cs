@@ -772,64 +772,101 @@ namespace Sentinel.Core
                     var baselineKey = $"{prefix}:{valueName}";
                     _proxyBaseline.TryGetValue(baselineKey, out var baselineVal);
 
-                    if (currentVal != baselineVal)
+                    if (ProxyValuesEquivalent(valueName, baselineVal, currentVal))
                     {
-                        var evidence = $"Proxy setting '{valueName}' in {prefix} modified. Baseline: '{baselineVal}', Current: '{currentVal}'";
-                        var reasoning = $"Proxy hijacking reroutes user traffic. Sentinel detected an unauthorized modification to system proxy settings.";
+                        // Adopt current representation so we do not re-fire on null↔"0"/"" noise
+                        _proxyBaseline[baselineKey] = currentVal;
+                        continue;
+                    }
 
-                        var detection = new DetectionEvent
+                    var evidence = $"Proxy setting '{valueName}' in {prefix} modified. Baseline: '{baselineVal}', Current: '{currentVal}'";
+                    var reasoning = $"Proxy hijacking reroutes user traffic. Sentinel detected an unauthorized modification to system proxy settings.";
+
+                    var detection = new DetectionEvent
+                    {
+                        RuleName = "Registry: Unauthorized Proxy Server Hijack",
+                        Evidence = evidence,
+                        Reasoning = reasoning,
+                        Confidence = 0.85,
+                        Tier = DetectionTier.Tier1Behavioral,
+                        AuthorizedResponse = ResponsePolicy.MayPerformInlineHostMutation(_config) ? ResponseAction.RemoveRegistryEntry : ResponseAction.LogOnly,
+                        ProcessName = "Unknown",
+                        ProcessId = 0,
+                        Metadata = new Dictionary<string, string>
                         {
-                            RuleName = "Registry: Unauthorized Proxy Server Hijack",
-                            Evidence = evidence,
-                            Reasoning = reasoning,
-                            Confidence = 0.85,
-                            Tier = DetectionTier.Tier1Behavioral,
-                            AuthorizedResponse = ResponsePolicy.MayPerformInlineHostMutation(_config) ? ResponseAction.RemoveRegistryEntry : ResponseAction.LogOnly,
-                            ProcessName = "Unknown",
-                            ProcessId = 0,
-                            Metadata = new Dictionary<string, string>
+                            { "Hive", prefix },
+                            { "KeyPath", path },
+                            { "ValueName", valueName },
+                            { "BaselineValue", baselineVal ?? "" },
+                            { "CurrentValue", currentVal ?? "" }
+                        }
+                    };
+
+                    _ = _detectionEngine.EmitAsync(detection);
+                    _toastService.ShowToast("Sentinel Alert: Proxy Hijack", $"Proxy '{valueName}' changed under {prefix}");
+
+                    if (ResponsePolicy.MayPerformInlineHostMutation(_config))
+                    {
+                        try
+                        {
+                            if (baselineVal == null)
                             {
-                                { "Hive", prefix },
-                                { "KeyPath", path },
-                                { "ValueName", valueName },
-                                { "BaselineValue", baselineVal ?? "" },
-                                { "CurrentValue", currentVal ?? "" }
+                                key.DeleteValue(valueName, throwOnMissingValue: false);
                             }
-                        };
-
-                        _ = _detectionEngine.EmitAsync(detection);
-                        _toastService.ShowToast("Sentinel Alert: Proxy Hijack", $"Proxy '{valueName}' changed under {prefix}");
-
-                        if (ResponsePolicy.MayPerformInlineHostMutation(_config))
-                        {
-                            try
+                            else
                             {
-                                if (baselineVal == null)
+                                if (valueName == "ProxyEnable" && int.TryParse(baselineVal, out int enableVal))
                                 {
-                                    key.DeleteValue(valueName, throwOnMissingValue: false);
+                                    key.SetValue(valueName, enableVal, RegistryValueKind.DWord);
                                 }
                                 else
                                 {
-                                    if (valueName == "ProxyEnable" && int.TryParse(baselineVal, out int enableVal))
-                                    {
-                                        key.SetValue(valueName, enableVal, RegistryValueKind.DWord);
-                                    }
-                                    else
-                                    {
-                                        key.SetValue(valueName, baselineVal, RegistryValueKind.String);
-                                    }
+                                    key.SetValue(valueName, baselineVal, RegistryValueKind.String);
                                 }
-                                _logger.LogWarning("[RegistryMonitor] Actively restored hijacked proxy '{ValueName}' to baseline value '{Baseline}'", valueName, baselineVal);
                             }
-                            catch (Exception ex)
-                            {
-                                _logger.LogError(ex, "[RegistryMonitor] Failed to restore proxy setting '{ValueName}'", valueName);
-                            }
+                            _logger.LogWarning("[RegistryMonitor] Actively restored hijacked proxy '{ValueName}' to baseline value '{Baseline}'", valueName, baselineVal);
                         }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, "[RegistryMonitor] Failed to restore proxy setting '{ValueName}'", valueName);
+                        }
+                    }
+                    else
+                    {
+                        // LogOnly: adopt new value after one alert so we do not flood every 5s
+                        _proxyBaseline[baselineKey] = currentVal;
                     }
                 }
             }
             catch { }
+        }
+
+        /// <summary>
+        /// ProxyEnable: missing / empty / "0" all mean "proxy disabled".
+        /// ProxyServer / AutoConfigURL: null and empty are equivalent (no proxy URL).
+        /// </summary>
+        private static bool ProxyValuesEquivalent(string valueName, string? baseline, string? current)
+        {
+            if (string.Equals(baseline, current, StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            if (string.Equals(valueName, "ProxyEnable", StringComparison.OrdinalIgnoreCase))
+            {
+                static bool IsProxyOff(string? v) =>
+                    string.IsNullOrWhiteSpace(v) || v == "0" ||
+                    string.Equals(v, "false", StringComparison.OrdinalIgnoreCase);
+
+                if (IsProxyOff(baseline) && IsProxyOff(current))
+                    return true;
+            }
+            else
+            {
+                // Empty string vs missing value for server/URL is not a hijack
+                if (string.IsNullOrWhiteSpace(baseline) && string.IsNullOrWhiteSpace(current))
+                    return true;
+            }
+
+            return false;
         }
 
         private void BuildExtensionBaseline()

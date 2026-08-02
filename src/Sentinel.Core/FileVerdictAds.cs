@@ -214,60 +214,14 @@ namespace Sentinel.Core
         {
             try
             {
-                if (string.IsNullOrEmpty(filePath) || !File.Exists(filePath))
+                if (string.IsNullOrEmpty(filePath) || string.IsNullOrEmpty(expectedSha256))
                     return HashVerdict.Unknown;
 
-                var text = TryReadVerdictPayload(filePath);
+                // Target may be gone; still allow cache lookup by hash
+                var text = TryReadVerdictPayload(filePath, expectedSha256);
                 if (string.IsNullOrWhiteSpace(text)) return HashVerdict.Unknown;
 
-                var parts = text.Split('|');
-                if (parts.Length != 4) return HashVerdict.Unknown;
-
-                var verdictStr = parts[0];
-                var timestampStr = parts[1];
-                var sha256 = parts[2];
-                var signatureHex = parts[3];
-
-                // Verify file hash match (hex is case-insensitive)
-                if (!string.Equals(expectedSha256, sha256, StringComparison.OrdinalIgnoreCase))
-                {
-                    return HashVerdict.Unknown;
-                }
-
-                // Verify signature — payload must match SetVerdict (lowercase sha)
-                var payloadStr = $"{verdictStr}|{timestampStr}|{sha256.ToLowerInvariant()}";
-                var payloadBytes = Encoding.UTF8.GetBytes(payloadStr);
-
-                byte[] computedSignature;
-                using (var hmac = new HMACSHA256(_hmacKey))
-                {
-                    computedSignature = hmac.ComputeHash(payloadBytes);
-                }
-                var signatureBytes = ConvertHex.FromHexString(signatureHex);
-
-                if (!SecurityValidation.SecureCompare(computedSignature, signatureBytes))
-                {
-                    return HashVerdict.Unknown;
-                }
-
-                // Check key expiry or timestamp sanity (within last 365 days)
-                if (long.TryParse(timestampStr, out var ticks))
-                {
-                    var signedAt = new DateTime(ticks, DateTimeKind.Utc);
-                    if (DateTime.UtcNow - signedAt > TimeSpan.FromDays(365) || signedAt > DateTime.UtcNow.AddHours(1))
-                    {
-                        return HashVerdict.Unknown;
-                    }
-                }
-                else
-                {
-                    return HashVerdict.Unknown;
-                }
-
-                if (Enum.TryParse<HashVerdict>(verdictStr, out var verdict))
-                {
-                    return verdict;
-                }
+                return ParseAndValidatePayload(text, expectedSha256);
             }
             catch
             {
@@ -280,9 +234,10 @@ namespace Sentinel.Core
         {
             try
             {
-                if (string.IsNullOrEmpty(filePath) || !File.Exists(filePath))
+                if (string.IsNullOrEmpty(fileSha256))
                     return;
 
+                // Prefer content-addressed store even if the file disappeared mid-scan
                 var timestampTicks = DateTime.UtcNow.Ticks;
                 var payloadStr = $"{verdict}|{timestampTicks}|{fileSha256.ToLowerInvariant()}";
                 var payloadBytes = Encoding.UTF8.GetBytes(payloadStr);
@@ -295,7 +250,7 @@ namespace Sentinel.Core
                 var signatureHex = ConvertHex.ToHexString(signature);
 
                 var finalPayload = $"{payloadStr}|{signatureHex}";
-                TryWriteVerdictPayload(filePath, finalPayload);
+                TryWriteVerdictPayload(filePath, fileSha256, finalPayload);
             }
             catch
             {
@@ -304,18 +259,49 @@ namespace Sentinel.Core
         }
 
         /// <summary>
-        /// Prefer NTFS ADS; fall back to adjacent sidecar when ADS path is rejected
-        /// (common under modern path validation / some test hosts).
+        /// Legacy per-file pollution (must never be written again). Still read for migration.
         /// </summary>
-        private static string SidecarPath(string filePath)
+        internal static string LegacySidecarPath(string filePath)
             => filePath + ".sentinel_verdict";
 
         private static string AdsPath(string filePath)
             => filePath + ":sentinel_verdict";
 
-        private static void TryWriteVerdictPayload(string filePath, string payload)
+        /// <summary>
+        /// Central content-addressed cache under ProgramData\Sentinel\Secure\VerdictCache.
+        /// Avoids sprinkling *.sentinel_verdict next to every scanned PE on every drive.
+        /// </summary>
+        private string CentralCachePath(string fileSha256)
         {
-            // 1) NTFS ADS via FileStream (WriteAllText path validation often rejects ":stream")
+            var hash = fileSha256.ToLowerInvariant();
+            if (hash.Length < 2)
+                hash = hash.PadRight(2, '0');
+            return Path.Combine(_secureDir, "VerdictCache", hash.Substring(0, 2), hash + ".verdict");
+        }
+
+        /// <summary>Expose cache root for tests / cleanup tools.</summary>
+        public string VerdictCacheDirectory => Path.Combine(_secureDir, "VerdictCache");
+
+        private void TryWriteVerdictPayload(string filePath, string fileSha256, string payload)
+        {
+            // 1) Always write central cache (no user-directory pollution)
+            try
+            {
+                var cachePath = CentralCachePath(fileSha256);
+                var dir = Path.GetDirectoryName(cachePath);
+                if (dir != null && !Directory.Exists(dir))
+                    Directory.CreateDirectory(dir);
+                File.WriteAllText(cachePath, payload, Encoding.UTF8);
+            }
+            catch
+            {
+                // continue — try ADS if path available
+            }
+
+            // 2) Optional NTFS ADS on the target (invisible; not a separate visible file)
+            if (string.IsNullOrEmpty(filePath) || !File.Exists(filePath))
+                return;
+
             try
             {
                 var ads = AdsPath(filePath);
@@ -325,39 +311,133 @@ namespace Sentinel.Core
                 {
                     sw.Write(payload);
                 }
-                return;
             }
             catch
             {
-                // fall through to sidecar
+                // ADS unavailable (FAT, some network shares, path validation) — central cache is enough
             }
 
-            // 2) Sidecar file next to the target
-            File.WriteAllText(SidecarPath(filePath), payload, Encoding.UTF8);
-        }
-
-        private static string? TryReadVerdictPayload(string filePath)
-        {
+            // 3) NEVER write adjacent .sentinel_verdict sidecars (legacy pollution)
+            // If a legacy sidecar exists, remove it after successful central write.
             try
             {
-                var ads = AdsPath(filePath);
-                using (var fs = new FileStream(ads, FileMode.Open, FileAccess.Read,
-                    FileShare.ReadWrite | FileShare.Delete))
-                using (var sr = new StreamReader(fs, Encoding.UTF8))
-                {
-                    return sr.ReadToEnd();
-                }
+                var side = LegacySidecarPath(filePath);
+                if (File.Exists(side))
+                    File.Delete(side);
+            }
+            catch
+            {
+                // best-effort cleanup
+            }
+        }
+
+        private string? TryReadVerdictPayload(string filePath, string expectedSha256)
+        {
+            // 1) Central cache (primary)
+            try
+            {
+                var cachePath = CentralCachePath(expectedSha256);
+                if (File.Exists(cachePath))
+                    return File.ReadAllText(cachePath, Encoding.UTF8);
             }
             catch
             {
                 // fall through
             }
 
-            var side = SidecarPath(filePath);
-            if (File.Exists(side))
-                return File.ReadAllText(side, Encoding.UTF8);
+            // 2) NTFS ADS on the target
+            if (!string.IsNullOrEmpty(filePath) && File.Exists(filePath))
+            {
+                try
+                {
+                    var ads = AdsPath(filePath);
+                    using (var fs = new FileStream(ads, FileMode.Open, FileAccess.Read,
+                        FileShare.ReadWrite | FileShare.Delete))
+                    using (var sr = new StreamReader(fs, Encoding.UTF8))
+                    {
+                        return sr.ReadToEnd();
+                    }
+                }
+                catch
+                {
+                    // fall through
+                }
+
+                // 3) Legacy sidecar — migrate into central cache, then delete
+                try
+                {
+                    var side = LegacySidecarPath(filePath);
+                    if (File.Exists(side))
+                    {
+                        var text = File.ReadAllText(side, Encoding.UTF8);
+                        // Only migrate if payload validates for this hash
+                        if (ParseAndValidatePayload(text, expectedSha256) != HashVerdict.Unknown)
+                        {
+                            try
+                            {
+                                var cachePath = CentralCachePath(expectedSha256);
+                                var dir = Path.GetDirectoryName(cachePath);
+                                if (dir != null && !Directory.Exists(dir))
+                                    Directory.CreateDirectory(dir);
+                                File.WriteAllText(cachePath, text, Encoding.UTF8);
+                            }
+                            catch { }
+
+                            try { File.Delete(side); } catch { }
+                        }
+                        return text;
+                    }
+                }
+                catch
+                {
+                    // fall through
+                }
+            }
 
             return null;
+        }
+
+        private HashVerdict ParseAndValidatePayload(string text, string expectedSha256)
+        {
+            var parts = text.Split('|');
+            if (parts.Length != 4) return HashVerdict.Unknown;
+
+            var verdictStr = parts[0];
+            var timestampStr = parts[1];
+            var sha256 = parts[2];
+            var signatureHex = parts[3];
+
+            if (!string.Equals(expectedSha256, sha256, StringComparison.OrdinalIgnoreCase))
+                return HashVerdict.Unknown;
+
+            var payloadStr = $"{verdictStr}|{timestampStr}|{sha256.ToLowerInvariant()}";
+            var payloadBytes = Encoding.UTF8.GetBytes(payloadStr);
+
+            byte[] computedSignature;
+            using (var hmac = new HMACSHA256(_hmacKey))
+            {
+                computedSignature = hmac.ComputeHash(payloadBytes);
+            }
+            var signatureBytes = ConvertHex.FromHexString(signatureHex);
+
+            if (!SecurityValidation.SecureCompare(computedSignature, signatureBytes))
+                return HashVerdict.Unknown;
+
+            if (long.TryParse(timestampStr, out var ticks))
+            {
+                var signedAt = new DateTime(ticks, DateTimeKind.Utc);
+                if (DateTime.UtcNow - signedAt > TimeSpan.FromDays(365) || signedAt > DateTime.UtcNow.AddHours(1))
+                    return HashVerdict.Unknown;
+            }
+            else
+            {
+                return HashVerdict.Unknown;
+            }
+
+            if (Enum.TryParse<HashVerdict>(verdictStr, out var verdict))
+                return verdict;
+
+            return HashVerdict.Unknown;
         }
     }
 }

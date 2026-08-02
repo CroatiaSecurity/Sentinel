@@ -1,6 +1,6 @@
 # Sentinel — Constraints
 
-**Version: 1.8.7**
+**Version: 1.8.8**
 
 ---
 
@@ -105,10 +105,12 @@
 ## Operational Constraints
 
 - Must run on Windows 10 / Windows Server 2019 or later
-- Must target `net10.0-windows`
+- Must target `net48-windows` for product binaries (Core / Service / Agent / Tests)
+- Optional offline tools may target modern TFMs (e.g. MlTrainer `net10.0-windows`) without changing product runtime
 - Must function as a standard user (reduced capability, no crash)
 - Must function as an elevated user (full capability)
-- Log files must not grow unbounded â€” rotation required (50 MB / 5 files)
-- Detection deduplication required â€” same signal must not flood the log
+- Log files must not grow unbounded — rotation required (20 MB / 5 files for `events.jsonl`)
+- Detection deduplication required — same signal must not flood the log
+- File reputation verdicts must not pollute user/system directories with adjacent `*.sentinel_verdict` sidecars; use central ProgramData cache (and optional NTFS ADS only)
 
 

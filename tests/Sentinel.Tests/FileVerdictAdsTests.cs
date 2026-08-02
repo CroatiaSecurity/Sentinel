@@ -76,6 +76,15 @@ namespace Sentinel.Tests
                 ads.SetVerdict(testFile, sha256, HashVerdict.Safe);
                 Assert.Equal(HashVerdict.Safe, ads.GetVerdict(testFile, sha256));
 
+                // Must not pollute adjacent path with legacy sidecars
+                Assert.False(File.Exists(testFile + ".sentinel_verdict"),
+                    "SetVerdict must not create *.sentinel_verdict sidecars next to user files");
+
+                // Central content-addressed cache should exist
+                var cacheDir = ads.VerdictCacheDirectory;
+                Assert.True(Directory.Exists(cacheDir));
+                Assert.NotEmpty(Directory.GetFiles(cacheDir, "*.verdict", SearchOption.AllDirectories));
+
                 // Set verdict to Unsafe
                 ads.SetVerdict(testFile, sha256, HashVerdict.Unsafe);
                 Assert.Equal(HashVerdict.Unsafe, ads.GetVerdict(testFile, sha256));
@@ -104,46 +113,54 @@ namespace Sentinel.Tests
                 // Mismatching SHA256 should return Unknown
                 Assert.Equal(HashVerdict.Unknown, ads.GetVerdict(testFile, "different_sha256_hash_here_12345678"));
 
-                // Corrupt signature in stored payload (NTFS ADS or sidecar fallback)
-                var adsPath = $"{testFile}:sentinel_verdict";
-                var sidecarPath = testFile + ".sentinel_verdict";
-                string? storePath = null;
-                string? payload = null;
-                try
-                {
-                    using var fs = new FileStream(adsPath, FileMode.Open, FileAccess.Read,
-                        FileShare.ReadWrite | FileShare.Delete);
-                    using var sr = new StreamReader(fs);
-                    payload = sr.ReadToEnd();
-                    storePath = adsPath;
-                }
-                catch
-                {
-                    if (File.Exists(sidecarPath))
-                    {
-                        payload = File.ReadAllText(sidecarPath);
-                        storePath = sidecarPath;
-                    }
-                }
-                Assert.False(string.IsNullOrEmpty(payload), "Expected a stored verdict payload after SetVerdict");
-                Assert.NotNull(storePath);
+                // Corrupt signature in central cache (primary store)
+                var hash = sha256.ToLowerInvariant();
+                var cachePath = Path.Combine(ads.VerdictCacheDirectory, hash.Substring(0, 2), hash + ".verdict");
+                Assert.True(File.Exists(cachePath), "Expected central VerdictCache entry after SetVerdict");
+                var payload = File.ReadAllText(cachePath);
 
-                // Tamper with the payload (e.g. corrupting the signature hex part)
-                var parts = payload!.Split('|');
-                parts[3] = "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"; // fake hmac signature
-                var corruptedPayload = string.Join("|", parts);
-                if (storePath == sidecarPath)
-                    File.WriteAllText(storePath!, corruptedPayload);
-                else
-                {
-                    using var fs = new FileStream(storePath!, FileMode.Create, FileAccess.Write,
-                        FileShare.ReadWrite | FileShare.Delete);
-                    using var sw = new StreamWriter(fs);
-                    sw.Write(corruptedPayload);
-                }
+                var parts = payload.Split('|');
+                parts[3] = "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"; // fake hmac
+                File.WriteAllText(cachePath, string.Join("|", parts));
 
                 // Verdict should be rejected and return Unknown
                 Assert.Equal(HashVerdict.Unknown, ads.GetVerdict(testFile, sha256));
+            }
+            finally
+            {
+                try { Directory.Delete(tempDir, true); } catch { }
+            }
+        }
+
+        [Fact]
+        public void FileVerdictAds_MigratesAndRemovesLegacySidecar()
+        {
+            var tempDir = Path.Combine(Path.GetTempPath(), "sentinel_ads_test_" + Guid.NewGuid().ToString("N")[..8]);
+            Directory.CreateDirectory(tempDir);
+            var testFile = Path.Combine(tempDir, "legacy_target.exe");
+
+            try
+            {
+                File.WriteAllText(testFile, "legacy content");
+                var sha256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+
+                // First write produces valid HMAC payload in central store
+                var ads = new FileVerdictAds(tempDir);
+                ads.SetVerdict(testFile, sha256, HashVerdict.Safe);
+
+                var hash = sha256.ToLowerInvariant();
+                var cachePath = Path.Combine(ads.VerdictCacheDirectory, hash.Substring(0, 2), hash + ".verdict");
+                var payload = File.ReadAllText(cachePath);
+
+                // Simulate legacy pollution: copy payload to sidecar and wipe central cache
+                var sidecar = testFile + ".sentinel_verdict";
+                File.WriteAllText(sidecar, payload);
+                Directory.Delete(ads.VerdictCacheDirectory, true);
+
+                // Read should recover via sidecar, re-populate cache, and delete sidecar
+                Assert.Equal(HashVerdict.Safe, ads.GetVerdict(testFile, sha256));
+                Assert.True(File.Exists(cachePath), "Legacy sidecar should migrate into central cache");
+                Assert.False(File.Exists(sidecar), "Legacy sidecar should be deleted after migration");
             }
             finally
             {

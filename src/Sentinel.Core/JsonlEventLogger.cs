@@ -155,10 +155,10 @@ namespace Sentinel.Core
                     }
                 }
 
-                // Check file size for rotation (50 MB)
+                // Check file size for rotation (20 MB — keep I/O and dashboard reads lighter)
                 try
                 {
-                    if (_fileStream != null && _fileStream.Length > 50L * 1024 * 1024)
+                    if (_fileStream != null && _fileStream.Length > 20L * 1024 * 1024)
                     {
                         RotateLogsInternal();
                     }

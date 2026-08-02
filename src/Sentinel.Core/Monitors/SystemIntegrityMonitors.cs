@@ -2397,6 +2397,9 @@ namespace Sentinel.Core
         private readonly Dictionary<string, WmiProviderInfo> _baselineProviders = new(StringComparer.OrdinalIgnoreCase);
         private bool _baselineEstablished;
 
+        // MOF paths already alerted this process lifetime (avoid re-emitting every scan)
+        private readonly HashSet<string> _alertedMofPaths = new(StringComparer.OrdinalIgnoreCase);
+
         // Sensitive WMI namespaces — unsigned providers here are high-confidence threats
         // (power management, thermal, Intel DTT, hardware monitoring)
         private static readonly HashSet<string> SensitiveNamespaces = new(StringComparer.OrdinalIgnoreCase)
@@ -2813,19 +2816,32 @@ namespace Sentinel.Core
                 var mofs = key.GetValue("Autorecover MOFs") as string[];
                 if (mofs == null || mofs.Length == 0) return;
 
+                // Track currently present paths so we can re-alert if a path is removed then re-added
+                var present = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
                 foreach (var mof in mofs)
                 {
                     if (ct.IsCancellationRequested) break;
                     if (string.IsNullOrWhiteSpace(mof)) continue;
 
-                    // System MOFs under %SystemRoot%\System32\wbem are legitimate
+                    // System / Microsoft product MOFs are legitimate (Defender, Office, etc.)
                     var expanded = Environment.ExpandEnvironmentVariables(mof);
-                    if (IsSystemProtectedPath(expanded)) continue;
+                    string normalized;
+                    try { normalized = Path.GetFullPath(expanded); }
+                    catch { normalized = expanded; }
+
+                    present.Add(normalized);
+                    if (IsSystemProtectedPath(normalized) || IsMicrosoftProductMofPath(normalized))
+                        continue;
+
+                    // Alert once per path per process lifetime (was flooding every scan)
+                    if (!_alertedMofPaths.Add(normalized))
+                        continue;
 
                     await _detectionEngine.EmitAsync(new DetectionEvent
                     {
                         RuleName = "WMI Provider Integrity: Suspicious MOF Auto-Recovery Entry",
-                        Evidence = $"Non-system MOF file in auto-recovery list: '{expanded}'",
+                        Evidence = $"Non-system MOF file in auto-recovery list: '{normalized}'",
                         Reasoning = "A MOF file outside of the Windows system directory is registered for " +
                                     "WMI auto-recovery. This legacy mechanism auto-compiles MOF definitions " +
                                     "into the WMI repository on rebuild, providing rootkit-level persistence " +
@@ -2836,8 +2852,11 @@ namespace Sentinel.Core
                         ProcessName = "SYSTEM",
                         ProcessId = 0
                     });
-                    _logger.LogWarning("[WmiProviderIntegrityMonitor] Suspicious MOF auto-recovery: {Path}", expanded);
+                    _logger.LogWarning("[WmiProviderIntegrityMonitor] Suspicious MOF auto-recovery: {Path}", normalized);
                 }
+
+                // Drop alert memory for paths no longer in the list so a re-add alerts again
+                _alertedMofPaths.RemoveWhere(p => !present.Contains(p));
             }
             catch (Exception ex)
             {
@@ -2847,19 +2866,61 @@ namespace Sentinel.Core
 
         /// <summary>
         /// Checks if a path is under Windows system-protected directories.
+        /// Comparison is case-insensitive (WMI registry often stores C:\WINDOWS\...).
         /// </summary>
         private static bool IsSystemProtectedPath(string path)
         {
-            var normalized = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar);
+            string normalized;
+            try { normalized = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar); }
+            catch { normalized = path.TrimEnd(Path.DirectorySeparatorChar); }
+
             var sysRoot = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
             var sys32 = Path.Combine(sysRoot, "System32");
             var sysWow = Path.Combine(sysRoot, "SysWOW64");
             var winsxs = Path.Combine(sysRoot, "WinSxS");
+            var assembly = sysRoot + @"\assembly";
 
-            return normalized.StartsWith(sys32) ||
-                   normalized.StartsWith(sysWow) ||
-                   normalized.StartsWith(winsxs) ||
-                   normalized.StartsWith(sysRoot + @"\assembly");
+            return normalized.StartsWith(sys32, StringComparison.OrdinalIgnoreCase) ||
+                   normalized.StartsWith(sysWow, StringComparison.OrdinalIgnoreCase) ||
+                   normalized.StartsWith(winsxs, StringComparison.OrdinalIgnoreCase) ||
+                   normalized.StartsWith(assembly, StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// Microsoft product MOF paths that legitimately live outside System32
+        /// (notably Windows Defender under Program Files).
+        /// </summary>
+        private static bool IsMicrosoftProductMofPath(string path)
+        {
+            string normalized;
+            try { normalized = Path.GetFullPath(path); }
+            catch { normalized = path; }
+
+            var pf = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+            var pf86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
+            var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
+
+            // Common Microsoft install roots that ship legitimate autorecover MOFs
+            string[] roots =
+            {
+                Path.Combine(pf, "Windows Defender"),
+                Path.Combine(pf, "Microsoft"),
+                Path.Combine(pf86, "Windows Defender"),
+                Path.Combine(pf86, "Microsoft"),
+                Path.Combine(programData, "Microsoft"),
+                // Some installs use lowercase "windows defender"
+                Path.Combine(pf, "windows defender"),
+                Path.Combine(pf86, "windows defender"),
+            };
+
+            foreach (var root in roots)
+            {
+                if (string.IsNullOrEmpty(root)) continue;
+                if (normalized.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+
+            return false;
         }
 
         /// <summary>

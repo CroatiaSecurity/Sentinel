@@ -2,6 +2,23 @@
 
 All notable changes to Sentinel are documented in this file.
 
+## [1.8.8] - 2026-08-02
+
+### Fixed — Host load / shell lag (false-positive storms)
+- **IPSec integrity guard:** exponential backoff after re-apply failures (30s → 2m → 5m → 15m → 1h). Stops hammering `netsh` after hard threshold; rate-limits detection emits (was every 30s forever — 600+ consecutive failures observed).
+- **MOF auto-recovery:** case-insensitive system path checks; allowlist Microsoft/Windows Defender product MOF paths under Program Files; alert **once per path** per process (was flooding `events.jsonl`).
+- **ProxyEnable false positive:** treat missing / empty / `"0"` as equivalent (proxy off); adopt baseline after LogOnly so audits do not re-fire every 5s.
+- **`events.jsonl` rotation:** threshold **50 MB → 20 MB**.
+
+### Fixed — Disk pollution (`*.sentinel_verdict`)
+- **`FileVerdictAds`:** store verdicts in central content-addressed cache under `%ProgramData%\Sentinel\Secure\VerdictCache\` (keyed by SHA-256).
+- Optional NTFS ADS on the target remains; **never** write adjacent `*.sentinel_verdict` sidecars (legacy fallback polluted every drive).
+- Legacy sidecars are migrated into the central cache on read, then deleted.
+- Unit tests cover no-sidecar write and legacy migration.
+
+### Docs
+- Platform docs corrected: product targets **`net48-windows`** (Framework 4.8); optional `tools/Sentinel.MlTrainer` remains `net10.0-windows` for build hosts with SDK 10.
+
 ## [1.8.7] - 2026-08-01
 
 ### Changed — Target framework: .NET Framework 4.8 (windows)
