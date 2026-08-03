@@ -53,7 +53,8 @@ namespace Sentinel.Core
             "ransomware", "cuckoo", "injection", "reverse shell", "credential", "lsass",
             "beacon", "exfil", "c2", "dump", string.Concat("mimi","katz"), "cobalt", "lateral", "token theft",
             "shadow copy", "uac bypass", "persistence", "rootkit", "keylog", "clipbanker",
-            "process hollowing", "dll sideload", "supply chain", "reinfection", "malware"
+            "process hollowing", "dll sideload", "supply chain", "reinfection", "malware",
+            "stalkerware", "surveillance", "remote control", "session theft", "webcam", "screen capture"
         };
 
         private static readonly Regex Sha256Regex = new(
@@ -161,10 +162,15 @@ namespace Sentinel.Core
                 {
                     var portal = LawEnforcementPortals.Resolve(_config.CountryCode);
                     // 1.8.4 API: ShowCriticalToast (always delivers; CriticalOnly does not suppress)
-                    _toastService.ShowCriticalToast(
-                        "Sentinel: Attack chain confirmed — evidence pack ready",
-                        $"{detection.RuleName} — integrity-sealed pack + affidavit template. " +
-                        $"File with {portal.PrimaryPortalName}. Path: {packPath}");
+                    var toastTitle = CoercionAbusePolicy.IsDigitalCoercionToolkit(detection)
+                        ? "Sentinel: Surveillance / remote-control abuse — evidence pack ready"
+                        : "Sentinel: Attack chain confirmed — evidence pack ready";
+                    var toastBody = CoercionAbusePolicy.IsDigitalCoercionToolkit(detection)
+                        ? $"{detection.RuleName} — technical indicators of device takeover or covert surveillance. " +
+                          $"Sealed pack + affidavit for {portal.PrimaryPortalName}. Path: {packPath}"
+                        : $"{detection.RuleName} — integrity-sealed pack + affidavit template. " +
+                          $"File with {portal.PrimaryPortalName}. Path: {packPath}";
+                    _toastService.ShowCriticalToast(toastTitle, toastBody);
                 }
 
                 _logger.LogWarning(
@@ -453,6 +459,10 @@ namespace Sentinel.Core
             report.AppendLine("  Integrity: see MANIFEST.sha256 + MANIFEST.hmac + VERIFY.txt.");
             report.AppendLine("  Do not edit sealed evidence files after generation.");
             report.AppendLine();
+            if (CoercionAbusePolicy.IsDigitalCoercionToolkit(detection))
+            {
+                report.Append(CoercionAbusePolicy.BuildPackSection(detection));
+            }
             report.AppendLine("────────────────────────────────────────────────────────────────────");
             report.AppendLine("DETECTION SUMMARY");
             report.AppendLine("────────────────────────────────────────────────────────────────────");
@@ -464,6 +474,7 @@ namespace Sentinel.Core
             report.AppendLine($"  Authorized Action: {detection.AuthorizedResponse}");
             report.AppendLine($"  Kill Authorized:   {detection.KillAuthorized}");
             report.AppendLine($"  Attack Character:  {IsAttackCharacter(detection)}");
+            report.AppendLine($"  Coercion toolkit:  {CoercionAbusePolicy.IsDigitalCoercionToolkit(detection)}");
             report.AppendLine($"  Process:           {detection.ProcessName} (PID {detection.ProcessId})");
             report.AppendLine($"  Detected At:       {detection.Timestamp:yyyy-MM-dd HH:mm:ss} UTC");
             report.AppendLine();
@@ -735,6 +746,13 @@ namespace Sentinel.Core
             sb.AppendLine("   Data or accounts affected: __________________________________________");
             sb.AppendLine("   Other harm: _________________________________________________________");
             sb.AppendLine();
+            if (CoercionAbusePolicy.IsDigitalCoercionToolkit(detection))
+            {
+                sb.AppendLine("4b. DEVICE / COERCION HARM (optional — complete only if true)");
+                sb.AppendLine("   Sentinel only proved technical indicators on this PC. You decide what to report.");
+                sb.Append(CoercionAbusePolicy.BuildAffidavitHarmHints());
+                sb.AppendLine();
+            }
             sb.AppendLine("5. CONSENT");
             sb.AppendLine("   [ ] I wish to file a formal complaint with law enforcement / the portal above.");
             sb.AppendLine("   [ ] I authorize investigators to examine the attached evidence pack and,");

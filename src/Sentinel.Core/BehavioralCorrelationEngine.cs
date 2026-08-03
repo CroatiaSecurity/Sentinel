@@ -347,9 +347,84 @@ namespace Sentinel.Core
                     "Process escalated privileges then communicated externally — post-exploitation lateral movement preparation.");
                 return;
             }
+
+            // ═══ v1.9.4: Digital coercion toolkit (platform-agnostic) ═══
+            // Covert surveillance + remote/network channel (stalkerware / coercive control PC)
+            var hasSurveillance = currentSignals.Any(CoercionAbusePolicy.IsSurveillanceRule);
+            var hasRemoteLeg = currentSignals.Any(CoercionAbusePolicy.IsRemoteControlRule) ||
+                               types.Contains(SignalType.ReverseShell) ||
+                               types.Contains(SignalType.NetworkC2);
+            if (hasSurveillance && hasRemoteLeg)
+            {
+                await EmitCompositeAsync(pid, "Covert Surveillance + Remote Channel", 0.94,
+                    "Screen/camera/input surveillance correlated with remote control or outbound C2.",
+                    "Covert capture (screen/webcam/keystroke-class) plus remote channel on the same process — " +
+                    "endpoint pattern used in stalkerware and coercive remote control of a victim PC. " +
+                    "Platform-agnostic (messaging, social, email, browsers, games — host traces only).",
+                    tagCoercionToolkit: true);
+                return;
+            }
+
+            // Remote-access abuse toolkit from staging + network / injection
+            var hasRemoteTool = currentSignals.Any(s =>
+                CoercionAbusePolicy.IsRemoteAccessToolProcess(s.ProcessName) ||
+                CoercionAbusePolicy.IsRemoteControlRule(s));
+            var hasStagingOrInject =
+                hasStagingPath ||
+                types.Contains(SignalType.ProcessInjection) ||
+                hasUnsignedOrSuspicious;
+            var hasRemoteChannel = types.Contains(SignalType.NetworkC2) ||
+                                   types.Contains(SignalType.ReverseShell);
+            if (hasRemoteTool && hasStagingOrInject && hasRemoteChannel)
+            {
+                await EmitCompositeAsync(pid, "Remote Control Abuse Toolkit", 0.93,
+                    "Remote-control tooling from untrusted context with network or injection corroboration.",
+                    "Remote administration / RAT-class tooling combined with staging path, unsigned binary, " +
+                    "or injection — common in coercive takeover of a victim workstation (AnyDesk/TeamViewer-class " +
+                    "abuse, commodity RATs). Not a judgment about the operator's identity.",
+                    tagCoercionToolkit: true);
+                return;
+            }
+
+            // Session/credential theft + abuse channel (account takeover for any service)
+            var hasSessionTheft = currentSignals.Any(CoercionAbusePolicy.IsSessionTheftRule);
+            if (hasSessionTheft &&
+                (types.Contains(SignalType.NetworkC2) || types.Contains(SignalType.ReverseShell) ||
+                 currentSignals.Any(s => s.RuleName.Contains("Exfil") || s.RuleName.Contains("Upload"))))
+            {
+                await EmitCompositeAsync(pid, "Session Theft + Abuse Channel", 0.95,
+                    "Credential/session store access correlated with outbound abuse channel.",
+                    "Browser/OS credential or session material accessed with concurrent network/exfil channel — " +
+                    "account takeover toolkit for email, messaging, social, banking, games (not limited to one app).",
+                    tagCoercionToolkit: true);
+                return;
+            }
+
+            // Stalkerware: surveillance + persistence
+            var hasPersistForSpy = currentSignals.Any(s =>
+                s.RuleName.Contains("Autorun") ||
+                s.RuleName.Contains("Scheduled Task") ||
+                s.RuleName.Contains("Persistence") ||
+                s.RuleName.Contains("Run Key") ||
+                s.RuleName.Contains("Startup"));
+            if (hasSurveillance && hasPersistForSpy)
+            {
+                await EmitCompositeAsync(pid, "Stalkerware Persistence Chain", 0.92,
+                    "Covert surveillance capability combined with persistence installation.",
+                    "Capture/surveillance signal plus autorun/persistence — classic stalkerware footprint " +
+                    "for long-term monitoring of a victim device.",
+                    tagCoercionToolkit: true);
+                return;
+            }
         }
 
-        private async Task EmitCompositeAsync(int pid, string ruleName, double confidence, string evidence, string reasoning)
+        private async Task EmitCompositeAsync(
+            int pid,
+            string ruleName,
+            double confidence,
+            string evidence,
+            string reasoning,
+            bool tagCoercionToolkit = false)
         {
             string name = "unknown";
             if (_signalBuffers.TryGetValue(pid, out var buffer))
@@ -377,6 +452,9 @@ namespace Sentinel.Core
                     [ResponsePolicy.TerminalOutcomeKey] = "Composite",
                 }
             };
+
+            if (tagCoercionToolkit)
+                CoercionAbusePolicy.TagAsCoercionToolkit(compositeEvent);
 
             await _emitCallback!(compositeEvent);
         }

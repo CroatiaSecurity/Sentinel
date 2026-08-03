@@ -2,6 +2,25 @@
 
 All notable changes to Sentinel are documented in this file.
 
+## [1.9.4] - 2026-08-03
+
+### Added — Digital coercion / surveillance toolkit defense (platform-agnostic)
+Protects users from **machine-side tools** used in online harassment, sexual coercion, stalkerware, account takeover, and remote blackmail — **not** chat moderation and **not** “rapist detection.”
+
+- **`CoercionAbusePolicy`:** classifies remote-control tools, surveillance rules, session-theft rules; tags packs with honest technical scope + LE affidavit harm checkboxes.
+- **Composites (chain-confirmed, pack-eligible):**
+  - `Covert Surveillance + Remote Channel` (0.94) — screen/webcam/input + C2/remote/shell
+  - `Remote Control Abuse Toolkit` (0.93) — remote-admin/RAT-class + staging/unsigned/inject + network
+  - `Session Theft + Abuse Channel` (0.95) — credential/session access + network/exfil
+  - `Stalkerware Persistence Chain` (0.92) — surveillance + autorun/persistence
+- **Evidence packs:** dedicated “DIGITAL COERCION / SURVEILLANCE TOOLKIT” section + affidavit optional harm categories when tagged.
+- **Agent Settings → Safety:** plain-language page (what Sentinel does/doesn’t do, session revoke, report, packs).
+- **Scope:** Discord, email, social, browsers, games, voice/video — any channel that leaves **host** traces.
+- Screen/webcam signals feed **composites** but remain weak chain seeds alone (no single-signal Cast-style nukes).
+
+### Docs
+- `THREAT_MODEL.md`, `README.md`, `design.md`, `constraints.md` — digital coercion toolkit mission + limits.
+
 ## [1.9.3] - 2026-08-03
 
 ### Fixed — Evidence packs after chain-confirmed nukes

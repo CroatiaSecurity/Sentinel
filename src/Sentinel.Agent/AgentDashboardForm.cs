@@ -168,7 +168,7 @@ namespace Sentinel.Agent
             sidebar.Controls.SetChildIndex(bottomBar, 0);
 
             // Report to Police stays in Settings; tray no longer deep-links here.
-            string[] navLabels = { "Overview", "Events", "Report to Police", "Quarantine", "Tools", "About" };
+            string[] navLabels = { "Overview", "Events", "Report to Police", "Quarantine", "Safety", "Tools", "About" };
             for (int i = 0; i < navLabels.Length; i++)
             {
                 var idx = i;
@@ -190,6 +190,7 @@ namespace Sentinel.Agent
                 BuildEventsPage(),
                 BuildReportPage(),
                 BuildQuarantinePage(),
+                BuildSafetyPage(),
                 BuildToolsPage(),
                 BuildAboutPage()
             };
@@ -1317,6 +1318,81 @@ namespace Sentinel.Agent
         }
 
         // ═══════════════════════════════════════════════════════════════
+        // Safety (digital coercion / surveillance toolkit — platform-agnostic)
+        // ═══════════════════════════════════════════════════════════════
+
+        private Panel BuildSafetyPage()
+        {
+            var page = new Panel { BackColor = Bg, Padding = new Padding(28) };
+            var layout = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 1,
+                RowCount = 3,
+                BackColor = Bg
+            };
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
+            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 52));
+            page.Controls.Add(layout);
+            layout.Controls.Add(MakeTitle("Safety"), 0, 0);
+
+            var body = MakeMultiline(readOnly: true);
+            body.Dock = DockStyle.Fill;
+            body.Text =
+                "PROTECTING YOU FROM DIGITAL COERCION TOOLKITS\n" +
+                "============================================\n\n" +
+                "Sentinel does not identify people as offenders and does not read your chats.\n" +
+                "It watches THIS Windows PC for tools predators and stalkers often use:\n\n" +
+                "  • Remote control (RATs, abused AnyDesk/TeamViewer-class tools, reverse shells)\n" +
+                "  • Covert surveillance (screen / camera / input capture + persistence)\n" +
+                "  • Account session theft (browsers, messaging, email, social, games, banking)\n" +
+                "  • Extortion malware (exfil + C2 chains)\n\n" +
+                "Scope is platform-agnostic: Discord, email, social apps, browsers, games,\n" +
+                "voice/video — anything that leaves host traces. Not chat moderation.\n\n" +
+                "When a multi-signal chain confirms, Sentinel can kill/quarantine and write a\n" +
+                "sealed evidence pack under:\n" +
+                $"  {GetReportRoot()}\n\n" +
+                "WHAT YOU SHOULD STILL DO\n" +
+                "  1. Revoke sessions on important accounts (email, messaging, social, bank).\n" +
+                "  2. Turn on 2FA everywhere you can.\n" +
+                "  3. Block and report abusers on the platform — Sentinel cannot ban them.\n" +
+                "  4. Use Report to Police with a sealed pack for device crimes.\n" +
+                "  5. If you are in danger offline, contact emergency services / local support.\n\n" +
+                "Honest limit: Sentinel cannot stop offline assault or prove someone's identity\n" +
+                "from a Discord ban reason. It stops and documents machine-side abuse tools.\n";
+            layout.Controls.Add(body, 0, 1);
+
+            var bar = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                FlowDirection = FlowDirection.LeftToRight,
+                WrapContents = false,
+                BackColor = Bg,
+                Padding = new Padding(0, 8, 0, 0)
+            };
+            bar.Controls.Add(MakeChromeButton("Open evidence packs", (_, _) => OpenFolder(GetReportRoot())));
+            bar.Controls.Add(MakeChromeButton("Open Events log", (_, _) =>
+            {
+                try
+                {
+                    var log = Path.Combine(ProgramDataRoot, "events.jsonl");
+                    if (File.Exists(log))
+                        Process.Start(new ProcessStartInfo { FileName = log, UseShellExecute = true });
+                    else
+                        MessageBox.Show(this, "No events.jsonl yet.", "Sentinel", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(this, ex.Message, "Sentinel", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+            }));
+            bar.Controls.Add(MakeChromeButton("Report to Police", (_, _) => ShowPage(2)));
+            layout.Controls.Add(bar, 0, 2);
+            return page;
+        }
+
+        // ═══════════════════════════════════════════════════════════════
         // About
         // ═══════════════════════════════════════════════════════════════
 
@@ -1342,6 +1418,10 @@ namespace Sentinel.Agent
                 "User-session agent for endpoint detection and response.\n" +
                 "The Sentinel service (SYSTEM) owns kills, quarantine, and hardening.\n" +
                 "This agent owns tray UI, keyboard guards, and filing helpers.\n\n" +
+                "Digital coercion / surveillance toolkit defense (v1.9.4):\n" +
+                "  Stops remote-control, stalkerware, and session-theft toolkits on the PC.\n" +
+                "  Does not moderate chat or identify offenders by social profile.\n" +
+                "  See Settings → Safety.\n\n" +
                 "Reportable-grade attacks produce integrity-sealed evidence packs under:\n" +
                 $"  {GetReportRoot()}\n\n" +
                 "Police filing:\n" +

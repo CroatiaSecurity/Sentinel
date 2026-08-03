@@ -1,8 +1,38 @@
 # Sentinel — Threat Model
 
-**Version: 1.8.5**
+**Version: 1.9.4**
 
 This document assumes the attacker has read the source code.
+
+---
+
+## Digital coercion / surveillance toolkit (v1.9.4)
+
+**Mission:** Protect users from **endpoint tools** commonly used to control, watch, or take over a PC in online harassment, sexual coercion, stalkerware, account takeover, and remote blackmail.
+
+**In scope (host behaviour):**
+
+| Toolkit | Examples of signals | Composite / response |
+|---------|---------------------|----------------------|
+| Covert surveillance | Screen capture, webcam, keystroke-class monitors | + remote/C2 → `Covert Surveillance + Remote Channel` |
+| Remote control | Reverse shell, RDP abuse, AnyDesk/TeamViewer-class from staging | + network → `Remote Control Abuse Toolkit` |
+| Session / account theft | Browser/OS credential stores, token theft, CDP/extension abuse | + network/exfil → `Session Theft + Abuse Channel` |
+| Stalkerware | Surveillance + autorun/persistence | `Stalkerware Persistence Chain` |
+| Classic malware | C2, ransomware, BYOVD, injection | Existing composites (unchanged) |
+
+**Out of scope (explicit):**
+
+- Reading Discord / social / email message content  
+- Identifying a person as a “rapist” or sexual offender  
+- Moderating speech or ban-list scraping  
+- Proving offline sexual assault  
+- Stopping abuse that never touches the victim’s Windows host  
+
+**Platforms:** Platform-agnostic. Messaging, social, email, browsers, games, voice/video, remote-support — anything that leaves process, file, registry, or network traces on Windows.
+
+**Evidence:** Coercion-tagged packs include a technical section stating what Sentinel asserts vs does not assert, plus optional affidavit checkboxes the **victim** completes (remote control, recording, session theft, threats/coercion). Sentinel never auto-files with police.
+
+**Honesty for users:** Settings → **Safety** page. Product language must not overclaim.
 
 ---
 

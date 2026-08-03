@@ -112,8 +112,6 @@ namespace Sentinel.Core
         {
             "Cast Device Guard",
             "Module Count Growth",
-            "Screen Capture",
-            "DXGI Desktop Duplication",
             "NeuroBehavior",
             "Visual Anomaly",
             "Cursor:",
@@ -139,6 +137,7 @@ namespace Sentinel.Core
         /// <summary>
         /// Weak attack-adjacent heuristics — may still feed composites, but never alone complete
         /// a ResponsePolicy PID chain nuke (need a real high-confidence terminal leg).
+        /// Includes surveillance legs (screen/webcam) so stalkerware composites can fire (v1.9.4).
         /// </summary>
         private static readonly string[] WeakChainOnlyRuleFragments =
         {
@@ -150,6 +149,11 @@ namespace Sentinel.Core
             "Persistence: New Scheduled Task",
             "Token Theft: SeImpersonatePrivilege",
             "Named Pipe: High-Entropy Name",
+            // Surveillance: composite fuel for coercion toolkit; never sole chain seed
+            "Screen Capture",
+            "DXGI Desktop Duplication",
+            "Desktop Duplication",
+            "Webcam",
         };
 
         /// <summary>
@@ -185,6 +189,11 @@ namespace Sentinel.Core
             "Covert C2",
             "Dropped Payload Active",
             "DGA + C2 Beaconing",
+            // v1.9.4 — digital coercion / stalkerware / remote-control abuse (platform-agnostic)
+            "Covert Surveillance + Remote Channel",
+            "Remote Control Abuse Toolkit",
+            "Session Theft + Abuse Channel",
+            "Stalkerware Persistence Chain",
             "[COMPOSITE]",
         };
 

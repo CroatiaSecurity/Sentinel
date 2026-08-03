@@ -1,6 +1,6 @@
 # Sentinel — Design Document
 
-**Version: 1.9.3**
+**Version: 1.9.4**
 
 ---
 
@@ -266,7 +266,8 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 | `SentinelHealthCheck` | Structured health checks: process, memory, handles, log file, quarantine, thread pool. |
 | `StartupSelfTest` | Verifies ETW, DPAPI, quarantine, log file, and rule loading before activating monitors. |
 | `ThreatReportService` | Reports threats to MalwareBazaar/URLhaus/AbuseIPDB via Cloudflare Worker proxy (HMAC-auth). |
-| `AutoIncidentReporter` | v1.7.7/1.7.8/1.9.3: Reportable-grade evidence packs, integrity seal (SHA-256+HMAC), victim affidavit, zip export, TI share, national portals. Chain-confirmed / composite nukes always write a pack (even if seed confidence is low). Does not file police reports. |
+| `AutoIncidentReporter` | v1.7.7/1.7.8/1.9.3/1.9.4: Reportable-grade evidence packs, integrity seal (SHA-256+HMAC), victim affidavit, zip export, TI share, national portals. Chain-confirmed / composite nukes always write a pack. Coercion-toolkit packs add honest technical scope + optional harm checkboxes. Does not file police reports. |
+| `CoercionAbusePolicy` | v1.9.4: Platform-agnostic classification of remote-control / surveillance / session-theft toolkit signals; pack + toast wording. Not chat moderation. |
 | `LawEnforcementPortals` | Country → cybercrime portal directory (IC3, Action Fraud, MUP, …); INTERPOL info-only. |
 | `IoCScanner` | Loads threat intel indicators from DPAPI-encrypted external cache. |
 | `InstallerHeuristics` | Installer name / Inno extractor / benign prefetch + **`IsLikelyInstallerPath`** (Downloads/Desktop/Program Files; not AppData\Roaming or bare Temp). Used for HighRisk demotion. |
