@@ -1,6 +1,6 @@
 # Sentinel — Design Document
 
-**Version: 1.9.2**
+**Version: 1.9.3**
 
 ---
 
@@ -266,7 +266,7 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 | `SentinelHealthCheck` | Structured health checks: process, memory, handles, log file, quarantine, thread pool. |
 | `StartupSelfTest` | Verifies ETW, DPAPI, quarantine, log file, and rule loading before activating monitors. |
 | `ThreatReportService` | Reports threats to MalwareBazaar/URLhaus/AbuseIPDB via Cloudflare Worker proxy (HMAC-auth). |
-| `AutoIncidentReporter` | v1.7.7/1.7.8: Reportable-grade evidence packs, integrity seal (SHA-256+HMAC), victim affidavit, zip export, TI share, national portals. Does not file police reports. |
+| `AutoIncidentReporter` | v1.7.7/1.7.8/1.9.3: Reportable-grade evidence packs, integrity seal (SHA-256+HMAC), victim affidavit, zip export, TI share, national portals. Chain-confirmed / composite nukes always write a pack (even if seed confidence is low). Does not file police reports. |
 | `LawEnforcementPortals` | Country → cybercrime portal directory (IC3, Action Fraud, MUP, …); INTERPOL info-only. |
 | `IoCScanner` | Loads threat intel indicators from DPAPI-encrypted external cache. |
 | `InstallerHeuristics` | Installer name / Inno extractor / benign prefetch + **`IsLikelyInstallerPath`** (Downloads/Desktop/Program Files; not AppData\Roaming or bare Temp). Used for HighRisk demotion. |
@@ -372,7 +372,7 @@ Emitted as Tier1 `DetectionEvent`s directly via `EmitAsync`. Requires signals fr
 | `Sentinel:ObserveUntilChain` (default **true**) | Demote all kill/quarantine/isolate/host mutation to LogOnly until multi-signal proof of terminal attack (C2 beacon, exfil, token theft, reverse shell, cred dump, BYOVD) |
 | `Sentinel:ChainConfirmMinSignals` (default **2**) | Distinct rules on same PID within window + ≥1 terminal outcome → nuke |
 | `Sentinel:ChainConfirmWindowSeconds` (default **300**) | Rolling correlation window |
-| `Sentinel:SilentObserve` (default **true**) | No toasts / auto evidence packs until chain-confirmed |
+| `Sentinel:SilentObserve` (default **true**) | No toasts / auto evidence packs until chain-confirmed; chain-confirmed nukes always pack + critical toast (v1.9.3) |
 | `Sentinel:EnforceActiveResponse` (default **false**) | When true, `AntiTamperGuard` force-re-enables ActiveResponse if flipped off |
 | DLL unload exemption | `DllUnloadEngine` FreeLibrary/quarantine on proven hostile load may act immediately |
 | CLI `--active-response` | Optional force-enable at process start (legacy) |

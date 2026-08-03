@@ -296,5 +296,133 @@ namespace Sentinel.Tests
         {
             Assert.False(ResponsePolicy.MayPerformInlineHostMutation(ObserveConfig()));
         }
+
+        [Fact]
+        public void Cast_Observe_Is_Weak_Seed_Never_Terminal_Or_Chain()
+        {
+            var cfg = ObserveConfig();
+            var cast = new DetectionEvent
+            {
+                RuleName = "Cast Device Guard: Cast Connection Observed",
+                ProcessId = 9001,
+                ProcessName = "msedge",
+                Confidence = 0.55,
+                SignalType = SignalType.NetworkC2, // even if mis-tagged NetworkC2
+                Tier = DetectionTier.Tier2Indicator,
+                AuthorizedResponse = ResponseAction.LogOnly,
+                Metadata = new Dictionary<string, string>
+                {
+                    ["Mode"] = "observe-only",
+                    ["WeakObserveSeed"] = "true",
+                    ["RemoteIP"] = "192.168.1.100",
+                    ["RemotePort"] = "8009",
+                }
+            };
+
+            Assert.True(ResponsePolicy.IsWeakObserveSeed(cast));
+            Assert.Null(ResponsePolicy.ClassifyTerminalOutcome(cast));
+            Assert.True(ResponsePolicy.IsNonCorrelatingObserveNoise(cast));
+            Assert.False(ResponsePolicy.MayPerformDestructiveResponse(cast, cfg));
+
+            // Cast + module growth must not chain-nuke a browser
+            var growth = new DetectionEvent
+            {
+                RuleName = "Memory Injection: Module Count Growth Detected",
+                ProcessId = 9001,
+                ProcessName = "msedge",
+                Confidence = 0.65,
+                Tier = DetectionTier.Tier2Indicator,
+                AuthorizedResponse = ResponseAction.LogOnly,
+                Metadata = new Dictionary<string, string> { ["WeakObserveSeed"] = "true" }
+            };
+            Assert.True(ResponsePolicy.IsWeakObserveSeed(growth));
+            Assert.False(ResponsePolicy.MayPerformDestructiveResponse(growth, cfg));
+            Assert.False(ResponsePolicy.MayPerformDestructiveResponse(cast, cfg));
+        }
+
+        [Fact]
+        public void Module_Growth_Plus_Ppid_Does_Not_Chain_Nuke()
+        {
+            var cfg = ObserveConfig();
+            var pid = 9002;
+            var growth = new DetectionEvent
+            {
+                RuleName = "Memory Injection: Module Count Growth Detected",
+                ProcessId = pid,
+                ProcessName = "msedge",
+                Confidence = 0.75,
+            };
+            var ppid = new DetectionEvent
+            {
+                RuleName = "PPID Spoofing: Parent PID Mismatch",
+                ProcessId = pid,
+                ProcessName = "dllhost",
+                Confidence = 0.88,
+            };
+
+            Assert.False(ResponsePolicy.MayPerformDestructiveResponse(growth, cfg));
+            Assert.False(ResponsePolicy.MayPerformDestructiveResponse(ppid, cfg));
+        }
+
+        [Fact]
+        public void Chain_Confirm_Promotes_Kill_Fields_For_Evidence_Packs()
+        {
+            var cfg = ObserveConfig();
+            var c2 = new DetectionEvent
+            {
+                RuleName = "C2 Beaconing: Statistical Beacon Detected",
+                SignalType = SignalType.NetworkC2,
+                ProcessId = 9010,
+                ProcessName = "evil.exe",
+                Confidence = 0.90,
+                Tier = DetectionTier.Tier1Behavioral,
+                AuthorizedResponse = ResponseAction.NetworkIsolate,
+            };
+            var inject = new DetectionEvent
+            {
+                RuleName = "Threat Intel: Remote Memory Injection",
+                SignalType = SignalType.ProcessInjection,
+                ProcessId = 9010,
+                ProcessName = "evil.exe",
+                Confidence = 0.88,
+                Tier = DetectionTier.Tier1Behavioral,
+                // Start as LogOnly — chain confirm must promote kill-grade fields
+                AuthorizedResponse = ResponseAction.LogOnly,
+            };
+
+            Assert.False(ResponsePolicy.MayPerformDestructiveResponse(c2, cfg));
+            Assert.True(ResponsePolicy.MayPerformDestructiveResponse(inject, cfg));
+            Assert.True(inject.KillAuthorized); // derived from AuthorizedResponse
+            Assert.Equal(DetectionTier.Tier1Behavioral, inject.Tier);
+            Assert.True(inject.AuthorizedResponse >= ResponseAction.KillProcessTree);
+            Assert.Equal(ResponseAction.QuarantineAndKill, inject.AuthorizedResponse);
+            Assert.Equal("true", inject.Metadata[ResponsePolicy.ChainConfirmedKey]);
+        }
+
+        [Fact]
+        public void Low_Confidence_C2_Does_Not_Complete_Chain()
+        {
+            var cfg = ObserveConfig();
+            var lowC2 = new DetectionEvent
+            {
+                RuleName = "C2 Beaconing: Statistical Beacon Detected",
+                SignalType = SignalType.NetworkC2,
+                ProcessId = 9020,
+                ProcessName = "maybe.exe",
+                Confidence = 0.50,
+            };
+            var inject = new DetectionEvent
+            {
+                RuleName = "Threat Intel: Remote Memory Injection",
+                SignalType = SignalType.ProcessInjection,
+                ProcessId = 9020,
+                ProcessName = "maybe.exe",
+                Confidence = 0.88,
+            };
+
+            Assert.False(ResponsePolicy.MayPerformDestructiveResponse(lowC2, cfg));
+            // Injection alone is not terminal; low-conf C2 must not authorize as terminal leg
+            Assert.False(ResponsePolicy.MayPerformDestructiveResponse(inject, cfg));
+        }
     }
 }

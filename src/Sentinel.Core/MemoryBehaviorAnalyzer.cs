@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -104,12 +105,19 @@ namespace Sentinel.Core
                                     RuleName = "Memory Injection: Module Count Growth Detected",
                                     Evidence = $"Process '{name}' (PID {proc.Id}) module count grew from {prevCount} to {currentModuleCount} (+{growth})",
                                     Reasoning = "Module growth can indicate DLL injection. Observe-first: LogOnly until " +
-                                                "corroborated by injection/network/file composites or a President's Law rule.",
+                                                "corroborated by injection/network/file composites or a President's Law rule. " +
+                                                "Never a chain seed by itself (browsers/IDEs grow modules constantly).",
                                     Confidence = suspiciousPath ? 0.75 : 0.65,
                                     Tier = DetectionTier.Tier2Indicator,
                                     AuthorizedResponse = ResponseAction.LogOnly,
                                     ProcessName = name,
-                                    ProcessId = proc.Id
+                                    ProcessId = proc.Id,
+                                    SignalType = SignalType.Generic,
+                                    Metadata = new Dictionary<string, string>
+                                    {
+                                        ["WeakObserveSeed"] = "true",
+                                        ["ModuleGrowth"] = growth.ToString(),
+                                    }
                                 });
                             }
                         }

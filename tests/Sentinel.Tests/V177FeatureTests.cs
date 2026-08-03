@@ -251,6 +251,73 @@ namespace Sentinel.Tests
             }
         }
 
+        [Fact]
+        public async Task HandleDetectionAsync_ChainConfirmed_WritesPack_Even_LowConfidence_SilentObserve()
+        {
+            // v1.9.3 regression: chain nukes must produce packs even when the *seed* rule
+            // had low confidence / KillAuthorized=false before response promotion.
+            var temp = Path.Combine(Path.GetTempPath(), "sentinel_auto_ir_chain_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(temp);
+            try
+            {
+                var cfg = new AutoIncidentReportingConfig
+                {
+                    Enabled = true,
+                    GenerateLocalEvidencePack = true,
+                    ReportThreatIntel = false,
+                    NotifyUser = false,
+                    ReportableGradeOnly = true,
+                    MinConfidence = 0.85,
+                    KillAuthorizedMinConfidence = 0.80,
+                    IncludeKillAuthorized = true,
+                    ReportDirectory = temp,
+                    CountryCode = "HR",
+                    CooldownSeconds = 0,
+                    MaxPacksPerHour = 100,
+                };
+                var threat = new ThreatReportService(new ThreatReportingConfig { Enabled = false },
+                    NullLogger<ThreatReportService>.Instance);
+                var sentinelCfg = new SentinelConfig
+                {
+                    SilentObserve = true,
+                    ObserveUntilChain = true,
+                    ActiveResponse = true,
+                };
+                var reporter = new AutoIncidentReporter(cfg, threat, NullLogger<AutoIncidentReporter>.Instance,
+                    sentinelConfig: sentinelCfg);
+
+                var detection = new DetectionEvent
+                {
+                    RuleName = "Threat Intel: Remote Memory Injection",
+                    SignalType = SignalType.ProcessInjection,
+                    Tier = DetectionTier.Tier1Behavioral,
+                    Confidence = 0.55, // below MinConfidence — previously blocked packs
+                    AuthorizedResponse = ResponseAction.QuarantineAndKill,
+                    ProcessName = "evil.exe",
+                    ProcessId = 4242,
+                    Evidence = "injection + C2 chain confirmed",
+                    Reasoning = "Multi-signal chain to C2Beacon",
+                    Metadata = new Dictionary<string, string>
+                    {
+                        [ResponsePolicy.ChainConfirmedKey] = "true",
+                        [ResponsePolicy.TerminalOutcomeKey] = "C2Beacon",
+                    }
+                };
+
+                Assert.True(AutoIncidentReporter.IsChainConfirmedOrComposite(detection));
+                Assert.True(ResponsePolicy.ShouldAutoReportIncident(detection, sentinelCfg));
+
+                await reporter.HandleDetectionAsync(detection);
+
+                Assert.Equal(1, reporter.PacksGenerated);
+                Assert.Single(Directory.GetDirectories(temp));
+            }
+            finally
+            {
+                try { Directory.Delete(temp, true); } catch { /* best effort */ }
+            }
+        }
+
         private static AutoIncidentReporter CreateReporter(out string tempDir, out AutoIncidentReportingConfig cfg)
         {
             tempDir = Path.Combine(Path.GetTempPath(), "sentinel_auto_ir_unit_" + Guid.NewGuid().ToString("N"));

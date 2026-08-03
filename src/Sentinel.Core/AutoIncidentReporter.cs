@@ -189,6 +189,12 @@ namespace Sentinel.Core
             if (IsTokenTheftOsFalsePositive(detection))
                 return false;
 
+            // v1.9.3: chain-confirmed / composite nukes always get a sealed evidence pack.
+            // Previously SilentObserve passed but ReportableGradeOnly + low seed Confidence
+            // (or KillAuthorized not written back) dropped packs after real kills.
+            if (IsChainConfirmedOrComposite(detection))
+                return true;
+
             var minConf = _config.MinConfidence;
             var killFloor = _config.ReportableGradeOnly
                 ? _config.KillAuthorizedMinConfidence
@@ -235,6 +241,18 @@ namespace Sentinel.Core
                 return true;
             }
 
+            return false;
+        }
+
+        public static bool IsChainConfirmedOrComposite(DetectionEvent detection)
+        {
+            if (detection == null) return false;
+            if (ResponsePolicy.IsNukeComposite(detection))
+                return true;
+            if (detection.Metadata != null &&
+                detection.Metadata.TryGetValue(ResponsePolicy.ChainConfirmedKey, out var v) &&
+                string.Equals(v, "true", StringComparison.OrdinalIgnoreCase))
+                return true;
             return false;
         }
 

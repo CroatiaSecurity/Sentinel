@@ -347,6 +347,9 @@ namespace Sentinel.Core
                 else if (chainAuthorized && !dllExempt)
                 {
                     // Nuke with everything once the chain is proven.
+                    // Write authority back onto the detection so AutoIncidentReporter
+                    // (and any post-response consumers) see kill-grade chain-confirmed state.
+                    ResponsePolicy.PromoteChainConfirmedFields(detection);
                     effectiveTier = DetectionTier.Tier1Behavioral;
                     effectiveResponse = ResponseAction.QuarantineAndKill;
                     effectiveKillAuthorized = true;

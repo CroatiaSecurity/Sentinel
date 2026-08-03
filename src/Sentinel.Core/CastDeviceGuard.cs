@@ -245,12 +245,14 @@ namespace Sentinel.Core
                         AuthorizedResponse = ResponseAction.LogOnly,
                         ProcessName = obsProc,
                         ProcessId = conn.OwnerPid,
-                        SignalType = SignalType.NetworkC2,
+                        // Generic — never NetworkC2. LAN Cast observe must not seed C2Beacon chain nukes.
+                        SignalType = SignalType.Generic,
                         Metadata = new Dictionary<string, string>
                         {
                             ["RemoteIP"] = conn.RemoteAddress,
                             ["RemotePort"] = conn.RemotePort.ToString(),
                             ["Mode"] = "observe-only",
+                            ["WeakObserveSeed"] = "true",
                             ["FirewallBlocked"] = "False"
                         }
                     });
@@ -284,19 +286,22 @@ namespace Sentinel.Core
                                $"NOT in TrustedCastDevices. Firewall block applied.",
                     Reasoning = "A process connected to a LAN device on Cast port (8008/8009). " +
                                 "TrustedCastDevices is non-empty and this IP is not listed. " +
-                                "Rogue LAN devices use Cast protocol as a C2 relay through the browser.",
+                                "Rogue LAN Cast endpoints can be used as a relay through the browser; " +
+                                "firewall block applied. Not classified as NetworkC2 terminal.",
                     Confidence = 0.92,
-                    Tier = DetectionTier.Tier1Behavioral,
+                    Tier = DetectionTier.Tier2Indicator,
                     AuthorizedResponse = ResponseAction.LogOnly,
                     ProcessName = procName,
                     ProcessId = conn.OwnerPid,
-                    SignalType = SignalType.NetworkC2,
+                    // Keep as Generic/weak seed — LAN Cast block is not a C2Beacon terminal family.
+                    SignalType = SignalType.Generic,
                     Metadata = new Dictionary<string, string>
                     {
                         ["RemoteIP"] = conn.RemoteAddress,
                         ["RemotePort"] = conn.RemotePort.ToString(),
                         ["IsBrowser"] = isBrowser.ToString(),
                         ["Mode"] = "enforce-allowlist",
+                        ["WeakObserveSeed"] = "true",
                         ["FirewallBlocked"] = "True"
                     }
                 });

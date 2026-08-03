@@ -150,6 +150,15 @@ namespace Sentinel.Tests
 
             try
             {
+                // Shared fixture log may already contain Lsass lines from earlier tests in this class.
+                var logPath = Path.Combine(_tempDir, "events.jsonl");
+                try
+                {
+                    if (File.Exists(logPath))
+                        File.WriteAllText(logPath, string.Empty);
+                }
+                catch { /* best effort */ }
+
                 var context = new FusedTelemetryContext
                 {
                     TriggeringEvent = new ProcessTelemetry
@@ -166,7 +175,7 @@ namespace Sentinel.Tests
                 // Submit same event twice rapidly (within dedup window)
                 engine.SubmitTelemetry(context);
                 engine.SubmitTelemetry(context);
-                await Task.Delay(500);
+                await Task.Delay(800);
 
                 // Should only see ONE detection logged (dedup suppresses the second).
                 // Count detection-type lines only — response rows may also mention the rule name.

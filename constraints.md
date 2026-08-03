@@ -1,6 +1,6 @@
 # Sentinel — Constraints
 
-**Version: 1.9.2**
+**Version: 1.9.3**
 
 ---
 
@@ -21,8 +21,10 @@
 | Observe-until-chain (v1.8.6) | Kill / quarantine / isolate / host mutation ONLY after multi-signal or composite proof of a **kill-grade terminal**: token theft, credential dump, reverse shell, C2 beaconing. Enforced in `ResponsePolicy` + `AdvancedResponseEngine`. Steam DirectX / System32 redistributable writes are never terminal. |
 | Tier1 = kill-grade only | `ResponsePolicy.ApplyTierLaw`: Tier1 only for high-confidence (≥`MinTier1Confidence`, default 0.85) token theft / cred dump / reverse shell / C2, or multi-signal composites that prove those. All other monitor signals are Tier2 + LogOnly observe fuel for correlation. Critical score alone must not promote noise to Tier1. |
 | DirectX / redist = Tier2 observe only | Steam DirectX, VC++, GPU redistributables may emit **1–2 Tier2** signals (e.g. System32 write). They must **never** be Tier1, never chain-seed, never composite legs (`IsBenignInstallerNoise` / `IsNonCorrelatingObserveNoise`). |
+| Weak observe seeds never chain-nuke (v1.9.3) | Cast observe, module-count growth, screen/UX heuristics, outbound-whitelist noise (`IsWeakObserveSeed` / `IsPureUxObserveNoise`) never classify as terminal and never fill the PID chain buffer. Pure UX also skips composites. Attack-adjacent weak signals (SeImpersonate, PPID) may still feed composites but not alone complete a chain nuke. Terminal chain legs require conf ≥ `MinTier1Confidence`. |
+| Chain-confirmed packs always (v1.9.3) | When a chain-confirmed nuke fires, `AutoIncidentReporter` MUST write a sealed evidence pack. Do not drop packs because the seed rule had low confidence or local-only kill flags. |
 | DLL unloaders exempt | `DllUnloadEngine` (and proven sideload FreeLibrary/quarantine) may remediate immediately. All other monitors observe until chain. |
-| Silent observe (v1.8.6) | `SilentObserve=true`: no toasts / auto evidence packs until chain-confirmed. Detection logging always continues. |
+| Silent observe (v1.8.6 / v1.9.3) | `SilentObserve=true`: no toasts / auto evidence packs until chain-confirmed. Detection logging always continues. Chain-confirmed nukes always produce packs + critical toast. |
 | Observe-first for user activity (v1.8.3) | Weak single-signal heuristics (shell+port, Downloads network, SeImpersonate alone, cloud-sync tools) MUST be LogOnly. IPSec default MUST be attack-only ports — not SSH/RDP/SMB. Full lockdown only via `RestrictivePortHardening`. |
 | Observe-first: no touch until proven malicious | Detection scanners stay fully armed. Single-signal identity/path noise → LogOnly. Proven terminal chains → full nuke. Games: skip process-memory handles only (Denuvo) — fail-closed when path unresolved. |
 | Process-memory defenses stay armed | Do not disable Hell's Gate, injection, ETW-patch, or DLL unload **capability**. Workaround for Denuvo: skip handle opens via `IsGameOrAntiCheatPath` / `IsGameOrAntiCheatProcess` only — **fail closed** when image path is unresolved (no `PROCESS_VM_READ` on unknown PIDs). `OpenRemoteHandle` must refuse `VM_READ` unless `CanInspect` passes. Name/path skips are **not** trust grants. Workaround for AV PE-import heuristics: `NativeProcessMemory` dynamic resolve — never gut the feature. |

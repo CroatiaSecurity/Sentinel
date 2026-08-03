@@ -2,14 +2,16 @@
 
 Real-time endpoint detection and response for Windows. Runs as a background service, monitors system behavior, and kills threats automatically when multiple signals correlate.
 
-**Current version: 1.9.2**
+**Current version: 1.9.3**
 
-### Product posture (v1.9.2 — observe-until-chain + Tier1 kill-grade only)
+### Product posture (v1.9.3 — observe-until-chain + Tier1 kill-grade only)
 
-**Full sensors. Silent until a real attack chain. Then nuke.**
+**Full sensors. Silent until a real attack chain. Then nuke — and seal an evidence pack.**
 
 - **Observe by default** (`ObserveUntilChain: true`): every monitor logs to `events.jsonl`; **no kill / quarantine / isolate / host rewrite / toast / evidence pack** on single-signal noise.
 - **Nuke only** when multi-signal / composite chain points at: **C2 beaconing**, **exfil**, **token theft**, **reverse shell**, **credential dump**, or **BYOVD** → quarantine + kill + isolate + chain tracer.
+- **Evidence packs on every chain-confirmed nuke** (`AutoIncidentReporter`): integrity-sealed pack under `%ProgramData%\Sentinel\IncidentReports` + critical toast (not blocked by low seed confidence).
+- **Weak observe seeds never chain-nuke:** LAN Cast observe, module-count growth, screen-capture/UX heuristics, outbound-whitelist noise, etc. (still logged; not C2Beacon terminal).
 - **DLL unloaders stay armed** (`DllUnloadEngine`): FreeLibrary / quarantine on **proven** hostile Temp/plant module loads only.
 - **Not an attack:** Steam DirectX, Vulkan/CUDA, GPU driver redistributables writing System32/SysWOW64 (and PID‑0 writer races) → LogOnly, never a kill seed.
 - **Silent observe** (`SilentObserve: true`): no peeps until chain-confirmed.
@@ -61,7 +63,7 @@ Sentinel is honest about its limits:
 - **Kernel implants already loaded and active** — Sentinel runs in userland. A kernel driver that is already executing can suppress any user-mode process. However, Sentinel detects the *entire attack chain leading up to driver load* (privilege escalation, driver file drop, service creation, cert planting) and can neutralize attacks before they reach kernel. See "BYOVD Defense" below.
 - **Nation-state zero-days with novel kernel implants** — Custom kernel exploits targeting unknown vulnerabilities are difficult for any behavioral tool to catch at the moment of exploitation. Sentinel still shrinks classic lateral-movement surface (attack-only IPSec, ASR, service/registry hardening, reactive threat-intel isolate) without pre-breaking SSH/RDP for normal users. For kiosk-style lockdown, set `RestrictivePortHardening: true`.
 - **Pre-boot attacks** — Sentinel starts after Windows. It detects boot config changes (BCD, EFI, boot drivers) after the fact via `BootIntegrityGuard`.
-- **Weak / non-terminal signals alone** — Shell using SSH, Downloads network, SeImpersonate alone, System32 redistributable writes (DirectX/GPU), netsh noise: **logged**, not killed. Destructive response requires a multi-signal chain to C2/exfil/token/shell/cred-dump/BYOVD (`ObserveUntilChain`, v1.9.2).
+- **Weak / non-terminal signals alone** — Shell using SSH, Downloads network, SeImpersonate alone, LAN Cast observe, module-count growth, System32 redistributable writes (DirectX/GPU), netsh noise: **logged**, not killed. Destructive response requires a multi-signal chain to C2/exfil/token/shell/cred-dump/BYOVD (`ObserveUntilChain`, v1.9.3).
 
 ---
 
@@ -132,7 +134,7 @@ Full transparency in [THREAT_MODEL.md](THREAT_MODEL.md).
 
 ## Installation
 
-Download **`SentinelSetup-1.9.2.exe`** from [GitHub Releases](https://github.com/CroatiaSecurity/Sentinel/releases) (or `releases/1.9.2/` after a local build) and run it as Administrator.
+Download **`SentinelSetup-1.9.3.exe`** from [GitHub Releases](https://github.com/CroatiaSecurity/Sentinel/releases) (or `releases/1.9.3/` after a local build) and run it as Administrator.
 
 **Minimum installer** — framework-dependent `net48-windows` (no bundled runtime). Small setup package.
 

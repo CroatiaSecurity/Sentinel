@@ -2,6 +2,27 @@
 
 All notable changes to Sentinel are documented in this file.
 
+## [1.9.3] - 2026-08-03
+
+### Fixed — Evidence packs after chain-confirmed nukes
+- **Root cause:** `SilentObserve` allowed reporting only when `Metadata.ChainConfirmed=true`, but `ShouldReport` still required high confidence / kill-grade fields that the response engine kept in *local* variables. Result: real chain kills (and toast path) produced **zero** packs under `%ProgramData%\Sentinel\IncidentReports`.
+- **`ResponsePolicy.PromoteChainConfirmedFields`:** on chain confirm, write Tier1 + `QuarantineAndKill` back onto the detection (so `KillAuthorized` derives true).
+- **`AdvancedResponseEngine`:** calls promote on chain-confirmed nuke path.
+- **`AutoIncidentReporter.ShouldReport`:** chain-confirmed / nuke composites always generate a sealed local evidence pack (still blocked for TokenTheft OS false positives).
+
+### Fixed — False chain nukes (Cast / module growth / weak seeds)
+- **Root cause:** `Cast Device Guard: Cast Connection Observed` was emitted as `SignalType.NetworkC2`, so `ClassifyTerminalOutcome` treated LAN Chromecast/Nest traffic as **C2Beacon**. Any second weak signal on the same browser PID (e.g. module-count growth) triggered `ChainConfirmed nuke (C2Beacon)` and killed `msedge`.
+- **`CastDeviceGuard`:** observe + enforce Cast events use `SignalType.Generic` + `WeakObserveSeed=true` (never NetworkC2 terminal).
+- **`MemoryBehaviorAnalyzer`:** module-count growth tagged `WeakObserveSeed` (browsers/IDEs grow modules constantly).
+- **`ResponsePolicy`:**
+  - `IsWeakObserveSeed` — Cast, module growth, screen capture, UX heuristics, BitLocker status, outbound whitelist noise, PPID spoof, ephemeral process, SeImpersonate-alone, etc. never enter the chain buffer and never classify as terminal.
+  - Terminal legs for chain confirm require confidence ≥ `MinTier1Confidence` (default **0.85**).
+  - `IsNonCorrelatingObserveNoise` includes weak seeds (skips composite legs too).
+
+### Tests
+- ResponsePolicy: Cast/module-growth no chain; low-conf C2 no chain; chain promote fields.
+- AutoIncidentReporter: chain-confirmed pack with SilentObserve + low seed confidence.
+
 ## [1.9.2] - 2026-08-02
 
 ### Added — Force-remove legacy `*.sentinel_verdict` on upgrade

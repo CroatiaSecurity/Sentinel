@@ -105,6 +105,54 @@ namespace Sentinel.Core
         };
 
         /// <summary>
+        /// Pure UX / ambient noise — excluded from BOTH chain buffer and multi-signal composites.
+        /// (Cast observe, module-count growth, screen capture, BitLocker status, whitelist noise, …)
+        /// </summary>
+        private static readonly string[] PureUxObserveRuleFragments =
+        {
+            "Cast Device Guard",
+            "Module Count Growth",
+            "Screen Capture",
+            "DXGI Desktop Duplication",
+            "NeuroBehavior",
+            "Visual Anomaly",
+            "Cursor:",
+            "Takeover Movement",
+            "Hardware Security: BitLocker",
+            "Self-Protection: Unexpected Module",
+            "Outbound Whitelist",
+            "Connection to Non-Whitelisted",
+            "Network Policy: Unusual Destination",
+            "Attack Tool: Connection from Suspicious Path",
+            "Traffic Anomaly: Upload Volume",
+            "Network: New Local TCP Listener",
+            "Network Share: Inbound SMB",
+            "Browser Extension: New Extension",
+            "Boot Integrity: BCD",
+            "Boot Integrity: New Boot Driver",
+            "Firewall Integrity: Bulk Rule",
+            "Anti-Tamper: IPSec Policy Deleted",
+            "Anti-Tamper: Hosts File Modification",
+            "C2 Pairing: Failover",
+        };
+
+        /// <summary>
+        /// Weak attack-adjacent heuristics — may still feed composites, but never alone complete
+        /// a ResponsePolicy PID chain nuke (need a real high-confidence terminal leg).
+        /// </summary>
+        private static readonly string[] WeakChainOnlyRuleFragments =
+        {
+            "PPID Spoofing",
+            "Parent PID Mismatch",
+            "Ephemeral Process",
+            "Self-Deleting",
+            "Privilege Escalation: Elevated Process from User Path",
+            "Persistence: New Scheduled Task",
+            "Token Theft: SeImpersonatePrivilege",
+            "Named Pipe: High-Entropy Name",
+        };
+
+        /// <summary>
         /// Secondary weak rules that are benign ONLY when the process/path is a known
         /// DirectX / VC++ / installer redistributable (not for arbitrary processes).
         /// </summary>
@@ -238,6 +286,65 @@ namespace Sentinel.Core
         }
 
         /// <summary>
+        /// Weak observe heuristics that must never classify as terminal or fill the chain buffer.
+        /// Pure UX noise is also excluded from multi-signal composites.
+        /// </summary>
+        public static bool IsWeakObserveSeed(DetectionEvent? detection)
+        {
+            if (detection == null) return false;
+
+            if (detection.Metadata != null &&
+                detection.Metadata.TryGetValue("WeakObserveSeed", out var flag) &&
+                string.Equals(flag, "true", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            // Explicit observe-only Cast mode must never be NetworkC2 terminal fuel.
+            if (detection.Metadata != null &&
+                detection.Metadata.TryGetValue("Mode", out var mode) &&
+                string.Equals(mode, "observe-only", StringComparison.OrdinalIgnoreCase) &&
+                (detection.RuleName?.IndexOf("Cast Device Guard", StringComparison.OrdinalIgnoreCase) ?? -1) >= 0)
+                return true;
+
+            var r = detection.RuleName ?? "";
+            foreach (var f in PureUxObserveRuleFragments)
+            {
+                if (r.IndexOf(f, StringComparison.OrdinalIgnoreCase) >= 0)
+                    return true;
+            }
+
+            foreach (var f in WeakChainOnlyRuleFragments)
+            {
+                if (r.IndexOf(f, StringComparison.OrdinalIgnoreCase) >= 0)
+                    return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Pure UX / ambient noise only — excluded from multi-signal composites.
+        /// Attack-adjacent weak signals (SeImpersonate, PPID, …) still feed composites.
+        /// </summary>
+        public static bool IsPureUxObserveNoise(DetectionEvent? detection)
+        {
+            if (detection == null) return false;
+
+            if (detection.Metadata != null &&
+                detection.Metadata.TryGetValue("WeakObserveSeed", out var flag) &&
+                string.Equals(flag, "true", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            var r = detection.RuleName ?? "";
+            foreach (var f in PureUxObserveRuleFragments)
+            {
+                if (r.IndexOf(f, StringComparison.OrdinalIgnoreCase) >= 0)
+                    return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
         /// Classify terminal outcome family from rule/evidence/signal type, or null if not terminal.
         /// </summary>
         public static string? ClassifyTerminalOutcome(DetectionEvent detection)
@@ -246,6 +353,10 @@ namespace Sentinel.Core
 
             // Installer / DirectX / GPU redistributable noise is never terminal.
             if (IsBenignInstallerNoise(detection))
+                return null;
+
+            // Weak observe seeds never become terminal families (even if mis-tagged NetworkC2).
+            if (IsWeakObserveSeed(detection))
                 return null;
 
             switch (detection.SignalType)
@@ -268,7 +379,7 @@ namespace Sentinel.Core
             {
                 foreach (var f in fragments)
                 {
-                    if (haystack.IndexOf(f) >= 0)
+                    if (haystack.IndexOf(f, StringComparison.OrdinalIgnoreCase) >= 0)
                         return outcome;
                 }
             }
@@ -357,11 +468,12 @@ namespace Sentinel.Core
         }
 
         /// <summary>
-        /// True when this signal must not count toward multi-signal composites or chain nukes.
-        /// DirectX installs may log Tier2 once or twice; they must never satisfy composite legs.
+        /// True when this signal must not count toward multi-signal composites.
+        /// DirectX / pure UX observe noise never satisfy composite legs. Attack-adjacent weak
+        /// seeds (SeImpersonate, PPID, …) still feed composites but not ResponsePolicy chain nukes.
         /// </summary>
         public static bool IsNonCorrelatingObserveNoise(DetectionEvent detection)
-            => detection == null || IsBenignInstallerNoise(detection);
+            => detection == null || IsBenignInstallerNoise(detection) || IsPureUxObserveNoise(detection);
 
         public static bool IsNukeComposite(DetectionEvent detection)
         {
@@ -389,10 +501,17 @@ namespace Sentinel.Core
 
             if (detection.Metadata != null &&
                 detection.Metadata.TryGetValue(ChainConfirmedKey, out var already) &&
-                string.Equals(already, "true"))
+                string.Equals(already, "true", StringComparison.OrdinalIgnoreCase))
+            {
+                PromoteChainConfirmedFields(detection);
                 return true;
+            }
 
             if (IsBenignInstallerNoise(detection))
+                return false;
+
+            // Weak observe seeds never fill the chain buffer (Cast, module growth, UX noise, …).
+            if (IsWeakObserveSeed(detection))
                 return false;
 
             if (IsNukeComposite(detection))
@@ -411,6 +530,9 @@ namespace Sentinel.Core
 
             int minSignals = Math.Max(2, config.ChainConfirmMinSignals);
             int windowSec = Math.Max(30, config.ChainConfirmWindowSeconds);
+            double minTerminalConf = config.MinTier1Confidence > 0
+                ? config.MinTier1Confidence
+                : DefaultMinTier1Confidence;
             var window = TimeSpan.FromSeconds(windowSec);
 
             var buffer = PidBuffers.GetOrAdd(pid, _ => new PidSignalBuffer());
@@ -418,20 +540,45 @@ namespace Sentinel.Core
             {
                 var now = DateTime.UtcNow;
                 buffer.Entries.RemoveAll(e => now - e.When > window);
-                buffer.Entries.Add(new SignalEntry(detection.RuleName ?? "unknown", ClassifyTerminalOutcome(detection), now));
 
-                var distinctRules = buffer.Entries.Select(e => e.RuleName).Distinct(StringComparer.OrdinalIgnoreCase).Count();
-                var terminal = buffer.Entries.Select(e => e.Outcome).FirstOrDefault(o => o != null);
+                var outcome = ClassifyTerminalOutcome(detection);
+                double conf = detection.Confidence;
+                if (conf <= 0 && detection.Metadata != null &&
+                    detection.Metadata.TryGetValue("ThreatScore", out var scoreStr) &&
+                    double.TryParse(scoreStr, out var score))
+                {
+                    conf = score > 1.0 ? score / 100.0 : score;
+                }
+
+                // Low-confidence terminal labels are observe fuel only — do not store as terminal.
+                if (outcome != null && conf < minTerminalConf)
+                    outcome = null;
+
+                buffer.Entries.Add(new SignalEntry(
+                    detection.RuleName ?? "unknown",
+                    outcome,
+                    conf,
+                    now));
+
+                var distinctRules = buffer.Entries
+                    .Select(e => e.RuleName)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Count();
+                var terminal = buffer.Entries
+                    .Where(e => e.Outcome != null && e.Confidence >= minTerminalConf)
+                    .Select(e => e.Outcome)
+                    .FirstOrDefault(o => o != null);
 
                 if (distinctRules >= minSignals && terminal != null)
                 {
-                    TagChainConfirmed(detection, terminal);
+                    TagChainConfirmed(detection, terminal!);
                     return true;
                 }
 
-                // Two+ terminal-family signals of different families (e.g. token + reverse shell)
+                // Two+ high-confidence terminal-family signals of different families
+                // (e.g. token + reverse shell) — still require min confidence each.
                 var terminalFamilies = buffer.Entries
-                    .Where(e => e.Outcome != null)
+                    .Where(e => e.Outcome != null && e.Confidence >= minTerminalConf)
                     .Select(e => e.Outcome!)
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .ToList();
@@ -506,6 +653,22 @@ namespace Sentinel.Core
             detection.Metadata ??= new Dictionary<string, string>();
             detection.Metadata[ChainConfirmedKey] = "true";
             detection.Metadata[TerminalOutcomeKey] = outcome;
+            PromoteChainConfirmedFields(detection);
+        }
+
+        /// <summary>
+        /// Write kill-grade fields back onto the detection so AutoIncidentReporter /
+        /// orchestrator see the same authority the response engine used for the nuke.
+        /// </summary>
+        public static void PromoteChainConfirmedFields(DetectionEvent detection)
+        {
+            if (detection == null) return;
+            detection.Tier = DetectionTier.Tier1Behavioral;
+            // KillAuthorized is derived from AuthorizedResponse >= KillProcess
+            if (detection.AuthorizedResponse < ResponseAction.KillProcessTree)
+                detection.AuthorizedResponse = ResponseAction.QuarantineAndKill;
+            detection.Metadata ??= new Dictionary<string, string>();
+            detection.Metadata[ChainConfirmedKey] = "true";
         }
 
         private sealed class PidSignalBuffer
@@ -513,7 +676,7 @@ namespace Sentinel.Core
             public List<SignalEntry> Entries { get; } = new();
         }
 
-        private readonly record struct SignalEntry(string RuleName, string? Outcome, DateTime When);
+        private readonly record struct SignalEntry(string RuleName, string? Outcome, double Confidence, DateTime When);
 
         /// <summary>Test helper — clear PID buffers between tests.</summary>
         internal static void ResetForTests() => PidBuffers.Clear();
