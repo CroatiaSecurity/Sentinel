@@ -2,6 +2,41 @@
 
 All notable changes to Sentinel are documented in this file.
 
+## [1.9.5] - 2026-08-03
+
+### Added — Windows Event Log trail (critical events only)
+Durable **secondary** audit trail alongside JSONL for SIEM / Event Viewer / LE chain-of-custody.
+
+- **`SentinelEventLogWriter`:** writes to Windows **Application** log, source **Sentinel** (configurable).
+- **Event IDs:** 1000 service start · 1001 stop · 1100 chain response · 1200 evidence pack · 1400 anti-tamper · 1500 heartbeat.
+- **Default CriticalOnly:** no Tier2 observe spam — only lifecycle, chain-confirmed responses, packs, heartbeat.
+- **Wired:** service start/stop, `AdvancedResponseEngine` destructive/chain actions, `AutoIncidentReporter` pack seal, optional heartbeat hosted service.
+- **Evidence packs** note dual trail (JSONL pack + Event Log when available).
+
+### Hardening — Graceful degradation on barebone / custom Windows
+Stripped images often lack or break Event Log, ETW, WMI, toast, etc. 1.9.5 policy:
+
+- Event Log **CreateEventSource / WriteEntry** failure → **permanently disable** Event Log trail for the process; **JSONL continues**.
+- Never throw from response/pack/service paths due to Event Log.
+- Rate limit (`MaxWritesPerMinute`, default 30) so a broken log stack is not hammered.
+- Prefer **Application** log (not custom channel) for maximum availability on custom builds.
+- Heartbeat and writes no-op when disabled; service still starts.
+- Existing ETW → WMI/poll fallback unchanged; monitor start failures still isolated.
+
+### Config (`Sentinel:WindowsEventLog`)
+```json
+"WindowsEventLog": {
+  "Enabled": true,
+  "SourceName": "Sentinel",
+  "LogName": "Application",
+  "CriticalOnly": true,
+  "MaxWritesPerMinute": 30,
+  "HeartbeatEnabled": true,
+  "HeartbeatMinutes": 60
+}
+```
+Set `Enabled: false` to opt out entirely.
+
 ## [1.9.4] - 2026-08-03
 
 ### Added — Digital coercion / surveillance toolkit defense (platform-agnostic)

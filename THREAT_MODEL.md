@@ -1,6 +1,6 @@
 # Sentinel — Threat Model
 
-**Version: 1.9.4**
+**Version: 1.9.5**
 
 This document assumes the attacker has read the source code.
 
@@ -33,6 +33,20 @@ This document assumes the attacker has read the source code.
 **Evidence:** Coercion-tagged packs include a technical section stating what Sentinel asserts vs does not assert, plus optional affidavit checkboxes the **victim** completes (remote control, recording, session theft, threats/coercion). Sentinel never auto-files with police.
 
 **Honesty for users:** Settings → **Safety** page. Product language must not overclaim.
+
+---
+
+## Windows Event Log + barebone Windows (v1.9.5)
+
+| Capability | Full Windows | Stripped / custom image |
+|------------|--------------|-------------------------|
+| JSONL `events.jsonl` | Primary trail | Primary trail (required) |
+| Windows Event Log Application/Sentinel | Secondary trail (critical IDs) | **Auto-disabled** if create/write fails |
+| Unified ETW | ~50 ms sensors | Falls back to WMI/poll |
+| Toasts | Best effort | Skip if no session / AppId |
+| TI proxy / feeds | Optional | Fail closed without secret |
+
+Attacker wiping only Event Log does not erase JSONL packs. Attacker wiping JSONL may still leave Event Log IDs 1100/1200 if the service was up. Neither is a substitute for offline backups of packs.
 
 ---
 

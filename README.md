@@ -2,9 +2,9 @@
 
 Real-time endpoint detection and response for Windows. Runs as a background service, monitors system behavior, and kills threats automatically when multiple signals correlate.
 
-**Current version: 1.9.4**
+**Current version: 1.9.5**
 
-### Product posture (v1.9.4 — observe-until-chain + digital coercion toolkit)
+### Product posture (v1.9.5 — observe-until-chain + dual audit trail)
 
 **Full sensors. Silent until a real attack chain. Then nuke — and seal an evidence pack.**
 
@@ -12,6 +12,8 @@ Real-time endpoint detection and response for Windows. Runs as a background serv
 - **Nuke only** when multi-signal / composite chain points at: **C2 beaconing**, **exfil**, **token theft**, **reverse shell**, **credential dump**, **BYOVD**, or **coercion toolkit composites** (covert surveillance + remote channel, remote-control abuse toolkit, session theft + abuse channel, stalkerware persistence) → quarantine + kill + isolate + chain tracer.
 - **Digital coercion / surveillance toolkit (v1.9.4):** platform-agnostic host defense against tools used in online harassment, sexual coercion, stalkerware, account takeover, and remote blackmail. **Does not** moderate chat or identify offenders by social profile. Settings → **Safety**.
 - **Evidence packs on every chain-confirmed nuke** (`AutoIncidentReporter`): integrity-sealed pack under `%ProgramData%\Sentinel\IncidentReports` + critical toast; coercion-tagged packs include LE-oriented harm checkboxes (you complete them).
+- **Windows Event Log trail (v1.9.5):** critical events also written to Application / source `Sentinel` (IDs 1000–1500) when Event Log exists. **Self-disables** on barebone/custom Windows where Event Log is stripped — JSONL remains primary. Config: `Sentinel:WindowsEventLog`.
+- **Graceful degradation:** missing ETW → WMI/poll; missing Event Log → JSONL only; monitor start failures isolated; never crash the host for optional telemetry.
 - **Weak observe seeds never chain-nuke alone:** LAN Cast observe, module-count growth, UX heuristics, outbound-whitelist noise, etc. Surveillance legs can still **feed composites**.
 - **DLL unloaders stay armed** (`DllUnloadEngine`): FreeLibrary / quarantine on **proven** hostile Temp/plant module loads only.
 - **Not an attack:** Steam DirectX, Vulkan/CUDA, GPU driver redistributables writing System32/SysWOW64 (and PID‑0 writer races) → LogOnly, never a kill seed.
@@ -135,7 +137,7 @@ Full transparency in [THREAT_MODEL.md](THREAT_MODEL.md).
 
 ## Installation
 
-Download **`SentinelSetup-1.9.4.exe`** from [GitHub Releases](https://github.com/CroatiaSecurity/Sentinel/releases) (or `releases/1.9.4/` after a local build) and run it as Administrator.
+Download **`SentinelSetup-1.9.5.exe`** from [GitHub Releases](https://github.com/CroatiaSecurity/Sentinel/releases) (or `releases/1.9.5/` after a local build) and run it as Administrator.
 
 **Minimum installer** — framework-dependent `net48-windows` (no bundled runtime). Small setup package.
 

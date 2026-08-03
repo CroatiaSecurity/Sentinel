@@ -18,6 +18,7 @@ namespace Sentinel.Core
         private readonly JsonlEventLogger _eventLogger;
         private readonly QuarantineManager _quarantineManager;
         private readonly AllowlistService? _allowlist;
+        private readonly SentinelEventLogWriter? _windowsEventLog;
         private IncidentResponseService? _incidentResponse;
         private DllUnloadEngine? _dllUnloadEngine;
         private ChainTracer? _chainTracer;
@@ -42,13 +43,41 @@ namespace Sentinel.Core
             SentinelMetrics metrics,
             JsonlEventLogger eventLogger,
             QuarantineManager quarantineManager,
-            AllowlistService? allowlist = null)
+            AllowlistService? allowlist = null,
+            SentinelEventLogWriter? windowsEventLog = null)
         {
             _config = config;
             _metrics = metrics;
             _eventLogger = eventLogger;
             _quarantineManager = quarantineManager;
             _allowlist = allowlist;
+            _windowsEventLog = windowsEventLog;
+        }
+
+        private void TryWriteWindowsEventLog(DetectionEvent detection, string actionTaken, string reason)
+        {
+            try
+            {
+                if (_windowsEventLog == null || !_windowsEventLog.IsAvailable)
+                    return;
+                // Durable trail for real actions / chain confirms only (not observe LogOnly spam)
+                if (string.IsNullOrEmpty(actionTaken) ||
+                    actionTaken.StartsWith("LOG", StringComparison.OrdinalIgnoreCase))
+                    return;
+                if (reason != null &&
+                    reason.IndexOf("ChainConfirmed", StringComparison.OrdinalIgnoreCase) < 0 &&
+                    actionTaken.IndexOf("KILL", StringComparison.OrdinalIgnoreCase) < 0 &&
+                    actionTaken.IndexOf("QUARANTINE", StringComparison.OrdinalIgnoreCase) < 0 &&
+                    actionTaken.IndexOf("ISOLATE", StringComparison.OrdinalIgnoreCase) < 0 &&
+                    actionTaken.IndexOf("NETWORK", StringComparison.OrdinalIgnoreCase) < 0)
+                    return;
+
+                _windowsEventLog.WriteChainResponse(detection, actionTaken, reason ?? "");
+            }
+            catch
+            {
+                // Absolute fail-soft — response path must never throw on Event Log
+            }
         }
 
         /// <summary>
@@ -608,6 +637,7 @@ namespace Sentinel.Core
                     ExecutionTimeMs = stopwatch.ElapsedMilliseconds
                 };
                 await _eventLogger.LogEventAsync("response", responseLog);
+                TryWriteWindowsEventLog(detection, responseLog.ActionTaken, responseLog.Reason);
                 NotifyReinfectionCorrelator(detection);
             }
             else if (shouldIsolateNetwork)
@@ -667,6 +697,7 @@ namespace Sentinel.Core
                     ExecutionTimeMs = stopwatch.ElapsedMilliseconds
                 };
                 await _eventLogger.LogEventAsync("response", responseLog);
+                TryWriteWindowsEventLog(detection, responseLog.ActionTaken, responseLog.Reason);
             }
             else if (shouldRemoveRegistryEntry)
             {
@@ -744,6 +775,7 @@ namespace Sentinel.Core
                     ExecutionTimeMs = stopwatch.ElapsedMilliseconds
                 };
                 await _eventLogger.LogEventAsync("response", responseLog);
+                TryWriteWindowsEventLog(detection, responseLog.ActionTaken, responseLog.Reason);
             }
             else if (shouldKill && detection.ProcessId > 4)
             {
@@ -800,6 +832,7 @@ namespace Sentinel.Core
                     ExecutionTimeMs = stopwatch.ElapsedMilliseconds
                 };
                 await _eventLogger.LogEventAsync("response", responseLog);
+                TryWriteWindowsEventLog(detection, responseLog.ActionTaken, responseLog.Reason);
                 NotifyReinfectionCorrelator(detection);
             }
             else
@@ -815,6 +848,7 @@ namespace Sentinel.Core
                     ExecutionTimeMs = stopwatch.ElapsedMilliseconds
                 };
                 await _eventLogger.LogEventAsync("response", responseLog);
+                // LogOnly never writes Windows Event Log (CriticalOnly trail)
             }
         }
 

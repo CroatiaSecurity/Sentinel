@@ -120,6 +120,12 @@ namespace Sentinel.Core
         public bool SilentObserve { get; set; } = true;
 
         /// <summary>
+        /// v1.9.5: Optional Windows Event Log trail (Application / source Sentinel).
+        /// Disabled automatically on barebone/custom images where Event Log is stripped.
+        /// </summary>
+        public WindowsEventLogConfig WindowsEventLog { get; set; } = new();
+
+        /// <summary>
         /// v1.8.3: When true, ThreatIntelFeedBlocker pre-creates Windows Firewall block rules
         /// for every feed IP/CIDR. Default <c>false</c> — observe connections to listed IPs
         /// and only act reactively (NetworkIsolate on live hit when ActiveResponse is on).
@@ -156,6 +162,40 @@ namespace Sentinel.Core
         public bool AutoDisableFailedUsbEnumeration { get; set; } = true;
 
         public CveShieldConfig CveShield { get; set; } = new();
+    }
+
+    /// <summary>
+    /// v1.9.5 — Durable secondary audit trail via Windows Event Log.
+    /// Primary product log remains JSONL. All writes fail-soft on stripped Windows.
+    /// </summary>
+    public class WindowsEventLogConfig
+    {
+        /// <summary>Master switch. Default on; writer self-disables if Event Log is unusable.</summary>
+        public bool Enabled { get; set; } = true;
+
+        /// <summary>Event source name (registered under LogName on first successful create).</summary>
+        public string SourceName { get; set; } = "Sentinel";
+
+        /// <summary>
+        /// Target log. Default Application — most available on custom/stripped images.
+        /// Custom logs require extra ACLs and fail more often; avoid for barebone hosts.
+        /// </summary>
+        public string LogName { get; set; } = "Application";
+
+        /// <summary>
+        /// When true (default): only service lifecycle, chain response, evidence pack,
+        /// quarantine, anti-tamper, heartbeat — never Tier2 observe spam.
+        /// </summary>
+        public bool CriticalOnly { get; set; } = true;
+
+        /// <summary>Rolling write budget (0 = unlimited). Protects broken log stacks.</summary>
+        public int MaxWritesPerMinute { get; set; } = 30;
+
+        /// <summary>Low-frequency "still alive" events for SIEM gap detection.</summary>
+        public bool HeartbeatEnabled { get; set; } = true;
+
+        /// <summary>Heartbeat interval in minutes (minimum 15 enforced at runtime).</summary>
+        public int HeartbeatMinutes { get; set; } = 60;
     }
 
     public class ThreatReportingConfig

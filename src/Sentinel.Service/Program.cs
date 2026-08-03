@@ -187,10 +187,15 @@ namespace Sentinel.Service
                     }
                     services.AddSingleton(config);
                     services.AddSingleton(threatReportingConfig);
+                    // Nested config (also bound via Sentinel.WindowsEventLog); expose as singleton for DI
+                    var winEventLogCfg = config.WindowsEventLog ?? new WindowsEventLogConfig();
+                    services.AddSingleton(winEventLogCfg);
 
                     // Infrastructure & Utilities
                     services.AddSingleton<SentinelMetrics>();
                     services.AddSingleton<ThreatReportService>();
+                    // v1.9.5: Windows Event Log trail — self-disables on barebone/stripped images
+                    services.AddSingleton<SentinelEventLogWriter>();
                     services.AddSingleton<AutoIncidentReporter>();
                     services.AddSingleton<JsonlEventLogger>(_ => new JsonlEventLogger(config.LogPath));
                     services.AddSingleton<EventGraph>();
@@ -280,6 +285,8 @@ namespace Sentinel.Service
 
                     // Core SentinelService (manages IMonitor lifecycle + ProcessAncestryCache)
                     services.AddHostedService<SentinelService>();
+                    // v1.9.5: optional Event Log heartbeat (no-ops if Event Log stripped)
+                    services.AddHostedService<SentinelEventLogHeartbeatService>();
 
                     // ─────────────────────────────────────────────────────────────────
                     // v1.4.4: Monitor Groups — replaces flat AddHostedService registrations.

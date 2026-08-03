@@ -79,6 +79,7 @@ namespace Sentinel.Core
         private readonly SentinelConfig _sentinelConfig;
         private readonly ThreatReportService _threatReportService;
         private readonly ToastService? _toastService;
+        private readonly SentinelEventLogWriter? _windowsEventLog;
         private readonly ILogger<AutoIncidentReporter> _logger;
         private readonly string _reportRoot;
         private readonly string _productVersion;
@@ -93,12 +94,14 @@ namespace Sentinel.Core
             ThreatReportService threatReportService,
             ILogger<AutoIncidentReporter> logger,
             ToastService? toastService = null,
-            SentinelConfig? sentinelConfig = null)
+            SentinelConfig? sentinelConfig = null,
+            SentinelEventLogWriter? windowsEventLog = null)
         {
             _config = config ?? new AutoIncidentReportingConfig();
             _sentinelConfig = sentinelConfig ?? new SentinelConfig();
             _threatReportService = threatReportService;
             _toastService = toastService;
+            _windowsEventLog = windowsEventLog;
             _logger = logger;
             _productVersion = typeof(AutoIncidentReporter).Assembly.GetName().Version?.ToString() ?? "1.8.0";
 
@@ -149,6 +152,12 @@ namespace Sentinel.Core
                 {
                     packPath = await WriteEvidencePackAsync(detection, incident).ConfigureAwait(false);
                     Interlocked.Increment(ref _packsGenerated);
+                    try
+                    {
+                        if (!string.IsNullOrEmpty(packPath) && _windowsEventLog != null)
+                            _windowsEventLog.WriteEvidencePack(detection, packPath);
+                    }
+                    catch { /* Event Log optional */ }
                 }
 
                 if (_config.ReportThreatIntel)
@@ -458,6 +467,10 @@ namespace Sentinel.Core
             report.AppendLine();
             report.AppendLine("  Integrity: see MANIFEST.sha256 + MANIFEST.hmac + VERIFY.txt.");
             report.AppendLine("  Do not edit sealed evidence files after generation.");
+            report.AppendLine();
+            report.AppendLine("  Secondary audit trail: Windows Event Log Application/Sentinel");
+            report.AppendLine("  (Event ID 1200 evidence pack / 1100 chain response when Event Log is available).");
+            report.AppendLine("  On stripped/custom Windows where Event Log is missing, JSONL + this pack remain authoritative.");
             report.AppendLine();
             if (CoercionAbusePolicy.IsDigitalCoercionToolkit(detection))
             {

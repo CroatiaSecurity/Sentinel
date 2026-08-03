@@ -36,6 +36,7 @@ namespace Sentinel.Service
         private readonly LocalServerMonitor _localServerMonitor;
         private readonly ParentPidSpoofDetector _parentPidSpoofDetector;
         private readonly ChainTracer _chainTracer;
+        private readonly SentinelEventLogWriter? _windowsEventLog;
         private readonly string _version;
 
         public SentinelService(
@@ -63,7 +64,8 @@ namespace Sentinel.Service
             DllUnloadEngine dllUnloadEngine,
             ParentPidSpoofDetector parentPidSpoofDetector,
             ChainTracer chainTracer,
-            SentinelOrchestrator orchestrator)
+            SentinelOrchestrator orchestrator,
+            SentinelEventLogWriter? windowsEventLog = null)
         {
             // Wire incident response into response engine (late binding to avoid circular DI)
             responseEngine.SetIncidentResponseService(incidentResponseService);
@@ -101,6 +103,7 @@ namespace Sentinel.Service
             _localServerMonitor = localServerMonitor;
             _parentPidSpoofDetector = parentPidSpoofDetector;
             _chainTracer = chainTracer;
+            _windowsEventLog = windowsEventLog;
             _version = LoadVersion();
         }
 
@@ -177,8 +180,18 @@ namespace Sentinel.Service
             {
                 Status = "started",
                 Version = _version,
-                Timestamp = DateTime.UtcNow
+                Timestamp = DateTime.UtcNow,
+                WindowsEventLogAvailable = _windowsEventLog?.IsAvailable == true,
+                WindowsEventLogDisabled = _windowsEventLog?.IsPermanentlyDisabled == true
+                    ? _windowsEventLog.DisableReason
+                    : null
             });
+
+            try
+            {
+                _windowsEventLog?.WriteServiceStart(_version);
+            }
+            catch { /* Event Log optional on stripped Windows */ }
 
             try
             {
@@ -196,6 +209,7 @@ namespace Sentinel.Service
             finally
             {
                 _logger.LogInformation("Sentinel Service stopping...");
+                try { _windowsEventLog?.WriteServiceStop(_version); } catch { /* optional */ }
 
                 // Stop and dispose IMonitors
                 foreach (var monitor in _monitors)
