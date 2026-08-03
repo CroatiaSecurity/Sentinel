@@ -6,6 +6,19 @@ Installer uploads should ideally show **zero detections**. Reality for a full
 userland EDR is harsher: many engines score *behavior capability* (process
 inspection, service install, quarantine, hooks), not just malware signatures.
 
+### ASR / “ransomware” blocks are not the same as VT
+
+Microsoft Defender **Attack Surface Reduction** rule
+`c1db55ab-…` is named *“Use advanced protection against ransomware”*. When it
+fires (Event 1121), it is **blocking untrusted/low-prevalence EXEs** (often
+Inno Setup extractors under `%TEMP%`) — **not** a classification that
+“Sentinel is ransomware.”
+
+Still, Sentinel must **never enable that rule in Block mode** against itself
+(see `HardeningModule.AsrRulesNeverBlock`). Unsigned Setup + that rule = Error 5
+on upgrade. **Code signing** is what makes prevalence/trust pass for both ASR
+and most VT engines.
+
 ## What we already do in the binary
 
 1. **No PE import of injection-family APIs** — `OpenProcess` (VM paths),

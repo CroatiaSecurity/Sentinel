@@ -2,6 +2,24 @@
 
 All notable changes to Sentinel are documented in this file.
 
+## [1.9.6] - 2026-08-03
+
+### Fixed — ASR no longer blocks SentinelSetup as “ransomware protection”
+**Root cause:** `HardeningModule` applied Defender ASR rule `c1db55ab`
+(“Use advanced protection against ransomware”) in **Block**. That rule stops
+unsigned/low-prevalence EXEs launched from `%TEMP%` — which is exactly how
+Inno Setup runs. Defender Event **1121** + Setup **Error 5** on upgrade.
+Not a second admin; not VT calling the product ransomware — **our own
+hardening** re-applied by `AsrPolicyGuard` every ~60s.
+
+- **Removed** `c1db55ab` from the enforced Block list.
+- On every apply: **delete** that GUID if an older build left it.
+- **ASROnlyExclusions** for `Program Files*\Sentinel` (and running base dir).
+- Manual helpers: `installer/install-no-inno.ps1`, `installer/fix-asr-for-setup.ps1`.
+
+### Docs
+- `docs/VIRUSTOTAL.md` — ASR vs VT; signing remains the path to 0/N detections.
+
 ## [1.9.5] - 2026-08-03
 
 ### Added — Windows Event Log trail (critical events only)

@@ -1,6 +1,6 @@
 # Sentinel — Threat Model
 
-**Version: 1.9.5**
+**Version: 1.9.6**
 
 This document assumes the attacker has read the source code.
 

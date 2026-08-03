@@ -28,11 +28,13 @@ namespace Sentinel.Tests
         [Fact]
         public void HardeningModule_AsrRules_HasExpectedBlockListSize()
         {
-            // 14 high-value rules; excludes prevalence-based "block unknown exe" (installer FP)
-            Assert.True(HardeningModule.AsrRules.Length >= 13);
+            // High-value rules; excludes prevalence + "advanced ransomware" (blocks Inno TEMP extract)
+            Assert.True(HardeningModule.AsrRules.Length >= 12);
             Assert.Contains(HardeningModule.AsrRules, r => r.Guid == "9e6c4e1f-7d60-472f-ba1a-a39ef669e4b2"); // LSASS
             Assert.Contains(HardeningModule.AsrRules, r => r.Guid == "56a863a9-875e-4185-98a7-b882c64b5ce5"); // vulnerable drivers
             Assert.DoesNotContain(HardeningModule.AsrRules, r => r.Guid == "01443614-cd74-433a-b99e-2ecdc07bfc25"); // prevalence
+            Assert.DoesNotContain(HardeningModule.AsrRules, r => r.Guid == "c1db55ab-c21a-4637-bb3f-a12568109d35");
+            Assert.Contains(HardeningModule.AsrRulesNeverBlock, g => g == "c1db55ab-c21a-4637-bb3f-a12568109d35");
         }
 
         [Fact]

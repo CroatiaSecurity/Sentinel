@@ -973,8 +973,12 @@ namespace Sentinel.Core
         /// <summary>
         /// Microsoft Defender Attack Surface Reduction rules enforced in Block mode (value 1).
         /// Written to the Policy hive so they survive Defender UI toggles and re-apply via AsrPolicyGuard.
-        /// Sourced from GEDR_ASR_Rules.ps1 + high-value workstation rules; avoids prevalence-based
-        /// "block unknown executables" which false-positives installers (including Sentinel's).
+        /// Sourced from GEDR_ASR_Rules.ps1 + high-value workstation rules.
+        ///
+        /// NOT included: c1db55ab ("Use advanced protection against ransomware") — that rule blocks
+        /// unsigned/low-prevalence executables launched from %TEMP% (classic Inno Setup extract path)
+        /// and was observed blocking SentinelSetup-*.exe upgrades (Defender Event 1121).
+        /// NOT included: pure prevalence "block unknown PE" rules for the same reason.
         /// </summary>
         internal static readonly (string Guid, string Name)[] AsrRules =
         {
@@ -990,12 +994,22 @@ namespace Sentinel.Core
             ("d1e49aac-8f56-4280-b9ba-993a6d77406c", "Block process creations from PSExec and WMI"),
             ("e6db77e5-3df2-4cf1-b95a-636979351e5b", "Block persistence through WMI event subscription"),
             ("56a863a9-875e-4185-98a7-b882c64b5ce5", "Block abuse of exploited vulnerable signed drivers"),
-            ("c1db55ab-c21a-4637-bb3f-a12568109d35", "Use advanced protection against ransomware"),
             ("26190899-1602-49e8-8b27-eb1d0a1ce869", "Block Office communication apps from creating child processes"),
         };
 
-        private const string AsrPolicyRulesKey =
-            @"SOFTWARE\Policies\Microsoft\Windows Defender\Windows Defender Exploit Guard\ASR\Rules";
+        /// <summary>
+        /// Rules that must NOT stay in Block if previously applied (self-upgrade / installer safety).
+        /// Deleted on every ApplyAsrRules so AsrPolicyGuard cannot re-arm them.
+        /// </summary>
+        internal static readonly string[] AsrRulesNeverBlock =
+        {
+            // Blocks Inno Setup / low-prevalence EXEs from %TEMP% (SentinelSetup Error 5).
+            "c1db55ab-c21a-4637-bb3f-a12568109d35",
+        };
+
+        private const string AsrPolicyRoot =
+            @"SOFTWARE\Policies\Microsoft\Windows Defender\Windows Defender Exploit Guard\ASR";
+        private const string AsrPolicyRulesKey = AsrPolicyRoot + @"\Rules";
 
         /// <summary>Apply all ASR rules in Block mode (1). Idempotent.</summary>
         public static void ApplyAsrRules()
@@ -1003,9 +1017,7 @@ namespace Sentinel.Core
             try
             {
                 // Ensure policy tree exists
-                SetRegistryDword(
-                    @"SOFTWARE\Policies\Microsoft\Windows Defender\Windows Defender Exploit Guard\ASR",
-                    "ExploitGuard_ASR_Rules", 1);
+                SetRegistryDword(AsrPolicyRoot, "ExploitGuard_ASR_Rules", 1);
 
                 using var key = Microsoft.Win32.Registry.LocalMachine.CreateSubKey(AsrPolicyRulesKey, writable: true);
                 if (key == null) return;
@@ -1014,8 +1026,69 @@ namespace Sentinel.Core
                 {
                     key.SetValue(guid, "1", Microsoft.Win32.RegistryValueKind.String);
                 }
+
+                // Drop rules that break our own (and most) installers if an older Sentinel applied them.
+                foreach (var bad in AsrRulesNeverBlock)
+                {
+                    try { key.DeleteValue(bad, throwOnMissingValue: false); } catch { /* ignore */ }
+                }
+
+                ApplyAsrOnlyExclusions();
             }
             catch { /* Non-fatal */ }
+        }
+
+        /// <summary>
+        /// ASR path exclusions so Sentinel binaries and Setup are not treated as ransomware staging.
+        /// Policy multi-sz: ASROnlyExclusions under the ASR policy root.
+        /// </summary>
+        public static void ApplyAsrOnlyExclusions()
+        {
+            try
+            {
+                var paths = new List<string>();
+                void Add(string? p)
+                {
+                    if (string.IsNullOrWhiteSpace(p)) return;
+                    try
+                    {
+                        p = Path.GetFullPath(p.Trim().TrimEnd('\\'));
+                    }
+                    catch { return; }
+                    if (!paths.Exists(x => string.Equals(x, p, StringComparison.OrdinalIgnoreCase)))
+                        paths.Add(p);
+                }
+
+                var pf86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
+                var pf = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+                if (!string.IsNullOrEmpty(pf86)) Add(Path.Combine(pf86, "Sentinel"));
+                if (!string.IsNullOrEmpty(pf)) Add(Path.Combine(pf, "Sentinel"));
+
+                // Running service / agent location (covers non-default install dir)
+                try
+                {
+                    var baseDir = AppContext.BaseDirectory;
+                    if (!string.IsNullOrEmpty(baseDir))
+                        Add(baseDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+                }
+                catch { /* ignore */ }
+
+                if (paths.Count == 0) return;
+
+                using var key = Microsoft.Win32.Registry.LocalMachine.CreateSubKey(AsrPolicyRoot, writable: true);
+                if (key == null) return;
+
+                // Merge with existing exclusions
+                var existing = key.GetValue("ASROnlyExclusions") as string[];
+                if (existing != null)
+                {
+                    foreach (var e in existing)
+                        Add(e);
+                }
+
+                key.SetValue("ASROnlyExclusions", paths.ToArray(), Microsoft.Win32.RegistryValueKind.MultiString);
+            }
+            catch { /* Non-fatal — barebone / locked policy hives */ }
         }
 
         /// <summary>
@@ -1034,6 +1107,14 @@ namespace Sentinel.Core
                     var val = key.GetValue(guid)?.ToString();
                     if (val != "1") return false;
                 }
+
+                // Intact also means hostile self-block rules are gone
+                foreach (var bad in AsrRulesNeverBlock)
+                {
+                    if (key.GetValue(bad) != null)
+                        return false;
+                }
+
                 return true;
             }
             catch
