@@ -27,7 +27,7 @@ namespace Sentinel.Tests
             Assert.False(config.EnforceActiveResponse);
             Assert.True(config.ObserveUntilChain);
             Assert.True(config.SilentObserve);
-            Assert.True(config.AutoDisableFailedUsbEnumeration);
+            Assert.False(config.AutoDisableFailedUsbEnumeration); // work-first: no USB auto-disable
             Assert.Empty(config.TrustedCastDevices);
             Assert.Empty(config.TrustedUsbDevices);
             Assert.Equal(15, config.DnsPollIntervalSeconds);

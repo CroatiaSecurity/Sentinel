@@ -54,6 +54,17 @@ namespace Sentinel.Tests
         }
 
         [Fact]
+        public void HardeningModule_ReleaseUserWorkSurface_DoesNotThrow()
+        {
+            // Work-first path: tear down proactive lockdown leftovers
+            HardeningModule.RestrictivePortHardeningEnabled = false;
+            var ex = Record.Exception(() => HardeningModule.ReleaseUserWorkSurface());
+            Assert.Null(ex);
+            ex = Record.Exception(() => HardeningModule.ApplyOrFail());
+            Assert.Null(ex);
+        }
+
+        [Fact]
         public void HardeningModule_ApplyCredentialAndBrowserHardening_DoesNotThrow()
         {
             HardeningModule.ApplyCredentialHardening();

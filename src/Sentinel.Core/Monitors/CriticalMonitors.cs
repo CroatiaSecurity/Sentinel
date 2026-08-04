@@ -255,15 +255,18 @@ namespace Sentinel.Core
             HardeningModule.RestrictivePortHardeningEnabled = _config.RestrictivePortHardening;
 
             _logger.LogInformation(
-                "[IPSecIntegrityGuard] Started — IPSec profile={Mode} (self-heal with backoff)",
+                "[IPSecIntegrityGuard] Started — IPSec profile={Mode}",
                 _config.RestrictivePortHardening
-                    ? "restrictive (attack + SSH/RDP/SMB/DB lockdown)"
-                    : "attack-only (malware/legacy ports; user services free)");
+                    ? "restrictive lockdown (self-heal)"
+                    : "work-first (no GSecurity IPSec; remove leftovers)");
 
-            // Once after upgrade: rebuild so old full-block policies drop SSH/RDP/etc.
+            // Once after upgrade: either remove GSecurity (default) or rebuild restrictive set.
             if (!_cleanedObserveMode)
             {
-                HardeningModule.ReapplyIPSecPolicy();
+                if (_config.RestrictivePortHardening)
+                    HardeningModule.ReapplyIPSecPolicy();
+                else
+                    HardeningModule.ReleaseUserWorkSurface();
                 _cleanedObserveMode = true;
             }
 
@@ -275,7 +278,18 @@ namespace Sentinel.Core
                 {
                     HardeningModule.RestrictivePortHardeningEnabled = _config.RestrictivePortHardening;
 
-                    if (HardeningModule.IsIPSecPolicyActive())
+                    // Default: never re-arm IPSec. If someone re-creates GSecurity, tear it down.
+                    if (!_config.RestrictivePortHardening)
+                    {
+                        if (HardeningModule.IsIPSecPolicyActive())
+                        {
+                            _logger.LogInformation(
+                                "[IPSecIntegrityGuard] GSecurity present in work-first mode — removing");
+                            HardeningModule.RemoveIPSecPolicyIfPresent();
+                        }
+                        _consecutiveFailures = 0;
+                    }
+                    else if (HardeningModule.IsIPSecPolicyActive())
                     {
                         if (_consecutiveFailures > 0)
                             _logger.LogInformation(
@@ -288,10 +302,9 @@ namespace Sentinel.Core
                     {
                         _consecutiveFailures++;
                         _logger.LogWarning(
-                            "[IPSecIntegrityGuard] IPSec policy GSecurity is MISSING or UNASSIGNED — re-applying (failure #{Count})",
+                            "[IPSecIntegrityGuard] Restrictive IPSec GSecurity missing — re-applying (failure #{Count})",
                             _consecutiveFailures);
 
-                        // Stop hammering netsh after hard threshold; only re-check periodically.
                         bool skipReapply = _consecutiveFailures > HardFailThreshold;
                         bool reapplied = false;
                         if (!skipReapply)
@@ -305,8 +318,6 @@ namespace Sentinel.Core
                             reapplied = HardeningModule.IsIPSecPolicyActive();
                         }
 
-                        // Emit on first failure, state change to success, or every MinEmitInterval
-                        // while still failing — not on every poll.
                         bool shouldEmit = !reapplied
                             ? (_consecutiveFailures == 1
                                || DateTimeOffset.UtcNow - _lastEmitUtc >= MinEmitInterval)
@@ -318,14 +329,11 @@ namespace Sentinel.Core
                             await _detectionEngine.EmitAsync(new DetectionEvent
                             {
                                 RuleName = "Anti-Tamper: IPSec Policy Deleted and Re-Applied",
-                                Evidence = $"GSecurity IPSec policy was found missing/unassigned. " +
+                                Evidence = $"Restrictive GSecurity IPSec was missing/unassigned. " +
                                            $"Re-application {(skipReapply ? "SKIPPED (backoff)" : reapplied ? "SUCCEEDED" : "FAILED")}. " +
-                                           $"Consecutive failures: {_consecutiveFailures}. " +
-                                           $"Profile: {(_config.RestrictivePortHardening ? "restrictive" : "attack-only")}",
-                                Reasoning = "The IPSec policy that blocks attack-only (or restrictive) ports was removed. " +
-                                            "Sentinel re-applied the current profile. Default profile does not block SSH/RDP/SMB. " +
-                                            "Repeated failures indicate netsh/IPSec stack issues or policy API unavailable — " +
-                                            "backoff is applied to avoid resource exhaustion.",
+                                           $"Consecutive failures: {_consecutiveFailures}.",
+                                Reasoning = "RestrictivePortHardening is on: Sentinel maintains the lockdown IPSec profile. " +
+                                            "Default work-first installs do not use GSecurity at all.",
                                 Confidence = 0.95,
                                 Tier = DetectionTier.Tier1Behavioral,
                                 AuthorizedResponse = ResponseAction.LogOnly,
@@ -336,7 +344,7 @@ namespace Sentinel.Core
                                 {
                                     ["Reapplied"] = reapplied.ToString(),
                                     ["ConsecutiveFailures"] = _consecutiveFailures.ToString(),
-                                    ["Restrictive"] = _config.RestrictivePortHardening.ToString(),
+                                    ["Restrictive"] = "true",
                                     ["BackedOff"] = skipReapply.ToString()
                                 }
                             });
@@ -378,37 +386,55 @@ namespace Sentinel.Core
     }
 
     /// <summary>
-    /// Self-heals Microsoft Defender ASR policy rules (Block mode) every 60s.
-    /// Ported from GEDR_ASR_Rules.ps1 install-once behavior into continuous integrity.
+    /// Restrictive/kiosk only: self-heals Defender ASR Block rules every 60s.
+    /// Default work-first: releases ASR Block policy leftovers and does not re-arm them.
     /// </summary>
     public sealed class AsrPolicyGuard : BackgroundService
     {
         private readonly DetectionEngine _detectionEngine;
+        private readonly SentinelConfig _config;
         private readonly ILogger<AsrPolicyGuard> _logger;
         private int _consecutiveFailures;
+        private bool _releasedWorkFirst;
 
-        public AsrPolicyGuard(DetectionEngine de, ILogger<AsrPolicyGuard> l)
+        public AsrPolicyGuard(DetectionEngine de, SentinelConfig config, ILogger<AsrPolicyGuard> l)
         {
             _detectionEngine = de;
+            _config = config;
             _logger = l;
         }
 
         protected override async Task ExecuteAsync(CancellationToken ct)
         {
-            _logger.LogInformation("[AsrPolicyGuard] Started — verifying Defender ASR Block rules every 60s");
+            _logger.LogInformation(
+                "[AsrPolicyGuard] Started — mode={Mode}",
+                _config.RestrictivePortHardening ? "restrictive (ASR Block self-heal)" : "work-first (no ASR re-arm)");
 
-            // Allow HardeningModule to apply first
             try { await Task.Delay(20000, ct); } catch (OperationCanceledException) { return; }
 
             while (!ct.IsCancellationRequested)
             {
                 try
                 {
-                    if (!HardeningModule.IsAsrPolicyIntact())
+                    HardeningModule.RestrictivePortHardeningEnabled = _config.RestrictivePortHardening;
+
+                    if (!_config.RestrictivePortHardening)
+                    {
+                        if (!_releasedWorkFirst)
+                        {
+                            HardeningModule.ReleaseAsrBlockPolicy();
+                            HardeningModule.ApplyAsrOnlyExclusions();
+                            _releasedWorkFirst = true;
+                            _logger.LogInformation(
+                                "[AsrPolicyGuard] Work-first: released Sentinel ASR Block policy leftovers");
+                        }
+                        _consecutiveFailures = 0;
+                    }
+                    else if (!HardeningModule.IsAsrPolicyIntact())
                     {
                         _consecutiveFailures++;
                         _logger.LogWarning(
-                            "[AsrPolicyGuard] ASR policy incomplete or demoted — re-applying (failure #{Count})",
+                            "[AsrPolicyGuard] Restrictive ASR incomplete — re-applying (failure #{Count})",
                             _consecutiveFailures);
 
                         HardeningModule.ReapplyAsrRules();
@@ -418,13 +444,11 @@ namespace Sentinel.Core
                         await _detectionEngine.EmitAsync(new DetectionEvent
                         {
                             RuleName = "Anti-Tamper: ASR Policy Drift Re-Applied",
-                            Evidence = $"One or more Defender ASR Block rules were missing or not set to Block. " +
+                            Evidence = $"Restrictive ASR Block rules missing/demoted. " +
                                        $"Re-application {(ok ? "SUCCEEDED" : "FAILED")}. " +
                                        $"Consecutive failures: {_consecutiveFailures}",
-                            Reasoning = "Attack Surface Reduction rules block Office child processes, " +
-                                        "LSASS credential theft, USB execution, WMI persistence, and related " +
-                                        "attack surfaces. An attacker or misconfiguration demoted these rules; " +
-                                        "Sentinel restored them.",
+                            Reasoning = "RestrictivePortHardening is on: Sentinel maintains ASR Block policy. " +
+                                        "Default work-first installs do not force ASR Block rules.",
                             Confidence = 0.90,
                             Tier = DetectionTier.Tier1Behavioral,
                             AuthorizedResponse = ResponseAction.LogOnly,
@@ -435,7 +459,8 @@ namespace Sentinel.Core
                             {
                                 ["Reapplied"] = ok.ToString(),
                                 ["ConsecutiveFailures"] = _consecutiveFailures.ToString(),
-                                ["RuleCount"] = HardeningModule.AsrRules.Length.ToString()
+                                ["RuleCount"] = HardeningModule.AsrRules.Length.ToString(),
+                                ["Restrictive"] = "true"
                             }
                         });
 

@@ -141,10 +141,10 @@ namespace Sentinel.Core
         public bool BlockFcmPushChannel { get; set; } = false;
 
         /// <summary>
-        /// v1.8.3: When false (default), IPSec only blocks attack/legacy ports nobody needs
-        /// (Telnet, rsh, TFTP, Meterpreter/BackOrifice-class ports). SSH, RDP, SMB, VNC,
-        /// databases, SOCKS, Docker stay open. When true, also block that broader service set
-        /// (locked-down host / kiosk mode).
+        /// v1.9.7: When false (default) — <b>work-first</b>: no proactive IPSec, RPC firewall,
+        /// ASR Block re-arm, service disables, RDP force-logoff, USB auto-disable, etc.
+        /// Sentinel still detects and only kills on chain-confirmed malice.
+        /// When true — locked-down / kiosk host (IPSec, ASR Block, remote session kill, …).
         /// </summary>
         public bool RestrictivePortHardening { get; set; } = false;
 
@@ -156,10 +156,11 @@ namespace Sentinel.Core
         public string[] TrustedUsbDevices { get; set; } = Array.Empty<string>();
 
         /// <summary>
-        /// v1.6.3: When true (default), auto-disable USB nodes that fail descriptor requests
+        /// v1.9.7: When true, auto-disable USB nodes that fail descriptor requests
         /// (VID_0000 / "Device Descriptor Request Failed") via registry ConfigFlags.
+        /// Default <c>false</c> — do not kill flaky USB devices on normal desktops.
         /// </summary>
-        public bool AutoDisableFailedUsbEnumeration { get; set; } = true;
+        public bool AutoDisableFailedUsbEnumeration { get; set; } = false;
 
         public CveShieldConfig CveShield { get; set; } = new();
     }

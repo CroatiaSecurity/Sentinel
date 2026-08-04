@@ -19,8 +19,9 @@ namespace Sentinel.Core
         private const uint LOAD_LIBRARY_SEARCH_SYSTEM32 = 0x00000800;
 
         /// <summary>
-        /// v1.8.3: When false (default), IPSec = attack-only ports (Telnet/RAT/etc.).
-        /// When true, also block SSH/RDP/SMB/DB/… (locked-down host).
+        /// v1.9.7: When false (default) — <b>work-first</b>: no proactive IPSec, RPC firewall,
+        /// service disable, ASR Block re-arm, RDP kill, browser/QUIC lockdown, etc.
+        /// Detection + chain-confirmed response still run. When true — locked-down / kiosk host.
         /// </summary>
         public static bool RestrictivePortHardeningEnabled { get; set; } = false;
 
@@ -32,24 +33,26 @@ namespace Sentinel.Core
                 // cryptographic posture. If internal code throws under FIPS, fix the algorithm
                 // usage rather than disabling FIPS system-wide.
 
-                // Remove Current Working Directory (CWD) from DLL search path by passing empty string
+                // Self-only: protect Sentinel process / install — never the user's tools.
                 bool res1 = SetDllDirectory(string.Empty);
-
-                // Restrict DLL search to %SystemRoot%\System32
                 bool res2 = SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32);
-
-                // v1.8.3: Always apply attack-only IPSec (malware/legacy ports nobody needs).
-                // Full lockdown (SSH/RDP/SMB/DB/…) only when RestrictivePortHardeningEnabled.
-                ApplyIPSecPolicy();
-
-                // v1.4.2: Register for Safe Mode boot — ensures Sentinel runs even in Safe Mode
                 RegisterForSafeMode();
 
-                // v1.4.2: Block remote access to RPC ephemeral ports (inbound LAN lateral movement)
-                BlockRemoteRpcEphemeralPorts();
-
-                // Apply custom hardening from setup scripts folder
-                ApplyUserSetupScriptsHardening();
+                // STANDING LAW (ProductPosture / constraints.md):
+                // Default observe/work-first — NO proactive OS lockdown.
+                // New proactive blocks MUST go through ProductPosture.TryProactiveHostLockdown
+                // or they will ship as regressions (RPC, ASR, RDP, USB, Cast, …).
+                if (ProductPosture.AllowsProactiveHostLockdown(null))
+                {
+                    ApplyIPSecPolicy();
+                    BlockRemoteRpcEphemeralPorts();
+                    ApplyUserSetupScriptsHardening();
+                }
+                else
+                {
+                    // Undo aggressive defaults left by older Sentinel builds so upgrades restore work.
+                    ReleaseUserWorkSurface();
+                }
 
                 return res1 && res2;
             }
@@ -57,6 +60,85 @@ namespace Sentinel.Core
             {
                 return false;
             }
+        }
+
+        /// <summary>
+        /// v1.9.7: Tear down proactive host lockdowns from prior versions so normal work
+        /// (NTLite, RDP, RPC/DISM, File/Print, Office, USB tools, installers) is not blocked.
+        /// Does not force-enable services the user disabled; only removes Sentinel-applied policy.
+        /// </summary>
+        public static void ReleaseUserWorkSurface()
+        {
+            try
+            {
+                // IPSec GSecurity (blocked ports / broke some stacks)
+                RemoveIPSecPolicyIfPresent();
+
+                // Inbound RPC ephemeral block (LAN lateral — also hostile to some admin tools)
+                RemoveFirewallRuleByName("Sentinel-Block-Remote-RPC-Ephemeral");
+
+                // ASR Block rules we wrote under Policy hive (break installers / Office / USB tools)
+                ReleaseAsrBlockPolicy();
+
+                // Keep install-dir exclusions only (safe for upgrades)
+                ApplyAsrOnlyExclusions();
+            }
+            catch { /* best effort */ }
+        }
+
+        /// <summary>Remove a Windows Firewall rule by name if present (fail-soft).</summary>
+        public static void RemoveFirewallRuleByName(string ruleName)
+        {
+            if (string.IsNullOrWhiteSpace(ruleName)) return;
+            try
+            {
+                var policyType = Type.GetTypeFromProgID("HNetCfg.FwPolicy2");
+                if (policyType == null) return;
+                dynamic? policy = Activator.CreateInstance(policyType);
+                if (policy == null) return;
+
+                // Copy names first — cannot modify collection while enumerating
+                var toRemove = new List<dynamic>();
+                foreach (dynamic rule in policy.Rules)
+                {
+                    try
+                    {
+                        if (string.Equals((string)rule.Name, ruleName, StringComparison.OrdinalIgnoreCase))
+                            toRemove.Add(rule);
+                    }
+                    catch { /* skip bad rule */ }
+                }
+
+                foreach (var rule in toRemove)
+                {
+                    try { policy.Rules.Remove(rule.Name); } catch { /* ignore */ }
+                }
+            }
+            catch { /* barebone / no firewall COM */ }
+        }
+
+        /// <summary>
+        /// Delete ASR Policy Rules Sentinel previously forced to Block.
+        /// Leaves machine ASR as user/Windows configured (no continuous re-arm).
+        /// </summary>
+        public static void ReleaseAsrBlockPolicy()
+        {
+            try
+            {
+                using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(AsrPolicyRulesKey, writable: true);
+                if (key == null) return;
+
+                foreach (var (guid, _) in AsrRules)
+                {
+                    try { key.DeleteValue(guid, throwOnMissingValue: false); } catch { }
+                }
+
+                foreach (var bad in AsrRulesNeverBlock)
+                {
+                    try { key.DeleteValue(bad, throwOnMissingValue: false); } catch { }
+                }
+            }
+            catch { /* ignore */ }
         }
 
         private struct PortDef
@@ -213,17 +295,21 @@ namespace Sentinel.Core
         }
 
         /// <summary>
-        /// Re-applies the IPSec policy from scratch (attack-only by default, full set if
-        /// RestrictivePortHardeningEnabled). Always rebuilds so upgrades drop SSH/RDP/etc. blocks.
+        /// Re-applies the IPSec policy from scratch when RestrictivePortHardening is on.
+        /// When off (default), removes GSecurity entirely — do not pre-block ports for users.
         /// </summary>
         public static void ReapplyIPSecPolicy()
         {
             try
             {
+                if (!RestrictivePortHardeningEnabled)
+                {
+                    RemoveIPSecPolicyIfPresent();
+                    return;
+                }
+
                 var ports = GetActivePortDefinitions();
-                string mode = RestrictivePortHardeningEnabled
-                    ? "attack-only + restrictive lockdown"
-                    : "attack-only (malware/legacy; SSH/RDP/SMB/DB free)";
+                const string mode = "restrictive lockdown (user opted in)";
 
                 // Delete and recreate — handles partial corruption and profile changes
                 RunNetsh("ipsec static delete policy name=GSecurity");
@@ -301,6 +387,13 @@ namespace Sentinel.Core
         /// </summary>
         public static void BlockRemoteRpcEphemeralPorts()
         {
+            // v1.9.7: only in restrictive/kiosk mode — default work-first surface stays open
+            if (!RestrictivePortHardeningEnabled)
+            {
+                RemoveFirewallRuleByName("Sentinel-Block-Remote-RPC-Ephemeral");
+                return;
+            }
+
             try
             {
                 const string ruleName = "Sentinel-Block-Remote-RPC-Ephemeral";
@@ -608,53 +701,15 @@ namespace Sentinel.Core
         /// </summary>
         private static void ApplyUserSetupScriptsHardening()
         {
+            // Entire block is restrictive/kiosk only (caller already gates).
             try
             {
-                // ═══════════════════════════════════════════════════════════════
-                // 1. DISABLE REMOTE ACCESS SERVICES
-                //    These are the most common lateral movement vectors.
-                //    Only disable services that are never needed on a workstation.
-                // ═══════════════════════════════════════════════════════════════
                 DisableRemoteAccessServices();
-
-                // ═══════════════════════════════════════════════════════════════
-                // 2. REGISTRY-BASED SECURITY HARDENING
-                //    Direct registry writes via Microsoft.Win32.Registry API.
-                //    Each setting has a documented security rationale.
-                // ═══════════════════════════════════════════════════════════════
                 ApplyRegistryHardening();
-
-                // ═══════════════════════════════════════════════════════════════
-                // 3. DEP (Data Execution Prevention) — NX AlwaysOn
-                //    Prevents code execution from non-executable memory pages.
-                //    This is the single most effective exploit mitigation after ASLR.
-                // ═══════════════════════════════════════════════════════════════
                 EnforceDepAlwaysOn();
-
-                // ═══════════════════════════════════════════════════════════════
-                // 4. LGPO SECURITY POLICY (if embedded)
-                //    Applies Group Policy security baseline from GSecurity.inf.
-                //    This is the only remaining shell-out — LGPO.exe has no .NET equivalent.
-                // ═══════════════════════════════════════════════════════════════
                 ApplyLgpoSecurityPolicy();
-
-                // ═══════════════════════════════════════════════════════════════
-                // 5. DEFENDER ASR RULES (GEDR_ASR_Rules.ps1 → native registry)
-                //    Block mode via Policy hive. Self-healed by AsrPolicyGuard.
-                // ═══════════════════════════════════════════════════════════════
                 ApplyAsrRules();
-
-                // ═══════════════════════════════════════════════════════════════
-                // 6. CREDENTIAL HARDENING (Creds.ps1 residual)
-                //    LSASS PPL, disable domain-cred caching, shrink cached logons.
-                // ═══════════════════════════════════════════════════════════════
                 ApplyCredentialHardening();
-
-                // ═══════════════════════════════════════════════════════════════
-                // 7. BROWSER HARDENING (Browsers.ps1 residual, AV-safe)
-                //    Policy registry only — no Preferences JSON rewrites, no browser kills.
-                //    Disables Chrome Remote Desktop host + WebRTC local-IP leakage policies.
-                // ═══════════════════════════════════════════════════════════════
                 ApplyBrowserHardening();
             }
             catch { /* Non-fatal: hardening is best-effort */ }
@@ -1011,11 +1066,18 @@ namespace Sentinel.Core
             @"SOFTWARE\Policies\Microsoft\Windows Defender\Windows Defender Exploit Guard\ASR";
         private const string AsrPolicyRulesKey = AsrPolicyRoot + @"\Rules";
 
-        /// <summary>Apply all ASR rules in Block mode (1). Idempotent.</summary>
+        /// <summary>Apply all ASR rules in Block mode (1). Restrictive/kiosk only.</summary>
         public static void ApplyAsrRules()
         {
             try
             {
+                if (!RestrictivePortHardeningEnabled)
+                {
+                    ReleaseAsrBlockPolicy();
+                    ApplyAsrOnlyExclusions();
+                    return;
+                }
+
                 // Ensure policy tree exists
                 SetRegistryDword(AsrPolicyRoot, "ExploitGuard_ASR_Rules", 1);
 

@@ -25,6 +25,7 @@ namespace Sentinel.Core
     public sealed class RemoteSessionGuard : BackgroundService
     {
         private readonly DetectionEngine _detectionEngine;
+        private readonly SentinelConfig _config;
         private readonly ILogger<RemoteSessionGuard> _logger;
 
         // Dedup: SessionId → last alert time
@@ -35,15 +36,29 @@ namespace Sentinel.Core
 
         private static readonly IntPtr WTS_CURRENT_SERVER_HANDLE = IntPtr.Zero;
 
-        public RemoteSessionGuard(DetectionEngine de, ILogger<RemoteSessionGuard> logger)
+        public RemoteSessionGuard(DetectionEngine de, SentinelConfig config, ILogger<RemoteSessionGuard> logger)
         {
             _detectionEngine = de;
+            _config = config ?? new SentinelConfig();
             _logger = logger;
         }
 
         protected override async Task ExecuteAsync(CancellationToken ct)
         {
-            _logger.LogInformation("[RemoteSessionGuard] Started — polling Terminal Services sessions every 5s");
+            // v1.9.7: force-logoff RDP/remote sessions only in restrictive/kiosk mode.
+            // Default work-first: users may RDP into their own PC.
+            if (!_config.RestrictivePortHardening)
+            {
+                _logger.LogInformation(
+                    "[RemoteSessionGuard] Work-first mode — not terminating remote sessions " +
+                    "(set RestrictivePortHardening=true for kiosk force-logoff)");
+                try { await Task.Delay(Timeout.Infinite, ct); }
+                catch (OperationCanceledException) { }
+                return;
+            }
+
+            _logger.LogInformation(
+                "[RemoteSessionGuard] Restrictive mode — polling Terminal Services sessions every 5s");
 
             try { await Task.Delay(TimeSpan.FromSeconds(10), ct); }
             catch (OperationCanceledException) { return; }

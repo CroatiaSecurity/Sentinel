@@ -23,8 +23,8 @@ namespace Sentinel.Service
             AppendDiagnostic("startup_trace.log",
                 $"[{DateTime.UtcNow:O}] Main() entered. Args: {string.Join(" ", args)}\n");
 
-            // v1.8.3: Load RestrictivePortHardening before any IPSec apply (default = off =
-            // do not pre-block SSH/RDP/torrents/etc.; remove leftover GSecurity if present).
+            // v1.9.7: work-first by default. RestrictivePortHardening=false means observe-until-malice
+            // only — no proactive IPSec/RPC/ASR/service lockdown (ReleaseUserWorkSurface on apply).
             try
             {
                 var earlyCfg = new ConfigurationBuilder()
@@ -39,7 +39,7 @@ namespace Sentinel.Service
                 HardeningModule.RestrictivePortHardeningEnabled = false;
             }
 
-            // Apply DLL search path hardening early (IPSec only if RestrictivePortHardening)
+            // Self-protect Sentinel process; lockdown only if RestrictivePortHardening=true
             HardeningModule.ApplyOrFail();
 
             // Secure Sentinel's installation directory permissions

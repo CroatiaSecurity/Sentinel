@@ -1,6 +1,6 @@
 # Sentinel — Constraints
 
-**Version: 1.9.6**
+**Version: 1.9.7**
 
 ---
 
@@ -27,6 +27,7 @@
 | Graceful degradation on barebone Windows (v1.9.5) | Optional features (Windows Event Log, ETW, toast, TI proxy, custom channels) MUST fail soft: disable permanently for the process after hard failure, keep JSONL + core detection, never throw out of response/pack/service paths. Prefer Application log over custom Event Log channels. |
 | Windows Event Log = critical only (v1.9.5) | When Event Log is available, write lifecycle + chain response + pack + heartbeat only. Never flood with Tier2 observe. Rate-limit writes. |
 | Never ASR-block our own installer (v1.9.6) | Do not enforce Defender ASR `c1db55ab` (advanced ransomware protection) in Block — it breaks Inno TEMP extract and is not “Sentinel is ransomware”. Delete if present; keep ASROnlyExclusions for install dir. |
+| **OBSERVE / WORK-FIRST IS THE LAW (v1.9.7)** | Default must never proactively reshape the host: no IPSec, no RPC/Cast/outbound FW blocks, no service disable, no ASR Block re-arm, no RDP force-logoff, no USB auto-disable, no “delete Windows firewall rules for safety.” **Only** self-protect Sentinel + detect/log. Destructive response only after chain-confirmed malice. Kiosk lockdown **only** if `RestrictivePortHardening=true`. **Any new proactive host mutation MUST call `ProductPosture.TryProactiveHostLockdown` (or equivalent gate) and ship unit tests that default-deny.** Do not add one-off blocks that re-break user work. |
 | DLL unloaders exempt | `DllUnloadEngine` (and proven sideload FreeLibrary/quarantine) may remediate immediately. All other monitors observe until chain. |
 | Silent observe (v1.8.6 / v1.9.3) | `SilentObserve=true`: no toasts / auto evidence packs until chain-confirmed. Detection logging always continues. Chain-confirmed nukes always produce packs + critical toast. |
 | Observe-first for user activity (v1.8.3) | Weak single-signal heuristics (shell+port, Downloads network, SeImpersonate alone, cloud-sync tools) MUST be LogOnly. IPSec default MUST be attack-only ports — not SSH/RDP/SMB. Full lockdown only via `RestrictivePortHardening`. |

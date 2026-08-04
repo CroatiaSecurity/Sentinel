@@ -2,13 +2,14 @@
 
 Real-time endpoint detection and response for Windows. Runs as a background service, monitors system behavior, and kills threats automatically when multiple signals correlate.
 
-**Current version: 1.9.6**
+**Current version: 1.9.7**
 
-### Product posture (v1.9.6 — observe-until-chain + dual audit trail)
+### Product posture (v1.9.7 — observe-only until malice + dual audit trail)
 
-**Full sensors. Silent until a real attack chain. Then nuke — and seal an evidence pack.**
+**Full sensors. Do not block your work. Silent until a real attack chain. Then nuke — and seal an evidence pack.**
 
 - **Observe by default** (`ObserveUntilChain: true`): every monitor logs to `events.jsonl`; **no kill / quarantine / isolate / host rewrite / toast / evidence pack** on single-signal noise.
+- **Work-first host surface (v1.9.7):** default does **not** apply IPSec lockdown, RPC firewall blocks, ASR Block re-arm, RemoteRegistry disable, RDP force-logoff, or USB auto-disable. Older lockdown leftovers are **removed** on upgrade. Kiosk/lockdown only if you set `RestrictivePortHardening: true`.
 - **Nuke only** when multi-signal / composite chain points at: **C2 beaconing**, **exfil**, **token theft**, **reverse shell**, **credential dump**, **BYOVD**, or **coercion toolkit composites** (covert surveillance + remote channel, remote-control abuse toolkit, session theft + abuse channel, stalkerware persistence) → quarantine + kill + isolate + chain tracer.
 - **Digital coercion / surveillance toolkit (v1.9.4):** platform-agnostic host defense against tools used in online harassment, sexual coercion, stalkerware, account takeover, and remote blackmail. **Does not** moderate chat or identify offenders by social profile. Settings → **Safety**.
 - **Evidence packs on every chain-confirmed nuke** (`AutoIncidentReporter`): integrity-sealed pack under `%ProgramData%\Sentinel\IncidentReports` + critical toast; coercion-tagged packs include LE-oriented harm checkboxes (you complete them).
@@ -137,9 +138,9 @@ Full transparency in [THREAT_MODEL.md](THREAT_MODEL.md).
 
 ## Installation
 
-Download **`SentinelSetup-1.9.6.exe`** from [GitHub Releases](https://github.com/CroatiaSecurity/Sentinel/releases) (or `releases/1.9.6/` after a local build) and run it as Administrator.
+Download **`SentinelSetup-1.9.7.exe`** from [GitHub Releases](https://github.com/CroatiaSecurity/Sentinel/releases) (or `releases/1.9.7/` after a local build) and run it as Administrator.
 
-If Setup fails with **Error 5 / temporary directory** while an older Sentinel is installed, that was ASR rule `c1db55ab` (fixed in 1.9.6). Use elevated `installer\install-no-inno.ps1` or stop the service, remove that rule, then upgrade.
+If Setup fails with **Error 5 / temporary directory** while an older Sentinel is installed, that was ASR rule `c1db55ab` (fixed in 1.9.6+). Use elevated `installer\install-no-inno.ps1` or `fix-asr-for-setup.ps1`, then upgrade.
 
 **Minimum installer** — framework-dependent `net48-windows` (no bundled runtime). Small setup package.
 

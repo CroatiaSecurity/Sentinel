@@ -80,12 +80,20 @@ namespace Sentinel.Core
                 trusted.Length,
                 trusted.Length > 0 ? string.Join(", ", trusted) : "none — log Cast traffic, no preemptive blocks");
 
-            // v1.4.2: Delete Windows built-in "Cast to Device" inbound firewall rules.
-            // These allow ANY LAN device to push RTSP/HTTP streams INTO this machine.
-            // A rogue Cast device uses exactly these rules to connect inbound.
-            DeleteCastToDeviceInboundRules();
+            // v1.9.7: never delete Windows Cast firewall rules in observe/work-first mode
+            // (breaks legitimate Chromecast / casting). Only when user set TrustedCastDevices.
+            if (enforce && ProductPosture.AllowsProactiveHostLockdown(_config))
+            {
+                DeleteCastToDeviceInboundRules();
+            }
+            else if (enforce)
+            {
+                // Allowlist enforce without full restrictive kiosk — still may delete Cast rules
+                // only when operator opted into TrustedCastDevices (explicit cast policy).
+                DeleteCastToDeviceInboundRules();
+            }
 
-            // v1.8.3: empty allowlist must not leave residual CastGuard blocks from older builds
+            // empty allowlist must not leave residual CastGuard blocks from older builds
             if (!enforce && !_legacyCastBlocksCleaned)
             {
                 RemoveLegacyCastGuardBlocks();

@@ -2,6 +2,30 @@
 
 All notable changes to Sentinel are documented in this file.
 
+## [1.9.7] - 2026-08-04
+
+### Policy — OBSERVE ONLY means no proactive host interference (work-first)
+**Standing law (do not re-litigate):** Default installs must **not** pre-block ports, kill RDP, disable services, re-arm ASR Block, delete Windows Cast FW rules, auto-disable USB, or otherwise reshape the OS “just in case.” Log everything; touch the host only on **chain-confirmed malice** (or when the user explicitly enables **RestrictivePortHardening** kiosk mode).
+
+**Enforcement for future code:** `ProductPosture` + `constraints.md` + `ProductPostureTests`. Any new proactive host mutation **must** gate on `ProductPosture.TryProactiveHostLockdown` and keep default-deny unit tests green. No more one-off silent blocks.
+
+| Default (RestrictivePortHardening=false) | Restrictive / kiosk (true) |
+|------------------------------------------|----------------------------|
+| No GSecurity IPSec (leftovers **removed** on upgrade) | Full IPSec lockdown set |
+| No RPC ephemeral firewall rule (leftovers removed) | Block remote RPC ephemeral ports |
+| No ASR Block re-arm (policy leftovers **released**) | ASR Block self-heal |
+| No RemoteRegistry/service disable | Attack + optional remote service disable |
+| No RDP force-logoff | RemoteSessionGuard force-logoff |
+| No USB auto-disable on failed enum | Optional USB auto-disable if enabled |
+| DLL search path + install ACLs only (self) | + registry/browser/credential hardening |
+
+- **`ReleaseUserWorkSurface()`** — undoes IPSec / RPC FW / ASR Block leftovers from 1.9.6 and earlier.
+- **IPSecIntegrityGuard / AsrPolicyGuard** — work-first: tear down leftovers; never re-apply lockdown.
+- **RemoteSessionGuard** — idle in work-first (RDP allowed).
+- **`AutoDisableFailedUsbEnumeration`** default **false**.
+
+Detection, events.jsonl, and chain-confirmed response are unchanged. Kiosk operators set `"RestrictivePortHardening": true`.
+
 ## [1.9.6] - 2026-08-03
 
 ### Fixed — ASR no longer blocks SentinelSetup as “ransomware protection”

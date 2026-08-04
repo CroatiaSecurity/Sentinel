@@ -150,21 +150,29 @@ namespace Sentinel.Tests
 
             try
             {
-                // Shared fixture log may already contain Lsass lines from earlier tests in this class.
-                var logPath = Path.Combine(_tempDir, "events.jsonl");
-                try
+                // Unique PID so shared fixture log from other tests cannot confuse counts.
+                int pid = 40000 + Environment.TickCount % 20000;
+                string pidToken = $"\"ProcessId\":{pid}";
+
+                int CountDetectionsForPid()
                 {
-                    if (File.Exists(logPath))
-                        File.WriteAllText(logPath, string.Empty);
+                    var n = 0;
+                    foreach (var line in ReadLog().Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+                    {
+                        if (line.IndexOf("\"type\":\"detection\"", StringComparison.Ordinal) >= 0 &&
+                            line.IndexOf("LsassAccessRule", StringComparison.Ordinal) >= 0 &&
+                            line.IndexOf(pidToken, StringComparison.Ordinal) >= 0)
+                            n++;
+                    }
+                    return n;
                 }
-                catch { /* best effort */ }
 
                 var context = new FusedTelemetryContext
                 {
                     TriggeringEvent = new ProcessTelemetry
                     {
                         ProcessName = "procdump.exe",
-                        ProcessId = 33333,
+                        ProcessId = pid,
                         CommandLine = "procdump.exe -ma lsass.exe dump.dmp",
                         ImagePath = @"C:\temp\procdump.exe",
                         ParentProcessName = "cmd.exe",
@@ -175,19 +183,10 @@ namespace Sentinel.Tests
                 // Submit same event twice rapidly (within dedup window)
                 engine.SubmitTelemetry(context);
                 engine.SubmitTelemetry(context);
-                await Task.Delay(800);
+                await Task.Delay(1200);
 
-                // Should only see ONE detection logged (dedup suppresses the second).
-                // Count detection-type lines only — response rows may also mention the rule name.
-                var log = ReadLog();
-                var detectionCount = 0;
-                foreach (var line in log.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
-                {
-                    if (line.IndexOf("\"type\":\"detection\"", StringComparison.Ordinal) >= 0 &&
-                        line.IndexOf("LsassAccessRule", StringComparison.Ordinal) >= 0)
-                        detectionCount++;
-                }
-                Assert.Equal(1, detectionCount);
+                // Dedup should produce exactly one detection for this PID.
+                Assert.Equal(1, CountDetectionsForPid());
             }
             finally
             {
