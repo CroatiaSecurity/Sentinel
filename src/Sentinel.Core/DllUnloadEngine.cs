@@ -43,7 +43,50 @@ namespace Sentinel.Core
             "system", "smss", "csrss", "wininit", "services", "lsass", "svchost",
             "explorer", "dwm", "winlogon", "MsMpEng", "NisSrv",
             "Sentinel.Service", "Sentinel.Agent",
+            // OS servicing / imaging — NEVER FreeLibrary/quarantine (NTLite, DISM, Setup)
+            "DismHost", "Dism", "TrustedInstaller", "TiWorker", "NTLite",
+            "SetupHost", "WUSA", "msiexec", "Setup", "WindowsPackageManagerServer",
+            "MoUsoCoreWorker", "UsoClient", "wuauclt", "MusNotification",
         };
+
+        /// <summary>
+        /// Paths used by legitimate offline/online servicing (NTLite scratch, CBS, WinSxS, DISM).
+        /// Modules here are not "Temp sideload plants".
+        /// </summary>
+        private static bool IsOsServicingPath(string? path)
+        {
+            if (string.IsNullOrEmpty(path)) return false;
+            var p = path;
+            // Case-insensitive contains without allocating ToLower on hot path
+            if (p.IndexOf(@"\NLTmpScratch\", StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            if (p.IndexOf(@"\NLTmpS\", StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            if (p.IndexOf(@"\WinSxS\", StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            if (p.IndexOf(@"\Servicing\", StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            if (p.IndexOf(@"\CbsTemp\", StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            if (p.IndexOf(@"\Windows\System32\Dism\", StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            if (p.IndexOf(@"\Windows\SysWOW64\Dism\", StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            if (p.IndexOf(@"\Microsoft\Windows\Servicing\", StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            return false;
+        }
+
+        private static bool IsOsServicingProcess(string processName, string? imagePath)
+        {
+            if (!string.IsNullOrEmpty(processName) && ProtectedProcessNames.Contains(processName))
+            {
+                // Only treat the servicing names as protected when path matches OR name is exclusive
+                var n = processName;
+                if (n.Equals("DismHost", StringComparison.OrdinalIgnoreCase) ||
+                    n.Equals("Dism", StringComparison.OrdinalIgnoreCase) ||
+                    n.Equals("TrustedInstaller", StringComparison.OrdinalIgnoreCase) ||
+                    n.Equals("TiWorker", StringComparison.OrdinalIgnoreCase) ||
+                    n.Equals("NTLite", StringComparison.OrdinalIgnoreCase) ||
+                    n.Equals("SetupHost", StringComparison.OrdinalIgnoreCase) ||
+                    n.Equals("WUSA", StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+
+            return IsOsServicingPath(imagePath);
+        }
 
         public static readonly HashSet<string> SideloadTargets = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -196,11 +239,18 @@ namespace Sentinel.Core
                     : processName;
                 result.ProcessName = name;
 
+                // Never touch NTLite / DISM / TrustedInstaller / offline servicing hosts.
+                // Treating their Temp-scratch modules as "sideload" breaks feature setup (RPC 1722).
+                if (IsOsServicingProcess(name, imagePath))
+                    return result;
+
                 if (ProtectedProcessNames.Contains(name) && IsProtectedPath(imagePath))
                     return result;
 
                 var procDir = Path.GetDirectoryName(imagePath);
                 if (string.IsNullOrEmpty(procDir) || IsWindowsSystemDirectory(procDir))
+                    return result;
+                if (IsOsServicingPath(procDir) || IsOsServicingPath(imagePath))
                     return result;
 
                 var hostileDisk = FindHostileSideloadDlls(procDir);
@@ -211,16 +261,32 @@ namespace Sentinel.Core
                     foreach (var mod in NativeProcessMemory.EnumModules(processId))
                     {
                         if (string.IsNullOrEmpty(mod.Path)) continue;
-                        if (mod.Path.Contains(@"\Windows\")) continue;
+                        if (mod.Path.IndexOf(@"\Windows\", StringComparison.OrdinalIgnoreCase) >= 0) continue;
+                        if (IsOsServicingPath(mod.Path)) continue;
 
-                        bool fromTemp = mod.Path.Contains(@"\Temp\") ||
-                                        mod.Path.Contains(@"\AppData\Local\Temp\");
+                        // Main EXE listed as a module under Temp is NOT a sideload plant
+                        if (string.Equals(mod.Path, imagePath, StringComparison.OrdinalIgnoreCase))
+                            continue;
+
+                        bool fromTemp = mod.Path.IndexOf(@"\Temp\", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                        mod.Path.IndexOf(@"\AppData\Local\Temp\", StringComparison.OrdinalIgnoreCase) >= 0;
                         var modDir = Path.GetDirectoryName(mod.Path) ?? "";
-                        bool plantNameInAppDir = modDir.Equals(procDir) &&
+                        bool plantNameInAppDir = modDir.Equals(procDir, StringComparison.OrdinalIgnoreCase) &&
                                                  SideloadTargets.Contains(mod.Name);
 
-                        // Behavior: module is loaded from Temp, or loaded plant that is hostile
-                        if (fromTemp || (plantNameInAppDir && File.Exists(mod.Path) && IsHostileSideloadDll(mod.Path)))
+                        // CRITICAL: only classic sideload *target names* from Temp are hostile.
+                        // Old logic treated ANY module under Temp as hostile → FreeLibrary/kill on
+                        // DismHost + DismCorePS.dll + friends when NTLite runs DISM from NLTmpScratch.
+                        bool tempSideloadTarget = fromTemp &&
+                                                  SideloadTargets.Contains(mod.Name) &&
+                                                  File.Exists(mod.Path) &&
+                                                  IsHostileSideloadDll(mod.Path);
+
+                        bool appDirPlant = plantNameInAppDir &&
+                                           File.Exists(mod.Path) &&
+                                           IsHostileSideloadDll(mod.Path);
+
+                        if (tempSideloadTarget || appDirPlant)
                             hostileLoaded.Add((mod.Path, mod.Base));
                     }
                 }

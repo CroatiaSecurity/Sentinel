@@ -2,9 +2,9 @@
 
 Real-time endpoint detection and response for Windows. Runs as a background service, monitors system behavior, and kills threats automatically when multiple signals correlate.
 
-**Current version: 1.9.7**
+**Current version: 1.9.8**
 
-### Product posture (v1.9.7 — observe-only until malice + dual audit trail)
+### Product posture (v1.9.8 — observe-only until malice + dual audit trail)
 
 **Full sensors. Do not block your work. Silent until a real attack chain. Then nuke — and seal an evidence pack.**
 
@@ -138,7 +138,7 @@ Full transparency in [THREAT_MODEL.md](THREAT_MODEL.md).
 
 ## Installation
 
-Download **`SentinelSetup-1.9.7.exe`** from [GitHub Releases](https://github.com/CroatiaSecurity/Sentinel/releases) (or `releases/1.9.7/` after a local build) and run it as Administrator.
+Download **`SentinelSetup-1.9.8.exe`** from [GitHub Releases](https://github.com/CroatiaSecurity/Sentinel/releases) (or `releases/1.9.8/` after a local build) and run it as Administrator.
 
 If Setup fails with **Error 5 / temporary directory** while an older Sentinel is installed, that was ASR rule `c1db55ab` (fixed in 1.9.6+). Use elevated `installer\install-no-inno.ps1` or `fix-asr-for-setup.ps1`, then upgrade.
 

@@ -2,6 +2,16 @@
 
 All notable changes to Sentinel are documented in this file.
 
+## [1.9.8] - 2026-08-04
+
+### Fixed — DllUnloadEngine was gutting NTLite / DismHost (RPC 1722)
+**This was the real “blocks even sooner” bug**, not NTLite alone.
+
+- Events showed: `DLL Sideloading: Proven Load — Unloaded + Quarantined` on **DismHost** loading `DismCorePS.dll`, `dismprov.dll`, `OSProvider.dll` from `Temp\NLTmpScratch\…`
+- Old logic treated **any module under `\Temp\`** as hostile → FreeLibrary / kill / quarantine on **legitimate DISM** mid feature-disable → **RPC server unavailable (0x800706ba)** and red “Skipped” earlier in the list.
+- **Fix:** only classic sideload **target names** (version.dll, dbghelp.dll, …) from Temp count; never entire Temp processes. **Never remediate** DismHost / TrustedInstaller / TiWorker / NTLite / NLTmpScratch / WinSxS / CBS paths.
+- Restore RemoteRegistry start type if we left it Disabled (Start=4 → Manual).
+
 ## [1.9.7] - 2026-08-04
 
 ### Policy — OBSERVE ONLY means no proactive host interference (work-first)

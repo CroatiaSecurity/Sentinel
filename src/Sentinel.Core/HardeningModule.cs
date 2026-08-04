@@ -80,6 +80,20 @@ namespace Sentinel.Core
                 // ASR Block rules we wrote under Policy hive (break installers / Office / USB tools)
                 ReleaseAsrBlockPolicy();
 
+                // Undo RemoteRegistry=Disabled from older builds (Start=4). Manual(3) is safe default.
+                try
+                {
+                    using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(
+                        @"SYSTEM\CurrentControlSet\Services\RemoteRegistry", writable: true);
+                    if (key != null)
+                    {
+                        var start = key.GetValue("Start");
+                        if (start is int s && s == 4)
+                            key.SetValue("Start", 3, Microsoft.Win32.RegistryValueKind.DWord);
+                    }
+                }
+                catch { /* ignore */ }
+
                 // Keep install-dir exclusions only (safe for upgrades)
                 ApplyAsrOnlyExclusions();
             }

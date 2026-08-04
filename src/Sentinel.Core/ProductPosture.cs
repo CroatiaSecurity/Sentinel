@@ -19,7 +19,8 @@ namespace Sentinel.Core
     /// <item>Detect + log to events.jsonl</item>
     /// <item>Destructive response only after multi-signal chain confirmation
     ///       (<see cref="ResponsePolicy"/> / ObserveUntilChain)</item>
-    /// <item>Proven hostile DLL unload (DllUnloadEngine)</item>
+    /// <item>Proven hostile DLL unload only for classic sideload targets — never OS servicing
+    ///       (DismHost/NTLite/TrustedInstaller) or arbitrary Temp modules</item>
     /// <item>Undo our own prior lockdown leftovers (<see cref="HardeningModule.ReleaseUserWorkSurface"/>)</item>
     /// </list>
     ///
