@@ -2,6 +2,18 @@
 
 All notable changes to Sentinel are documented in this file.
 
+## [1.9.9] - 2026-08-04
+
+### Observe — optional OS services + bulk upload noise (no host mutation)
+
+**Product law unchanged:** for ~99% of software and normal user work (including **torrent seeding**), Sentinel **observes only**. Destructive response remains reserved for chain-confirmed malice (credential dump, C2 beaconing, ransomware encryption, reverse shell, token theft, true staged exfil chains).
+
+- **`PrivacyServiceOutboundMonitor`** + **`ServiceProcessMap`** — inventory optional services (`DiagTrack`, `whesvc`, `dmwappushservice`, `PcaSvc`, `WerSvc`, `wisvc`, plus config extras); log running state and public outbound remotes as **Tier2 / LogOnly / WeakObserveSeed**. Never stop services, kill `svchost`, or firewall-block for privacy noise.
+- **`ServiceExfilPosture`** config — default `Enabled=true`, `Mode=Observe`. Soft/Hard reaction reserved for a later opt-in (not shipped).
+- **`BulkTransferNoise`** — qBittorrent, uTorrent, Transmission, Deluge, aria2, Tixati, SABnzbd, etc.
+- **`DataExfiltrationMonitor` / `TrafficVolumeBaseline`** — when a bulk-transfer client is running, volume spikes become **`Traffic Anomaly: Bulk Transfer Upload (Observe)`** (not Exfil terminal, no `ExfiltrationSpikeSignal`). Host-wide spikes renamed to **`Traffic Anomaly: Outbound Volume Spike`** (no longer `"Data Exfiltration:…"` string that seeded the Exfil terminal family).
+- **`ResponsePolicy`** — pure-UX fragments for `Privacy:`, bulk transfer, and outbound volume spikes so they never chain-nuke.
+
 ## [1.9.8] - 2026-08-04
 
 ### Fixed — DllUnloadEngine was gutting NTLite / DismHost (RPC 1722)

@@ -684,25 +684,64 @@ namespace Sentinel.Core
                     // After baseline: check for spikes
                     if (_baselineAverage > 0 && delta > _baselineAverage * SpikeMultiplier)
                     {
-                        await _detectionEngine.EmitAsync(new DetectionEvent
+                        // v1.9.9: Torrent seeding / P2P / downloaders explain most home-user spikes.
+                        // Observe only — never Exfil terminal, never Tier1.
+                        if (BulkTransferNoise.IsAnyBulkTransferProcessRunning(out var bulkClient))
                         {
-                            RuleName = "Traffic Anomaly: Upload Volume Spike Detected",
-                            Evidence = $"Upload bytes in last 30s: {delta:N0} (baseline avg: {_baselineAverage:N0}, " +
-                                       $"threshold: {_baselineAverage * SpikeMultiplier:N0}, ratio: {delta / _baselineAverage:F1}x)",
-                            Reasoning = "Network upload volume exceeded 3x the baseline average. This may indicate " +
-                                        "data exfiltration by a firmware-level NIC implant, compromised driver, or " +
-                                        "process-invisible network stack manipulation. These attacks operate below " +
-                                        "the OS process layer and are invisible to per-process network monitoring.",
-                            Confidence = 0.75, Tier = DetectionTier.Tier1Behavioral,
-                            AuthorizedResponse = ResponseAction.LogOnly,
-                            ProcessName = "SYSTEM", ProcessId = 0,
-                            Metadata = new Dictionary<string, string>
+                            await _detectionEngine.EmitAsync(new DetectionEvent
                             {
-                                ["ActualBytes"] = delta.ToString(),
-                                ["BaselineAvg"] = _baselineAverage.ToString("F0"),
-                                ["Ratio"] = (delta / _baselineAverage).ToString("F1")
-                            }
-                        });
+                                RuleName = "Traffic Anomaly: Bulk Transfer Upload (Observe)",
+                                Evidence =
+                                    $"Upload bytes in last 30s: {delta:N0} while bulk-transfer client '{bulkClient}' is running " +
+                                    $"(baseline avg: {_baselineAverage:N0}).",
+                                Reasoning =
+                                    "Upload volume spike coincides with a known torrent/P2P/downloader. " +
+                                    "Seeding and bulk transfers are normal user activity — observe only.",
+                                Confidence = 0.40,
+                                Tier = DetectionTier.Tier2Indicator,
+                                AuthorizedResponse = ResponseAction.LogOnly,
+                                ProcessName = bulkClient ?? "SYSTEM",
+                                ProcessId = 0,
+                                SignalType = SignalType.Generic,
+                                Metadata = new Dictionary<string, string>
+                                {
+                                    ["BulkTransfer"] = "true",
+                                    ["BulkTransferClient"] = bulkClient ?? "",
+                                    ["ObserveOnly"] = "true",
+                                    ["WeakObserveSeed"] = "true",
+                                    ["ActualBytes"] = delta.ToString(),
+                                    ["BaselineAvg"] = _baselineAverage.ToString("F0"),
+                                    ["Ratio"] = (delta / _baselineAverage).ToString("F1")
+                                }
+                            });
+                        }
+                        else
+                        {
+                            await _detectionEngine.EmitAsync(new DetectionEvent
+                            {
+                                RuleName = "Traffic Anomaly: Upload Volume Spike Detected",
+                                Evidence = $"Upload bytes in last 30s: {delta:N0} (baseline avg: {_baselineAverage:N0}, " +
+                                           $"threshold: {_baselineAverage * SpikeMultiplier:N0}, ratio: {delta / _baselineAverage:F1}x)",
+                                Reasoning =
+                                    "Network upload volume exceeded 3x the baseline average (no known bulk-transfer client detected). " +
+                                    "Observe-only host-wide signal — not process-attributed. " +
+                                    "May indicate heavy upload or rare process-invisible stack abuse; does not alone authorize response.",
+                                Confidence = 0.55,
+                                Tier = DetectionTier.Tier2Indicator,
+                                AuthorizedResponse = ResponseAction.LogOnly,
+                                ProcessName = "SYSTEM",
+                                ProcessId = 0,
+                                SignalType = SignalType.Generic,
+                                Metadata = new Dictionary<string, string>
+                                {
+                                    ["ActualBytes"] = delta.ToString(),
+                                    ["BaselineAvg"] = _baselineAverage.ToString("F0"),
+                                    ["Ratio"] = (delta / _baselineAverage).ToString("F1"),
+                                    ["ObserveOnly"] = "true",
+                                    ["WeakObserveSeed"] = "true"
+                                }
+                            });
+                        }
                     }
 
                     // Slowly adapt baseline (exponential moving average)

@@ -1,6 +1,6 @@
 # Sentinel — Design Document
 
-**Version: 1.9.8**
+**Version: 1.9.9**
 
 ---
 
@@ -88,7 +88,7 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 | `DllLoadFailureMonitor` | Event Log ID 7 + SideBySide errors for failed DLL hijack attempts | periodic |
 | `DiskWideDllScanner` | Scans all drives for unsigned/suspicious DLLs at relaxed intervals | periodic |
 | `PersistentConnectionMonitor` | Detects long-lived connections (webhooks, C2 pairing) and failover on drop | 10s |
-| `DataExfiltrationMonitor` | Monitors outbound network volume, sensitive file access, USB writes | 15s |
+| `DataExfiltrationMonitor` | Host-wide outbound volume spikes; **torrent/P2P/aria2 bulk transfer = observe-only** (never Exfil terminal) | 15s |
 | `AdsDataStagingMonitor` | Detects non-standard NTFS Alternate Data Streams (>1KB) in Temp/Downloads | periodic |
 | `ScriptExecutionMonitor` | PowerShell Event 4104, parent-child anomalies, AMSI bypass, SAM extraction, script drops | 10s |
 | `ScriptHardeningMonitor` | PS history integrity, SBL enforcement, downgrade, obfuscation scoring, profile persistence | 8s |
@@ -127,7 +127,7 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 | `NetworkReinfectionDetector` | Monitors NIC state changes; flags new suspicious processes after network reconnection | on NIC event |
 | `ReinfectionCorrelator` | Tracks killed/quarantined hashes across reboots; scans for reappearance | 60s |
 | `DnsCrossValidator` | Resolves test domain via system + direct Cloudflare; detects router DNS poisoning | periodic |
-| `TrafficVolumeBaseline` | Monitors raw NetworkInterface BytesSent; alerts on 3x baseline upload volume | 30s |
+| `TrafficVolumeBaseline` | NIC BytesSent spikes; bulk-transfer clients (torrent/P2P) → observe-only, not Exfil | 30s |
 | `OutboundConnectionWhitelist` | Monitors/enforces outbound connections against allowed IP subnets | periodic |
 | `RemoteAccessMonitor` | Scans for 35+ remote access tools; Tier2 presence / Tier1 tunnels from staging paths | 60s |
 | `ThreatIntelFeedBlocker` | Spamhaus/Feodo/ET feeds in memory; **observe-only by default** (no proactive FW); reactive `NetworkIsolate` on live hit when `ActiveResponse`; optional `ThreatIntelProactiveFirewall` | 4h refresh / 30s conn |
@@ -146,6 +146,8 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 | `WmiPersistenceMonitor` | Periodic scan for __EventFilter/__EventConsumer persistence (T1546.003) | 5min |
 | `WmiProviderIntegrityMonitor` | Enumerates __Win32Provider objects; validates Authenticode on provider DLLs | 5min |
 | `WorkFoldersExfilMonitor` | Detects unauthorized Work Folders activation; active response: kills service | 15s |
+| `PrivacyServiceOutboundMonitor` | **Observe-only:** optional OS services (DiagTrack, whesvc, …) running + public remotes; never stop/kill/isolate | 15s |
+| `ServiceProcessMap` | Service name ↔ PID map (shared `svchost` attribution for privacy observe) | on demand |
 | `TlsCertificateMonitor` | Monitors LocalMachine\Root + TrustedPublisher; baselines at startup. BYOVD follow-up: exact cert **thumbprint** match only → stop service + delete SCM key (does **not** delete `System32\drivers\*.sys`) | 60s |
 | `UacBypassSurfaceMonitor` | Detects COM AutoElevation vectors and manifest autoElevate + copy-drop | periodic |
 | `HostsFileGuard` | Enforces embedded hosts (ads baseline SHA-256); FCM `mtalk.*` lines only when `BlockFcmPushChannel=true`; purges other files in drivers\etc | FSW + 30s |

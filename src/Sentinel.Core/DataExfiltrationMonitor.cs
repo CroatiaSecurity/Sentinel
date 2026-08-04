@@ -1,5 +1,5 @@
 using System;
-using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Net.NetworkInformation;
 using System.Threading;
 using System.Threading.Tasks;
@@ -13,6 +13,10 @@ namespace Sentinel.Core
     /// - Unusually large outbound transfers from the system
     /// - Sudden spikes in bytes-sent that deviate from baseline
     /// Purely behavioral — based on transfer volume, not destinations.
+    ///
+    /// v1.9.9: When a known bulk-transfer client is running (torrent seeders, P2P, aria2, …),
+    /// volume spikes are observe-only noise — never "Exfil" terminal fuel and never
+    /// publish ExfiltrationSpikeSignal. User seeding is not malice.
     /// </summary>
     public sealed class DataExfiltrationMonitor : BackgroundService
     {
@@ -68,16 +72,67 @@ namespace Sentinel.Core
                     var threshold = Math.Max(MinBaselineBytes, _baselineRate * SpikeMultiplier);
                     if (delta > threshold)
                     {
+                        // Torrent seeding / P2P / download managers: do not label as Exfil.
+                        if (BulkTransferNoise.IsAnyBulkTransferProcessRunning(out var bulkClient))
+                        {
+                            _logger.LogDebug(
+                                "[DataExfiltrationMonitor] Suppressing exfil volume spike during bulk transfer ({Client}): {Mb}MB/15s",
+                                bulkClient, delta / (1024 * 1024));
+
+                            await _detectionEngine.EmitAsync(new DetectionEvent
+                            {
+                                RuleName = "Traffic Anomaly: Bulk Transfer Upload (Observe)",
+                                Evidence =
+                                    $"Outbound spike {delta / (1024 * 1024)}MB in {Interval.TotalSeconds}s while bulk-transfer client '{bulkClient}' is running. " +
+                                    $"Baseline rate ~{_baselineRate / (1024 * 1024)}MB/interval.",
+                                Reasoning =
+                                    "High outbound volume coincides with a known torrent/P2P/downloader process (seeding or bulk transfer). " +
+                                    "Sentinel observes only — this is not treated as data exfiltration and cannot seed malice chains.",
+                                Confidence = 0.40,
+                                Tier = DetectionTier.Tier2Indicator,
+                                AuthorizedResponse = ResponseAction.LogOnly,
+                                ProcessName = bulkClient ?? "SYSTEM",
+                                ProcessId = 0,
+                                SignalType = SignalType.Generic,
+                                Metadata = new Dictionary<string, string>
+                                {
+                                    ["BulkTransfer"] = "true",
+                                    ["BulkTransferClient"] = bulkClient ?? "",
+                                    ["ObserveOnly"] = "true",
+                                    ["WeakObserveSeed"] = "true",
+                                    ["ActualBytes"] = delta.ToString(),
+                                }
+                            });
+                            // Do NOT publish ExfiltrationSpikeSignal — would mis-correlate as exfil.
+                            continue;
+                        }
+
+                        // Host-wide volume: still LogOnly + weak seed (no process attribution).
+                        // Rule name avoids "Exfil*" terminal fragments so torrent-less spikes
+                        // cannot complete an Exfil chain leg either.
                         await _detectionEngine.EmitAsync(new DetectionEvent
                         {
-                            RuleName = "Data Exfiltration: Outbound Volume Spike",
+                            RuleName = "Traffic Anomaly: Outbound Volume Spike",
                             Evidence = $"Outbound data spike: {delta / (1024 * 1024)}MB in {Interval.TotalSeconds}s (baseline: {_baselineRate / (1024 * 1024)}MB)",
-                            Reasoning = "A sudden spike in outbound network transfer volume was detected, significantly exceeding the established baseline. This pattern is consistent with data exfiltration.",
-                            Confidence = 0.60, Tier = DetectionTier.Tier2Indicator,
+                            Reasoning =
+                                "Host-wide outbound volume exceeded baseline. Observe-only (no process attribution). " +
+                                "True exfil still requires chain-confirmed malice signals " +
+                                "(cred dump, C2, ransomware, reverse shell, token theft, staged cloud exfil tools).",
+                            Confidence = 0.55,
+                            Tier = DetectionTier.Tier2Indicator,
                             AuthorizedResponse = ResponseAction.LogOnly,
-                            ProcessName = "SYSTEM", ProcessId = 0
+                            ProcessName = "SYSTEM",
+                            ProcessId = 0,
+                            SignalType = SignalType.Generic,
+                            Metadata = new Dictionary<string, string>
+                            {
+                                ["ObserveOnly"] = "true",
+                                ["WeakObserveSeed"] = "true",
+                                ["ActualBytes"] = delta.ToString(),
+                            }
                         });
 
+                        // Soft enrichment for correlators — not a kill path.
                         _contextBus?.Publish(new ExfiltrationSpikeSignal
                         {
                             ProcessId = 0,

@@ -512,6 +512,7 @@ namespace Sentinel.Service
                             sp.GetRequiredService<RegistryMonitor>(),
                             sp.GetRequiredService<WmiPersistenceMonitor>(),
                             sp.GetRequiredService<WorkFoldersExfilMonitor>(),
+                            sp.GetRequiredService<PrivacyServiceOutboundMonitor>(),
                             sp.GetRequiredService<TlsCertificateMonitor>(),
                             sp.GetRequiredService<UacBypassSurfaceMonitor>(),
                             sp.GetRequiredService<HostsFileGuard>(),
@@ -546,6 +547,8 @@ namespace Sentinel.Service
                     services.AddSingleton<RegistryMonitor>();
                     services.AddSingleton<WmiPersistenceMonitor>();
                     services.AddSingleton<WorkFoldersExfilMonitor>();
+                    services.AddSingleton<ServiceProcessMap>();
+                    services.AddSingleton<PrivacyServiceOutboundMonitor>();
                     services.AddSingleton<TlsCertificateMonitor>();
                     services.AddSingleton<UacBypassSurfaceMonitor>();
                     services.AddSingleton<HostsFileGuard>();

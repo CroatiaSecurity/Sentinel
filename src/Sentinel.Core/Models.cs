@@ -163,6 +163,58 @@ namespace Sentinel.Core
         public bool AutoDisableFailedUsbEnumeration { get; set; } = false;
 
         public CveShieldConfig CveShield { get; set; } = new();
+
+        /// <summary>
+        /// v1.9.9: Observe optional vendor/OS services that phone home (DiagTrack, whesvc, …).
+        /// Default Mode=Observe — log only; never stop services or firewall-block for privacy noise.
+        /// Destructive host mutation remains reserved for chain-confirmed malice
+        /// (cred dump, C2, ransomware, reverse shell, token theft, proven exfil chains).
+        /// </summary>
+        public ServiceExfilPostureConfig ServiceExfilPosture { get; set; } = new();
+    }
+
+    /// <summary>
+    /// How Sentinel treats optional OS/vendor services that perform outbound telemetry.
+    /// MVP ships Observe only; Soft/Hard are reserved for future opt-in (not default).
+    /// </summary>
+    public enum ServiceExfilPostureMode
+    {
+        /// <summary>Log inventory + outbound remotes only. No host mutation.</summary>
+        Observe = 0,
+        /// <summary>Future: NetworkIsolate public remotes for inventory services (opt-in).</summary>
+        SoftReact = 1,
+        /// <summary>Future: stop inventory services via SCM (opt-in; never kill svchost).</summary>
+        HardReact = 2
+    }
+
+    /// <summary>
+    /// v1.9.9 — Awareness of optional services that may phone home while remaining legitimate.
+    /// Product law: 99% of software is observe-only; act only on kill-grade malice chains.
+    /// </summary>
+    public sealed class ServiceExfilPostureConfig
+    {
+        /// <summary>Master switch for PrivacyServiceOutboundMonitor. Default true (observe).</summary>
+        public bool Enabled { get; set; } = true;
+
+        /// <summary>Always Observe in shipped defaults. Soft/Hard must stay off unless operator opts in later.</summary>
+        public ServiceExfilPostureMode Mode { get; set; } = ServiceExfilPostureMode.Observe;
+
+        public int ScanIntervalSeconds { get; set; } = 15;
+
+        /// <summary>
+        /// Extra service short names to treat as privacy/phone-home inventory.
+        /// Merged with built-in defaults (DiagTrack, whesvc, …).
+        /// </summary>
+        public string[] Inventory { get; set; } = Array.Empty<string>();
+
+        /// <summary>Service names the operator chooses to ignore (no privacy events).</summary>
+        public string[] Allowlist { get; set; } = Array.Empty<string>();
+
+        /// <summary>
+        /// Services that must never be stopped/disabled even if HardReact is added later.
+        /// Empty uses built-in NeverTouch set (EventLog, BFE, Defender, …).
+        /// </summary>
+        public string[] NeverTouch { get; set; } = Array.Empty<string>();
     }
 
     /// <summary>
