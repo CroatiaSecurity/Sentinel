@@ -85,6 +85,53 @@ namespace Sentinel.Core
             return new List<GraphEdge>();
         }
 
+        /// <summary>
+        /// v2.0 — Diversity score for weighted correlation.
+        /// Counts distinct relation types and endpoint/file fan-out for a process key.
+        /// </summary>
+        public GraphDiversityScore GetProcessDiversity(int processId, string? processName = null)
+        {
+            var score = new GraphDiversityScore { ProcessId = processId };
+            // Edges are stored under keys like PID_{id}_{name} — match by PID prefix.
+            var prefix = $"PID_{processId}_";
+            var relations = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var endpoints = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var files = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            int edgeCount = 0;
+
+            foreach (var kvp in _processEdges)
+            {
+                if (!kvp.Key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) &&
+                    !(processName != null && kvp.Key.Equals($"PID_{processId}_{processName}", StringComparison.OrdinalIgnoreCase)))
+                    continue;
+
+                List<GraphEdge> edges;
+                lock (kvp.Value)
+                    edges = new List<GraphEdge>(kvp.Value);
+
+                foreach (var e in edges)
+                {
+                    edgeCount++;
+                    relations.Add(e.Relation ?? "");
+                    if (string.Equals(e.Relation, "CONNECTED", StringComparison.OrdinalIgnoreCase))
+                        endpoints.Add(e.TargetKey);
+                    else if (string.Equals(e.Relation, "WROTE", StringComparison.OrdinalIgnoreCase))
+                        files.Add(e.TargetKey);
+                }
+            }
+
+            score.EdgeCount = edgeCount;
+            score.DistinctRelations = relations.Count;
+            score.DistinctEndpoints = endpoints.Count;
+            score.DistinctFiles = files.Count;
+            // Bounded boost 0–25 used by WeightedCorrelationEngine
+            score.WeightBoost =
+                Math.Min(8, score.DistinctRelations * 3) +
+                Math.Min(10, score.DistinctEndpoints) +
+                Math.Min(7, score.DistinctFiles / 2);
+            return score;
+        }
+
         public void Prune(TimeSpan retentionWindow)
         {
             lock (_pruneLock)
@@ -124,5 +171,16 @@ namespace Sentinel.Core
                 }
             }
         }
+    }
+
+    /// <summary>v2.0 graph diversity summary for explainable weighted scoring.</summary>
+    public sealed class GraphDiversityScore
+    {
+        public int ProcessId { get; set; }
+        public int EdgeCount { get; set; }
+        public int DistinctRelations { get; set; }
+        public int DistinctEndpoints { get; set; }
+        public int DistinctFiles { get; set; }
+        public int WeightBoost { get; set; }
     }
 }

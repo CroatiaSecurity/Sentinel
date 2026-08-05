@@ -36,6 +36,7 @@ namespace Sentinel.Core
         private readonly HashReputationService _reputationService;
         private readonly FileReputationEngine _fileReputationEngine;
         private readonly BehavioralCorrelationEngine _correlationEngine;
+        private readonly WeightedCorrelationEngine? _weightedCorrelation;
         private readonly ScoringEngine _scoringEngine;
         private readonly ILogger<DetectionEngine> _logger;
         private readonly CancellationTokenSource _cts = new();
@@ -58,7 +59,8 @@ namespace Sentinel.Core
             FileReputationEngine fileReputationEngine,
             BehavioralCorrelationEngine correlationEngine,
             ScoringEngine scoringEngine,
-            ILogger<DetectionEngine> logger)
+            ILogger<DetectionEngine> logger,
+            WeightedCorrelationEngine? weightedCorrelation = null)
         {
             _rules.AddRange(rules);
             _metrics = metrics;
@@ -68,11 +70,13 @@ namespace Sentinel.Core
             _reputationService = reputationService;
             _fileReputationEngine = fileReputationEngine;
             _correlationEngine = correlationEngine;
+            _weightedCorrelation = weightedCorrelation;
             _scoringEngine = scoringEngine;
             _logger = logger;
 
-            // Wire up the correlation engine callback
-            _correlationEngine.Initialize(this.EmitAsync);
+            // Wire up correlation engines (hand-authored composites + v2.0 weighted)
+            _correlationEngine.Initialize(this.EmitCompositeAsync);
+            _weightedCorrelation?.Initialize(this.EmitCompositeAsync);
 
             // Start background processing
             _processingTask = Task.Run(ProcessTelemetryQueueAsync);
@@ -80,6 +84,11 @@ namespace Sentinel.Core
 
         public void SubmitTelemetry(FusedTelemetryContext context)
         {
+            _metrics.RecordTelemetryReceived();
+            // DropOldest: TryWrite always accepts; oldest is discarded under pressure.
+            // Approximate drop signal when channel is saturated (Count ≈ capacity).
+            if (_telemetryChannel.Reader.Count >= TelemetryChannelCapacity - 1)
+                _metrics.RecordTelemetryDropped();
             _telemetryChannel.Writer.TryWrite(context);
         }
 
@@ -87,6 +96,30 @@ namespace Sentinel.Core
         {
             // Direct emission bypassing rules (for composite detections)
             await HandleDetectionEventAsync(detectionEvent);
+        }
+
+        /// <summary>
+        /// Composite callback from correlation engines. Marks metrics and routes
+        /// through full detection handling (score, tier law, response).
+        /// </summary>
+        private async Task EmitCompositeAsync(DetectionEvent detectionEvent)
+        {
+            if (detectionEvent == null) return;
+            if (detectionEvent.RuleName != null &&
+                detectionEvent.RuleName.IndexOf("Weighted Correlation", StringComparison.OrdinalIgnoreCase) >= 0)
+                _metrics.RecordWeightedEmitted();
+            else
+                _metrics.RecordCompositeEmitted();
+
+            if (detectionEvent.Metadata != null &&
+                detectionEvent.Metadata.TryGetValue(ResponsePolicy.ChainConfirmedKey, out var cc) &&
+                string.Equals(cc, "true", StringComparison.OrdinalIgnoreCase))
+            {
+                _metrics.RecordChainConfirmed();
+            }
+
+            AttackTechniqueMap.Enrich(detectionEvent);
+            await HandleDetectionEventAsync(detectionEvent).ConfigureAwait(false);
         }
 
         public async Task SubmitConsultantSignalAsync(DetectionEvent detectionEvent)
@@ -135,12 +168,10 @@ namespace Sentinel.Core
                                             // This generated false detections, fed the correlation engine with
                                             // SuspiciousProcess signals, and created bogus incidents against ourselves.
                                             //
-                                            // SECURITY v1.4.4: Path-verified with normalization.
-                                            // Path.GetFullPath resolves junctions/symlinks/relative segments.
-                                            // Trailing separator prevents prefix collision attacks.
-                                            var selfDir = Path.GetFullPath(AppContext.BaseDirectory).TrimEnd('\\') + '\\';
-                                            var normalizedImagePath = Path.GetFullPath(imagePath);
-                                            if (normalizedImagePath.StartsWith(selfDir))
+                                            // v2.0 RT-HIGH-2: hardlink-aware self-exclusion (not string prefix alone)
+                                            if (SelfPathGuard.IsSentinelSelfBinary(imagePath) ||
+                                                SelfPathGuard.IsUnderInstallDirectory(imagePath) &&
+                                                Path.GetFileName(imagePath).StartsWith("Sentinel.", StringComparison.OrdinalIgnoreCase))
                                                 return;
 
                                             // v1.3.1: Use multi-signal FileReputationEngine for on-execute verdicts
@@ -335,6 +366,10 @@ namespace Sentinel.Core
             var scoreProfile = _scoringEngine.Score(detection);
             detection.Metadata["ThreatScore"] = scoreProfile.Score.ToString();
             detection.Metadata["ThreatVerdict"] = scoreProfile.Verdict.ToString();
+            detection.Metadata["ThreatCategory"] = scoreProfile.Category.ToString();
+
+            // v2.0: ATT&CK technique mapping on every detection
+            AttackTechniqueMap.Enrich(detection);
 
             bool isConsultant = detection.Metadata.TryGetValue("ConsultantSignal", out var csFlag)
                 && string.Equals(csFlag, "true");
@@ -358,7 +393,11 @@ namespace Sentinel.Core
 
             // Feed ALL tiers to correlation — Tier2 observe signals seed composites;
             // multi-signal composites are what authorize kill.
+            var corrStart = DateTime.UtcNow;
             await _correlationEngine.RegisterSignalAsync(detection);
+            if (_weightedCorrelation != null)
+                await _weightedCorrelation.RegisterSignalAsync(detection);
+            _metrics.RecordCorrelation((DateTime.UtcNow - corrStart).TotalMilliseconds);
         }
 
         private async Task HandleDetectionEventAsync(DetectionEvent detection)

@@ -274,11 +274,13 @@ namespace Sentinel.Core
                     // symlinks, junctions, and relative segments (../) before comparison.
                     // Also use trailing separator to prevent prefix collision attacks
                     // (e.g., C:\Program Files\Sentinel2\evil.exe matching our dir).
-                    var selfDir = Path.GetFullPath(AppContext.BaseDirectory).TrimEnd('\\') + '\\';
-                    if (detectedImagePath != null)
+                    // v2.0 RT-HIGH-2: hardlink-aware self path (not string-prefix alone)
+                    if (detectedImagePath != null &&
+                        (SelfPathGuard.IsSentinelSelfBinary(detectedImagePath) ||
+                         SelfPathGuard.IsUnderInstallDirectory(detectedImagePath)))
                     {
-                        var normalizedTarget = Path.GetFullPath(detectedImagePath);
-                        if (normalizedTarget.StartsWith(selfDir))
+                        // Only skip response for our own binaries under install — not arbitrary hardlinks
+                        if (SelfPathGuard.IsSentinelSelfBinary(detectedImagePath))
                         {
                             reason = "LogOnly (Self-exclusion: verified Sentinel install path)";
                             stopwatch.Stop();

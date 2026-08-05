@@ -197,6 +197,11 @@ namespace Sentinel.Core
             "Remote Control Abuse Toolkit",
             "Session Theft + Abuse Channel",
             "Stalkerware Persistence Chain",
+            // v2.0 — explainable weighted multi-signal composite
+            "Weighted Correlation",
+            "Multi-Signal Threat",
+            // v2.0 — signed disk rule packs
+            "Rule Pack:",
             "[COMPOSITE]",
         };
 

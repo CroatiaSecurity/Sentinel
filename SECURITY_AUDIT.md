@@ -12,11 +12,11 @@ Independent red-team re-audit added RT-NEW-* findings (see CHANGELOG). Status:
 |---------|--------|
 | RT-CRIT-1 Cleartext `X-Sentinel-Auth` | **Fixed** |
 | RT-CRIT-2 Reflection without allowlist | **Fixed** |
-| RT-CRIT-3 MachineGuid + entropy key KD | Open |
+| RT-CRIT-3 MachineGuid + entropy key KD | **Mitigated (v2.0)** — DPAPI LocalMachine `.machine_secret.dpapi` + hmac-v3 |
 | RT-HIGH-1 Rules reload TOCTOU sleep | **Mitigated** |
-| RT-HIGH-2 Hardlink self-exclusion | Open |
+| RT-HIGH-2 Hardlink self-exclusion | **Mitigated (v2.0)** — `SelfPathGuard` final-path + known binary names |
 | RT-HIGH-3 Installer ACL reset window | Open |
-| RT-HIGH-4 No Service↔Agent IPC auth | Open |
+| RT-HIGH-4 No Service↔Agent IPC auth | **Mitigated (v2.0)** — HMAC named pipe `SentinelIpc-v2` + `.ipc_token` |
 | RT-MED-1 Unbounded telemetry channel | **Fixed** |
 | RT-MED-2 Thread.Sleep in rules watcher | **Fixed** |
 | RT-MED-3 Diagnostic writes before ACL | **Fixed** |

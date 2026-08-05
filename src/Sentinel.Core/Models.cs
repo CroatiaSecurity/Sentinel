@@ -171,6 +171,12 @@ namespace Sentinel.Core
         /// (cred dump, C2, ransomware, reverse shell, token theft, proven exfil chains).
         /// </summary>
         public ServiceExfilPostureConfig ServiceExfilPosture { get; set; } = new();
+
+        /// <summary>
+        /// v2.0: Explainable weighted multi-signal correlation (complements hand-authored composites).
+        /// Bound from appsettings section Sentinel:WeightedCorrelation.
+        /// </summary>
+        public WeightedCorrelationConfig WeightedCorrelation { get; set; } = new();
     }
 
     /// <summary>

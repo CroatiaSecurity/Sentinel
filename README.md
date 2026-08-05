@@ -2,9 +2,9 @@
 
 Real-time endpoint detection and response for Windows. Runs as a background service, monitors system behavior, and kills threats automatically when multiple signals correlate.
 
-**Current version: 1.9.8**
+**Current version: 2.0.0**
 
-### Product posture (v1.9.8 — observe-only until malice + dual audit trail)
+### Product posture (v2.0 — observe-only until malice + dual audit trail + explainable correlation)
 
 **Full sensors. Do not block your work. Silent until a real attack chain. Then nuke — and seal an evidence pack.**
 
@@ -112,9 +112,11 @@ Full transparency in [THREAT_MODEL.md](THREAT_MODEL.md).
 
 2. **Monitors** — 80+ background monitors consume ETW telemetry and perform additional analysis (behavioral baselines, statistical beaconing detection, memory scanning, hardware state checks, certificate integrity). Monitors that previously polled every 5-30 seconds now react instantly via ETW events.
 
-3. **Detection engine** — Events are scored by the multi-factor ScoringEngine and classified into tiers. Tier 1 (behavioral) signals are high-confidence. Tier 2 (indicator) signals are corroborating evidence. Rules declare their detection category at compile time via attributes.
+3. **Detection engine** — Events are scored by the multi-factor ScoringEngine and classified into tiers. Tier 1 (behavioral) signals are high-confidence. Tier 2 (indicator) signals are corroborating evidence. Rules declare their detection category at compile time via attributes. **v2.0:** detections are tagged with MITRE ATT&CK technique IDs when mappable.
 
-4. **Correlation** — The BehavioralCorrelationEngine evaluates multi-signal composites on the same process within 60 seconds. 12 composite patterns (Injected C2 Beacon, Active Ransomware Chain, Credential Dump + Exfiltration, Named Pipe C2 + Beaconing, Token Theft + Lateral Movement, etc.) produce kill-authorized detections with 0.90-0.99 confidence.
+4. **Correlation** — Two engines run in parallel:
+   - **BehavioralCorrelationEngine** — hand-authored multi-signal composites (ransomware chain, injected C2, token theft + lateral, coercion toolkit, …) at 0.90–0.99 confidence.
+   - **WeightedCorrelationEngine (v2.0)** — explainable score cards (`Credential=50 + C2=42 + … ≥ 100`) that emit `Weighted Correlation: Multi-Signal Threat` when threshold + terminal contribution are met. Score-card fields are always written to detection metadata.
 
 5. **Response** — Authorized responses range from log-only to process termination, quarantine, network isolation, certificate removal, and persistence cleanup. The ChainTracer walks the parent process tree, quarantines attack-root binaries, and removes persistence (Run keys, scheduled tasks). Only corroborated threats get killed.
 
@@ -122,13 +124,17 @@ Full transparency in [THREAT_MODEL.md](THREAT_MODEL.md).
 
 7. **Reportable-grade evidence (v1.7.7/1.7.8)** — High-confidence attacks produce integrity-sealed packs under `%ProgramData%\Sentinel\IncidentReports\` (SHA-256 manifest + machine-bound HMAC, victim affidavit template, chain of custody, national cybercrime portal links, optional TI share). Sentinel prepares evidence for **you** to file; it does not auto-submit to police or INTERPOL.
 
-8. **Settings UI (v1.7.9)** — Tray **Settings** (double-click) opens a dark sidebar window: Overview, Events, **Report to Police** (edit affidavit → send filing helper), Quarantine, About. No ActiveResponse toggle in the agent (service-only).
+8. **Settings UI** — Tray **Settings** (double-click): Overview, Events, **Report to Police**, Quarantine, Safety, **Ops (v2.0 metrics)**, Tools, About. No ActiveResponse toggle in the agent (service-only).
+
+9. **Plugins + rule packs (v2.0)** — `IDetector` / `ICorrelationRule` / `ITelemetryProvider` / `IResponsePlugin` via `PluginRegistry`. Signed disk packs under `%ProgramData%\Sentinel\rules\packs\` (see [docs/RULE_PACKS.md](docs/RULE_PACKS.md)).
+
+10. **Service↔Agent IPC (v2.0)** — Authenticated named pipe (`SentinelIpc-v2`) for live Ops/health. HMAC token under ProgramData; read-only commands only.
 
 ---
 
 ## Test Suite
 
-**1000** automated tests (xUnit), all passing on net48:
+**600+** automated tests (xUnit) on net48:
 - End-to-end integration tests (full pipeline: telemetry → detection → scoring → correlation → response)
 - Unit tests for all critical engines (Response, Correlation, ChainTracer, FileReputation, AntiTamper, Detection)
 - Monitor unit tests including LNK classification, threat-intel feed parsing, USB failed-enumeration, PS-ported guards, v1.7.5–1.7.6 features, auto incident evidence packs (v1.7.7/1.7.8)
@@ -138,7 +144,7 @@ Full transparency in [THREAT_MODEL.md](THREAT_MODEL.md).
 
 ## Installation
 
-Download **`SentinelSetup-1.9.8.exe`** from [GitHub Releases](https://github.com/CroatiaSecurity/Sentinel/releases) (or `releases/1.9.8/` after a local build) and run it as Administrator.
+Download **`SentinelSetup-2.0.0.exe`** from [GitHub Releases](https://github.com/CroatiaSecurity/Sentinel/releases) (or `releases/2.0.0/` after a local build) and run it as Administrator.
 
 If Setup fails with **Error 5 / temporary directory** while an older Sentinel is installed, that was ASR rule `c1db55ab` (fixed in 1.9.6+). Use elevated `installer\install-no-inno.ps1` or `fix-asr-for-setup.ps1`, then upgrade.
 
@@ -170,6 +176,7 @@ cd installer
 | [architecture-council.md](architecture-council.md) | Detailed architecture specification |
 | [constraints.md](constraints.md) | Hard rules and design constraints |
 | [requirements.md](requirements.md) | Functional requirements |
+| [docs/RULE_PACKS.md](docs/RULE_PACKS.md) | v2.0 signed correlation rule packs |
 
 ---
 

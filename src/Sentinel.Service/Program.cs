@@ -10,6 +10,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Configuration;
 using Sentinel.Core;
+using Sentinel.Core.Plugins;
 
 namespace Sentinel.Service
 {
@@ -218,6 +219,21 @@ namespace Sentinel.Service
                     services.AddSingleton<TelemetryFusionEngine>();
                     services.AddSingleton<AdvancedResponseEngine>();
                     services.AddSingleton<BehavioralCorrelationEngine>();
+                    // v2.0: plugin surface + explainable weighted correlation
+                    services.AddSingleton<PluginRegistry>();
+                    services.AddSingleton(sp =>
+                    {
+                        var wc = config.WeightedCorrelation ?? new WeightedCorrelationConfig();
+                        // Prefer nested bind if present under WeightedCorrelation section
+                        hostContext.Configuration.GetSection("Sentinel:WeightedCorrelation").Bind(wc);
+                        return wc;
+                    });
+                    services.AddSingleton<WeightedCorrelationEngine>(sp =>
+                        new WeightedCorrelationEngine(
+                            sp.GetRequiredService<WeightedCorrelationConfig>(),
+                            sp.GetRequiredService<PluginRegistry>(),
+                            sp.GetService<ILogger<WeightedCorrelationEngine>>(),
+                            sp.GetService<EventGraph>()));
                     services.AddSingleton<AllowlistService>();
                     services.AddSingleton<SignerTrustService>();
                     services.AddSingleton<ScoringEngine>();
@@ -287,6 +303,12 @@ namespace Sentinel.Service
                     services.AddHostedService<SentinelService>();
                     // v1.9.5: optional Event Log heartbeat (no-ops if Event Log stripped)
                     services.AddHostedService<SentinelEventLogHeartbeatService>();
+                    // v2.0: ops metrics snapshot for Agent Ops dashboard
+                    services.AddHostedService<OpsMetricsPublisher>();
+                    // v2.0: authenticated Service↔Agent named pipe (RT-HIGH-4)
+                    services.AddHostedService<ServiceAgentIpcHost>();
+                    // v2.0: signed correlation rule packs → PluginRegistry
+                    services.AddHostedService<RulePackLoader>();
 
                     // ─────────────────────────────────────────────────────────────────
                     // v1.4.4: Monitor Groups — replaces flat AddHostedService registrations.

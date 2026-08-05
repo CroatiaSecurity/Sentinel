@@ -1,6 +1,6 @@
 # Sentinel — Design Document
 
-**Version: 1.9.9**
+**Version: 2.0.0**
 
 ---
 
@@ -20,11 +20,27 @@ Sentinel follows a clean pipeline architecture with strict separation of concern
 ```
 Monitors → TelemetryFusionEngine → DetectionEngine → AdvancedResponseEngine → JsonlEventLogger
                     ↓                      ↑               ↓
-               EventGraph          BehavioralCorrelationEngine
-           (queryable graph)              ↑               ↓
-                                   (composite detections via EmitAsync)
+               EventGraph     BehavioralCorrelationEngine  (+ WeightedCorrelationEngine v2.0)
+           (queryable graph)   hand-authored composites     score cards + threshold emit
+                                      ↑               ↓
+                               (composite detections via EmitAsync)
                                                      ChainTracer (kill + quarantine)
+                                                     OpsMetricsPublisher → ops_metrics.json
 ```
+
+### v2.0 platform additions
+
+| Component | Role |
+|-----------|------|
+| `WeightedCorrelationEngine` | Explainable category weights; emits when Total ≥ Threshold |
+| `AttackTechniqueMap` | MITRE ATT&CK technique IDs on detections |
+| `PluginRegistry` + interfaces | Extensibility surface for detectors / correlation / response |
+| `RulePackLoader` | Signed `*.pack.json` → `ICorrelationRule` plugins |
+| `EventGraph.GetProcessDiversity` | Graph fan-out boost for weighted score cards |
+| `ServiceAgentIpcHost` / `ServiceAgentIpcClient` | HMAC authenticated named pipe (ops/health only) |
+| `OpsMetricsPublisher` | Writes `%ProgramData%\Sentinel\ops_metrics.json` |
+| `SelfPathGuard` | Hardlink-aware install self-exclusion |
+| `ProductInfo.Version` | `2.0.0` |
 
 All components are wired via Microsoft.Extensions.DependencyInjection. No static mutable state anywhere.
 

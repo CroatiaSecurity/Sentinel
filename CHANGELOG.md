@@ -2,6 +2,47 @@
 
 All notable changes to Sentinel are documented in this file.
 
+## [2.0.0] - 2026-08-05
+
+### Platform — explainable correlation, plugins, ops, IPC, rule packs, graph boost
+
+Major platform release. Product law unchanged: **observe by default**, work-first host surface, destructive response only on multi-signal / chain-confirmed kill-grade malice.
+
+#### Weighted correlation (explainable score cards)
+- **`WeightedCorrelationEngine`** — category weights (Credential=50, Injection=44, Persistence=31, Network=18, BYOVD=60, …) summed per PID within a 90s window.
+- Emits **`Weighted Correlation: Multi-Signal Threat`** when total ≥ threshold (default **100**), ≥2 distinct categories, and a terminal-family contribution (or high score).
+- Every signal gets `ScoreCardTotal`, `ScoreCardBreakdown`, `ScoreCardExplanation` metadata for JSONL / packs.
+- Complements hand-authored `BehavioralCorrelationEngine` composites (both stay armed).
+- Config: `Sentinel:WeightedCorrelation` (`Enabled`, `Threshold`, `MinDistinctCategories`, `EnableGraphBoost`).
+- **EventGraph diversity boost** (0–25): endpoint/file fan-out raises the score card when `EnableGraphBoost=true`.
+
+#### MITRE ATT&CK mapping
+- **`AttackTechniqueMap`** tags detections with technique IDs (`T1003.001`, `T1055`, …) into `AttackTechniques` metadata.
+- Applied on all detections and weighted/hand-authored composites.
+
+#### Plugin architecture + signed rule packs
+- Interfaces: `IDetector`, `ITelemetryProvider`, `ICorrelationRule`, `IResponsePlugin`.
+- **`PluginRegistry`** DI singleton — register correlation rules without editing core god-files.
+- **`RulePackLoader`**: `%ProgramData%\Sentinel\rules\packs\*.pack.json` (HMAC fail-closed) → `FragmentCorrelationRule` plugins.
+- Docs: [docs/RULE_PACKS.md](docs/RULE_PACKS.md).
+
+#### Ops / diagnostics
+- Expanded **`SentinelMetrics`**: telemetry/sec, detections/sec, drops, composite/weighted counts, correlation latency percentiles.
+- **`OpsMetricsPublisher`** writes `%ProgramData%\Sentinel\ops_metrics.json` every ~10s.
+- Agent Settings → **Ops** page (prefers live IPC, falls back to file).
+
+#### Service↔Agent IPC (RT-HIGH-4)
+- **`ServiceAgentIpcHost`** named pipe `SentinelIpc-v2` with HMAC token (`%ProgramData%\Sentinel\Secure\.ipc_token`).
+- Read-only ops: `ping`, `ops`, `health`. No ActiveResponse control over the pipe.
+
+#### Security hardening (audit residual)
+- **RT-CRIT-3 mitigation:** HMAC key derivation adds DPAPI LocalMachine **`.machine_secret.dpapi`** (SYSTEM-only ACL) + label `hmac-v3`.
+- **RT-HIGH-2 mitigation:** **`SelfPathGuard`** hardlink-aware final-path checks for self-exclusion (DetectionEngine + AdvancedResponseEngine).
+- **RT-HIGH-4 mitigation:** authenticated named-pipe IPC (above).
+
+#### Product info
+- `ProductInfo.Version = 2.0.0`, `version.txt`, installer `SentinelSetup-2.0.0`.
+
 ## [1.9.9] - 2026-08-04
 
 ### Observe — optional OS services + bulk upload noise (no host mutation)

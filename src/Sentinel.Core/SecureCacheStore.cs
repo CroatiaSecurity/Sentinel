@@ -153,11 +153,106 @@ namespace Sentinel.Core
             }
             catch { }
 
-            // 3. Domain-specific label to derive a unique key for cache HMAC
+            // 3. v2.0 RT-CRIT-3: DPAPI-bound machine secret (SYSTEM-context ciphertext).
+            // Even if .install_entropy ACL is weakened and MachineGuid is public, an attacker
+            // still needs LocalMachine DPAPI unprotect on this host to reconstruct the key.
+            try
+            {
+                var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
+                var secretPath = Path.Combine(programData, "Sentinel", "Secure", ".machine_secret.dpapi");
+                byte[] plainSecret;
+                if (File.Exists(secretPath))
+                {
+                    LockEntropyFileAcl(secretPath);
+                    var cipher = File.ReadAllBytes(secretPath);
+                    var plain = UnprotectStatic(cipher);
+                    plainSecret = plain != null && plain.Length == 32 ? plain : CreateAndPersistMachineSecret(secretPath);
+                }
+                else
+                {
+                    plainSecret = CreateAndPersistMachineSecret(secretPath);
+                }
+                ms.Write(plainSecret, 0, plainSecret.Length);
+            }
+            catch
+            {
+                // Fail-soft: older installs without secret still derive from entropy+GUID
+            }
+
+            // 4. Domain-specific label to derive a unique key for cache HMAC
             // (prevents reuse of this key material for other purposes)
-            ms.Write(Encoding.UTF8.GetBytes("sentinel-secure-cache-hmac-v2"));
+            ms.Write(Encoding.UTF8.GetBytes("sentinel-secure-cache-hmac-v3"));
 
             return System.Security.Cryptography.Sha256Net48.HashData(ms.ToArray());
+        }
+
+        private static byte[] CreateAndPersistMachineSecret(string secretPath)
+        {
+            var secret = new byte[32];
+            using (var rng = RandomNumberGenerator.Create())
+                rng.GetBytes(secret);
+
+            var dir = Path.GetDirectoryName(secretPath)!;
+            if (!Directory.Exists(dir))
+                Directory.CreateDirectory(dir);
+
+            var cipher = ProtectStatic(secret);
+            if (cipher != null && cipher.Length > 0)
+                File.WriteAllBytes(secretPath, cipher);
+            LockEntropyFileAcl(secretPath);
+            return secret;
+        }
+
+        private static byte[]? ProtectStatic(byte[] data)
+        {
+            var blobIn = new DATA_BLOB();
+            var blobOut = new DATA_BLOB();
+            var blobEntropy = new DATA_BLOB();
+            var prompt = new CRYPTPROTECT_PROMPTSTRUCT { cbSize = Marshal.SizeOf(typeof(CRYPTPROTECT_PROMPTSTRUCT)) };
+            try
+            {
+                blobIn.pbData = Marshal.AllocHGlobal(data.Length);
+                blobIn.cbData = data.Length;
+                Marshal.Copy(data, 0, blobIn.pbData, data.Length);
+                if (!CryptProtectData(ref blobIn, "SentinelMachineSecret", ref blobEntropy, IntPtr.Zero,
+                        ref prompt, CRYPTPROTECT_UI_FORBIDDEN | CRYPTPROTECT_LOCAL_MACHINE, ref blobOut))
+                    return null;
+                var result = new byte[blobOut.cbData];
+                Marshal.Copy(blobOut.pbData, result, 0, blobOut.cbData);
+                return result;
+            }
+            catch { return null; }
+            finally
+            {
+                if (blobIn.pbData != IntPtr.Zero) Marshal.FreeHGlobal(blobIn.pbData);
+                if (blobOut.pbData != IntPtr.Zero) Marshal.FreeHGlobal(blobOut.pbData);
+            }
+        }
+
+        private static byte[]? UnprotectStatic(byte[] data)
+        {
+            var blobIn = new DATA_BLOB();
+            var blobOut = new DATA_BLOB();
+            var blobEntropy = new DATA_BLOB();
+            var prompt = new CRYPTPROTECT_PROMPTSTRUCT { cbSize = Marshal.SizeOf(typeof(CRYPTPROTECT_PROMPTSTRUCT)) };
+            try
+            {
+                blobIn.pbData = Marshal.AllocHGlobal(data.Length);
+                blobIn.cbData = data.Length;
+                Marshal.Copy(data, 0, blobIn.pbData, data.Length);
+                if (!CryptUnprotectData(ref blobIn, IntPtr.Zero, ref blobEntropy, IntPtr.Zero,
+                        ref prompt, CRYPTPROTECT_UI_FORBIDDEN | CRYPTPROTECT_LOCAL_MACHINE, ref blobOut))
+                    return null;
+                var result = new byte[blobOut.cbData];
+                Marshal.Copy(blobOut.pbData, result, 0, blobOut.cbData);
+                return result;
+            }
+            catch { return null; }
+            finally
+            {
+                if (blobIn.pbData != IntPtr.Zero) Marshal.FreeHGlobal(blobIn.pbData);
+                if (blobOut.pbData != IntPtr.Zero) Marshal.FreeHGlobal(blobOut.pbData);
+            }
         }
 
         public void Save(string cacheName, string key, string value)

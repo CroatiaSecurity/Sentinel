@@ -79,6 +79,9 @@ namespace Sentinel.Agent
         // Tools
         private TextBox? _toolsInfo;
 
+        // Ops (v2.0)
+        private TextBox? _opsInfo;
+
         public AgentDashboardForm(
             string version,
             AutoIncidentReportingConfig reportConfig,
@@ -168,7 +171,8 @@ namespace Sentinel.Agent
             sidebar.Controls.SetChildIndex(bottomBar, 0);
 
             // Report to Police stays in Settings; tray no longer deep-links here.
-            string[] navLabels = { "Overview", "Events", "Report to Police", "Quarantine", "Safety", "Tools", "About" };
+            // v2.0: Ops page for pipeline metrics (events/sec, correlation, monitors).
+            string[] navLabels = { "Overview", "Events", "Report to Police", "Quarantine", "Safety", "Ops", "Tools", "About" };
             for (int i = 0; i < navLabels.Length; i++)
             {
                 var idx = i;
@@ -191,6 +195,7 @@ namespace Sentinel.Agent
                 BuildReportPage(),
                 BuildQuarantinePage(),
                 BuildSafetyPage(),
+                BuildOpsPage(),
                 BuildToolsPage(),
                 BuildAboutPage()
             };
@@ -224,7 +229,8 @@ namespace Sentinel.Agent
             else if (index == 1) RefreshEvents();
             else if (index == 2) RefreshPacks();
             else if (index == 3) RefreshQuarantine();
-            else if (index == 4) RefreshTools();
+            else if (index == 5) RefreshOps();
+            else if (index == 6) RefreshTools();
         }
 
         private void RefreshAll()
@@ -233,6 +239,7 @@ namespace Sentinel.Agent
             RefreshEvents();
             RefreshPacks();
             RefreshQuarantine();
+            RefreshOps();
             RefreshTools();
         }
 
@@ -1318,6 +1325,162 @@ namespace Sentinel.Agent
         }
 
         // ═══════════════════════════════════════════════════════════════
+        // Ops (v2.0 — pipeline metrics from service ops_metrics.json)
+        // ═══════════════════════════════════════════════════════════════
+
+        private Panel BuildOpsPage()
+        {
+            var page = new Panel { BackColor = Bg, Padding = new Padding(28) };
+            var layout = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 1,
+                RowCount = 3,
+                BackColor = Bg
+            };
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
+            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 52));
+            page.Controls.Add(layout);
+            layout.Controls.Add(MakeTitle("Ops / Diagnostics"), 0, 0);
+
+            _opsInfo = MakeMultiline(readOnly: true);
+            _opsInfo.Dock = DockStyle.Fill;
+            layout.Controls.Add(_opsInfo, 0, 1);
+
+            var bar = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                FlowDirection = FlowDirection.LeftToRight,
+                WrapContents = false,
+                BackColor = Bg,
+                Padding = new Padding(0, 8, 0, 0)
+            };
+            bar.Controls.Add(MakeChromeButton("Refresh", (_, _) => RefreshOps()));
+            bar.Controls.Add(MakeChromeButton("Open ops_metrics.json", (_, _) =>
+            {
+                var path = Path.Combine(ProgramDataRoot, "ops_metrics.json");
+                OpenFileIfExists(path, "No ops_metrics.json yet. Is Sentinel.Service running?");
+            }));
+            layout.Controls.Add(bar, 0, 2);
+            return page;
+        }
+
+        private void RefreshOps()
+        {
+            if (_opsInfo == null) return;
+            try
+            {
+                // Prefer authenticated IPC (live); fall back to ops_metrics.json on disk.
+                string? source = null;
+                JsonElement r = default;
+                bool fromIpc = false;
+
+                try
+                {
+                    var ipcJson = ServiceAgentIpcClient.Request("ops");
+                    if (!string.IsNullOrEmpty(ipcJson))
+                    {
+                        using var ipcDoc = JsonDocument.Parse(ipcJson);
+                        if (ipcDoc.RootElement.TryGetProperty("ok", out var okEl) && okEl.GetBoolean() &&
+                            ipcDoc.RootElement.TryGetProperty("ops", out var opsEl))
+                        {
+                            // Re-parse ops object as standalone document for GetJson helpers
+                            var opsRaw = opsEl.GetRawText();
+                            using var opsDoc = JsonDocument.Parse(opsRaw);
+                            r = opsDoc.RootElement.Clone();
+                            fromIpc = true;
+                            source = "IPC (authenticated named pipe)";
+                        }
+                    }
+                }
+                catch { /* fall through to file */ }
+
+                if (!fromIpc)
+                {
+                    var path = Path.Combine(ProgramDataRoot, "ops_metrics.json");
+                    if (!File.Exists(path))
+                    {
+                        _opsInfo.Text =
+                            "No ops metrics yet.\n\n" +
+                            "The service publishes metrics via:\n" +
+                            "  • Authenticated named pipe SentinelIpc-v2 (live)\n" +
+                            "  • %ProgramData%\\Sentinel\\ops_metrics.json (every ~10s)\n\n" +
+                            "Start/restart the Sentinel service and click Refresh.";
+                        return;
+                    }
+                    var json = File.ReadAllText(path);
+                    using var doc = JsonDocument.Parse(json);
+                    r = doc.RootElement.Clone();
+                    source = "ops_metrics.json (file)";
+                }
+                var sb = new StringBuilder();
+                sb.AppendLine("SENTINEL OPS SNAPSHOT (v2.0)");
+                sb.AppendLine("===========================");
+                sb.AppendLine();
+                sb.AppendLine($"  Source:              {source ?? "—"}");
+                sb.AppendLine($"  Product version:     {GetJsonString(r, "ProductVersion")}");
+                sb.AppendLine($"  Snapshot (UTC):      {GetJsonString(r, "TimestampUtc")}");
+                sb.AppendLine();
+                sb.AppendLine("Throughput");
+                sb.AppendLine($"  Telemetry/sec:       {GetJsonNumber(r, "TelemetryPerSecond")}");
+                sb.AppendLine($"  Detections/sec:      {GetJsonNumber(r, "DetectionsPerSecond")}");
+                sb.AppendLine($"  Telemetry total:     {GetJsonNumber(r, "TelemetryReceived")}");
+                sb.AppendLine($"  Telemetry pressure:  {GetJsonNumber(r, "TelemetryDropped")} (near-capacity writes)");
+                sb.AppendLine($"  Detections total:    {GetJsonNumber(r, "DetectionsTotal")}");
+                sb.AppendLine($"  Responses total:     {GetJsonNumber(r, "ResponsesTotal")}");
+                sb.AppendLine();
+                sb.AppendLine("Correlation");
+                sb.AppendLine($"  Hand-authored composites: {GetJsonNumber(r, "CompositesEmitted")}");
+                sb.AppendLine($"  Weighted composites:      {GetJsonNumber(r, "WeightedCompositesEmitted")}");
+                sb.AppendLine($"  Chain-confirmed:          {GetJsonNumber(r, "ChainConfirmed")}");
+                sb.AppendLine($"  Weighted enabled:         {GetJsonString(r, "WeightedCorrelationEnabled")}");
+                sb.AppendLine($"  Weighted threshold:       {GetJsonNumber(r, "WeightedThreshold")}");
+                sb.AppendLine();
+                sb.AppendLine("Latency (ms)");
+                sb.AppendLine($"  Detection p50/p95:    {GetJsonNumber(r, "DetectionLatencyMsP50")} / {GetJsonNumber(r, "DetectionLatencyMsP95")}");
+                sb.AppendLine($"  Response  p50/p95:    {GetJsonNumber(r, "ResponseLatencyMsP50")} / {GetJsonNumber(r, "ResponseLatencyMsP95")}");
+                sb.AppendLine($"  Correlation p50/p95:  {GetJsonNumber(r, "CorrelationLatencyMsP50")} / {GetJsonNumber(r, "CorrelationLatencyMsP95")}");
+                sb.AppendLine();
+                sb.AppendLine("Health");
+                sb.AppendLine($"  Monitors registered:  {GetJsonNumber(r, "RegisteredMonitors")}");
+                sb.AppendLine($"  Monitors running:     {GetJsonNumber(r, "RunningMonitors")}");
+                sb.AppendLine($"  Plugins loaded:       {GetJsonNumber(r, "PluginCount")}");
+                sb.AppendLine();
+                sb.AppendLine("Explainability");
+                sb.AppendLine("  Detection events include ScoreCard* and AttackTechniques metadata");
+                sb.AppendLine("  in events.jsonl when weighted correlation is active.");
+                _opsInfo.Text = sb.ToString();
+            }
+            catch (Exception ex)
+            {
+                _opsInfo.Text = "Failed to read ops metrics:\n" + ex.Message;
+            }
+        }
+
+        private static string GetJsonString(JsonElement r, string name)
+        {
+            if (r.TryGetProperty(name, out var p))
+            {
+                if (p.ValueKind == JsonValueKind.String) return p.GetString() ?? "";
+                return p.ToString();
+            }
+            return "—";
+        }
+
+        private static string GetJsonNumber(JsonElement r, string name)
+        {
+            if (r.TryGetProperty(name, out var p))
+            {
+                if (p.ValueKind == JsonValueKind.Number) return p.ToString();
+                if (p.ValueKind == JsonValueKind.True || p.ValueKind == JsonValueKind.False)
+                    return p.GetBoolean().ToString();
+                return p.ToString();
+            }
+            return "—";
+        }
+
+        // ═══════════════════════════════════════════════════════════════
         // Safety (digital coercion / surveillance toolkit — platform-agnostic)
         // ═══════════════════════════════════════════════════════════════
 
@@ -1418,7 +1581,13 @@ namespace Sentinel.Agent
                 "User-session agent for endpoint detection and response.\n" +
                 "The Sentinel service (SYSTEM) owns kills, quarantine, and hardening.\n" +
                 "This agent owns tray UI, keyboard guards, and filing helpers.\n\n" +
-                "Digital coercion / surveillance toolkit defense (v1.9.4):\n" +
+                "v2.0 platform:\n" +
+                "  • Weighted multi-signal correlation with explainable score cards\n" +
+                "  • MITRE ATT&CK technique tags on detections\n" +
+                "  • Plugin interfaces (detectors / correlation / response)\n" +
+                "  • Ops dashboard (Settings → Ops)\n" +
+                "  • Hardlink-aware self-exclusion + DPAPI machine secret for HMAC keys\n\n" +
+                "Digital coercion / surveillance toolkit defense:\n" +
                 "  Stops remote-control, stalkerware, and session-theft toolkits on the PC.\n" +
                 "  Does not moderate chat or identify offenders by social profile.\n" +
                 "  See Settings → Safety.\n\n" +
