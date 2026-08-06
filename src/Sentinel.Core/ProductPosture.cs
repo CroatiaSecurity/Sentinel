@@ -69,5 +69,18 @@ namespace Sentinel.Core
                 return false;
             return ResponsePolicy.MayPerformDestructiveResponse(detection, config);
         }
+
+        /// <summary>
+        /// v1.9.10: Narrow post-incident MITM suite (cert remove, FCM Send-Tab-to-Self block,
+        /// rogue Cast / fake Chromecast firewall). Explicit operator opt-in via
+        /// <see cref="MitmDefenseConfig.Enabled"/> — does not enable full kiosk lockdown.
+        /// </summary>
+        public static bool AllowsMitmDefenseMutations(SentinelConfig? config)
+        {
+            return config != null
+                   && config.ActiveResponse
+                   && config.MitmDefense != null
+                   && config.MitmDefense.Enabled;
+        }
     }
 }

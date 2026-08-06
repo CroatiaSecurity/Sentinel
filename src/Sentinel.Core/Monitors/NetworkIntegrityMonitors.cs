@@ -203,7 +203,12 @@ namespace Sentinel.Core
                                 Confidence = 0.88, Tier = DetectionTier.Tier1Behavioral,
                                 AuthorizedResponse = ResponseAction.NetworkIsolate,
                                 ProcessName = "SYSTEM", ProcessId = 0,
-                                Metadata = new Dictionary<string, string> { { "TargetIP", gwIpForMacCheck } }
+                                SignalType = SignalType.NetworkC2,
+                                Metadata = new Dictionary<string, string>
+                                {
+                                    { "TargetIP", gwIpForMacCheck },
+                                    { "MitmDefense", "true" }
+                                }
                             });
                             _baselineGatewayMac = currentMac;
                             SetStaticGatewayArp(gwIpForMacCheck, currentMac);
@@ -240,12 +245,14 @@ namespace Sentinel.Core
                             Tier = DetectionTier.Tier1Behavioral,
                             AuthorizedResponse = includesGateway ? ResponseAction.NetworkIsolate : ResponseAction.LogOnly,
                             ProcessName = "SYSTEM", ProcessId = 0,
+                            SignalType = includesGateway ? SignalType.NetworkC2 : SignalType.Generic,
                             Metadata = new Dictionary<string, string>
                             {
                                 ["MAC"] = mac,
                                 ["AffectedIPs"] = string.Join(";", ips),
                                 ["IncludesGateway"] = includesGateway.ToString(),
-                                ["TargetIP"] = includesGateway ? (_gatewayIp ?? "") : ""
+                                ["TargetIP"] = includesGateway ? (_gatewayIp ?? "") : "",
+                                ["MitmDefense"] = includesGateway ? "true" : "false"
                             }
                         });
                     }
@@ -957,7 +964,10 @@ namespace Sentinel.Core
 
         private static readonly Dictionary<string, string> OuiLookup = new(StringComparer.OrdinalIgnoreCase)
         {
-            { "B0-B3-69", "Google" }, { "F4-F5-D8", "Google" }, { "54-60-09", "Google" },
+            // B0-B3-69 is Shenzhen SDMC (set-top / OTT) — NOT Google. In-incident it was
+            // spoofed as "Google Chromecast" to pass naive OUI trust. Treat as cast-spoof OUI.
+            { "B0-B3-69", "Shenzhen SDMC (cast-spoof OUI)" },
+            { "F4-F5-D8", "Google" }, { "54-60-09", "Google" },
             { "A4-77-33", "Google" }, { "30-FD-38", "Google" }, { "48-D6-D5", "Google" },
             { "E8-DE-27", "TP-Link" }, { "50-C7-BF", "TP-Link" },
             { "DC-A6-32", "Raspberry Pi" }, { "B8-27-EB", "Raspberry Pi" }, { "E4-5F-01", "Raspberry Pi" },
@@ -1035,32 +1045,61 @@ namespace Sentinel.Core
                                 // Cast ports (8008/8009) on a new device: check if any ghost/empty-name
                                 // process is actively connecting to this device IP. If yes, this isn't a
                                 // Chromecast — it's a C2 relay masquerading as one (PlugX technique).
-                                // If no ghost connection, treat as normal consumer device (log only).
+                                // MitmDefense: also promote cast-spoof OUI (B0-B3-69 / known rogue) without ghost wait.
                                 if (!isHighRisk && 
                                     (suspiciousService.Contains("Cast") ||
                                      suspiciousService.Contains("8008")))
                                 {
                                     if (HasGhostConnectionTo(dev.Ip))
                                     {
-                                        confidence = 0.92;
-                                        reasoning += " CORRELATED: An unresolvable/empty-name process has active connections to this device, indicating C2 relay masquerading as a casting device.";
+                                        confidence = 0.95;
+                                        reasoning += " CORRELATED: Invisible/empty-name process talking to this Cast endpoint " +
+                                                     "(planted-cert → ghost → fake Chromecast MitM chain).";
+                                    }
+                                    else if (IsMitmRogueCastDevice(dev.Ip, dev.Mac, manufacturer))
+                                    {
+                                        confidence = 0.93;
+                                        reasoning += " MitmDefense: MAC/OUI matches known cast-spoof / rogue Chromecast IOC " +
+                                                     "(e.g. B0-B3-69 SDMC used as fake Google Cast).";
                                     }
                                 }
 
                                 reasoning += $" Device has an open {suspiciousService} port, which is commonly used for screen casting, debugging, or remote access.";
                             }
+                            else if (IsMitmRogueCastDevice(dev.Ip, dev.Mac, manufacturer))
+                            {
+                                confidence = 0.90;
+                                reasoning += " MitmDefense: device MAC/IP is a known rogue Cast IOC.";
+                            }
+
+                            var metadata = new Dictionary<string, string>
+                            {
+                                ["DeviceIP"] = dev.Ip,
+                                ["DeviceMAC"] = dev.Mac,
+                                ["Manufacturer"] = manufacturer
+                            };
+                            if (confidence >= 0.90 && ProductPosture.AllowsMitmDefenseMutations(_config))
+                                metadata["MitmDefense"] = "true";
 
                             await _detectionEngine.EmitAsync(new DetectionEvent
                             {
-                                RuleName = "Phantom Device: New Unauthorized Network Device",
+                                RuleName = confidence >= 0.92
+                                    ? "Phantom Device: Fake Chromecast / Rogue Cast Relay"
+                                    : "Phantom Device: New Unauthorized Network Device",
                                 Evidence = $"New device: IP={dev.Ip}, MAC={dev.Mac}, Manufacturer={manufacturer}{(suspiciousService != null ? $", Open={suspiciousService}" : "")}",
                                 Reasoning = reasoning,
                                 Confidence = confidence, Tier = tier,
-                                AuthorizedResponse = ResponseAction.LogOnly,
-                                ProcessName = "SYSTEM", ProcessId = 0
+                                AuthorizedResponse = confidence >= 0.90
+                                    ? ResponseAction.NetworkIsolate
+                                    : ResponseAction.LogOnly,
+                                ProcessName = "SYSTEM", ProcessId = 0,
+                                SignalType = confidence >= 0.90 ? SignalType.NetworkC2 : SignalType.Generic,
+                                Metadata = metadata
                             });
 
-                            if (ResponsePolicy.MayPerformInlineHostMutation(_config) && confidence >= 0.85)
+                            // Block under MitmDefense or general inline mutation when high confidence
+                            if ((ProductPosture.AllowsMitmDefenseMutations(_config) && confidence >= 0.90) ||
+                                (ResponsePolicy.MayPerformInlineHostMutation(_config) && confidence >= 0.85))
                                 await BlockDevice(dev.Ip, dev.Mac, manufacturer, suspiciousService);
                         }
                         else
@@ -1253,6 +1292,39 @@ namespace Sentinel.Core
                     return mfg;
             }
             return "Unknown";
+        }
+
+        /// <summary>
+        /// MitmDefense: known rogue Cast IP or cast-spoof OUI (B0-B3-69 etc.).
+        /// </summary>
+        private bool IsMitmRogueCastDevice(string ip, string mac, string manufacturer)
+        {
+            if (!ProductPosture.AllowsMitmDefenseMutations(_config))
+                return false;
+            var mitm = _config.MitmDefense;
+            if (mitm == null || !mitm.AutoBlockRogueCast)
+                return false;
+
+            foreach (var known in mitm.KnownRogueCastIps ?? Array.Empty<string>())
+            {
+                if (string.Equals(known, ip, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+
+            var oui = mac.Length >= 8 ? mac[..8].Replace(':', '-').ToUpperInvariant() : "";
+            foreach (var prefix in mitm.RogueCastMacPrefixes ?? Array.Empty<string>())
+            {
+                var norm = (prefix ?? "").Replace(':', '-').ToUpperInvariant();
+                if (norm.Length >= 8) norm = norm[..8];
+                if (string.Equals(norm, oui, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+
+            if (manufacturer.Contains("cast-spoof", StringComparison.OrdinalIgnoreCase) ||
+                manufacturer.Contains("SDMC", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            return false;
         }
 
         private static List<NetworkDevice> GetArpTable()

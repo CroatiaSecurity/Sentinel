@@ -2,7 +2,7 @@
 
 Real-time endpoint detection and response for Windows. Runs as a background service, monitors system behavior, and kills threats automatically when multiple signals correlate.
 
-**Current version: 2.0.0**
+**Current version: 2.0.1**
 
 ### Product posture (v2.0 — observe-only until malice + dual audit trail + explainable correlation)
 
@@ -10,6 +10,7 @@ Real-time endpoint detection and response for Windows. Runs as a background serv
 
 - **Observe by default** (`ObserveUntilChain: true`): every monitor logs to `events.jsonl`; **no kill / quarantine / isolate / host rewrite / toast / evidence pack** on single-signal noise.
 - **Work-first host surface (v1.9.7):** default does **not** apply IPSec lockdown, RPC firewall blocks, ASR Block re-arm, RemoteRegistry disable, RDP force-logoff, or USB auto-disable. Older lockdown leftovers are **removed** on upgrade. Kiosk/lockdown only if you set `RestrictivePortHardening: true`.
+- **Post-incident MitM suite (v2.0.1):** set `Sentinel:MitmDefense:Enabled` after a confirmed MitM / fake-Chromecast incident. Restores: planted-root cert removal, FCM “Send Tab to Self” block, invisible-process→Cast kill, rogue Cast (e.g. `B0-B3-69` / known IPs) firewall — without full kiosk lockdown. Default **off** on clean installs.
 - **Nuke only** when multi-signal / composite chain points at: **C2 beaconing**, **exfil**, **token theft**, **reverse shell**, **credential dump**, **BYOVD**, or **coercion toolkit composites** (covert surveillance + remote channel, remote-control abuse toolkit, session theft + abuse channel, stalkerware persistence) → quarantine + kill + isolate + chain tracer.
 - **Digital coercion / surveillance toolkit (v1.9.4):** platform-agnostic host defense against tools used in online harassment, sexual coercion, stalkerware, account takeover, and remote blackmail. **Does not** moderate chat or identify offenders by social profile. Settings → **Safety**.
 - **Evidence packs on every chain-confirmed nuke** (`AutoIncidentReporter`): integrity-sealed pack under `%ProgramData%\Sentinel\IncidentReports` + critical toast; coercion-tagged packs include LE-oriented harm checkboxes (you complete them).

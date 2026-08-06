@@ -362,18 +362,33 @@ namespace Sentinel.Core
             // Global observe-until-chain: every monitor is silent LogOnly until multi-signal
             // proof points at BYOVD / exfil / token theft / reverse shell / cred dump.
             // DLL unload remediations are exempt (DllUnloadEngine still FreeLibrary/quarantines plants).
+            // MitmDefense suite is also exempt: planted cert + ghost process + fake Chromecast /
+            // FCM Send-Tab-to-Self is a confirmed post-incident chain that must act without waiting
+            // for a second unrelated signal.
             // When chain confirms → full nuke (quarantine+kill + isolate + chain tracer).
             bool chainAuthorized = false;
             bool dllExempt = ResponsePolicy.IsDllUnloadExempt(detection);
+            bool mitmExempt = ResponsePolicy.IsMitmDefenseAction(detection, _config);
             if (_config.ObserveUntilChain)
             {
                 chainAuthorized = ResponsePolicy.MayPerformDestructiveResponse(detection, _config);
-                if (!chainAuthorized && !dllExempt)
+                if (!chainAuthorized && !dllExempt && !mitmExempt)
                 {
                     effectiveTier = DetectionTier.Tier2Indicator;
                     effectiveResponse = ResponseAction.LogOnly;
                     effectiveKillAuthorized = false;
                     reason = "LogOnly (observe-until-chain: no multi-signal terminal attack yet)";
+                }
+                else if (mitmExempt && !chainAuthorized)
+                {
+                    // Keep author response (RemoveCert / KillProcessTree / NetworkIsolate).
+                    // Do not promote to full QuarantineAndKill — MitM suite is surgical.
+                    effectiveTier = DetectionTier.Tier1Behavioral;
+                    if (detection.AuthorizedResponse is ResponseAction.KillProcess
+                        or ResponseAction.KillProcessTree
+                        or ResponseAction.QuarantineAndKill)
+                        effectiveKillAuthorized = true;
+                    reason = $"MitmDefense action ({detection.AuthorizedResponse})";
                 }
                 else if (chainAuthorized && !dllExempt)
                 {
@@ -402,7 +417,8 @@ namespace Sentinel.Core
                 reason = "LogOnly (observe-first: weak user-activity heuristic — no confirmed attack)";
             }
 
-            bool ar = _config.ActiveResponse && (!_config.ObserveUntilChain || chainAuthorized || dllExempt);
+            // MitmDefense: cert remove / kill ghost / isolate rogue Cast without full multi-signal chain.
+            bool ar = _config.ActiveResponse && (!_config.ObserveUntilChain || chainAuthorized || dllExempt || mitmExempt);
 
             if (effectiveResponse == ResponseAction.QuarantineAndKill && effectiveTier == DetectionTier.Tier1Behavioral)
             {
@@ -475,12 +491,15 @@ namespace Sentinel.Core
                         : "LogOnly (ActiveResponse disabled)";
                 }
             }
-            else if (effectiveKillAuthorized && effectiveTier == DetectionTier.Tier1Behavioral)
+            else if ((effectiveKillAuthorized ||
+                      effectiveResponse is ResponseAction.KillProcess or ResponseAction.KillProcessTree) &&
+                     effectiveTier == DetectionTier.Tier1Behavioral)
             {
                 if (ar)
                 {
                     shouldKill = true;
-                    reason = $"Killed (AuthorizedResponse={effectiveResponse})";
+                    if (!reason.StartsWith("MitmDefense") && !reason.StartsWith("ChainConfirmed"))
+                        reason = $"Killed (AuthorizedResponse={effectiveResponse})";
                 }
                 else
                 {

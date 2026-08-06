@@ -1,6 +1,6 @@
 # Sentinel — Design Document
 
-**Version: 2.0.0**
+**Version: 2.0.1**
 
 ---
 
@@ -40,7 +40,7 @@ Monitors → TelemetryFusionEngine → DetectionEngine → AdvancedResponseEngin
 | `ServiceAgentIpcHost` / `ServiceAgentIpcClient` | HMAC authenticated named pipe (ops/health only) |
 | `OpsMetricsPublisher` | Writes `%ProgramData%\Sentinel\ops_metrics.json` |
 | `SelfPathGuard` | Hardlink-aware install self-exclusion |
-| `ProductInfo.Version` | `2.0.0` |
+| `ProductInfo.Version` | `2.0.1` |
 
 All components are wired via Microsoft.Extensions.DependencyInjection. No static mutable state anywhere.
 
@@ -185,7 +185,8 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 | `DeviceInstallMonitor` | Baselines PnP devices/drivers; detects new device installs and BYOVD | 15s + WMI event |
 | `MtpTransferGuard` | Blocks non-media file transfers to/from MTP devices (phones/tablets) | 5s |
 | `VolumeMountMonitor` | Detects RAM disks, PMEM, VeraCrypt, VHD; extends FileActivityMonitor dynamically | 5s |
-| `CastDeviceGuard` | Empty `TrustedCastDevices` = **observe-only** (log Cast traffic); non-empty = enforce allowlist + FW block; removes OS inbound Cast rules | 5s |
+| `CastDeviceGuard` | Empty `TrustedCastDevices` = observe-only **unless** `MitmDefense.Enabled` (then auto-block rogue Cast IOCs / phantom spoof); non-empty = enforce allowlist + FW block | 5s |
+| `MitmDefense` (config suite) | Post-incident: planted-cert remove + FCM Send-Tab-to-Self block + ghost→fake-Chromecast kill + rogue Cast FW | — |
 | `WslMonitor` | Monitors WSL process spawns, suspicious commands, new distro installs | 10s |
 | `RawDiskAccessMonitor` | Detects processes opening raw disk device paths via NtQuerySystemInformation handles | 20s |
 | `PrintSpoolerMonitor` | Monitors print spooler for bulk spool file creation and XPS exfiltration | 15s |

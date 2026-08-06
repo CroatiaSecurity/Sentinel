@@ -2,6 +2,52 @@
 
 All notable changes to Sentinel are documented in this file.
 
+## [2.0.1] - 2026-08-06
+
+### Restored — Post-incident MitM defense suite (fake Chromecast + planted cert + ghost process)
+
+Recreates the June 13–14 attack defense as a single opt-in suite under `Sentinel:MitmDefense`.
+
+**Attack chain this closes:**
+1. Plant self-signed root (machine-name CN, absurd validity, Server Auth EKU) → TLS MitM
+2. Invisible / hollowed process (empty name / unresolvable PID) runs under that trust
+3. Ghost process C2s to rogue LAN Cast endpoint (e.g. `192.168.1.100:8009`, OUI `B0-B3-69` SDMC spoofed as Chromecast)
+4. Optional: stolen Chrome tokens + FCM “Send Tab to Self” opens attacker URLs in open tabs
+
+**What MitmDefense.Enabled does (narrow exception to ObserveUntilChain / work-first):**
+- **TlsCertificateMonitor** — high-confidence planted roots still `RemoveCert` / `RemoveCertAndKillAdder` under observe-until-chain
+- **GhostProcessMonitor** — unresolvable/empty-name PID → Cast `:8008/:8009` or known rogue IP → **KillProcessTree** + `TargetIP` isolate metadata (immediate, no 2-scan wait)
+- **CastDeviceGuard** — auto firewall-block rogue Cast by IOC MAC (`B0-B3-69` default) / known IPs / phantom+Google-OUI spoof; does not wipe blocks when suite is on
+- **PhantomDeviceMonitor** — `B0-B3-69` no longer labeled “Google”; cast-spoof + ghost correlation blocks at ≥0.90
+- **NullSessionGuard** — FCM TCP 5228 block when suite on (Send Tab to Self)
+- **AdvancedResponseEngine** — MitmDefense actions are not demoted to LogOnly by ObserveUntilChain
+
+**Config** (`appsettings.json` → `Sentinel:MitmDefense`):
+```json
+"MitmDefense": {
+  "Enabled": true,
+  "RemovePlantedCerts": true,
+  "BlockFcmPushChannel": true,
+  "AutoBlockRogueCast": true,
+  "RogueCastMacPrefixes": [ "B0-B3-69" ],
+  "KnownRogueCastIps": [ "192.168.1.100" ]
+}
+```
+Default `Enabled=false` on clean installs. This host’s appsettings has it **on** post-incident.
+
+### Audit — other post-Kiro / observe-first regressions checked
+
+| Defense | Status in 2.0.1 |
+|---------|-----------------|
+| MitM cert remove + ghost→Cast kill + rogue Cast FW + FCM | **Restored** via `MitmDefense` |
+| HostsFileGuard FCM mtalk hosts | **Fixed** — honors `MitmDefense.BlockFcmPushChannel` |
+| ARP gateway spoof → NetworkIsolate | **Fixed** — MitmDefense / ARP rules exempt from observe demotion |
+| Proxy hijack revert | OK when MitmDefense on (`MayPerformInlineHostMutation`) |
+| Route table /32 cleanup | OK when MitmDefense on |
+| Static gateway ARP lock | Still applied at ArpSpoofMonitor start (not observe-gated) |
+| Null session LSA harden | Still always-on |
+| IPSec / ASR / Cast inbound wipe defaults | Intentionally work-first unless RestrictivePortHardening (not a bug) |
+
 ## [2.0.0] - 2026-08-05
 
 ### Platform — explainable correlation, plugins, ops, IPC, rule packs, graph boost

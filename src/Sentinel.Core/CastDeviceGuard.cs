@@ -4,7 +4,6 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Net;
-using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -14,21 +13,25 @@ using Microsoft.Extensions.Logging;
 namespace Sentinel.Core
 {
     /// <summary>
-    /// Watches browser connections to Cast protocol ports (8008/8009) on the LAN.
+    /// MITM defense component: watches browser/LAN connections to Cast ports (8008/8009)
+    /// and blocks fake Chromecast / rogue Cast relays that weaponize open Chrome tabs as C2.
     ///
-    /// v1.8.3 observe-first:
-    ///   - Empty TrustedCastDevices → LogOnly (do not firewall-block). Normal Chromecast works.
-    ///   - Non-empty TrustedCastDevices → enforce allowlist (block unknown LAN Cast IPs).
+    /// Modes:
+    ///   - Default (MitmDefense off, empty TrustedCastDevices): observe-only.
+    ///   - TrustedCastDevices non-empty: enforce allowlist (block unlisted LAN Cast IPs).
+    ///   - MitmDefense.Enabled + AutoBlockRogueCast: block known-rogue MAC/IP and
+    ///     phantom Google-spoof Cast devices; leave legitimate baselined Cast alone.
     ///
-    /// Post-incident zero-trust: list only known device IPs (or leave empty to observe).
-    /// Inbound "Cast to Device" OS rules are still removed (attack surface; not user traffic).
-    ///
-    /// v1.0.4: Rewritten from baseline-based to allowlist-only.
+    /// Incident (2026-06): 192.168.1.100 with OUI B0-B3-69 (SDMC, not Google) on :8009
+    /// held a persistent Chrome Cast channel — C2 relay through "open tab" path.
+    /// Paired with TlsCertificateMonitor (planted roots) and NullSessionGuard FCM block
+    /// ("Send Tab to Self" via push after token theft).
     /// </summary>
     public sealed class CastDeviceGuard : BackgroundService
     {
         private readonly DetectionEngine _detectionEngine;
         private readonly SentinelConfig _config;
+        private readonly PhantomDeviceMonitor? _phantomDeviceMonitor;
         private readonly ILogger<CastDeviceGuard> _logger;
 
         private readonly ConcurrentDictionary<string, DateTimeOffset> _alertedConnections = new();
@@ -45,9 +48,19 @@ namespace Sentinel.Core
             "chrome", "msedge", "brave", "vivaldi", "opera", "chromium"
         };
 
+        /// <summary>Real Google Cast hardware OUIs (not B0-B3-69 — that is SDMC / spoof).</summary>
+        private static readonly HashSet<string> RealGoogleCastOuis = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "F4-F5-D8", "54-60-09", "A4-77-33", "30-FD-38", "48-D6-D5",
+            "6C-AD-F8", "E4-F0-42", "20-DF-B9", "94-EB-2C"
+        };
+
         [DllImport("iphlpapi.dll", SetLastError = true)]
         private static extern uint GetExtendedTcpTable(IntPtr pTcpTable, ref int pdwSize,
             bool bOrder, int ulAf, int tableClass, uint reserved);
+
+        [DllImport("iphlpapi.dll")]
+        private static extern int GetIpNetTable(IntPtr pIpNetTable, ref int pdwSize, bool bOrder);
 
         [StructLayout(LayoutKind.Sequential)]
         private struct MIB_TCPROW_OWNER_PID
@@ -60,44 +73,62 @@ namespace Sentinel.Core
             public uint owningPid;
         }
 
+        [StructLayout(LayoutKind.Sequential)]
+        private struct MIB_IPNETROW
+        {
+            public int dwIndex;
+            public int dwPhysAddrLen;
+            public byte mac0, mac1, mac2, mac3, mac4, mac5, mac6, mac7;
+            public int dwAddr;
+            public int dwType;
+        }
+
         public CastDeviceGuard(
             DetectionEngine detectionEngine,
             SentinelConfig config,
-            ILogger<CastDeviceGuard> logger)
+            ILogger<CastDeviceGuard> logger,
+            PhantomDeviceMonitor? phantomDeviceMonitor = null)
         {
             _detectionEngine = detectionEngine;
             _config = config;
             _logger = logger;
+            _phantomDeviceMonitor = phantomDeviceMonitor;
         }
 
         protected override async Task ExecuteAsync(CancellationToken ct)
         {
+            var mitm = _config.MitmDefense ?? new MitmDefenseConfig();
             var trusted = _config.TrustedCastDevices ?? Array.Empty<string>();
-            bool enforce = trusted.Length > 0;
+            bool enforceAllowlist = trusted.Length > 0;
+            bool mitmRogueBlock = ProductPosture.AllowsMitmDefenseMutations(_config) && mitm.AutoBlockRogueCast;
+
             _logger.LogInformation(
-                "[CastDeviceGuard] Started — mode={Mode}. Trusted: {Count} ({IPs})",
-                enforce ? "ENFORCE-ALLOWLIST" : "OBSERVE-ONLY",
+                "[CastDeviceGuard] Started — allowlist={Allow} mitmRogueBlock={Mitm}. Trusted={Count} RoguePrefixes={Prefixes}",
+                enforceAllowlist ? "ENFORCE" : "off",
+                mitmRogueBlock ? "ON" : "OFF",
                 trusted.Length,
-                trusted.Length > 0 ? string.Join(", ", trusted) : "none — log Cast traffic, no preemptive blocks");
+                mitmRogueBlock
+                    ? string.Join(",", mitm.RogueCastMacPrefixes ?? Array.Empty<string>())
+                    : "n/a");
 
-            // v1.9.7: never delete Windows Cast firewall rules in observe/work-first mode
-            // (breaks legitimate Chromecast / casting). Only when user set TrustedCastDevices.
-            if (enforce && ProductPosture.AllowsProactiveHostLockdown(_config))
-            {
+            if (enforceAllowlist || mitmRogueBlock)
                 DeleteCastToDeviceInboundRules();
-            }
-            else if (enforce)
-            {
-                // Allowlist enforce without full restrictive kiosk — still may delete Cast rules
-                // only when operator opted into TrustedCastDevices (explicit cast policy).
-                DeleteCastToDeviceInboundRules();
-            }
 
-            // empty allowlist must not leave residual CastGuard blocks from older builds
-            if (!enforce && !_legacyCastBlocksCleaned)
+            // Only wipe legacy blocks when fully observe (no allowlist, no MITM suite)
+            if (!enforceAllowlist && !mitmRogueBlock && !_legacyCastBlocksCleaned)
             {
                 RemoveLegacyCastGuardBlocks();
                 _legacyCastBlocksCleaned = true;
+            }
+
+            // Re-apply known rogue IPs from config immediately
+            if (mitmRogueBlock)
+            {
+                foreach (var ip in mitm.KnownRogueCastIps ?? Array.Empty<string>())
+                {
+                    if (IPAddress.TryParse(ip, out _))
+                        await EnsureFirewallBlock(ip);
+                }
             }
 
             while (!ct.IsCancellationRequested)
@@ -105,17 +136,13 @@ namespace Sentinel.Core
                 try
                 {
                     await Task.Delay(ScanInterval, ct);
-                    await ScanAndKillCastConnections(ct);
+                    await ScanAndRespond(ct);
                 }
                 catch (OperationCanceledException) { break; }
                 catch (Exception ex) { _logger.LogDebug(ex, "[CastDeviceGuard] Error"); }
             }
         }
 
-        /// <summary>
-        /// Removes Sentinel-CastGuard-Block-* rules when running in observe-only mode
-        /// so upgrades stop obstructing normal Chromecast use.
-        /// </summary>
         private void RemoveLegacyCastGuardBlocks()
         {
             try
@@ -155,12 +182,6 @@ namespace Sentinel.Core
             }
         }
 
-        /// <summary>
-        /// Deletes all Windows built-in "Cast to Device" inbound firewall rules and
-        /// "Media Center Extenders" rules. These allow any LAN device to connect inbound
-        /// on RTSP/HTTP streaming ports — the exact attack surface for rogue Cast relays.
-        /// Self-healing: runs every service start in case Windows Update re-creates them.
-        /// </summary>
         private void DeleteCastToDeviceInboundRules()
         {
             try
@@ -194,7 +215,8 @@ namespace Sentinel.Core
 
                 if (toDelete.Count > 0)
                 {
-                    _logger.LogWarning("[CastDeviceGuard] DELETED {Count} inbound Cast/Media streaming firewall rules (attack surface removal)",
+                    _logger.LogWarning(
+                        "[CastDeviceGuard] DELETED {Count} inbound Cast/Media streaming firewall rules (attack surface removal)",
                         toDelete.Count);
                 }
             }
@@ -204,10 +226,14 @@ namespace Sentinel.Core
             }
         }
 
-        private async Task ScanAndKillCastConnections(CancellationToken ct)
+        private async Task ScanAndRespond(CancellationToken ct)
         {
             var trusted = _config.TrustedCastDevices ?? Array.Empty<string>();
             bool enforceAllowlist = trusted.Length > 0;
+            var mitm = _config.MitmDefense ?? new MitmDefenseConfig();
+            bool mitmRogueBlock = ProductPosture.AllowsMitmDefenseMutations(_config) && mitm.AutoBlockRogueCast;
+
+            var arpByIp = GetArpIpToMac();
             var connections = GetEstablishedTcpConnections();
 
             foreach (var conn in connections)
@@ -216,58 +242,24 @@ namespace Sentinel.Core
                 if (!CastPorts.Contains(conn.RemotePort)) continue;
                 if (!IsPrivateIp(conn.RemoteAddress)) continue;
 
-                // Explicitly trusted by user? Leave it alone.
                 if (enforceAllowlist &&
                     trusted.Contains(conn.RemoteAddress, StringComparer.OrdinalIgnoreCase))
                     continue;
 
-                // Observe-only when no allowlist configured — do not obstruct normal Cast.
-                if (!enforceAllowlist)
+                arpByIp.TryGetValue(conn.RemoteAddress, out var mac);
+                mac ??= "";
+
+                bool isRogue = mitmRogueBlock && IsRogueCastTarget(conn.RemoteAddress, mac, mitm);
+                bool unlistedUnderAllowlist = enforceAllowlist &&
+                    !trusted.Contains(conn.RemoteAddress, StringComparer.OrdinalIgnoreCase);
+
+                // Pure observe: no allowlist, no MITM suite
+                if (!isRogue && !unlistedUnderAllowlist)
                 {
-                    var observeKey = $"obs:{conn.RemoteAddress}:{conn.RemotePort}";
-                    if (_alertedConnections.TryGetValue(observeKey, out var lastObs) &&
-                        DateTimeOffset.UtcNow - lastObs < AlertCooldown)
-                        continue;
-                    _alertedConnections[observeKey] = DateTimeOffset.UtcNow;
-
-                    string obsProc;
-                    try
-                    {
-                        using var proc = Process.GetProcessById(conn.OwnerPid);
-                        obsProc = proc.ProcessName;
-                    }
-                    catch { continue; }
-
-                    await _detectionEngine.EmitAsync(new DetectionEvent
-                    {
-                        RuleName = "Cast Device Guard: Cast Connection Observed",
-                        Evidence = $"Process '{obsProc}' (PID {conn.OwnerPid}) → " +
-                                   $"{conn.RemoteAddress}:{conn.RemotePort}. " +
-                                   "TrustedCastDevices empty — observe-only (no firewall block).",
-                        Reasoning = "Cast-port traffic on the LAN was observed. With an empty allowlist " +
-                                    "Sentinel logs only so Chromecast/Nest casting keeps working. " +
-                                    "Set TrustedCastDevices to known IPs to enforce an allowlist after " +
-                                    "a rogue Cast/phantom device incident.",
-                        Confidence = 0.55,
-                        Tier = DetectionTier.Tier2Indicator,
-                        AuthorizedResponse = ResponseAction.LogOnly,
-                        ProcessName = obsProc,
-                        ProcessId = conn.OwnerPid,
-                        // Generic — never NetworkC2. LAN Cast observe must not seed C2Beacon chain nukes.
-                        SignalType = SignalType.Generic,
-                        Metadata = new Dictionary<string, string>
-                        {
-                            ["RemoteIP"] = conn.RemoteAddress,
-                            ["RemotePort"] = conn.RemotePort.ToString(),
-                            ["Mode"] = "observe-only",
-                            ["WeakObserveSeed"] = "true",
-                            ["FirewallBlocked"] = "False"
-                        }
-                    });
+                    await EmitObserveOnly(conn);
                     continue;
                 }
 
-                // Enforce mode: NOT in allowlist → block at firewall and alert.
                 string procName;
                 try
                 {
@@ -278,64 +270,174 @@ namespace Sentinel.Core
 
                 await EnsureFirewallBlock(conn.RemoteAddress);
 
+                // Close the weaponized open-tab Cast channel: kill non-browser trees;
+                // browsers stay up (user work) — firewall already cuts :8008/:8009 to the rogue.
+                bool isBrowser = BrowserProcesses.Contains(procName);
+                if (!isBrowser && ProductPosture.AllowsMitmDefenseMutations(_config))
+                {
+                    try { HardeningModule.SafeKillProcessTree(conn.OwnerPid); }
+                    catch { }
+                }
+
                 var alertKey = $"{conn.RemoteAddress}:{conn.RemotePort}";
                 if (_alertedConnections.TryGetValue(alertKey, out var lastAlert) &&
                     DateTimeOffset.UtcNow - lastAlert < AlertCooldown)
                     continue;
 
                 _alertedConnections[alertKey] = DateTimeOffset.UtcNow;
-                bool isBrowser = BrowserProcesses.Contains(procName);
+
+                string reason = isRogue
+                    ? $"Rogue Cast / fake Chromecast (MAC={mac}). MitmDefense AutoBlockRogueCast."
+                    : "IP not in TrustedCastDevices allowlist.";
 
                 await _detectionEngine.EmitAsync(new DetectionEvent
                 {
-                    RuleName = "Cast Device Guard: Unauthorized Cast Connection Blocked",
+                    RuleName = isRogue
+                        ? "Cast Device Guard: Fake Chromecast / Rogue Cast Blocked"
+                        : "Cast Device Guard: Unauthorized Cast Connection Blocked",
                     Evidence = $"Process '{procName}' (PID {conn.OwnerPid}) → " +
-                               $"{conn.RemoteAddress}:{conn.RemotePort}. " +
-                               $"NOT in TrustedCastDevices. Firewall block applied.",
-                    Reasoning = "A process connected to a LAN device on Cast port (8008/8009). " +
-                                "TrustedCastDevices is non-empty and this IP is not listed. " +
-                                "Rogue LAN Cast endpoints can be used as a relay through the browser; " +
-                                "firewall block applied. Not classified as NetworkC2 terminal.",
-                    Confidence = 0.92,
-                    Tier = DetectionTier.Tier2Indicator,
-                    AuthorizedResponse = ResponseAction.LogOnly,
+                               $"{conn.RemoteAddress}:{conn.RemotePort} MAC={mac}. {reason} Firewall block applied.",
+                    Reasoning = "Chrome/Edge maintain Cast sessions on 8008/8009. A rogue LAN device " +
+                                "spoofing Chromecast becomes a C2 relay through open browser tabs — same " +
+                                "class as FCM 'Send Tab to Self' after MitM token theft. Firewall block " +
+                                "severs the channel; non-browser processes to the rogue are killed.",
+                    Confidence = 0.93,
+                    Tier = DetectionTier.Tier1Behavioral,
+                    AuthorizedResponse = ResponseAction.NetworkIsolate,
                     ProcessName = procName,
                     ProcessId = conn.OwnerPid,
-                    // Keep as Generic/weak seed — LAN Cast block is not a C2Beacon terminal family.
-                    SignalType = SignalType.Generic,
+                    SignalType = SignalType.NetworkC2,
                     Metadata = new Dictionary<string, string>
                     {
                         ["RemoteIP"] = conn.RemoteAddress,
                         ["RemotePort"] = conn.RemotePort.ToString(),
+                        ["MAC"] = mac,
                         ["IsBrowser"] = isBrowser.ToString(),
-                        ["Mode"] = "enforce-allowlist",
-                        ["WeakObserveSeed"] = "true",
+                        ["IsRogue"] = isRogue.ToString(),
+                        ["Mode"] = isRogue ? "mitm-rogue-block" : "enforce-allowlist",
+                        ["MitmDefense"] = "true",
+                        ["TargetIP"] = conn.RemoteAddress,
                         ["FirewallBlocked"] = "True"
                     }
                 });
             }
         }
 
+        private async Task EmitObserveOnly(TcpConnectionInfo conn)
+        {
+            var observeKey = $"obs:{conn.RemoteAddress}:{conn.RemotePort}";
+            if (_alertedConnections.TryGetValue(observeKey, out var lastObs) &&
+                DateTimeOffset.UtcNow - lastObs < AlertCooldown)
+                return;
+            _alertedConnections[observeKey] = DateTimeOffset.UtcNow;
+
+            string obsProc;
+            try
+            {
+                using var proc = Process.GetProcessById(conn.OwnerPid);
+                obsProc = proc.ProcessName;
+            }
+            catch { return; }
+
+            await _detectionEngine.EmitAsync(new DetectionEvent
+            {
+                RuleName = "Cast Device Guard: Cast Connection Observed",
+                Evidence = $"Process '{obsProc}' (PID {conn.OwnerPid}) → " +
+                           $"{conn.RemoteAddress}:{conn.RemotePort}. Observe-only.",
+                Reasoning = "Cast-port traffic observed. MitmDefense off and TrustedCastDevices empty — " +
+                            "log only so Chromecast keeps working. Enable Sentinel:MitmDefense:Enabled " +
+                            "after a fake Cast / MitM incident, or set TrustedCastDevices allowlist.",
+                Confidence = 0.55,
+                Tier = DetectionTier.Tier2Indicator,
+                AuthorizedResponse = ResponseAction.LogOnly,
+                ProcessName = obsProc,
+                ProcessId = conn.OwnerPid,
+                SignalType = SignalType.Generic,
+                Metadata = new Dictionary<string, string>
+                {
+                    ["RemoteIP"] = conn.RemoteAddress,
+                    ["RemotePort"] = conn.RemotePort.ToString(),
+                    ["Mode"] = "observe-only",
+                    ["WeakObserveSeed"] = "true",
+                    ["FirewallBlocked"] = "False"
+                }
+            });
+        }
+
+        /// <summary>
+        /// Rogue if: known bad IP, known spoof OUI (e.g. B0-B3-69), or phantom device
+        /// presenting a Google Cast OUI (spoofed real Google MAC after baseline).
+        /// </summary>
+        private bool IsRogueCastTarget(string ip, string mac, MitmDefenseConfig mitm)
+        {
+            foreach (var known in mitm.KnownRogueCastIps ?? Array.Empty<string>())
+            {
+                if (string.Equals(known, ip, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+
+            if (_blockedIps.ContainsKey(ip))
+                return true;
+
+            if (_phantomDeviceMonitor != null && _phantomDeviceMonitor.IsBlockedDevice(ip))
+                return true;
+
+            var oui = MacToOui(mac);
+            if (string.IsNullOrEmpty(oui))
+                return false;
+
+            foreach (var prefix in mitm.RogueCastMacPrefixes ?? Array.Empty<string>())
+            {
+                var norm = NormalizeOui(prefix);
+                if (string.Equals(norm, oui, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+
+            // Phantom + real-Google OUI on Cast = spoof of Google hardware after boot
+            if (RealGoogleCastOuis.Contains(oui) &&
+                _phantomDeviceMonitor != null &&
+                _phantomDeviceMonitor.IsPhantomDevice(ip))
+                return true;
+
+            return false;
+        }
+
+        private static string MacToOui(string mac)
+        {
+            if (string.IsNullOrWhiteSpace(mac)) return "";
+            var norm = mac.Replace(':', '-').ToUpperInvariant();
+            var parts = norm.Split('-');
+            if (parts.Length < 3) return "";
+            return $"{parts[0]}-{parts[1]}-{parts[2]}";
+        }
+
+        private static string NormalizeOui(string prefix)
+        {
+            var p = (prefix ?? "").Replace(':', '-').ToUpperInvariant().Trim();
+            var parts = p.Split(new[] { '-' }, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length >= 3)
+                return $"{parts[0]}-{parts[1]}-{parts[2]}";
+            return p;
+        }
+
         private async Task EnsureFirewallBlock(string ip)
         {
-            // v1.6.0: Strict IP validation before interpolating into netsh
-            if (!System.Net.IPAddress.TryParse(ip, out var parsed) ||
-                System.Net.IPAddress.IsLoopback(parsed) ||
-                parsed.Equals(System.Net.IPAddress.Any) ||
-                parsed.Equals(System.Net.IPAddress.IPv6Any) ||
-                parsed.Equals(System.Net.IPAddress.Broadcast))
+            if (!IPAddress.TryParse(ip, out var parsed) ||
+                IPAddress.IsLoopback(parsed) ||
+                parsed.Equals(IPAddress.Any) ||
+                parsed.Equals(IPAddress.IPv6Any) ||
+                parsed.Equals(IPAddress.Broadcast))
             {
                 _logger.LogDebug("[CastDeviceGuard] Refusing firewall block for invalid IP: {IP}", ip);
                 return;
             }
 
-            // Normalize to canonical form (strips any junk that TryParse accepted)
             ip = parsed.ToString();
             if (_blockedIps.ContainsKey(ip)) return;
             try
             {
                 var safeLabel = ip.Replace('.', '_').Replace(':', '_');
-                var ruleName = $"Sentinel-CastGuard-Block-{safeLabel}";
+                var ruleName = $"{CastBlockRulePrefix}{safeLabel}";
                 var psi = new ProcessStartInfo("netsh",
                     $"advfirewall firewall add rule name=\"{ruleName}-OUT\" dir=out action=block remoteip={ip} enable=yes")
                 {
@@ -349,7 +451,7 @@ namespace Sentinel.Core
                 { if (proc != null) await proc.WaitForExitAsync(); }
 
                 _blockedIps[ip] = ruleName;
-                _logger.LogInformation("[CastDeviceGuard] Firewall block: {IP}", ip);
+                _logger.LogWarning("[CastDeviceGuard] Firewall block (MITM/rogue Cast): {IP}", ip);
             }
             catch (Exception ex)
             {
@@ -368,6 +470,37 @@ namespace Sentinel.Core
                     return second >= 16 && second <= 31;
             }
             return false;
+        }
+
+        private static Dictionary<string, string> GetArpIpToMac()
+        {
+            var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                int size = 0;
+                GetIpNetTable(IntPtr.Zero, ref size, false);
+                if (size <= 0) return map;
+                var buffer = Marshal.AllocHGlobal(size);
+                try
+                {
+                    if (GetIpNetTable(buffer, ref size, false) != 0) return map;
+                    int entries = Marshal.ReadInt32(buffer);
+                    int entrySize = Marshal.SizeOf<MIB_IPNETROW>();
+                    var entryPtr = buffer + 4;
+                    for (int i = 0; i < entries; i++)
+                    {
+                        var row = Marshal.PtrToStructure<MIB_IPNETROW>(entryPtr + (i * entrySize));
+                        if (row.dwType == 2) continue; // invalid
+                        var ip = new IPAddress(BitConverter.GetBytes(row.dwAddr)).ToString();
+                        var mac = $"{row.mac0:X2}-{row.mac1:X2}-{row.mac2:X2}-{row.mac3:X2}-{row.mac4:X2}-{row.mac5:X2}";
+                        if (mac != "00-00-00-00-00-00")
+                            map[ip] = mac;
+                    }
+                }
+                finally { Marshal.FreeHGlobal(buffer); }
+            }
+            catch { }
+            return map;
         }
 
         private List<TcpConnectionInfo> GetEstablishedTcpConnections()

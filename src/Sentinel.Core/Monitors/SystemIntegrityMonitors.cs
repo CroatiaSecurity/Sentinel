@@ -946,18 +946,36 @@ namespace Sentinel.Core
             var authorizedResponse = overrideResponse ?? ResponseAction.LogOnly;
 
             // Startup scans never auto-remove (user may have installed them intentionally)
+            // Exception: high-conf MitM plant under MitmDefense (caller sets isStartupScan=false + RemoveCert)
             if (isStartupScan) authorizedResponse = ResponseAction.LogOnly;
+
+            // MitM suite: planted root powers invisible process + fake Chromecast C2
+            bool removing = authorizedResponse == ResponseAction.RemoveCert
+                         || authorizedResponse == ResponseAction.RemoveCertAndKillAdder;
+            if (removing || ProductPosture.AllowsMitmDefenseMutations(_config))
+            {
+                metadata["MitmDefense"] = "true";
+                reasoning += " Part of MitM defense chain: planted root enables TLS intercept and/or " +
+                             "trust for a hollowed process that talks to a rogue Cast/fake Chromecast.";
+            }
+
+            var tier = analysis.Tier;
+            if (removing)
+                tier = DetectionTier.Tier1Behavioral;
 
             await _detectionEngine.EmitAsync(new DetectionEvent
             {
-                RuleName = "TLS: Suspicious Root Certificate Detected",
+                RuleName = removing
+                    ? "TLS: MitM Planted Root Certificate — Removing"
+                    : "TLS: Suspicious Root Certificate Detected",
                 Evidence = evidence,
                 Reasoning = reasoning,
                 Confidence = analysis.Confidence,
-                Tier = analysis.Tier,
+                Tier = tier,
                 AuthorizedResponse = authorizedResponse,
                 ProcessName = adderInfo?.ProcessName ?? "SYSTEM",
                 ProcessId = adderInfo?.ProcessId ?? 0,
+                SignalType = SignalType.SecurityEvasion,
                 Metadata = metadata
             });
         }
@@ -1463,16 +1481,21 @@ namespace Sentinel.Core
             _detectionEngine = de;
             _config = config;
             _logger = l;
-            _trustedContent = BuildTrustedHostsContent(config.BlockFcmPushChannel);
+            // MitmDefense.Enabled implies FCM hosts blocks (Send Tab to Self after token theft)
+            bool fcmBlock = config.BlockFcmPushChannel
+                || (config.MitmDefense?.Enabled == true && (config.MitmDefense.BlockFcmPushChannel));
+            _trustedContent = BuildTrustedHostsContent(fcmBlock);
             using var sha = SHA256.Create();
             _trustedHash = ConvertHex.ToHexString(sha.ComputeHash(new UTF8Encoding(false).GetBytes(_trustedContent)));
         }
 
         protected override async Task ExecuteAsync(CancellationToken ct)
         {
+            bool fcmBlock = _config.BlockFcmPushChannel
+                || (_config.MitmDefense?.Enabled == true && _config.MitmDefense.BlockFcmPushChannel);
             _logger.LogInformation(
                 "[HostsFileGuard] Started — enforcing hosts (FCM mtalk block={Fcm}) in {Path}",
-                _config.BlockFcmPushChannel, DriversEtcPath);
+                fcmBlock, DriversEtcPath);
 
             if (!Directory.Exists(DriversEtcPath))
             {

@@ -72,8 +72,57 @@ namespace Sentinel.Tests
         public void TrustedCastDevices_EmptyMeansObserveNotKill()
         {
             // v1.8.3 docs in Models: empty allowlist is observe-only
+            // (unless MitmDefense.Enabled — then rogue Cast IOCs are blocked)
             var cfg = new SentinelConfig();
             Assert.Empty(cfg.TrustedCastDevices);
+            Assert.False(cfg.MitmDefense.Enabled);
+        }
+
+        [Fact]
+        public void MitmDefense_DefaultOff_ButSuiteFieldsPresent()
+        {
+            var cfg = new SentinelConfig();
+            Assert.False(cfg.MitmDefense.Enabled);
+            Assert.True(cfg.MitmDefense.RemovePlantedCerts);
+            Assert.True(cfg.MitmDefense.BlockFcmPushChannel);
+            Assert.True(cfg.MitmDefense.AutoBlockRogueCast);
+            Assert.Contains("B0-B3-69", cfg.MitmDefense.RogueCastMacPrefixes);
+        }
+
+        [Fact]
+        public void MitmDefense_WhenEnabled_AllowsMutationsAndClassifiesActions()
+        {
+            var cfg = new SentinelConfig
+            {
+                ActiveResponse = true,
+                ObserveUntilChain = true,
+                MitmDefense = new MitmDefenseConfig { Enabled = true }
+            };
+            Assert.True(ProductPosture.AllowsMitmDefenseMutations(cfg));
+            Assert.True(ResponsePolicy.MayPerformInlineHostMutation(cfg));
+
+            var castEvt = new DetectionEvent
+            {
+                RuleName = "Cast Device Guard: Fake Chromecast / Rogue Cast Blocked",
+                AuthorizedResponse = ResponseAction.NetworkIsolate,
+                Metadata = new Dictionary<string, string> { ["MitmDefense"] = "true" }
+            };
+            Assert.True(ResponsePolicy.IsMitmDefenseAction(castEvt, cfg));
+
+            var ghostEvt = new DetectionEvent
+            {
+                RuleName = "Ghost Process: Invisible Process → Fake Chromecast / Rogue Cast (MitM chain)",
+                AuthorizedResponse = ResponseAction.KillProcessTree,
+                Metadata = new Dictionary<string, string> { ["MitmDefense"] = "true" }
+            };
+            Assert.True(ResponsePolicy.IsMitmDefenseAction(ghostEvt, cfg));
+
+            var certEvt = new DetectionEvent
+            {
+                RuleName = "TLS: MitM Planted Root Certificate — Removing",
+                AuthorizedResponse = ResponseAction.RemoveCert
+            };
+            Assert.True(ResponsePolicy.IsMitmDefenseAction(certEvt, cfg));
         }
 
         [Fact]

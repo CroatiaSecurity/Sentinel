@@ -27,6 +27,10 @@ namespace Sentinel.Core
     /// that cannot be resolved to a valid, signed process image is immediately
     /// suspicious and investigated.
     ///
+    /// MitM / fake-Chromecast chain (post-incident):
+    ///   Planted root cert → invisible/hollowed process → TCP to rogue Cast :8008/:8009.
+    /// When MitmDefense is on, ghost→Cast/rogue-IP is immediate kill + isolate (no 2-scan wait).
+    ///
     /// Scan interval: 15 seconds (catches short-lived RAT processes between
     /// BeaconingDetector's 30s analysis cycle).
     /// </summary>
@@ -34,6 +38,7 @@ namespace Sentinel.Core
     {
         private readonly DetectionEngine _detectionEngine;
         private readonly ProcessAncestryCache _ancestryCache;
+        private readonly SentinelConfig _config;
         private readonly PhantomDeviceMonitor? _phantomDeviceMonitor;
         private readonly ContextBus? _contextBus;
         private readonly ILogger<GhostProcessMonitor> _logger;
@@ -64,12 +69,14 @@ namespace Sentinel.Core
         public GhostProcessMonitor(
             DetectionEngine detectionEngine,
             ProcessAncestryCache ancestryCache,
+            SentinelConfig config,
             ILogger<GhostProcessMonitor> logger,
             PhantomDeviceMonitor? phantomDeviceMonitor = null,
             ContextBus? contextBus = null)
         {
             _detectionEngine = detectionEngine;
             _ancestryCache = ancestryCache;
+            _config = config;
             _phantomDeviceMonitor = phantomDeviceMonitor;
             _contextBus = contextBus;
             _logger = logger;
@@ -134,7 +141,10 @@ namespace Sentinel.Core
                     bool connectsToBlockedDevice = _phantomDeviceMonitor != null &&
                         group.Any(c => _phantomDeviceMonitor.IsBlockedDevice(c.RemoteAddress));
 
-                    if (hasHighConfidencePort || connectsToBlockedDevice || state.SeenCount >= 2)
+                    // MitM suite: invisible process talking to Cast / known rogue Chromecast IP
+                    bool mitmGhostCast = IsMitmGhostCastRelay(group);
+
+                    if (hasHighConfidencePort || connectsToBlockedDevice || mitmGhostCast || state.SeenCount >= 2)
                     {
                         await EmitGhostDetection(pid, resolution, state, ct);
                         _alertedPids[pid] = DateTimeOffset.UtcNow;
@@ -148,7 +158,7 @@ namespace Sentinel.Core
                             Destinations = state.Connections.Select(c => $"{c.RemoteAddress}:{c.RemotePort}").Distinct().Take(10).ToList(),
                             ScansSeen = state.SeenCount,
                             ConnectsToBlockedDevice = connectsToBlockedDevice,
-                            HasSuspiciousPort = hasHighConfidencePort
+                            HasSuspiciousPort = hasHighConfidencePort || mitmGhostCast
                         });
                     }
                 }
@@ -158,8 +168,9 @@ namespace Sentinel.Core
                     // This is a strong indicator of process hollowing or image swap
                     var conns = group.ToList();
                     bool hasSuspiciousPort = conns.Any(c => SuspiciousMasqueradePorts.Contains(c.RemotePort));
+                    bool mitmGhostCast = IsMitmGhostCastRelay(conns);
 
-                    if (hasSuspiciousPort)
+                    if (hasSuspiciousPort || mitmGhostCast)
                     {
                         await EmitEmptyNameDetection(pid, resolution, conns, ct);
                         _alertedPids[pid] = DateTimeOffset.UtcNow;
@@ -189,6 +200,7 @@ namespace Sentinel.Core
                 state.Connections.Select(c => $"{c.RemoteAddress}:{c.RemotePort}").Distinct().Take(5));
 
             bool hasSuspiciousPort = state.Connections.Any(c => SuspiciousMasqueradePorts.Contains(c.RemotePort));
+            bool mitmGhostCast = IsMitmGhostCastRelay(state.Connections);
 
             // Escalation: if connecting to a device PhantomDeviceMonitor already blocked/flagged,
             // this is confirmed C2 via a rogue LAN relay. Kill it + chain trace.
@@ -199,11 +211,14 @@ namespace Sentinel.Core
 
             double confidence;
             ResponseAction response;
+            string ruleName = "Ghost Process: Unresolvable PID with Active Network";
 
-            if (connectsToBlockedDevice)
+            if (mitmGhostCast || connectsToBlockedDevice)
             {
-                confidence = 0.95;
+                confidence = 0.96;
                 response = ResponseAction.KillProcessTree;
+                if (mitmGhostCast)
+                    ruleName = "Ghost Process: Invisible Process → Fake Chromecast / Rogue Cast (MitM chain)";
             }
             else if (connectsToPhantomDevice && hasSuspiciousPort)
             {
@@ -221,35 +236,81 @@ namespace Sentinel.Core
                 response = ResponseAction.NetworkIsolate;
             }
 
+            var castTarget = state.Connections
+                .FirstOrDefault(c => (c.RemotePort == 8008 || c.RemotePort == 8009) && IsPrivateIp(c.RemoteAddress));
+            var targetIp = castTarget?.RemoteAddress
+                ?? state.Connections.Select(c => c.RemoteAddress).FirstOrDefault(IsPrivateIp)
+                ?? "";
+
+            var metadata = new Dictionary<string, string>
+            {
+                ["Destinations"] = destinations,
+                ["ConnectionCount"] = state.Connections.Count.ToString(),
+                ["ScansSeen"] = state.SeenCount.ToString(),
+                ["HasSuspiciousPort"] = hasSuspiciousPort.ToString(),
+                ["ConnectsToBlockedDevice"] = connectsToBlockedDevice.ToString(),
+                ["MitmGhostCast"] = mitmGhostCast.ToString()
+            };
+            if (mitmGhostCast || connectsToBlockedDevice)
+            {
+                metadata["MitmDefense"] = "true";
+                if (!string.IsNullOrEmpty(targetIp))
+                    metadata["TargetIP"] = targetIp;
+            }
+
             await _detectionEngine.EmitAsync(new DetectionEvent
             {
-                RuleName = "Ghost Process: Unresolvable PID with Active Network",
+                RuleName = ruleName,
                 Evidence = $"PID {pid} has {state.Connections.Count} established outbound connection(s) " +
                            $"to [{destinations}] but cannot be resolved to a running process. " +
                            $"Observed in {state.SeenCount} consecutive scans." +
-                           (connectsToBlockedDevice ? " TARGET IS A BLOCKED PHANTOM DEVICE." : ""),
+                           (connectsToBlockedDevice ? " TARGET IS A BLOCKED PHANTOM DEVICE." : "") +
+                           (mitmGhostCast ? " MITM CHAIN: invisible process ↔ Cast/rogue Chromecast." : ""),
                 Reasoning = "A process ID owns active outbound TCP connections but the process " +
                             "cannot be resolved via Process.GetProcessById or the ancestry cache. " +
                             "This occurs when a process exits but its connections persist (orphaned sockets), " +
                             "or when a RAT uses process hollowing/DLL sideloading causing the host process " +
                             "to terminate while the injected code's network activity continues under the original PID. " +
-                            (connectsToBlockedDevice
-                                ? "The target IP is a device already blocked by PhantomDeviceMonitor — confirmed C2 relay."
-                                : "PlugX, ShadowPad, and Mustang Panda specifically exploit this technique."),
+                            (mitmGhostCast
+                                ? "Post-incident MitM pattern: planted root cert powers trust for an invisible process " +
+                                  "that C2s through a fake Chromecast (Cast :8008/:8009) on the LAN — kill + isolate."
+                                : connectsToBlockedDevice
+                                    ? "The target IP is a device already blocked by PhantomDeviceMonitor — confirmed C2 relay."
+                                    : "PlugX, ShadowPad, and Mustang Panda specifically exploit this technique."),
                 Confidence = confidence,
                 Tier = DetectionTier.Tier1Behavioral,
                 AuthorizedResponse = response,
                 ProcessName = resolution.Name ?? "UNRESOLVABLE",
                 ProcessId = pid,
-                Metadata = new Dictionary<string, string>
-                {
-                    ["Destinations"] = destinations,
-                    ["ConnectionCount"] = state.Connections.Count.ToString(),
-                    ["ScansSeen"] = state.SeenCount.ToString(),
-                    ["HasSuspiciousPort"] = hasSuspiciousPort.ToString(),
-                    ["ConnectsToBlockedDevice"] = connectsToBlockedDevice.ToString()
-                }
+                SignalType = mitmGhostCast ? SignalType.NetworkC2 : SignalType.SuspiciousProcess,
+                Metadata = metadata
             });
+        }
+
+        /// <summary>
+        /// Invisible process talking to Cast ports or known rogue Cast IPs under MitmDefense.
+        /// Matches the planted-cert → ghost process → fake Chromecast C2 pattern.
+        /// </summary>
+        private bool IsMitmGhostCastRelay(IEnumerable<ConnectionInfo> connections)
+        {
+            if (!ProductPosture.AllowsMitmDefenseMutations(_config))
+                return false;
+            var mitm = _config.MitmDefense;
+            if (mitm == null || !mitm.AutoBlockRogueCast)
+                return false;
+
+            var known = new HashSet<string>(
+                mitm.KnownRogueCastIps ?? Array.Empty<string>(),
+                StringComparer.OrdinalIgnoreCase);
+
+            foreach (var c in connections)
+            {
+                if (known.Contains(c.RemoteAddress))
+                    return true;
+                if (IsPrivateIp(c.RemoteAddress) && (c.RemotePort == 8008 || c.RemotePort == 8009))
+                    return true;
+            }
+            return false;
         }
 
         private async Task EmitEmptyNameDetection(int pid, ProcessResolution resolution,
@@ -259,6 +320,7 @@ namespace Sentinel.Core
                 connections.Select(c => $"{c.RemoteAddress}:{c.RemotePort}").Distinct().Take(5));
 
             bool hasSuspiciousPort = connections.Any(c => SuspiciousMasqueradePorts.Contains(c.RemotePort));
+            bool mitmGhostCast = IsMitmGhostCastRelay(connections);
 
             // Escalation: ghost + connecting to blocked/phantom device = confirmed C2
             bool connectsToBlockedDevice = _phantomDeviceMonitor != null &&
@@ -270,11 +332,14 @@ namespace Sentinel.Core
 
             double confidence;
             ResponseAction response;
+            string ruleName = "Ghost Process: Empty Name with Active Network";
 
-            if (connectsToBlockedDevice || connectsToPhantomOnCastPort)
+            if (mitmGhostCast || connectsToBlockedDevice || connectsToPhantomOnCastPort)
             {
-                confidence = 0.95;
+                confidence = 0.96;
                 response = ResponseAction.KillProcessTree;
+                if (mitmGhostCast)
+                    ruleName = "Ghost Process: Empty-Name Process → Fake Chromecast (MitM chain)";
             }
             else if (hasSuspiciousPort)
             {
@@ -287,32 +352,47 @@ namespace Sentinel.Core
                 response = ResponseAction.LogOnly;
             }
 
+            var castTarget = connections
+                .FirstOrDefault(c => (c.RemotePort == 8008 || c.RemotePort == 8009) && IsPrivateIp(c.RemoteAddress));
+            var metadata = new Dictionary<string, string>
+            {
+                ["Destinations"] = destinations,
+                ["ImagePath"] = resolution.ImagePath ?? "unknown",
+                ["HasSuspiciousPort"] = hasSuspiciousPort.ToString(),
+                ["ConnectsToBlockedDevice"] = connectsToBlockedDevice.ToString(),
+                ["MitmGhostCast"] = mitmGhostCast.ToString()
+            };
+            if (mitmGhostCast || connectsToBlockedDevice || connectsToPhantomOnCastPort)
+            {
+                metadata["MitmDefense"] = "true";
+                if (castTarget != null)
+                    metadata["TargetIP"] = castTarget.RemoteAddress;
+            }
+
             await _detectionEngine.EmitAsync(new DetectionEvent
             {
-                RuleName = "Ghost Process: Empty Name with Active Network",
+                RuleName = ruleName,
                 Evidence = $"PID {pid} has {connections.Count} established outbound connection(s) " +
                            $"to [{destinations}] but process name is empty/blank. " +
                            $"Image path: '{resolution.ImagePath ?? "unknown"}'" +
-                           (connectsToBlockedDevice ? " TARGET IS A BLOCKED PHANTOM DEVICE." : ""),
+                           (connectsToBlockedDevice ? " TARGET IS A BLOCKED PHANTOM DEVICE." : "") +
+                           (mitmGhostCast ? " MITM CHAIN: hollowed process ↔ fake Chromecast." : ""),
                 Reasoning = "A process with an empty/unresolvable name is maintaining active outbound " +
                             "network connections. Empty process names in ETW telemetry indicate the " +
                             "ImageName field was blank at process creation — a hallmark of process hollowing " +
                             "(T1055.012) where the original image is unmapped after spawn. " +
-                            (connectsToBlockedDevice || connectsToPhantomOnCastPort
-                                ? "The target is a confirmed rogue LAN device — kill authorized."
-                                : "RATs like PlugX use this to evade name-based allowlists in security tools."),
+                            (mitmGhostCast
+                                ? "Planted cert + hollowed process + Cast :8009 = MitM fake-Chromecast C2; kill authorized."
+                                : connectsToBlockedDevice || connectsToPhantomOnCastPort
+                                    ? "The target is a confirmed rogue LAN device — kill authorized."
+                                    : "RATs like PlugX use this to evade name-based allowlists in security tools."),
                 Confidence = confidence,
                 Tier = DetectionTier.Tier1Behavioral,
                 AuthorizedResponse = response,
                 ProcessName = string.IsNullOrEmpty(resolution.Name) ? "EMPTY_NAME" : resolution.Name,
                 ProcessId = pid,
-                Metadata = new Dictionary<string, string>
-                {
-                    ["Destinations"] = destinations,
-                    ["ImagePath"] = resolution.ImagePath ?? "unknown",
-                    ["HasSuspiciousPort"] = hasSuspiciousPort.ToString(),
-                    ["ConnectsToBlockedDevice"] = connectsToBlockedDevice.ToString()
-                }
+                SignalType = mitmGhostCast ? SignalType.NetworkC2 : SignalType.SuspiciousProcess,
+                Metadata = metadata
             });
         }
 

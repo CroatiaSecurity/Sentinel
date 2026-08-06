@@ -307,9 +307,15 @@ namespace Sentinel.Core
 
         protected override async Task ExecuteAsync(CancellationToken ct)
         {
+            // MitmDefense.Enabled implies FCM block (Send Tab to Self after token theft)
+            bool fcmOn = _config.BlockFcmPushChannel
+                         || (ProductPosture.AllowsMitmDefenseMutations(_config)
+                             && (_config.MitmDefense?.BlockFcmPushChannel ?? true));
+
             _logger.LogInformation(
-                "[NullSessionGuard] Started — blank-password network restrictions; FCM block={Fcm}",
-                _config.BlockFcmPushChannel ? "ON (post-incident)" : "OFF (observe-only default)");
+                "[NullSessionGuard] Started — blank-password network restrictions; FCM block={Fcm} (MitmDefense={Mitm})",
+                fcmOn ? "ON (post-incident / MitM suite)" : "OFF (observe-only default)",
+                ProductPosture.AllowsMitmDefenseMutations(_config));
 
             // Initial delay to let other monitors start
             await Task.Delay(15000, ct);
@@ -319,7 +325,10 @@ namespace Sentinel.Core
                 try
                 {
                     await EnforceNullSessionProtection(ct);
-                    if (_config.BlockFcmPushChannel)
+                    fcmOn = _config.BlockFcmPushChannel
+                            || (ProductPosture.AllowsMitmDefenseMutations(_config)
+                                && (_config.MitmDefense?.BlockFcmPushChannel ?? true));
+                    if (fcmOn)
                         await EnforceFcmPushBlock(ct);
                     else if (!_fcmCleanupDone)
                         RemoveFcmPushBlockIfPresent();

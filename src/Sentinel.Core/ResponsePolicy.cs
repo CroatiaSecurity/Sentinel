@@ -637,6 +637,11 @@ namespace Sentinel.Core
             if (config == null || !config.ActiveResponse)
                 return false;
 
+            // Post-incident MITM suite: cert plant removal, FCM tab-injection block, rogue Cast.
+            // Explicit MitmDefense.Enabled — not full RestrictivePortHardening.
+            if (ProductPosture.AllowsMitmDefenseMutations(config))
+                return true;
+
             if (!config.ObserveUntilChain)
                 return true;
 
@@ -644,6 +649,46 @@ namespace Sentinel.Core
                 return true;
 
             return false;
+        }
+
+        /// <summary>
+        /// True when a detection is part of the MITM suite and MitmDefense is enabled
+        /// (cert remove / cast block / FCM). Used by AdvancedResponseEngine to act under
+        /// ObserveUntilChain without requiring a multi-signal kill chain.
+        /// </summary>
+        public static bool IsMitmDefenseAction(DetectionEvent detection, SentinelConfig config)
+        {
+            if (!ProductPosture.AllowsMitmDefenseMutations(config) || detection == null)
+                return false;
+
+            if (detection.AuthorizedResponse == ResponseAction.RemoveCert ||
+                detection.AuthorizedResponse == ResponseAction.RemoveCertAndKillAdder)
+                return config.MitmDefense.RemovePlantedCerts;
+
+            if (detection.Metadata != null &&
+                detection.Metadata.TryGetValue("MitmDefense", out var flag) &&
+                string.Equals(flag, "true", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            var rule = detection.RuleName ?? "";
+            return rule.Contains("Cast Device Guard", StringComparison.OrdinalIgnoreCase)
+                   || rule.Contains("FCM Push", StringComparison.OrdinalIgnoreCase)
+                   || rule.Contains("MitM", StringComparison.OrdinalIgnoreCase)
+                   || rule.Contains("MITM", StringComparison.OrdinalIgnoreCase)
+                   || rule.Contains("Phantom Device", StringComparison.OrdinalIgnoreCase)
+                   || rule.Contains("TLS Certificate", StringComparison.OrdinalIgnoreCase)
+                   || rule.Contains("TLS:", StringComparison.OrdinalIgnoreCase)
+                   || rule.Contains("Certificate", StringComparison.OrdinalIgnoreCase)
+                   || rule.Contains("Ghost Process", StringComparison.OrdinalIgnoreCase)
+                   || rule.Contains("Fake Chromecast", StringComparison.OrdinalIgnoreCase)
+                   || rule.Contains("Rogue Cast", StringComparison.OrdinalIgnoreCase)
+                   // Classic LAN MitM surface (same suite as June chain)
+                   || rule.Contains("ARP Spoof", StringComparison.OrdinalIgnoreCase)
+                   || rule.Contains("Proxy", StringComparison.OrdinalIgnoreCase)
+                   || rule.Contains("Route Table", StringComparison.OrdinalIgnoreCase)
+                   || rule.Contains("Persistent Route", StringComparison.OrdinalIgnoreCase)
+                   || rule.Contains("DNS Poison", StringComparison.OrdinalIgnoreCase)
+                   || rule.Contains("DNS Hijack", StringComparison.OrdinalIgnoreCase);
         }
 
         public static bool ShouldNotifyUser(DetectionEvent detection, SentinelConfig config)

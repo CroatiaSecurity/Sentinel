@@ -1,6 +1,6 @@
 # Sentinel — Threat Model
 
-**Version: 1.9.8**
+**Version: 2.0.1**
 
 This document assumes the attacker has read the source code.
 
@@ -109,6 +109,7 @@ See [design.md](design.md) for the full component inventory (all MonitorGroups +
 - **RemoteSessionGuard** (v1.7.5) — Force-logoff unauthorized RDP/remote sessions
 - **ForumHrWatchMonitor** (v1.7.6) — Dedicated forum.hr abuse watch (site no longer hosts-blocked)
 - **Observe-first posture (v1.8.3)** — Weak path/port/shell heuristics LogOnly; IPSec attack-only by default; `RestrictivePortHardening` for full lockdown
+- **MitmDefense suite (v2.0.1)** — Opt-in post-incident: planted root cert remove, FCM Send-Tab-to-Self block, ghost process → fake Chromecast kill, rogue Cast FW (narrow exception to ObserveUntilChain)
 
 ### Group 1: Critical (Self-Protection)
 | Monitor | Purpose |

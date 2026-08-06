@@ -48,6 +48,46 @@ namespace Sentinel.Core
         public string? CustomFeedPath { get; set; } // Local fallback JSON for offline testing
     }
 
+    /// <summary>
+    /// Post-incident MITM hardening — cert plant + FCM tab injection + fake Chromecast C2 relay.
+    /// Observed chain (2026-06-13/14):
+    ///   1. Plant self-signed root (CN=WINDOWS-PC / long validity) → TLS intercept
+    ///   2. Steal Chrome sync tokens during intercept window
+    ///   3. "Send Tab to Self" via FCM push (TCP 5228) opens attacker URLs in open Chrome
+    ///   4. Rogue LAN device (e.g. 192.168.1.100, OUI B0-B3-69) on Cast :8009 as C2 relay
+    ///      through the browser's open Cast/tab channel
+    /// </summary>
+    public class MitmDefenseConfig
+    {
+        /// <summary>Master switch for the suite. Default false (clean install work-first).</summary>
+        public bool Enabled { get; set; } = false;
+
+        /// <summary>
+        /// Remove high-confidence planted MitM roots even under ObserveUntilChain.
+        /// </summary>
+        public bool RemovePlantedCerts { get; set; } = true;
+
+        /// <summary>
+        /// Block Google FCM TCP 5228 — severs "Send Tab to Self" after token theft.
+        /// When MitmDefense.Enabled, this overrides Sentinel:BlockFcmPushChannel=false.
+        /// </summary>
+        public bool BlockFcmPushChannel { get; set; } = true;
+
+        /// <summary>
+        /// Auto firewall-block rogue Cast / fake Chromecast devices when detected.
+        /// </summary>
+        public bool AutoBlockRogueCast { get; set; } = true;
+
+        /// <summary>
+        /// MAC OUI prefixes treated as cast-spoof / known hostile (normalized XX-XX-XX).
+        /// B0-B3-69 is Shenzhen SDMC, historically spoofed as "Google Chromecast" in-incident.
+        /// </summary>
+        public string[] RogueCastMacPrefixes { get; set; } = { "B0-B3-69" };
+
+        /// <summary>Explicit rogue Cast / MITM relay IPs (e.g. confirmed 192.168.1.100).</summary>
+        public string[] KnownRogueCastIps { get; set; } = Array.Empty<string>();
+    }
+
     public class SentinelConfig
     {
         public bool ActiveResponse { get; set; } = true;
@@ -55,12 +95,20 @@ namespace Sentinel.Core
         public string? WatchPath { get; set; }
         /// <summary>
         /// Explicit allowlist of Cast device IPs on the LAN.
-        /// v1.8.3: Empty = observe-only (log Cast traffic, do not firewall-block).
+        /// v1.8.3: Empty = observe-only (log Cast traffic, do not firewall-block) unless
+        /// <see cref="MitmDefense"/> is enabled (then rogue Cast IOCs are blocked).
         /// Non-empty = enforce allowlist (block LAN Cast IPs not listed).
-        /// Post-incident hosts that need zero-trust Cast should list only known devices
-        /// (or use a deliberate block after a phantom Cast IP is confirmed).
         /// </summary>
         public string[] TrustedCastDevices { get; set; } = Array.Empty<string>();
+
+        /// <summary>
+        /// v1.9.10: Post-incident MITM defense suite (June 13–14 chain).
+        /// When Enabled: plant MitM certs are removed, FCM "Send Tab to Self" is blocked,
+        /// and fake Chromecast / rogue Cast LAN relays are firewall-blocked.
+        /// Does not require RestrictivePortHardening (narrow exception for this threat class).
+        /// Default off for clean installs; enable after confirmed MitM / fake Cast.
+        /// </summary>
+        public MitmDefenseConfig MitmDefense { get; set; } = new();
 
         // Dynamic polling intervals (configurable)
         public int DnsPollIntervalSeconds { get; set; } = 15;

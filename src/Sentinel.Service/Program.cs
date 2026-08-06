@@ -414,7 +414,14 @@ namespace Sentinel.Service
                     });
                     services.AddSingleton<FileVerdictScanner>();
                     services.AddSingleton<ConsultantSignalIngestor>();
-                    services.AddSingleton<GhostProcessMonitor>();
+                    services.AddSingleton<GhostProcessMonitor>(sp =>
+                        new GhostProcessMonitor(
+                            sp.GetRequiredService<DetectionEngine>(),
+                            sp.GetRequiredService<ProcessAncestryCache>(),
+                            sp.GetRequiredService<SentinelConfig>(),
+                            sp.GetRequiredService<ILogger<GhostProcessMonitor>>(),
+                            sp.GetService<PhantomDeviceMonitor>(),
+                            sp.GetService<ContextBus>()));
                     services.AddSingleton<EphemeralProcessMonitor>();
                     services.AddSingleton<ModuleValidationMonitor>();
                     services.AddSingleton<RuntimeModuleIntegrityMonitor>();
@@ -619,7 +626,12 @@ namespace Sentinel.Service
                     services.AddSingleton<DeviceInstallMonitor>();
                     services.AddSingleton<MtpTransferGuard>();
                     services.AddSingleton<VolumeMountMonitor>();
-                    services.AddSingleton<CastDeviceGuard>();
+                    services.AddSingleton<CastDeviceGuard>(sp =>
+                        new CastDeviceGuard(
+                            sp.GetRequiredService<DetectionEngine>(),
+                            sp.GetRequiredService<SentinelConfig>(),
+                            sp.GetRequiredService<ILogger<CastDeviceGuard>>(),
+                            sp.GetService<PhantomDeviceMonitor>()));
                     services.AddSingleton<WslMonitor>();
                     services.AddSingleton<RawDiskAccessMonitor>();
                     services.AddSingleton<PrintSpoolerMonitor>();
