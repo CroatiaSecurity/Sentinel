@@ -1,6 +1,6 @@
 # Sentinel — Design Document
 
-**Version: 2.0.1**
+**Version: 2.0.2**
 
 ---
 
@@ -40,7 +40,7 @@ Monitors → TelemetryFusionEngine → DetectionEngine → AdvancedResponseEngin
 | `ServiceAgentIpcHost` / `ServiceAgentIpcClient` | HMAC authenticated named pipe (ops/health only) |
 | `OpsMetricsPublisher` | Writes `%ProgramData%\Sentinel\ops_metrics.json` |
 | `SelfPathGuard` | Hardlink-aware install self-exclusion |
-| `ProductInfo.Version` | `2.0.1` |
+| `ProductInfo.Version` | `2.0.2` |
 
 All components are wired via Microsoft.Extensions.DependencyInjection. No static mutable state anywhere.
 

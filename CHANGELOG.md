@@ -2,6 +2,30 @@
 
 All notable changes to Sentinel are documented in this file.
 
+## [2.0.2] - 2026-08-07
+
+### Fixed — Config hygiene and documentation audit
+
+- **`appsettings.json` duplicate key** — `RestrictivePortHardening` appeared twice in the `Sentinel` section (once before `WindowsEventLog`, once after). `System.Text.Json` silently uses the last value; removed the duplicate to eliminate ambiguity on future edits.
+- **`MitmDefense.KnownRogueCastIps` cleared** — Default config contained `192.168.1.100`, the attacker IP from the June 13–14 incident on this machine. That IP is meaningless on any other machine and would cause `CastDeviceGuard` to pre-block a potentially legitimate LAN device on clean installs. Cleared to `[]`. Users who reproduce this attack should add their attacker IP post-incident; the detection logic (`AutoBlockRogueCast`, `RogueCastMacPrefixes`) remains armed and will identify rogue Cast devices dynamically.
+- **`README.md` installer filename** — Download link referenced `SentinelSetup-2.0.0.exe`; corrected to `2.0.1` (now `2.0.2` with this release).
+
+### Docs — requirements.md brought to current (was stale at v1.8.5)
+
+Complete rewrite to match the 2.0.x codebase:
+
+- Corrected `EnforceActiveResponse` default (`false`, not `true` as previously documented)
+- Added full `ObserveUntilChain` / `SilentObserve` / `ChainConfirm` config model to FR-6
+- Added T1-19 through T1-23: digital coercion toolkit composites, AI agent / MCP abuse, package supply-chain runtime, indirect syscall / Hell's Gate, MitM attack chain
+- Added T2-05/T2-06: privacy service observe-only, bulk transfer / torrent observe-only
+- Expanded FR-4 to include all 19 current BehavioralCorrelationEngine composites plus WeightedCorrelationEngine as a second engine with score card requirements
+- Added FR-14 (plugin architecture), FR-15 (Service↔Agent IPC), FR-16 (ops metrics), FR-17 (work-first posture / ProductPosture gate), FR-18 (MitmDefense suite)
+- Fixed log rotation size from 50 MB to 20 MB (actual value since v1.8.8)
+- Updated NFR-1 through NFR-7 with weak-seed LogOnly requirement, soft-fail graceful degradation, and STA threading constraint
+- Added full document history table from v1.7.9 through v2.0.2
+
+### Docs — constraints.md and design.md version headers bumped to 2.0.2
+
 ## [2.0.1] - 2026-08-06
 
 ### Restored — Post-incident MitM defense suite (fake Chromecast + planted cert + ghost process)
