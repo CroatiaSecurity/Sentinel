@@ -213,9 +213,9 @@ namespace Sentinel.Tests
     public class ProductInfoTests
     {
         [Fact]
-        public void Version_Is200()
+        public void Version_Is203()
         {
-            Assert.Equal("2.0.0", ProductInfo.Version);
+            Assert.Equal("2.0.3", ProductInfo.Version);
         }
     }
 

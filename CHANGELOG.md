@@ -2,6 +2,49 @@
 
 All notable changes to Sentinel are documented in this file.
 
+## [2.0.3] - 2026-08-08
+
+### Security — IPC token ACL race fix (RT-MED-1)
+
+- **`ServiceAgentIpc.EnsureServerToken()`** — Fixed TOCTOU race where the IPC token file was briefly world-readable between `File.WriteAllBytes` and `LockTokenAcl`. Token is now written to a temp file with a pre-configured `FileSecurity` descriptor (SYSTEM full, Admins full, AuthenticatedUsers read) via the `FileStream` constructor, then atomically renamed into place. Parent directory (`%ProgramData%\Sentinel\Secure\`) is also ACL-locked before token creation.
+- Fallback to original write+lock behavior if the atomic path fails (e.g., cross-volume move).
+
+### Fixed — PID buffer stale signal accumulation
+
+- **`ResponsePolicy`** — `PidBuffers` (used for multi-signal chain correlation) were never evicted. A recycled PID could inherit stale signals from a dead process and immediately chain-nuke the new process on its first detection.
+- Added `SweepStalePidBuffers()` (public, callable from health checks) and `TryLazySweep()` (internal, runs every 2 minutes within `RegisterAndEvaluateChain`). Buffers are evicted when all entries are older than `ChainConfirmWindowSeconds + 60s` grace.
+- `PidSignalBuffer` now tracks `LastActivity` timestamp.
+
+### Fixed — Log rotation disk exhaustion
+
+- **`JsonlEventLogger`** — Added disk-space guard (`CheckDiskSpaceInternal`):
+  - Below 200 MB free on the log volume: proactively prunes oldest rotated logs (`.5` through `.3`).
+  - Below 100 MB free: stops writing entirely (drops events gracefully via `_droppedEvents` counter).
+  - Auto-recovers when space is freed above the 100 MB floor.
+- Prevents Sentinel from filling the last disk space with event logs on constrained volumes.
+
+### Fixed — Agent restart counter env-var leakage
+
+- **Agent `Program.cs`** — Replaced `WS_AGENT_RESTART_COUNT` environment variable with a file-based marker (`%ProgramData%\Sentinel\.agent_restart_marker`). The env-var approach leaked into child processes via `ProcessStartInfo.EnvironmentVariables` inheritance, potentially polluting the counter.
+- Marker stores `{utc_ticks}|{count}` and auto-expires after 60 seconds (stale markers treated as fresh start). Cleared on successful host startup via `ClearRestartMarker()`.
+- Both `TryImmediateRestart` and `ScheduleDelayedRelaunch` use the unified `ReadAndIncrementRestartMarker()`.
+
+### Added — GitHub Actions CI
+
+- `.github/workflows/build.yml` — Build and test on push/PR to `main`/`master`. Windows runner, .NET 8 SDK, `dotnet restore` → `dotnet build -c Release` → `dotnet test`.
+
+### Docs — SECURITY.md updated for v2.0 attack surface
+
+- Supported versions table updated (2.0.x current, 1.9.x/1.8.x security-fixes-only).
+- New "Attack Surface (v2.0)" section documenting: Service-Agent IPC auth model, signed rule packs HMAC verification, plugin registry constraints, threat intel proxy authentication, ops metrics file.
+- New in-scope vulnerability categories: IPC token theft/replay, rule pack signature bypass, plugin registry abuse, weighted correlation score manipulation.
+- Security design philosophy section with key principles (fail-closed, minimum privilege, rate limiting, graceful degradation).
+
+### Docs — Version headers bumped to 2.0.3
+
+- `design.md`, `constraints.md`, `requirements.md`, `README.md` version references updated.
+- `ProductInfo.Version` constant corrected from `2.0.1` → `2.0.3`.
+
 ## [2.0.2] - 2026-08-07
 
 ### Fixed — Config hygiene and documentation audit

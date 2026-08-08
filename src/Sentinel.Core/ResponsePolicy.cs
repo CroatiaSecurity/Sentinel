@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 
 namespace Sentinel.Core
 {
@@ -552,11 +553,15 @@ namespace Sentinel.Core
                 : DefaultMinTier1Confidence;
             var window = TimeSpan.FromSeconds(windowSec);
 
+            // v2.0.3: lazy sweep to evict stale PID buffers (prevents recycled-PID false chains)
+            TryLazySweep(windowSec);
+
             var buffer = PidBuffers.GetOrAdd(pid, _ => new PidSignalBuffer());
             lock (buffer)
             {
                 var now = DateTime.UtcNow;
                 buffer.Entries.RemoveAll(e => now - e.When > window);
+                buffer.LastActivity = now;
 
                 var outcome = ClassifyTerminalOutcome(detection);
                 double conf = detection.Confidence;
@@ -736,9 +741,63 @@ namespace Sentinel.Core
         private sealed class PidSignalBuffer
         {
             public List<SignalEntry> Entries { get; } = new();
+            public DateTime LastActivity { get; set; } = DateTime.UtcNow;
         }
 
         private readonly record struct SignalEntry(string RuleName, string? Outcome, double Confidence, DateTime When);
+
+        // v2.0.3: TTL sweep state — prevents stale PID buffers from accumulating
+        // and false-positive chain-nukes on recycled PIDs.
+        private static long _lastSweepTicks = Environment.TickCount;
+        private const int SweepIntervalMs = 120_000; // sweep every 2 minutes
+
+        /// <summary>
+        /// v2.0.3: Evict PID buffers whose last activity exceeds the chain window + grace.
+        /// Called lazily from RegisterAndEvaluateChain and explicitly from SentinelHealthCheck.
+        /// Prevents recycled PIDs from inheriting stale signals from dead processes.
+        /// </summary>
+        public static int SweepStalePidBuffers(int chainWindowSeconds = 300)
+        {
+            var cutoff = DateTime.UtcNow.AddSeconds(-(chainWindowSeconds + 60));
+            int removed = 0;
+            foreach (var kvp in PidBuffers)
+            {
+                var buffer = kvp.Value;
+                bool stale;
+                lock (buffer)
+                {
+                    stale = buffer.LastActivity < cutoff && buffer.Entries.Count == 0
+                            || buffer.LastActivity < cutoff;
+                    if (stale)
+                    {
+                        // Double-check: remove entries outside window before declaring stale
+                        buffer.Entries.RemoveAll(e => e.When < cutoff);
+                        stale = buffer.Entries.Count == 0;
+                    }
+                }
+                if (stale && PidBuffers.TryRemove(kvp.Key, out _))
+                    removed++;
+            }
+            return removed;
+        }
+
+        /// <summary>
+        /// Lazy sweep: called within RegisterAndEvaluateChain to bound dictionary growth
+        /// without requiring external periodic invocation.
+        /// </summary>
+        private static void TryLazySweep(int chainWindowSeconds)
+        {
+            long now = Environment.TickCount;
+            long last = Interlocked.Read(ref _lastSweepTicks);
+            // Avoid sweep storms — only one sweep per interval
+            if (unchecked(now - last) >= SweepIntervalMs)
+            {
+                if (Interlocked.CompareExchange(ref _lastSweepTicks, now, last) == last)
+                {
+                    SweepStalePidBuffers(chainWindowSeconds);
+                }
+            }
+        }
 
         /// <summary>Test helper — clear PID buffers between tests.</summary>
         internal static void ResetForTests() => PidBuffers.Clear();

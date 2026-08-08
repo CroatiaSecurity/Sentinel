@@ -14,6 +14,7 @@ namespace Sentinel.Core
         private FileStream? _fileStream;
         private StreamWriter? _writer;
         private bool _isDegraded;
+        private bool _diskSpaceDegraded;
         private bool _disposed;
 
         public string LogFilePath => _logFilePath;
@@ -168,6 +169,14 @@ namespace Sentinel.Core
                     // Ignore rotation failure, continue writing
                 }
 
+                // v2.0.3: Disk space guard — degrade gracefully if volume is critically low.
+                // Prevents Sentinel from filling the last remaining disk space with event logs.
+                if (!CheckDiskSpaceInternal())
+                {
+                    Interlocked.Increment(ref _droppedEvents);
+                    return;
+                }
+
                 var entry = new
                 {
                     type,
@@ -195,6 +204,84 @@ namespace Sentinel.Core
             {
                 try { _semaphore.Release(); } catch (ObjectDisposedException) { }
             }
+        }
+
+        /// <summary>
+        /// v2.0.3: Check available disk space on the log volume.
+        /// Returns false (skip write) when free space is below 100 MB.
+        /// Also triggers cleanup of oldest rotated logs to reclaim space.
+        /// </summary>
+        private bool CheckDiskSpaceInternal()
+        {
+            try
+            {
+                var logDir = Path.GetDirectoryName(_logFilePath);
+                if (string.IsNullOrEmpty(logDir)) return true;
+
+                var driveRoot = Path.GetPathRoot(logDir);
+                if (string.IsNullOrEmpty(driveRoot)) return true;
+
+                var driveInfo = new DriveInfo(driveRoot);
+                if (!driveInfo.IsReady) return true;
+
+                long freeBytes = driveInfo.AvailableFreeSpace;
+                const long MinFreeBytes = 100L * 1024 * 1024; // 100 MB floor
+                const long WarnFreeBytes = 200L * 1024 * 1024; // 200 MB → prune old logs
+
+                if (freeBytes < WarnFreeBytes)
+                {
+                    // Proactively delete oldest rotated logs to reclaim space
+                    PruneOldestRotatedLogs();
+                }
+
+                if (freeBytes < MinFreeBytes)
+                {
+                    // Critical: stop writing to prevent disk exhaustion
+                    if (!_isDegraded)
+                    {
+                        _isDegraded = true;
+                        _diskSpaceDegraded = true;
+                    }
+                    return false;
+                }
+
+                // Recover from disk-space degradation if space freed up
+                if (_diskSpaceDegraded && freeBytes >= MinFreeBytes)
+                {
+                    _diskSpaceDegraded = false;
+                    if (_isDegraded)
+                    {
+                        TryOpenFileInternal();
+                    }
+                }
+
+                return true;
+            }
+            catch
+            {
+                // Cannot determine disk space — allow write (fail-open for logging)
+                return true;
+            }
+        }
+
+        /// <summary>
+        /// v2.0.3: Delete the oldest rotated log files when disk space is low.
+        /// Deletes from .5 down to .3 (keeps .1 and .2 as recent context).
+        /// </summary>
+        private void PruneOldestRotatedLogs()
+        {
+            try
+            {
+                for (int i = 5; i >= 3; i--)
+                {
+                    var rotatedPath = $"{_logFilePath}.{i}";
+                    if (File.Exists(rotatedPath))
+                    {
+                        File.Delete(rotatedPath);
+                    }
+                }
+            }
+            catch { /* best effort */ }
         }
 
         private void RotateLogsInternal()

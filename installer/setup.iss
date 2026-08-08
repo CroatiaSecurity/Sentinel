@@ -1,6 +1,6 @@
 [Setup]
 AppName=Sentinel
-AppVersion=2.0.2
+AppVersion=2.0.3
 AppPublisher=Gorstak
 AppPublisherURL=https://gorstak.eu
 SourceDir=.

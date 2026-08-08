@@ -61,6 +61,9 @@ namespace Sentinel.Core
             if (!Directory.Exists(dir))
                 Directory.CreateDirectory(dir);
 
+            // Lock directory ACL to SYSTEM + Admins (prevent creation-time token read by non-admins)
+            LockDirectoryAcl(dir);
+
             if (File.Exists(path))
             {
                 try
@@ -78,9 +81,105 @@ namespace Sentinel.Core
             var token = new byte[32];
             using (var rng = RandomNumberGenerator.Create())
                 rng.GetBytes(token);
-            File.WriteAllBytes(path, token);
-            LockTokenAcl(path);
+
+            // v2.0.3 RT-MED-1: Atomic token write — create temp file with restricted ACL
+            // BEFORE writing bytes, then rename into place. Eliminates the window where
+            // the token file exists with inherited (potentially world-readable) permissions.
+            var tempPath = path + "." + Guid.NewGuid().ToString("N").Substring(0, 8) + ".tmp";
+            try
+            {
+                // Create file with explicit restricted ACL from the start
+                var security = CreateTokenFileSecurity();
+                using (var fs = new FileStream(
+                    tempPath,
+                    FileMode.CreateNew,
+                    FileSystemRights.Write,
+                    FileShare.None,
+                    4096,
+                    FileOptions.None,
+                    security))
+                {
+                    fs.Write(token, 0, token.Length);
+                    fs.Flush(true);
+                }
+
+                // Atomic replace: if target exists (corrupt/short), delete first
+                if (File.Exists(path))
+                    File.Delete(path);
+                File.Move(tempPath, path);
+
+                // Ensure final ACL is correct (Move preserves source ACL on same volume)
+                LockTokenAcl(path);
+            }
+            catch
+            {
+                // Fallback: direct write + immediate ACL lock (original behavior)
+                try { File.Delete(tempPath); } catch { }
+                File.WriteAllBytes(path, token);
+                LockTokenAcl(path);
+            }
+
             return token;
+        }
+
+        /// <summary>
+        /// v2.0.3: Build a FileSecurity descriptor for the token file BEFORE creation.
+        /// SYSTEM=Full, Admins=Full, AuthenticatedUsers=Read.
+        /// </summary>
+        private static FileSecurity CreateTokenFileSecurity()
+        {
+            var security = new FileSecurity();
+            security.SetAccessRuleProtection(true, false);
+
+            var system = new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null);
+            security.AddAccessRule(new FileSystemAccessRule(
+                system, FileSystemRights.FullControl, AccessControlType.Allow));
+
+            var admins = new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null);
+            security.AddAccessRule(new FileSystemAccessRule(
+                admins, FileSystemRights.FullControl, AccessControlType.Allow));
+
+            var authUsers = new SecurityIdentifier(WellKnownSidType.AuthenticatedUserSid, null);
+            security.AddAccessRule(new FileSystemAccessRule(
+                authUsers, FileSystemRights.Read, AccessControlType.Allow));
+
+            return security;
+        }
+
+        /// <summary>
+        /// v2.0.3: Lock the Secure directory to SYSTEM + Admins so even the temp file
+        /// inherits restricted permissions during creation.
+        /// </summary>
+        private static void LockDirectoryAcl(string dirPath)
+        {
+            try
+            {
+                var dirInfo = new DirectoryInfo(dirPath);
+                var security = dirInfo.GetAccessControl();
+                security.SetAccessRuleProtection(true, false);
+
+                var system = new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null);
+                security.AddAccessRule(new FileSystemAccessRule(
+                    system, FileSystemRights.FullControl,
+                    InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+                    PropagationFlags.None, AccessControlType.Allow));
+
+                var admins = new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null);
+                security.AddAccessRule(new FileSystemAccessRule(
+                    admins, FileSystemRights.FullControl,
+                    InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+                    PropagationFlags.None, AccessControlType.Allow));
+
+                // Authenticated Users need Read on the token file (Agent auth)
+                var authUsers = new SecurityIdentifier(WellKnownSidType.AuthenticatedUserSid, null);
+                security.AddAccessRule(new FileSystemAccessRule(
+                    authUsers, FileSystemRights.ReadAndExecute,
+                    InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+                    PropagationFlags.None, AccessControlType.Allow));
+
+                dirInfo.SetAccessControl(security);
+            }
+            catch { /* best effort — LockTokenAcl is the final guard */ }
         }
 
         /// <summary>

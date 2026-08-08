@@ -16,10 +16,11 @@ namespace Sentinel.Agent
         private static extern bool FreeConsole();
 
         // ── Self-restart state ────────────────────────────────────────────
-        // Tracks how many times this process has already re-launched itself so
-        // we can give up after too many rapid failures (crash loop guard).
+        // v2.0.3: File-based restart counter (replaces env var which leaked into
+        // child processes and could be polluted by inheritance). The marker file
+        // stores a timestamp + count; stale markers (>60s old) are treated as fresh.
         private const int MaxSelfRestarts = 5;
-        private const string RestartCountEnvVar = "WS_AGENT_RESTART_COUNT";
+        private const int RestartWindowSeconds = 60;
         // ─────────────────────────────────────────────────────────────────
 
         [STAThread]
@@ -63,6 +64,9 @@ namespace Sentinel.Agent
             var orchestrator    = host.Services.GetRequiredService<SentinelOrchestrator>();
             detectionEngine.SetOrchestrator(orchestrator);
 
+            // v2.0.3: Clear restart marker on successful startup — host built and wired
+            ClearRestartMarker();
+
             try
             {
                 host.Run();
@@ -95,24 +99,21 @@ namespace Sentinel.Agent
         ///   - Only restarts on unclean exit (non-zero expected lifecycle exits are
         ///     not currently signalled, so we restart on every exit — the watchdog
         ///     dedup window prevents storms).
-        ///   - Restart counter in the environment prevents crash-loop amplification
-        ///     beyond MaxSelfRestarts.
+        ///   - v2.0.3: File-based restart counter prevents crash-loop amplification
+        ///     beyond MaxSelfRestarts within a rolling window.
         /// </summary>
         private static void TryImmediateRestart(string[] args)
         {
             try
             {
-                // Read the restart counter from the environment (set on the child process below)
-                int restartCount = 0;
-                var envVal = Environment.GetEnvironmentVariable(RestartCountEnvVar);
-                if (envVal != null) int.TryParse(envVal, out restartCount);
+                int restartCount = ReadAndIncrementRestartMarker();
 
                 if (restartCount >= MaxSelfRestarts)
                 {
                     // Too many rapid self-restarts — let the AgentWatchdog (Service side) handle it
                     LogCrash("SelfRestartAborted",
                         new InvalidOperationException(
-                            $"Self-restart limit ({MaxSelfRestarts}) reached. " +
+                            $"Self-restart limit ({MaxSelfRestarts}) reached within {RestartWindowSeconds}s. " +
                             "Waiting for AgentWatchdog to recover the agent."));
                     return;
                 }
@@ -129,7 +130,6 @@ namespace Sentinel.Agent
                     UseShellExecute = false,
                     WindowStyle = ProcessWindowStyle.Hidden,
                 };
-                psi.EnvironmentVariables[RestartCountEnvVar] = (restartCount + 1).ToString();
                 if (args != null && args.Length > 0)
                     psi.Arguments = string.Join(" ", args);
 
@@ -144,45 +144,98 @@ namespace Sentinel.Agent
         /// <summary>
         /// Called from the UnhandledException handler when IsTerminating=true.
         /// The process is about to die before the finally block can run, so we
-        /// spawn a watchdog process that waits briefly then re-launches us.
-        /// v1.5.4: Uses direct process start with a sleep wrapper instead of cmd.exe
-        /// to eliminate detectable LOLBin artifact.
+        /// spawn a new instance directly.
+        /// v2.0.3: Uses file-based restart counter (no env var inheritance).
         /// </summary>
         private static void ScheduleDelayedRelaunch(string[] args)
         {
             try
             {
-                var envVal = Environment.GetEnvironmentVariable(RestartCountEnvVar);
-                int restartCount = 0;
-                if (envVal != null) int.TryParse(envVal, out restartCount);
+                int restartCount = ReadAndIncrementRestartMarker();
                 if (restartCount >= MaxSelfRestarts) return;
 
                 var exePath = Process.GetCurrentProcess().MainModule?.FileName;
                 if (string.IsNullOrEmpty(exePath) || !File.Exists(exePath))
                     return;
 
-                // Use PowerShell's Start-Sleep + Start-Process as a less-detectable
-                // alternative to cmd.exe ping hack. But per constraints, we should avoid
-                // shelling out entirely. Instead, use a .NET approach: launch ourselves
-                // with a special --delay-start flag that makes us sleep before running.
-                // Since we control our own binary, this is the cleanest approach.
-                //
-                // Fallback: Just launch directly with a brief Thread.Sleep in TryImmediateRestart.
-                // The 2s sleep in TryImmediateRestart handles the normal case.
-                // For the IsTerminating case, launch directly — the AgentWatchdog (10s cycle)
-                // will cover us if we fail to self-restart.
                 var psi = new ProcessStartInfo(exePath)
                 {
                     UseShellExecute = false,
                     WindowStyle = ProcessWindowStyle.Hidden,
                 };
-                psi.EnvironmentVariables[RestartCountEnvVar] = (restartCount + 1).ToString();
                 if (args != null && args.Length > 0)
                     psi.Arguments = string.Join(" ", args);
 
                 Process.Start(psi);
             }
             catch { }
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // File-based restart marker (v2.0.3)
+        // ═══════════════════════════════════════════════════════════════
+
+        /// <summary>
+        /// Reads the current restart count from the marker file. If the marker is
+        /// stale (older than RestartWindowSeconds), resets to 0. Increments and writes back.
+        /// Returns the count BEFORE increment (i.e., how many restarts have already occurred).
+        /// </summary>
+        private static int ReadAndIncrementRestartMarker()
+        {
+            try
+            {
+                var markerPath = GetRestartMarkerPath();
+                int count = 0;
+
+                if (File.Exists(markerPath))
+                {
+                    var content = File.ReadAllText(markerPath).Trim();
+                    var parts = content.Split('|');
+                    if (parts.Length == 2 &&
+                        long.TryParse(parts[0], out long ticks) &&
+                        int.TryParse(parts[1], out int existingCount))
+                    {
+                        var markerTime = new DateTime(ticks, DateTimeKind.Utc);
+                        if ((DateTime.UtcNow - markerTime).TotalSeconds <= RestartWindowSeconds)
+                        {
+                            count = existingCount;
+                        }
+                        // else: stale marker — treat as fresh (count stays 0)
+                    }
+                }
+
+                // Write incremented marker
+                var newContent = $"{DateTime.UtcNow.Ticks}|{count + 1}";
+                File.WriteAllText(markerPath, newContent);
+
+                return count;
+            }
+            catch
+            {
+                // If we can't read/write the marker, allow restart (fail-open)
+                return 0;
+            }
+        }
+
+        /// <summary>
+        /// Clears the restart marker on successful startup (host fully built and running).
+        /// Called after the host starts successfully.
+        /// </summary>
+        private static void ClearRestartMarker()
+        {
+            try
+            {
+                var markerPath = GetRestartMarkerPath();
+                if (File.Exists(markerPath))
+                    File.Delete(markerPath);
+            }
+            catch { }
+        }
+
+        private static string GetRestartMarkerPath()
+        {
+            var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
+            return Path.Combine(programData, "Sentinel", ".agent_restart_marker");
         }
 
         // ═══════════════════════════════════════════════════════════════
