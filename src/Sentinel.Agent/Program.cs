@@ -23,9 +23,23 @@ namespace Sentinel.Agent
         private const int RestartWindowSeconds = 60;
         // ─────────────────────────────────────────────────────────────────
 
+        // ── Single-instance guard ─────────────────────────────────────────
+        // Multiple launch paths can race (installer, Run key, AgentWatchdog,
+        // self-restart). A named mutex prevents duplicate tray icons.
+        private const string SingleInstanceMutexName = "Global\\SentinelAgentSingleInstance";
+        // ─────────────────────────────────────────────────────────────────
+
         [STAThread]
         public static void Main(string[] args)
         {
+            // ── Single-instance check (before anything else) ──────────────
+            using var instanceMutex = new Mutex(true, SingleInstanceMutexName, out bool createdNew);
+            if (!createdNew)
+            {
+                // Another Agent instance is already running — exit silently.
+                return;
+            }
+
             // ── Crash handlers (registered first, before any allocations) ──
             AppDomain.CurrentDomain.UnhandledException += (s, e) =>
             {
