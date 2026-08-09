@@ -4,6 +4,16 @@ All notable changes to Sentinel are documented in this file.
 
 ## [2.0.3] - 2026-08-08
 
+### Test Coverage Expansion (1072 → 1755 tests, +64%)
+
+Major test infrastructure expansion. Adds comprehensive unit tests for all previously untested core subsystems and Monitors.
+
+- **45 new/expanded test files** covering detection logic, response coordination, infrastructure, and all critical Monitors
+- **Monitors/ coverage: 1/20 → 12/20** — TokenTheft, NamedPipe, BrowserC2Guard, CriticalMonitors, CredentialProtection, NetworkIntegrity, Peripheral, CloudSyncExfil, ScriptHardening, SystemIntegrity, DriverLoad
+- **Core infrastructure tested:** Net48Compat, JsonlEventLogger, SecureCacheStore, QuarantineManager, SignerTrustService, ContextBus, RateLimiter, MonitorGroup, MonitorRegistry, IncidentManager, TelemetryFusionEngine
+- **Detection/response tested:** BehavioralBaseline, BeaconingDetector, DynamicRulesEvaluator, AutoIncidentReporter, ResponseCoordinator, ReinfectionCorrelator, IsolationResponseEngine
+- **Expanded thin tests:** DllUnloadEngine (1→25 tests), EventGraph (5→60 tests)
+
 ### Security — IPC token ACL race fix (RT-MED-1)
 
 - **`ServiceAgentIpc.EnsureServerToken()`** — Fixed TOCTOU race where the IPC token file was briefly world-readable between `File.WriteAllBytes` and `LockTokenAcl`. Token is now written to a temp file with a pre-configured `FileSecurity` descriptor (SYSTEM full, Admins full, AuthenticatedUsers read) via the `FileStream` constructor, then atomically renamed into place. Parent directory (`%ProgramData%\Sentinel\Secure\`) is also ACL-locked before token creation.
