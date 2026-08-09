@@ -139,9 +139,9 @@ namespace Sentinel.Core
                     {
                         var qPath = await _quarantine.QuarantineFileAtomicAsync(imagePath!);
                         if (qPath != null)
-                            evidence["QuarantinedBinary"] = imagePath;
+                            evidence["QuarantinedBinary"] = imagePath!;
                         else
-                            evidence["QuarantineSkippedSigned"] = imagePath;
+                            evidence["QuarantineSkippedSigned"] = imagePath!;
                     }
                 }
             }

@@ -216,7 +216,7 @@ namespace Sentinel.Core
                 DateTimeOffset.UtcNow - lastAlert < AlertCooldown)
                 return;
 
-            _alertedExecutables[exeName] = DateTimeOffset.UtcNow;
+            _alertedExecutables[exeName!] = DateTimeOffset.UtcNow;
 
             // Check if this process is still running (if not, it was ephemeral)
             var stillRunning = Process.GetProcessesByName(baseName).Length > 0;
@@ -226,7 +226,7 @@ namespace Sentinel.Core
 
             // This process ran and exited before WMI could report it
             // Try to find the executable on disk for reputation check
-            var exePath = FindExecutable(exeName);
+            var exePath = FindExecutable(exeName!);
             bool isSuspiciousPath = exePath != null &&
                 SuspiciousStagingPaths.Any(p => exePath.Contains(p));
 
@@ -260,7 +260,7 @@ namespace Sentinel.Core
             _fusionEngine.FeedEvent(new ProcessTelemetry
             {
                 Type = "EphemeralProcess",
-                ProcessName = exeName,
+                ProcessName = exeName!,
                 ImagePath = exePath ?? "(deleted)",
                 CommandLine = "(ephemeral — captured via Prefetch)",
                 ProcessId = 0, // Already exited
@@ -286,7 +286,7 @@ namespace Sentinel.Core
                 Confidence = confidence,
                 Tier = tier,
                 AuthorizedResponse = response,
-                ProcessName = exeName,
+                ProcessName = exeName!,
                 ProcessId = 0,
                 SignalType = SignalType.SuspiciousProcess,
                 Metadata = new Dictionary<string, string>
@@ -302,9 +302,9 @@ namespace Sentinel.Core
             _contextBus?.Publish(new EphemeralProcessSignal
             {
                 ProcessId = 0,
-                ProcessName = exeName,
+                ProcessName = exeName!,
                 SourceMonitor = "EphemeralProcessMonitor",
-                ExecutableName = exeName,
+                ExecutableName = exeName!,
                 ExecutablePath = exePath,
                 SelfDeleted = selfDeleted,
                 SuspiciousPath = isSuspiciousPath,

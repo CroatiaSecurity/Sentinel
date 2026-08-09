@@ -79,12 +79,12 @@ namespace Sentinel.Core
                             int pid = Convert.ToInt32(pidObj);
                             if (pid <= 0) continue;
 
-                            serviceToPid[name] = pid;
+                            serviceToPid[name!] = pid;
                             var list = pidToServices.GetOrAdd(pid, _ => new List<string>());
                             lock (list)
                             {
                                 if (!list.Any(s => string.Equals(s, name, StringComparison.OrdinalIgnoreCase)))
-                                    list.Add(name);
+                                    list.Add(name!);
                             }
                         }
                         catch

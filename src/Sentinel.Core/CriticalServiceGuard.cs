@@ -175,12 +175,12 @@ namespace Sentinel.Core
                         int crashCount = history.CrashTimes.Count;
 
                         // Check if this is a monitored service
-                        bool isMonitored = MonitoredServices.ContainsKey(serviceName);
+                        bool isMonitored = MonitoredServices.ContainsKey(serviceName!);
                         bool overThreshold = crashCount >= SuspiciousCrashThreshold;
 
                         if (isMonitored && overThreshold)
                         {
-                            await EmitServiceCrashAlert(serviceName, crashCount, ct);
+                            await EmitServiceCrashAlert(serviceName!, crashCount, ct);
                         }
                     }
                 }

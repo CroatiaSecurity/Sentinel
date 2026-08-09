@@ -252,7 +252,7 @@ namespace Sentinel.Core
                 if (IsOsServicingProcess(name!, imagePath))
                     return result;
 
-                if (ProtectedProcessNames.Contains(name) && IsProtectedPath(imagePath))
+                if (ProtectedProcessNames.Contains(name!) && IsProtectedPath(imagePath))
                     return result;
 
                 var procDir = Path.GetDirectoryName(imagePath);
@@ -320,7 +320,7 @@ namespace Sentinel.Core
                             Confidence = 0.70,
                             Tier = DetectionTier.Tier2Indicator,
                             AuthorizedResponse = ResponseAction.LogOnly,
-                            ProcessName = name,
+                            ProcessName = name!,
                             ProcessId = processId,
                             SignalType = SignalType.ProcessInjection,
                             Metadata = new Dictionary<string, string>
@@ -390,7 +390,7 @@ namespace Sentinel.Core
                     if (_remediationHistory.ContainsKey(rkey)) continue;
                     if (!TryConsumeRateLimit()) break;
                     _remediationHistory[rkey] = DateTimeOffset.UtcNow;
-                    await RemediateDroppedDll(dllPath, name, processId);
+                    await RemediateDroppedDll(dllPath, name!, processId);
                     result.UnloadedDlls.Add(dllPath);
                 }
 
@@ -407,7 +407,7 @@ namespace Sentinel.Core
                         Confidence = 0.90,
                         Tier = DetectionTier.Tier1Behavioral,
                         AuthorizedResponse = ResponseAction.LogOnly, // already acted
-                        ProcessName = name,
+                        ProcessName = name!,
                         ProcessId = processId,
                         SignalType = SignalType.ProcessInjection,
                         Metadata = new Dictionary<string, string>

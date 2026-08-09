@@ -204,7 +204,7 @@ namespace Sentinel.Core
                     if (!IsSuspiciousPath(imagePath!)) continue;
 
                     // Skip if the binary is signed by a trusted publisher (e.g. GoogleUpdate, BraveUpdate)
-                    if (_signerTrust != null && _signerTrust.IsSignedFile(imagePath))
+                    if (_signerTrust != null && _signerTrust.IsSignedFile(imagePath!))
                         continue;
 
                     // Check parent chain — if parent is user-interactive, skip
@@ -233,7 +233,7 @@ namespace Sentinel.Core
                         ProcessId = proc.Id,
                         Metadata = new Dictionary<string, string>
                         {
-                            ["ImagePath"] = imagePath,
+                            ["ImagePath"] = imagePath!,
                             ["ProcessStartTime"] = startTime.ToString("O"),
                             ["NicUpTime"] = earliestNicUp.ToString("O"),
                             ["DelayAfterNicUp"] = $"{(startTime - earliestNicUp).TotalSeconds:F1}s",

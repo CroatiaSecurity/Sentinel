@@ -2606,13 +2606,13 @@ namespace Sentinel.Core
                 bool isSystemPath = IsSystemProtectedPath(provider.DllPath!);
 
                 // Verify Authenticode signature
-                bool isSigned = SecurityValidation.VerifyAuthenticodeSignature(provider.DllPath);
+                bool isSigned = SecurityValidation.VerifyAuthenticodeSignature(provider.DllPath!);
 
                 // Determine if namespace is sensitive (power/thermal/hardware)
                 bool isSensitiveNs = IsSensitiveNamespace(provider.Namespace);
 
                 // Extract publisher for logging
-                string publisher = isSigned ? GetSignerPublisher(provider.DllPath) : "UNSIGNED";
+                string publisher = isSigned ? GetSignerPublisher(provider.DllPath!) : "UNSIGNED";
 
                 // Decision matrix:
                 if (!isSigned && isSensitiveNs)

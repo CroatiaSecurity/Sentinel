@@ -38,7 +38,7 @@ namespace Sentinel.Core
         public static bool ValidateFileName(string? fileName)
         {
             if (string.IsNullOrWhiteSpace(fileName)) return false;
-            return SafeFileNameRegex.IsMatch(fileName!) && !fileName.Contains("..");
+            return SafeFileNameRegex.IsMatch(fileName!) && !fileName!.Contains("..");
         }
 
         public static bool ValidateIpAddress(string? ip)

@@ -212,7 +212,7 @@ namespace Sentinel.Core
                         {
                             RuleName = "Script: Malicious PowerShell Script Block",
                             Evidence = $"Matched {matchedPatterns.Count} patterns: [{string.Join(", ", matchedPatterns.Take(5))}]. " +
-                                       $"Script snippet: {scriptBlock![..Math.Min(200, scriptBlock.Length)]}...",
+                                       $"Script snippet: {scriptBlock![..Math.Min(200, scriptBlock!.Length)]}...",
                             Reasoning = "PowerShell Script Block Logging (Event 4104) captured deobfuscated script content " +
                                         "containing known attack tool signatures. This bypasses command-line obfuscation " +
                                         "since the AMSI/ScriptBlock layer sees the final decoded content.",

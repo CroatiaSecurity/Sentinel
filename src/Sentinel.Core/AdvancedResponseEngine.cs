@@ -521,7 +521,7 @@ namespace Sentinel.Core
             if (shouldRemoveCertAndKillAdder)
             {
                 var certThumb = detection.Metadata!.GetValueOrDefault("CertThumbprint", "Unknown");
-                var adderPidStr = detection.Metadata.GetValueOrDefault("AdderProcessId", "0");
+                var adderPidStr = detection.Metadata!.GetValueOrDefault("AdderProcessId", "0");
 
                 if (!string.IsNullOrEmpty(certThumb) && certThumb != "Unknown")
                 {
@@ -711,9 +711,9 @@ namespace Sentinel.Core
             else if (shouldRemoveRegistryEntry)
             {
                 var hive = detection.Metadata!.GetValueOrDefault("Hive", "HKLM");
-                var keyPath = detection.Metadata.GetValueOrDefault("KeyPath", "");
-                var valueName = detection.Metadata.GetValueOrDefault("ValueName", "");
-                var subKey = detection.Metadata.GetValueOrDefault("SubKey", "");
+                var keyPath = detection.Metadata!.GetValueOrDefault("KeyPath", "");
+                var valueName = detection.Metadata!.GetValueOrDefault("ValueName", "");
+                var subKey = detection.Metadata!.GetValueOrDefault("SubKey", "");
                 var removed = false;
                 var removalLog = "";
 
@@ -756,7 +756,7 @@ namespace Sentinel.Core
                             var parent = Microsoft.Win32.Registry.ClassesRoot.OpenSubKey("CLSID", writable: true);
                             if (parent != null)
                             {
-                                var clsid = detection.Metadata.GetValueOrDefault("CLSID", "");
+                                var clsid = detection.Metadata!.GetValueOrDefault("CLSID", "");
                                 if (!string.IsNullOrEmpty(clsid))
                                 {
                                     parent.DeleteSubKeyTree(clsid, throwOnMissingSubKey: false);

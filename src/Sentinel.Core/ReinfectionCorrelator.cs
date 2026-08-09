@@ -270,7 +270,7 @@ namespace Sentinel.Core
                             Metadata = new Dictionary<string, string>
                             {
                                 ["SHA256"] = hash,
-                                ["CurrentPath"] = imagePath,
+                                ["CurrentPath"] = imagePath!,
                                 ["OriginalPath"] = entry.OriginalPath,
                                 ["OriginalProcessName"] = entry.ProcessName,
                                 ["KilledAt"] = entry.KilledAt.ToString("O"),

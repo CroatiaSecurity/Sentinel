@@ -141,7 +141,7 @@ namespace Sentinel.Core
                             await EmitFallbackDriveDetection(vol, startupClassification);
                             await DismountFallbackDrive(vol);
                             await HuntSubstCreatorProcess(vol.DriveLetter!, skipPhase4: true);
-                            await RemoveSubstPersistence(vol.DriveLetter);
+                            await RemoveSubstPersistence(vol.DriveLetter!);
                         });
                         continue; // Do NOT baseline this drive
                     }
@@ -271,7 +271,7 @@ namespace Sentinel.Core
                                 _logger.LogWarning(
                                     "[VolumeMountMonitor] SUBST drive {Drive} is being recreated rapidly — escalating to kill ALL DefineDosDevice callers",
                                     vol.DriveLetter);
-                                await HuntRecentlySpawnedUnsignedProcesses(vol.DriveLetter.TrimEnd('\\', ':').ToUpperInvariant(), new HashSet<int>());
+                                await HuntRecentlySpawnedUnsignedProcesses(vol.DriveLetter!.TrimEnd('\\', ':').ToUpperInvariant(), new HashSet<int>());
                             }
 
                             continue;
@@ -305,7 +305,7 @@ namespace Sentinel.Core
                             !string.Equals(classification, "ISO") &&
                             !IsWimMountDrive(vol.DriveLetter!))
                         {
-                            _fileActivityMonitor.AddWatchPath(vol.DriveLetter);
+                            _fileActivityMonitor.AddWatchPath(vol.DriveLetter!);
                             _logger.LogInformation(
                                 "[VolumeMountMonitor] Extended FileActivityMonitor to new volume: {Drive}",
                                 vol.DriveLetter);

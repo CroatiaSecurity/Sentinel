@@ -131,7 +131,7 @@ namespace Sentinel.Core
                             // kill-class response chain-kills legitimate tools (WinReducer, installers).
                             bool selfSigned = !string.IsNullOrEmpty(imagePath) &&
                                 (_signerTrust.IsSignedFile(imagePath!) ||
-                                 SecurityValidation.VerifyAuthenticodeSignature(imagePath));
+                                 SecurityValidation.VerifyAuthenticodeSignature(imagePath!));
                             bool demote = ShouldDemotePpidToLogOnly(proc.ProcessName, imagePath, selfSigned);
                             var response = demote
                                 ? ResponseAction.LogOnly

@@ -276,8 +276,8 @@ namespace Sentinel.Core
             }
 
             // Step 4: Gather trust signals (each independently non-forgeable)
-            bool isProtectedPath = IsInProtectedDirectory(imagePath);
-            bool hasValidAuthenticode = SecurityValidation.VerifyAuthenticodeSignature(imagePath, _logger);
+            bool isProtectedPath = IsInProtectedDirectory(imagePath!);
+            bool hasValidAuthenticode = SecurityValidation.VerifyAuthenticodeSignature(imagePath!, _logger);
             bool hasDestinationDiversity = GetDestinationDiversityCount(history.ProcessId) >= 3;
             bool isBaselineEstablished = _baseline != null &&
                 !string.IsNullOrEmpty(history.ProcessName) &&
@@ -304,7 +304,7 @@ namespace Sentinel.Core
             // never demote below KillProcess regardless of trust score. The signed binary is
             // compromised via sideloading — its Authenticode signature is irrelevant since the
             // malicious code runs in its address space.
-            if (isProtectedPath && hasValidAuthenticode && IsSideloadCompromised(history.ProcessId, imagePath))
+            if (isProtectedPath && hasValidAuthenticode && IsSideloadCompromised(history.ProcessId, imagePath!))
             {
                 _logger.LogWarning(
                     "[BeaconingDetector] PID {Pid}: Signed binary at protected path BUT has sideload detection — forcing Kill",

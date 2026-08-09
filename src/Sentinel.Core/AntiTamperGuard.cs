@@ -515,7 +515,7 @@ namespace Sentinel.Core
                     var appName = subKey.GetValue("App Name") as string;
                     // Match product name
                     if (!string.IsNullOrEmpty(appName) &&
-                        appName.Contains("Sentinel"))
+                        appName!.Contains("Sentinel"))
                     {
                         // Found a policy targeting Sentinel! Delete it.
                         baseKey.DeleteSubKeyTree(subkeyName);
