@@ -694,8 +694,8 @@ namespace Sentinel.Core
 
                         if (category is int cat && cat == 0 && !string.IsNullOrEmpty(name))
                         {
-                            if (_alertedProfiles.Contains(name)) continue;
-                            _alertedProfiles.Add(name);
+                            if (_alertedProfiles.Contains(name!)) continue;
+                            _alertedProfiles.Add(name!);
 
                             _ = _detectionEngine.EmitAsync(new DetectionEvent
                             {

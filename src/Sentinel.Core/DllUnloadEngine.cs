@@ -66,7 +66,7 @@ namespace Sentinel.Core
             if (string.IsNullOrEmpty(path)) return false;
             var p = path;
             // Case-insensitive contains without allocating ToLower on hot path
-            if (p.IndexOf(@"\NLTmpScratch\", StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            if (p!.IndexOf(@"\NLTmpScratch\", StringComparison.OrdinalIgnoreCase) >= 0) return true;
             if (p.IndexOf(@"\NLTmpS\", StringComparison.OrdinalIgnoreCase) >= 0) return true;
             if (p.IndexOf(@"\WinSxS\", StringComparison.OrdinalIgnoreCase) >= 0) return true;
             if (p.IndexOf(@"\Servicing\", StringComparison.OrdinalIgnoreCase) >= 0) return true;
@@ -245,11 +245,11 @@ namespace Sentinel.Core
                 var name = string.IsNullOrEmpty(processName)
                     ? (Path.GetFileNameWithoutExtension(imagePath) ?? "")
                     : processName;
-                result.ProcessName = name;
+                result.ProcessName = name!;
 
                 // Never touch NTLite / DISM / TrustedInstaller / offline servicing hosts.
                 // Treating their Temp-scratch modules as "sideload" breaks feature setup (RPC 1722).
-                if (IsOsServicingProcess(name, imagePath))
+                if (IsOsServicingProcess(name!, imagePath))
                     return result;
 
                 if (ProtectedProcessNames.Contains(name) && IsProtectedPath(imagePath))
@@ -325,7 +325,7 @@ namespace Sentinel.Core
                             SignalType = SignalType.ProcessInjection,
                             Metadata = new Dictionary<string, string>
                             {
-                                ["ImagePath"] = imagePath,
+                                ["ImagePath"] = imagePath!,
                                 ["Plants"] = string.Join(";", hostileDisk),
                                 ["Phase"] = "Observe"
                             }
@@ -412,7 +412,7 @@ namespace Sentinel.Core
                         SignalType = SignalType.ProcessInjection,
                         Metadata = new Dictionary<string, string>
                         {
-                            ["ImagePath"] = imagePath,
+                            ["ImagePath"] = imagePath!,
                             ["SideloadedDlls"] = string.Join(";", result.UnloadedDlls),
                             ["Phase"] = "Remediate"
                         }
@@ -562,7 +562,7 @@ namespace Sentinel.Core
         private static bool IsProtectedPath(string? path)
         {
             if (string.IsNullOrEmpty(path)) return false;
-            return path.StartsWith(@"C:\Windows\") ||
+            return path!.StartsWith(@"C:\Windows\") ||
                    path.StartsWith(@"C:\Program Files") ||
                    path.Contains(@"\AppData\Local\Google\") ||
                    path.Contains(@"\AppData\Local\Microsoft\") ||

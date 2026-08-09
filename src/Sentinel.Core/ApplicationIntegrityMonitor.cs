@@ -362,9 +362,9 @@ namespace Sentinel.Core
                 ["ExecutablePath"] = baseline.ExecutablePath
             };
 
-            if (!string.IsNullOrEmpty(impostorHash)) metadata["ImpostorHash"] = impostorHash;
-            if (!string.IsNullOrEmpty(impostorPublisher)) metadata["ImpostorPublisher"] = impostorPublisher;
-            if (!string.IsNullOrEmpty(impostorProduct)) metadata["ImpostorProduct"] = impostorProduct;
+            if (!string.IsNullOrEmpty(impostorHash)) metadata["ImpostorHash"] = impostorHash!;
+            if (!string.IsNullOrEmpty(impostorPublisher)) metadata["ImpostorPublisher"] = impostorPublisher!;
+            if (!string.IsNullOrEmpty(impostorProduct)) metadata["ImpostorProduct"] = impostorProduct!;
 
             // Recommend LogOnly at emit — DetectionEngine.ApplyTierLaw also demotes non-kill-grade.
             // Destructive response only via AdvancedResponseEngine after chain confirm (or lab AR).
@@ -887,7 +887,7 @@ namespace Sentinel.Core
                         if (string.IsNullOrEmpty(imagePath)) { proc.Dispose(); continue; }
 
                         // Look for installer-like processes that started recently
-                        var isInstaller = imagePath.Contains("installer") ||
+                        var isInstaller = imagePath!.Contains("installer") ||
                                          imagePath.Contains("setup") ||
                                          imagePath.Contains("update") ||
                                          imagePath.Contains("msiexec") ||

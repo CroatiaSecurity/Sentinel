@@ -358,7 +358,7 @@ namespace Sentinel.Core
                     return false;
                 }
 
-                var pathLower = imagePath.ToLowerInvariant();
+                var pathLower = imagePath!.ToLowerInvariant();
 
                 // System processes (svchost, lsass, etc.) must reside in Windows directory
                 bool isSystemEntry = stem.Equals("svchost") ||
@@ -401,7 +401,7 @@ namespace Sentinel.Core
                 if (string.IsNullOrEmpty(imagePath)) return true; // No path = suspicious
 
                 // If the binary is Authenticode-signed, allow it into the learning phase
-                if (_signerTrust != null && _signerTrust.IsSignedFile(imagePath))
+                if (_signerTrust != null && _signerTrust.IsSignedFile(imagePath!))
                     return false;
 
                 // v1.8.3: known portable UUP/download tools may be unsigned under Downloads —
@@ -410,7 +410,7 @@ namespace Sentinel.Core
                     return false;
 
                 // Unsigned binary — check if it's in a suspicious staging location
-                var pathLower = imagePath.ToLowerInvariant();
+                var pathLower = imagePath!.ToLowerInvariant();
                 return pathLower.Contains(@"\temp\") ||
                        pathLower.Contains(@"\tmp\") ||
                        pathLower.Contains(@"\downloads\") ||

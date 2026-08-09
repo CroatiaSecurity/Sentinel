@@ -95,7 +95,7 @@ namespace Sentinel.Core
                             if (growth >= ModuleGrowthThreshold)
                             {
                                 bool suspiciousPath = !string.IsNullOrEmpty(path) &&
-                                    (path.Contains(@"\Temp\") ||
+                                    (path!.Contains(@"\Temp\") ||
                                      path.Contains(@"\Downloads\"));
 
                                 // Single-signal growth: observe. Temp/Downloads path growth is stronger
@@ -136,7 +136,7 @@ namespace Sentinel.Core
 
                         // Missing image alone is weak — observe only (not kill on identity/path absence)
                         if (!string.IsNullOrEmpty(path) &&
-                            !path.StartsWith(@"\\") &&
+                            !path!.StartsWith(@"\\") &&
                             path.Length > 3 &&
                             !File.Exists(path))
                         {

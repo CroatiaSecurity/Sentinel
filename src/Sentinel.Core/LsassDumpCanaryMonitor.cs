@@ -116,7 +116,7 @@ namespace Sentinel.Core
                         // Check if granted access includes PROCESS_VM_READ (0x10)
                         if (!string.IsNullOrEmpty(grantedAccess))
                         {
-                            if (uint.TryParse(grantedAccess.Replace("0x", ""),
+                            if (uint.TryParse(grantedAccess!.Replace("0x", ""),
                                 System.Globalization.NumberStyles.HexNumber, null, out var access))
                             {
                                 if ((access & 0x0010) == 0) continue; // No VM_READ — not a dump attempt
@@ -149,7 +149,7 @@ namespace Sentinel.Core
                             SignalType = SignalType.LsassAccess,
                             Metadata = new Dictionary<string, string>
                             {
-                                ["SourceImage"] = sourceImage,
+                                ["SourceImage"] = sourceImage!,
                                 ["GrantedAccess"] = grantedAccess ?? "unknown"
                             }
                         });
@@ -276,11 +276,11 @@ namespace Sentinel.Core
         {
             if (string.IsNullOrEmpty(path)) return false;
             // Must be in a known system folder AND be signed
-            bool inSystemFolder = SystemLsassAccessorPaths.Any(t => path.StartsWith(t));
+            bool inSystemFolder = SystemLsassAccessorPaths.Any(t => path!.StartsWith(t));
             if (!inSystemFolder) return false;
             // Verify signature — unsigned binaries in system folders are suspicious
             if (_signerTrust != null)
-                return _signerTrust.IsSignedFile(path);
+                return _signerTrust.IsSignedFile(path!);
             return true; // If no signer service available, fall back to path-only (degraded mode)
         }
 

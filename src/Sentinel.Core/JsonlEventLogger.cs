@@ -8,7 +8,7 @@ namespace Sentinel.Core
 {
     public class JsonlEventLogger : IAsyncDisposable
     {
-        private readonly string _logFilePath;
+        private string _logFilePath = null!;
         private readonly SemaphoreSlim _semaphore = new(1, 1);
         private readonly BurstRateLimiter _rateLimiter = new(1000, 5000);
         private FileStream? _fileStream;
@@ -25,7 +25,7 @@ namespace Sentinel.Core
         {
             if (!string.IsNullOrWhiteSpace(customPath))
             {
-                _logFilePath = customPath;
+                _logFilePath = customPath!;
             }
             else
             {

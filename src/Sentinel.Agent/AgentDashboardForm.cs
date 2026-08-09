@@ -1381,7 +1381,7 @@ namespace Sentinel.Agent
                     var ipcJson = ServiceAgentIpcClient.Request("ops");
                     if (!string.IsNullOrEmpty(ipcJson))
                     {
-                        using var ipcDoc = JsonDocument.Parse(ipcJson);
+                        using var ipcDoc = JsonDocument.Parse(ipcJson!);
                         if (ipcDoc.RootElement.TryGetProperty("ok", out var okEl) && okEl.GetBoolean() &&
                             ipcDoc.RootElement.TryGetProperty("ops", out var opsEl))
                         {
@@ -1890,7 +1890,7 @@ namespace Sentinel.Agent
         }
 
         private static string BlankOr(string? value) =>
-            string.IsNullOrWhiteSpace(value) ? "________________________________" : value.Trim();
+            string.IsNullOrWhiteSpace(value) ? "________________________________" : value!.Trim();
 
         private static void SelectCombo(ComboBox box, string? value)
         {
@@ -1918,7 +1918,7 @@ namespace Sentinel.Agent
         private static void SelectCountry(ComboBox box, string? code)
         {
             if (string.IsNullOrWhiteSpace(code)) return;
-            code = code.Trim().ToUpperInvariant();
+            code = code!.Trim().ToUpperInvariant();
             if (code == "UK") code = "GB";
             foreach (var item in box.Items)
             {

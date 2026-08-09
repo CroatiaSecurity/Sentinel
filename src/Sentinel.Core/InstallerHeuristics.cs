@@ -96,7 +96,7 @@ namespace Sentinel.Core
                 if (file.StartsWith("innosetup") || file.StartsWith("is-")) return true;
                 if (file.Contains("innosetup") && file.EndsWith(".tmp")) return true;
 
-                var lower = imagePath.ToLowerInvariant();
+                var lower = imagePath!.ToLowerInvariant();
                 if (lower.Contains(@"\temp\is-") || lower.Contains(@"\temp\nst") ||
                     lower.Contains(@"\temp\nsm") || lower.Contains(@"\temp\nsu") ||
                     lower.Contains(@"\temp\7zs") || lower.Contains(@"\.be\")) // WiX burn extract
@@ -274,7 +274,7 @@ namespace Sentinel.Core
         public static bool IsOfflineImageWorkPath(string? path)
         {
             if (string.IsNullOrWhiteSpace(path)) return false;
-            var lower = path.ToLowerInvariant();
+            var lower = path!.ToLowerInvariant();
 
             if (lower.Contains(@"\uupdump\") ||
                 lower.Contains(@"\uups\") ||
@@ -313,7 +313,7 @@ namespace Sentinel.Core
         private static string NormalizeProcessStem(string? name)
         {
             if (string.IsNullOrWhiteSpace(name)) return "";
-            var n = name.Trim();
+            var n = name!.Trim();
             if (n.EndsWith(".exe"))
                 n = n[..^4];
             return n;

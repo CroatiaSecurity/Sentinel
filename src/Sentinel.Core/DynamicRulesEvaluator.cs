@@ -38,7 +38,7 @@ namespace Sentinel.Core
         };
 
         internal static bool IsAllowedPropertyName(string? name) =>
-            !string.IsNullOrWhiteSpace(name) && AllowedPropertyNames.Contains(name);
+            !string.IsNullOrWhiteSpace(name) && AllowedPropertyNames.Contains(name!);
 
         public bool Evaluate(object target)
         {
@@ -340,7 +340,7 @@ namespace Sentinel.Core
                 byte[]? providedBytes;
                 try
                 {
-                    providedBytes = ConvertHex.FromHexString(providedHmac);
+                    providedBytes = ConvertHex.FromHexString(providedHmac!);
                 }
                 catch
                 {

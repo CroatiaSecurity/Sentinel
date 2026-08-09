@@ -140,7 +140,7 @@ namespace Sentinel.Core
                         {
                             await EmitFallbackDriveDetection(vol, startupClassification);
                             await DismountFallbackDrive(vol);
-                            await HuntSubstCreatorProcess(vol.DriveLetter, skipPhase4: true);
+                            await HuntSubstCreatorProcess(vol.DriveLetter!, skipPhase4: true);
                             await RemoveSubstPersistence(vol.DriveLetter);
                         });
                         continue; // Do NOT baseline this drive
@@ -149,7 +149,7 @@ namespace Sentinel.Core
 
                 _baselineVolumes.Add(vol.DeviceId);
                 if (!string.IsNullOrEmpty(vol.DriveLetter))
-                    _baselineDriveLetters.Add(vol.DriveLetter.TrimEnd('\\').ToUpperInvariant());
+                    _baselineDriveLetters.Add(vol.DriveLetter!.TrimEnd('\\').ToUpperInvariant());
             }
 
             while (!ct.IsCancellationRequested)
@@ -172,7 +172,7 @@ namespace Sentinel.Core
                             _baselineVolumes.Add(vol.DeviceId);
                             if (!string.IsNullOrEmpty(vol.DriveLetter))
                             {
-                                var letter = vol.DriveLetter.TrimEnd('\\', ':');
+                                var letter = vol.DriveLetter!.TrimEnd('\\', ':');
                                 if (!letter.Equals("C"))
                                 {
                                     var psi = new ProcessStartInfo
@@ -199,12 +199,12 @@ namespace Sentinel.Core
                         // fully initializes — GUID paths resolve late, labels populate late, etc.)
                         var normalizedLetter = vol.DriveLetter?.TrimEnd('\\').ToUpperInvariant();
                         bool driveLetterWasBaselined = !string.IsNullOrEmpty(normalizedLetter) &&
-                            _baselineDriveLetters.Contains(normalizedLetter);
+                            _baselineDriveLetters.Contains(normalizedLetter!);
 
                         // Add to baseline (either way, we've seen it now)
                         _baselineVolumes.Add(vol.DeviceId);
                         if (!string.IsNullOrEmpty(normalizedLetter))
-                            _baselineDriveLetters.Add(normalizedLetter);
+                            _baselineDriveLetters.Add(normalizedLetter!);
 
                         // During startup grace period OR if the drive letter was already baselined,
                         // this is a late-initializing volume — not attacker-created.
@@ -236,7 +236,7 @@ namespace Sentinel.Core
                                 !string.IsNullOrEmpty(vol.DriveLetter))
                             {
                                 await DismountFallbackDrive(vol);
-                                await HuntSubstCreatorProcess(vol.DriveLetter);
+                                await HuntSubstCreatorProcess(vol.DriveLetter!);
                             }
                             continue;
                         }
@@ -259,8 +259,8 @@ namespace Sentinel.Core
                                 vol.DriveLetter);
                             await EmitFallbackDriveDetection(vol, classification);
                             await DismountFallbackDrive(vol);
-                            await HuntSubstCreatorProcess(vol.DriveLetter);
-                            await RemoveSubstPersistence(vol.DriveLetter);
+                            await HuntSubstCreatorProcess(vol.DriveLetter!);
+                            await RemoveSubstPersistence(vol.DriveLetter!);
 
                             // v1.4.1: If the drive keeps reappearing (recreated faster than our scan),
                             // escalate — scan ALL non-system processes using DefineDosDevice API.
@@ -303,7 +303,7 @@ namespace Sentinel.Core
                         // the servicing-process guard covers any stragglers.
                         if (!string.IsNullOrEmpty(vol.DriveLetter) &&
                             !string.Equals(classification, "ISO") &&
-                            !IsWimMountDrive(vol.DriveLetter))
+                            !IsWimMountDrive(vol.DriveLetter!))
                         {
                             _fileActivityMonitor.AddWatchPath(vol.DriveLetter);
                             _logger.LogInformation(
@@ -480,7 +480,7 @@ namespace Sentinel.Core
                 var substTarget = GetSubstTarget(normalizedLetter);
                 if (!string.IsNullOrEmpty(substTarget))
                 {
-                    await HuntBySubstTarget(substTarget, normalizedLetter, killed);
+                    await HuntBySubstTarget(substTarget!, normalizedLetter, killed);
                 }
 
                 if (killed.Count == 0 && !skipPhase4)
@@ -1247,7 +1247,7 @@ namespace Sentinel.Core
         private bool IsEfiPartition(VolumeInfo vol)
         {
             if (string.IsNullOrEmpty(vol.FileSystem)) return false;
-            if (!vol.FileSystem.Equals("FAT32") &&
+            if (!vol.FileSystem!.Equals("FAT32") &&
                 !vol.FileSystem.Equals("FAT"))
                 return false;
 
@@ -1305,14 +1305,14 @@ namespace Sentinel.Core
                 "NTFS", "FAT", "FAT32", "exFAT", "ReFS"
             };
 
-            if (!string.IsNullOrEmpty(vol.FileSystem) && knownFs.Contains(vol.FileSystem))
+            if (!string.IsNullOrEmpty(vol.FileSystem) && knownFs.Contains(vol.FileSystem!))
             {
                 // Has a real filesystem — check if it's also a standard drive type
                 if (!string.IsNullOrEmpty(vol.DriveLetter))
                 {
                     try
                     {
-                        var driveInfo = new DriveInfo(vol.DriveLetter.TrimEnd('\\'));
+                        var driveInfo = new DriveInfo(vol.DriveLetter!.TrimEnd('\\'));
                         if (driveInfo.DriveType == DriveType.Removable ||
                             driveInfo.DriveType == DriveType.Fixed ||
                             driveInfo.DriveType == DriveType.Network)
@@ -1514,7 +1514,7 @@ namespace Sentinel.Core
                     if (!string.IsNullOrEmpty(substOutput))
                     {
                         // Output format: "S:\: => C:\some\path"
-                        foreach (var line in substOutput.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+                        foreach (var line in substOutput!.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
                         {
                             var parts = line.Split(new[] { "=>" }, StringSplitOptions.None);
                             if (parts.Length == 2)
@@ -1740,7 +1740,7 @@ namespace Sentinel.Core
                 // Check if it's a CDRom (virtual ISO mount)
                 try
                 {
-                    var driveInfo = new DriveInfo(vol.DriveLetter.TrimEnd('\\'));
+                    var driveInfo = new DriveInfo(vol.DriveLetter!.TrimEnd('\\'));
                     if (driveInfo.DriveType == DriveType.CDRom)
                         return "ISO";
                 }
@@ -1748,7 +1748,7 @@ namespace Sentinel.Core
 
                 // Check if it's a SUBST drive
                 var buffer = new char[260];
-                uint result = QueryDosDevice(vol.DriveLetter.TrimEnd('\\'), buffer, (uint)buffer.Length);
+                uint result = QueryDosDevice(vol.DriveLetter!.TrimEnd('\\'), buffer, (uint)buffer.Length);
                 if (result > 0)
                 {
                     var target = new string(buffer, 0, (int)result).TrimEnd('\0');

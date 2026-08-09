@@ -266,7 +266,7 @@ namespace Sentinel.Core
             }
 
             // Step 3: Check hash reputation — Unsafe always kills regardless of other signals
-            var verdict = GetFileVerdict(imagePath);
+            var verdict = GetFileVerdict(imagePath!);
             if (verdict == HashVerdict.Unsafe)
             {
                 _logger.LogWarning(

@@ -224,7 +224,7 @@ namespace Sentinel.Core
         internal static bool IsObserveOnlyUserActivityHeuristic(string? ruleName)
         {
             if (string.IsNullOrWhiteSpace(ruleName)) return false;
-            var r = ruleName;
+            var r = ruleName!;
 
             // Composites / confirmed campaigns always act
             if (r.Contains("Composite") ||
@@ -520,7 +520,7 @@ namespace Sentinel.Core
 
             if (shouldRemoveCertAndKillAdder)
             {
-                var certThumb = detection.Metadata.GetValueOrDefault("CertThumbprint", "Unknown");
+                var certThumb = detection.Metadata!.GetValueOrDefault("CertThumbprint", "Unknown");
                 var adderPidStr = detection.Metadata.GetValueOrDefault("AdderProcessId", "0");
 
                 if (!string.IsNullOrEmpty(certThumb) && certThumb != "Unknown")
@@ -551,7 +551,7 @@ namespace Sentinel.Core
             }
             else if (shouldRemoveCert)
             {
-                var certThumb = detection.Metadata.GetValueOrDefault("CertThumbprint", "Unknown");
+                var certThumb = detection.Metadata!.GetValueOrDefault("CertThumbprint", "Unknown");
 
                 if (!string.IsNullOrEmpty(certThumb) && certThumb != "Unknown")
                 {
@@ -590,7 +590,7 @@ namespace Sentinel.Core
                 }
 
                 // DLL sideloading/injection: quarantine the malicious DLL, kill the host process
-                var targetPidStr = detection.Metadata.GetValueOrDefault("TargetProcessId", "0");
+                var targetPidStr = detection.Metadata!.GetValueOrDefault("TargetProcessId", "0");
                 int.TryParse(targetPidStr, out int targetPid);
                 
                 string quarantinedInfo = "None";
@@ -621,7 +621,7 @@ namespace Sentinel.Core
                     if (!string.IsNullOrEmpty(quarantinePath) && File.Exists(quarantinePath))
                     {
                         // QuarantineManager refuses signed binaries by default (returns null).
-                        var qPath = await _quarantineManager.QuarantineFileAtomicAsync(quarantinePath);
+                        var qPath = await _quarantineManager.QuarantineFileAtomicAsync(quarantinePath!);
                         injectorQuarantined = qPath != null;
                         // signed binary — kill process tree but preserve the file on disk
                     }
@@ -668,7 +668,7 @@ namespace Sentinel.Core
                 }
 
                 // Network-level threat: block suspicious IPs extracted from evidence metadata
-                var targetIp = detection.Metadata.GetValueOrDefault("TargetIP", "");
+                var targetIp = detection.Metadata!.GetValueOrDefault("TargetIP", "");
                 if (!string.IsNullOrEmpty(targetIp))
                 {
                     // Validate IP before creating firewall rules
@@ -710,7 +710,7 @@ namespace Sentinel.Core
             }
             else if (shouldRemoveRegistryEntry)
             {
-                var hive = detection.Metadata.GetValueOrDefault("Hive", "HKLM");
+                var hive = detection.Metadata!.GetValueOrDefault("Hive", "HKLM");
                 var keyPath = detection.Metadata.GetValueOrDefault("KeyPath", "");
                 var valueName = detection.Metadata.GetValueOrDefault("ValueName", "");
                 var subKey = detection.Metadata.GetValueOrDefault("SubKey", "");
@@ -885,7 +885,7 @@ namespace Sentinel.Core
                 }
                 if (!string.IsNullOrEmpty(hash))
                 {
-                    _reinfectionCorrelator.RegisterKilledHash(hash, detection.ProcessName ?? "unknown", detection.ProcessName ?? "unknown");
+                    _reinfectionCorrelator.RegisterKilledHash(hash!, detection.ProcessName ?? "unknown", detection.ProcessName ?? "unknown");
                 }
             }
             catch { }

@@ -11,7 +11,7 @@ namespace Sentinel.Core
     public class FileVerdictAds
     {
         private readonly byte[] _hmacKey;
-        private readonly string _secureDir;
+        private readonly string _secureDir = null!;
         private readonly bool _isCustomDir;
 
         [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
@@ -57,7 +57,7 @@ namespace Sentinel.Core
         {
             if (!string.IsNullOrWhiteSpace(customSecureDir))
             {
-                _secureDir = customSecureDir;
+                _secureDir = customSecureDir!;
                 _isCustomDir = true;
             }
             else
@@ -223,7 +223,7 @@ namespace Sentinel.Core
                 var text = TryReadVerdictPayload(filePath, expectedSha256);
                 if (string.IsNullOrWhiteSpace(text)) return HashVerdict.Unknown;
 
-                return ParseAndValidatePayload(text, expectedSha256);
+                return ParseAndValidatePayload(text!, expectedSha256);
             }
             catch
             {

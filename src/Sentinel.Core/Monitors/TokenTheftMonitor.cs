@@ -408,7 +408,7 @@ namespace Sentinel.Core
                 return IsLikelyProtectedOsProcess(name);
             }
 
-            string pathLower = path.ToLowerInvariant();
+            string pathLower = path!.ToLowerInvariant();
             return pathLower.Contains(@"\windows\") ||
                    pathLower.Contains(@"\program files\") ||
                    pathLower.Contains(@"\program files (x86)\");

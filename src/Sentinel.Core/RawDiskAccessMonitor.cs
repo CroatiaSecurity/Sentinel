@@ -324,7 +324,7 @@ namespace Sentinel.Core
                                 continue;
 
                             var name = GetObjectName(dupHandle);
-                            if (!string.IsNullOrEmpty(name) && IsRawDiskPath(name))
+                            if (!string.IsNullOrEmpty(name) && IsRawDiskPath(name!))
                             {
                                 results.Add(name);
                                 if (results.Count >= 5) break; // Don't enumerate everything

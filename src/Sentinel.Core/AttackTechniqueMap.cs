@@ -90,7 +90,7 @@ namespace Sentinel.Core
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var (fragment, techniques) in Map)
             {
-                if (ruleName.IndexOf(fragment, StringComparison.OrdinalIgnoreCase) < 0)
+                if (ruleName!.IndexOf(fragment, StringComparison.OrdinalIgnoreCase) < 0)
                     continue;
                 foreach (var t in techniques)
                 {

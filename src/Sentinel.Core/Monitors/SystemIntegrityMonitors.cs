@@ -2066,7 +2066,7 @@ namespace Sentinel.Core
 
                     var imagePath = GetDriverImagePath(driver);
                     bool suspicious = !string.IsNullOrEmpty(imagePath) &&
-                        SuspiciousDriverPaths.Any(p => imagePath.Contains(p));
+                        SuspiciousDriverPaths.Any(p => imagePath!.Contains(p));
 
                     await _detectionEngine.EmitAsync(new DetectionEvent
                     {
@@ -2603,7 +2603,7 @@ namespace Sentinel.Core
                 if (!File.Exists(provider.DllPath)) continue;
 
                 // Check if DLL is in a system-protected path
-                bool isSystemPath = IsSystemProtectedPath(provider.DllPath);
+                bool isSystemPath = IsSystemProtectedPath(provider.DllPath!);
 
                 // Verify Authenticode signature
                 bool isSigned = SecurityValidation.VerifyAuthenticodeSignature(provider.DllPath);

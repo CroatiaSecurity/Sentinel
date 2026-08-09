@@ -68,7 +68,7 @@ namespace Sentinel.Core
                             if (string.IsNullOrWhiteSpace(name)) continue;
 
                             var display = mo["DisplayName"] as string ?? name;
-                            displayNames[name] = display;
+                            displayNames[name!] = display!;
 
                             var state = mo["State"] as string;
                             if (!string.Equals(state, "Running", StringComparison.OrdinalIgnoreCase))

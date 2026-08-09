@@ -110,7 +110,7 @@ namespace Sentinel.Core
             void Add(string? p)
             {
                 if (!string.IsNullOrWhiteSpace(p) && Directory.Exists(p))
-                    paths.Add(p);
+                    paths.Add(p!);
             }
 
             // Service runs as SYSTEM — enumerate every interactive user profile (not just SYSTEM's dirs)

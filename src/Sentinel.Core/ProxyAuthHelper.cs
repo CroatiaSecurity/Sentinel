@@ -113,7 +113,7 @@ namespace Sentinel.Core
 
         public static bool HasSharedSecret(ThreatReportingConfig? config) =>
             config != null && !string.IsNullOrWhiteSpace(config.ProxySharedSecret)
-            && config.ProxySharedSecret.Length >= 16;
+            && config.ProxySharedSecret!.Length >= 16;
 
         /// <summary>
         /// Signs <paramref name="jsonBody"/> and applies auth headers to <paramref name="request"/>.

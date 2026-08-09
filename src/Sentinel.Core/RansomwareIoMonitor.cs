@@ -75,7 +75,7 @@ namespace Sentinel.Core
                     {
                         if (!string.IsNullOrEmpty(imagePath))
                         {
-                            var lower = imagePath.ToLowerInvariant();
+                            var lower = imagePath!.ToLowerInvariant();
                             bool isSuspiciousDir = lower.Contains(@"\temp\") ||
                                                    lower.Contains(@"\downloads\") ||
                                                    lower.Contains(@"\appdata\local\temp\");
@@ -95,7 +95,7 @@ namespace Sentinel.Core
                     if (!legitimate && !string.IsNullOrEmpty(imagePath) &&
                         (InstallerHeuristics.LooksLikeInstallerName(processName, imagePath) ||
                          InstallerHeuristics.IsInstallerExtractor(processName, imagePath)) &&
-                        SecurityValidation.VerifyAuthenticodeSignature(imagePath))
+                        SecurityValidation.VerifyAuthenticodeSignature(imagePath!))
                     {
                         legitimate = true;
                     }

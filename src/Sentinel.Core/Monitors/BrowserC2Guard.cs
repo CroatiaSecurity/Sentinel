@@ -140,7 +140,7 @@ namespace Sentinel.Core
                         // Check parent — if parent is node/python/automation tool from suspicious path, escalate
                         var parentInfo = GetParentInfo(proc.Id);
                         bool suspiciousParent = !string.IsNullOrEmpty(parentInfo.name) &&
-                            !BrowserProcessNames.Contains(Sentinel.Core.StringNet48.ReplaceIgnoreCase(parentInfo.name, ".exe", ""));
+                            !BrowserProcessNames.Contains(Sentinel.Core.StringNet48.ReplaceIgnoreCase(parentInfo.name!, ".exe", ""));
 
                         double confidence = 0.78;
                         var response = ResponseAction.LogOnly;

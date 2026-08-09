@@ -146,7 +146,7 @@ namespace Sentinel.Core
         internal static bool IsForumHrDomain(string? domain)
         {
             if (string.IsNullOrWhiteSpace(domain)) return false;
-            domain = domain.Trim().TrimEnd('.').ToLowerInvariant();
+            domain = domain!.Trim().TrimEnd('.').ToLowerInvariant();
             if (domain.StartsWith("http://")) domain = domain[7..];
             if (domain.StartsWith("https://")) domain = domain[8..];
             var slash = domain.IndexOf('/');

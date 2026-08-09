@@ -139,7 +139,7 @@ namespace Sentinel.Core
             // Primary: probe the configured proxy endpoint
             if (!string.IsNullOrEmpty(_reportingConfig.ProxyEndpoint))
             {
-                if (await TryHeadRequestAsync(_reportingConfig.ProxyEndpoint, ct))
+                if (await TryHeadRequestAsync(_reportingConfig.ProxyEndpoint!, ct))
                     return true;
             }
 

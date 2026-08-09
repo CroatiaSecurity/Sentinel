@@ -401,7 +401,7 @@ namespace Sentinel.Core
             if (string.IsNullOrEmpty(processName)) return false;
 
             // Fast path: known-good process names (system, browsers, dev tools)
-            if (LegitimateProcesses.Contains(processName)) return true;
+            if (LegitimateProcesses.Contains(processName!)) return true;
 
             return false;
         }

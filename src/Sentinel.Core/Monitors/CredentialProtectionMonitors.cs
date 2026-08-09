@@ -241,7 +241,7 @@ namespace Sentinel.Core
                                     string? imagePath = null;
                                     try { imagePath = SecurityValidation.GetProcessImagePath(proc.Id); } catch { }
                                     if (!string.IsNullOrEmpty(imagePath) &&
-                                        (imagePath.Contains(@"\Temp\") ||
+                                        (imagePath!.Contains(@"\Temp\") ||
                                          imagePath.Contains(@"\Downloads\")))
                                     {
                                         _alertedFiles.Add(fileName);

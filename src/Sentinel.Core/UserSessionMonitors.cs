@@ -58,7 +58,7 @@ namespace Sentinel.Core
                                 var capturePath = SecurityValidation.GetProcessImagePath(proc.Id);
                                 if (!string.IsNullOrEmpty(capturePath))
                                 {
-                                    var lp = capturePath.ToLowerInvariant();
+                                    var lp = capturePath!.ToLowerInvariant();
                                     bool isTrustedLocation = lp.Contains(@"\program files") ||
                                                              lp.Contains(@"\windows\") ||
                                                              lp.Contains(@"\appdata\local\programs\") ||
@@ -1018,7 +1018,7 @@ namespace Sentinel.Core
                             if ((name.Contains("sendinput") || name.Contains("autoit") ||
                                  name.Contains("nircmd") || name.Contains("inputsimulator")) &&
                                 !string.IsNullOrEmpty(imagePath) &&
-                                (imagePath.Contains(@"\Temp\") ||
+                                (imagePath!.Contains(@"\Temp\") ||
                                  imagePath.Contains(@"\Downloads\")))
                             {
                                 if ((DateTime.UtcNow - _lastAlertTime).TotalSeconds < 60) break;

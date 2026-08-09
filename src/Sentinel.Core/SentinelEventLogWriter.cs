@@ -300,7 +300,7 @@ namespace Sentinel.Core
         private static string SanitizeName(string? name, string fallback)
         {
             if (string.IsNullOrWhiteSpace(name)) return fallback;
-            var sb = new StringBuilder(name.Length);
+            var sb = new StringBuilder(name!.Length);
             foreach (var c in name.Trim())
             {
                 if (char.IsLetterOrDigit(c) || c is '-' or '_' or ' ')
@@ -311,7 +311,7 @@ namespace Sentinel.Core
         }
 
         private static string Safe(string? s) =>
-            string.IsNullOrEmpty(s) ? "" : s.Replace("\r", " ").Replace("\n", " ");
+            string.IsNullOrEmpty(s) ? "" : s!.Replace("\r", " ").Replace("\n", " ");
 
         private static string Truncate(string s, int max)
         {

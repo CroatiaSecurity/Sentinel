@@ -121,7 +121,7 @@ namespace Sentinel.Core
             }
 
             // Exclude temp/downloads directories from any name-only baseline trust
-            var lowerPath = imagePath.ToLowerInvariant();
+            var lowerPath = imagePath!.ToLowerInvariant();
             if (lowerPath.Contains(@"\temp\") || 
                 lowerPath.Contains(@"\downloads\") || 
                 lowerPath.Contains(@"\appdata\local\temp\"))
@@ -157,7 +157,7 @@ namespace Sentinel.Core
             {
                 var json = _cacheStore.Load("allowlist", "user");
                 if (string.IsNullOrWhiteSpace(json)) return;
-                var entries = JsonSerializer.Deserialize<List<AllowlistEntry>>(json);
+                var entries = JsonSerializer.Deserialize<List<AllowlistEntry>>(json!);
                 if (entries == null) return;
                 foreach (var e in entries)
                     _userAllowlist[e.ProcessName.ToLowerInvariant()] = e;

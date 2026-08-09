@@ -187,7 +187,7 @@ namespace Sentinel.Core
                 try
                 {
                     _logger.LogInformation("CVE Shield: Loading feed from local path: {Path}", _config.CveShield.CustomFeedPath);
-                    var content = await System.IO.FileNet48.ReadAllTextAsync(_config.CveShield.CustomFeedPath, cancellationToken);
+                    var content = await System.IO.FileNet48.ReadAllTextAsync(_config.CveShield.CustomFeedPath!, cancellationToken);
                     var localCatalog = JsonSerializer.Deserialize<CisaKevCatalog>(content, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
                     return localCatalog?.Vulnerabilities ?? new List<CisaVulnerability>();
                 }
@@ -315,7 +315,7 @@ namespace Sentinel.Core
                                 var displayName = subkey?.GetValue("DisplayName")?.ToString();
                                 if (!string.IsNullOrEmpty(displayName))
                                 {
-                                    list.Add(displayName);
+                                    list.Add(displayName!);
                                 }
                             }
                             catch { }
@@ -338,7 +338,7 @@ namespace Sentinel.Core
                             var displayName = subkey?.GetValue("DisplayName")?.ToString();
                             if (!string.IsNullOrEmpty(displayName))
                             {
-                                list.Add(displayName);
+                                list.Add(displayName!);
                             }
                         }
                         catch { }

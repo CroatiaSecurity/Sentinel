@@ -288,7 +288,7 @@ namespace Sentinel.Core
         public static bool RuleNameLooksLikeAttack(string? ruleName)
         {
             if (string.IsNullOrWhiteSpace(ruleName)) return false;
-            var lower = ruleName.ToLowerInvariant();
+            var lower = ruleName!.ToLowerInvariant();
             return AttackRuleKeywords.Any(k => lower.Contains(k));
         }
 
@@ -1102,7 +1102,7 @@ namespace Sentinel.Core
         private static string WrapIndented(string? text, string indent)
         {
             if (string.IsNullOrWhiteSpace(text)) return indent + "(none)";
-            var lines = text.Replace("\r\n", "\n").Split('\n');
+            var lines = text!.Replace("\r\n", "\n").Split('\n');
             return string.Join(Environment.NewLine, lines.Select(l => indent + l));
         }
 

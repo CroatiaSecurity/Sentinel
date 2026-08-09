@@ -315,7 +315,7 @@ namespace Sentinel.Core
                     if (_baselineDnsServers.TryGetValue(ni.Id, out var baselineDns))
                     {
                         var currentDns = GetRegistryDns(ni.Id);
-                        if (!string.IsNullOrEmpty(currentDns) && !currentDns.Equals(baselineDns))
+                        if (!string.IsNullOrEmpty(currentDns) && !currentDns!.Equals(baselineDns))
                         {
                             await _detectionEngine.EmitAsync(new DetectionEvent
                             {

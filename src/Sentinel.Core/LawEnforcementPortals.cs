@@ -207,7 +207,7 @@ namespace Sentinel.Core
         private static string? NormalizeCountryCode(string? code)
         {
             if (string.IsNullOrWhiteSpace(code)) return null;
-            code = code.Trim().ToUpperInvariant();
+            code = code!.Trim().ToUpperInvariant();
             if (code.Equals("UK")) return "GB";
             return code.Length == 2 ? code : null;
         }

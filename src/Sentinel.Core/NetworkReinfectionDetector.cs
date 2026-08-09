@@ -201,7 +201,7 @@ namespace Sentinel.Core
                     if (string.IsNullOrEmpty(imagePath)) continue;
 
                     // Must be from a suspicious path
-                    if (!IsSuspiciousPath(imagePath)) continue;
+                    if (!IsSuspiciousPath(imagePath!)) continue;
 
                     // Skip if the binary is signed by a trusted publisher (e.g. GoogleUpdate, BraveUpdate)
                     if (_signerTrust != null && _signerTrust.IsSignedFile(imagePath))

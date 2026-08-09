@@ -270,7 +270,7 @@ namespace Sentinel.Core
 
                     int pid = Convert.ToInt32(obj["ProcessId"]);
                     string name = obj["Name"]?.ToString() ?? "unknown";
-                    string alertKey = $"cmd:{pid}:{cmdLine.GetHashCode()}";
+                    string alertKey = $"cmd:{pid}:{cmdLine!.GetHashCode()}";
                     if (_alertedItems.Contains(alertKey)) continue;
 
                     foreach (var (pattern, desc, confidence) in EtwManipulationPatterns)

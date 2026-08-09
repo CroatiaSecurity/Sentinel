@@ -49,8 +49,10 @@ namespace Sentinel.Core
         // an attacker modified appsettings.json or injected config — fire anti-tamper alert.
         private bool _activeResponseLastKnown;
         // v1.6.0: Boot-time ActiveResponse=false was force-enabled; alert pending on first integrity tick
+#pragma warning disable CS0169
         private bool _bootActiveResponseForcePending;
         private bool _bootActiveResponseAlerted;
+#pragma warning restore CS0169
         // v1.6.0: SHA-256 of appsettings.json at first successful read (config integrity)
         private string? _appsettingsHash;
         private bool _appsettingsTamperAlerted;

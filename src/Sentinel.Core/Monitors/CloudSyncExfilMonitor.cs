@@ -185,7 +185,7 @@ namespace Sentinel.Core
 
                     string? cmdLine = GetCommandLine(pid);
                     bool hasRemoteTarget = !string.IsNullOrEmpty(cmdLine) &&
-                        (cmdLine.Contains(":") &&
+                        (cmdLine!.Contains(":") &&
                          (cmdLine.Contains("sync") ||
                           cmdLine.Contains("copy") ||
                           cmdLine.Contains("move")));
@@ -272,8 +272,8 @@ namespace Sentinel.Core
                 using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(parts[1].Replace("HKEY_CURRENT_USER\\", ""));
                 if (key == null) return;
                 string? val = key.GetValue("")?.ToString();
-                if (!string.IsNullOrEmpty(val) && Directory.Exists(val) && !dirs.Contains(val))
-                    dirs.Add(val);
+                if (!string.IsNullOrEmpty(val) && Directory.Exists(val!) && !dirs.Contains(val!))
+                    dirs.Add(val!);
             }
             catch { }
         }

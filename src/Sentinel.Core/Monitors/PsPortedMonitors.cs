@@ -176,7 +176,7 @@ namespace Sentinel.Core
             void Add(string? p)
             {
                 if (!string.IsNullOrWhiteSpace(p) && Directory.Exists(p))
-                    roots.Add(p);
+                    roots.Add(p!);
             }
 
             // Service runs as SYSTEM — enumerate interactive user profiles for Desktops

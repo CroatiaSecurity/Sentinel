@@ -100,7 +100,7 @@ namespace Sentinel.Core
             {
                 if (Directory.Exists(config.WatchPath))
                 {
-                    paths.Add(config.WatchPath);
+                    paths.Add(config.WatchPath!);
                 }
                 else
                 {
@@ -733,7 +733,7 @@ namespace Sentinel.Core
                  var imagePath = SecurityValidation.GetProcessImagePath(pid);
                  if (!string.IsNullOrEmpty(imagePath))
                  {
-                     if (imagePath.StartsWith(@"C:\Windows\") ||
+                     if (imagePath!.StartsWith(@"C:\Windows\") ||
                          imagePath.Contains(@"\Windows Defender\") ||
                          imagePath.Contains(@"\Microsoft Security Client\") ||
                          imagePath.Contains(@"\Sentinel\"))

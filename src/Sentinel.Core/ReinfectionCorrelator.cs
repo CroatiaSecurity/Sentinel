@@ -122,7 +122,7 @@ namespace Sentinel.Core
             if (SystemBinaryNames.Contains(nameNoExt)) return true;
 
             // Check by path — anything in Windows\System32 or Windows\SysWOW64 is a system binary
-            var normalized = pathOrName.Replace('/', '\\');
+            var normalized = pathOrName!.Replace('/', '\\');
             if (normalized.Contains(@"\Windows\System32\") ||
                 normalized.Contains(@"\Windows\SysWOW64\") ||
                 normalized.Contains(@"\Windows\WinSxS\"))
@@ -242,7 +242,7 @@ namespace Sentinel.Core
                     // Never alert on Windows system binaries
                     if (IsWindowsSystemBinary(imagePath)) continue;
 
-                    var hash = ComputeFileHash(imagePath);
+                    var hash = ComputeFileHash(imagePath!);
                     if (hash == null) continue;
 
                     if (_killedHashes.TryGetValue(hash, out var entry))

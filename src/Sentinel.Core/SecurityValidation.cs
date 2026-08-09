@@ -21,7 +21,7 @@ namespace Sentinel.Core
             try
             {
                 // Prevent path traversal
-                if (path.Contains("..")) return false;
+                if (path!.Contains("..")) return false;
                 
                 // Absolute path check
                 if (!Path.IsPathRooted(path)) return false;
@@ -38,7 +38,7 @@ namespace Sentinel.Core
         public static bool ValidateFileName(string? fileName)
         {
             if (string.IsNullOrWhiteSpace(fileName)) return false;
-            return SafeFileNameRegex.IsMatch(fileName) && !fileName.Contains("..");
+            return SafeFileNameRegex.IsMatch(fileName!) && !fileName.Contains("..");
         }
 
         public static bool ValidateIpAddress(string? ip)
@@ -64,7 +64,7 @@ namespace Sentinel.Core
         {
             if (string.IsNullOrWhiteSpace(filename)) return false;
             if (filename.Contains('\0')) return false;
-            if (filename.IndexOf('/') >= 0 || filename.Contains('\\')) return false;
+            if (filename!.IndexOf('/') >= 0 || filename.Contains('\\')) return false;
             if (filename.Contains("..")) return false;
 
             // Dangerous characters
@@ -655,7 +655,7 @@ namespace Sentinel.Core
         public static bool IsGameOrAntiCheatPath(string? path)
         {
             if (string.IsNullOrEmpty(path)) return false;
-            var lower = path.ToLowerInvariant();
+            var lower = path!.ToLowerInvariant();
 
             // Never treat staging dirs as "game" even if renamed steam/epic folders
             if (lower.Contains(@"\temp\") ||

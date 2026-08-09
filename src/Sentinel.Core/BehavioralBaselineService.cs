@@ -88,7 +88,7 @@ namespace Sentinel.Core
 
             if (!string.IsNullOrEmpty(imagePath))
             {
-                var pathKey = imagePath.ToLowerInvariant();
+                var pathKey = imagePath!.ToLowerInvariant();
                 _knownExecutablePaths.AddOrUpdate(pathKey,
                     _ => new PathReputation { Path = imagePath, FirstSeen = DateTimeOffset.UtcNow, LastSeen = DateTimeOffset.UtcNow, ExecutionCount = 1 },
                     (_, p) => { p.LastSeen = DateTimeOffset.UtcNow; p.ExecutionCount++; return p; });
@@ -96,7 +96,7 @@ namespace Sentinel.Core
 
             if (!string.IsNullOrEmpty(parentName))
             {
-                var pcKey = $"{parentName.ToLowerInvariant()}->{key}";
+                var pcKey = $"{parentName!.ToLowerInvariant()}->{key}";
                 _knownParentChild.AddOrUpdate(pcKey,
                     _ => new ParentChildRelationship { ParentName = parentName, ChildName = processName, FirstSeen = DateTimeOffset.UtcNow, LastSeen = DateTimeOffset.UtcNow, OccurrenceCount = 1 },
                     (_, r) => { r.LastSeen = DateTimeOffset.UtcNow; r.OccurrenceCount++; return r; });
@@ -177,7 +177,7 @@ namespace Sentinel.Core
             {
                 var json = _cacheStore.Load("baseline", "data");
                 if (string.IsNullOrWhiteSpace(json)) return;
-                var data = JsonSerializer.Deserialize<BaselineData>(json);
+                var data = JsonSerializer.Deserialize<BaselineData>(json!);
                 if (data == null) return;
 
                 foreach (var p in data.Processes) _knownProcesses[p.ProcessName.ToLowerInvariant()] = p;

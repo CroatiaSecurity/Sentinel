@@ -222,7 +222,7 @@ namespace Sentinel.Core
                             !string.IsNullOrEmpty(node.ImagePath) &&
                             InstallerHeuristics.LooksLikeInstallerName(node.ProcessName, node.ImagePath) &&
                             File.Exists(node.ImagePath) &&
-                            SecurityValidation.VerifyAuthenticodeSignature(node.ImagePath))
+                            SecurityValidation.VerifyAuthenticodeSignature(node.ImagePath!))
                         {
                             _logger.LogInformation(
                                 "[ChainTracer] Preserving signed installer ancestor PID {Pid} ({Name})",
@@ -435,7 +435,7 @@ namespace Sentinel.Core
         {
             // Never trust name alone — require path verification
             if (string.IsNullOrEmpty(imagePath)) return false;
-            return SystemPaths.Any(sp => imagePath.StartsWith(sp));
+            return SystemPaths.Any(sp => imagePath!.StartsWith(sp));
         }
 
         /// <summary>
@@ -469,7 +469,7 @@ namespace Sentinel.Core
             // Installed browser at expected path (not Temp staging of "chrome.exe")
             if (!isGenericSetup && !string.IsNullOrEmpty(imagePath))
             {
-                var lower = imagePath.ToLowerInvariant();
+                var lower = imagePath!.ToLowerInvariant();
                 bool inStaging = lower.Contains(@"\temp\") ||
                                  lower.Contains(@"\downloads\") ||
                                  lower.Contains(@"\appdata\local\temp\");
@@ -483,7 +483,7 @@ namespace Sentinel.Core
             {
                 try
                 {
-                    if (SecurityValidation.VerifyAuthenticodeSignature(imagePath))
+                    if (SecurityValidation.VerifyAuthenticodeSignature(imagePath!))
                         return true;
                 }
                 catch { /* treat as untrusted */ }
@@ -520,7 +520,7 @@ namespace Sentinel.Core
             // Name matches — verify the path is legitimate
             if (!string.IsNullOrEmpty(imagePath))
             {
-                var lowerPath = imagePath.ToLowerInvariant();
+                var lowerPath = imagePath!.ToLowerInvariant();
                 if (LegitimateIdePaths.Any(p => lowerPath.Contains(p)))
                     return true;
 

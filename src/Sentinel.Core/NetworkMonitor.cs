@@ -167,7 +167,7 @@ namespace Sentinel.Core
         private static bool IsSuspiciousPath(string? path)
         {
             if (string.IsNullOrEmpty(path)) return false;
-            var lower = path.ToLowerInvariant();
+            var lower = path!.ToLowerInvariant();
             return lower.Contains(@"\temp\") || lower.Contains(@"\downloads\");
         }
 
@@ -179,7 +179,7 @@ namespace Sentinel.Core
         private static bool IsKnownBrowser(string? processName, string? imagePath = null)
         {
             if (string.IsNullOrEmpty(processName)) return false;
-            var lower = processName.ToLowerInvariant();
+            var lower = processName!.ToLowerInvariant();
             bool nameMatches = lower == "chrome" || lower == "chrome.exe" ||
                    lower == "msedge" || lower == "msedge.exe" ||
                    lower == "firefox" || lower == "firefox.exe" ||
@@ -192,7 +192,7 @@ namespace Sentinel.Core
 
             // Name matches — verify path is legitimate (not temp/downloads/staging)
             if (string.IsNullOrEmpty(imagePath)) return false;
-            var pathLower = imagePath.ToLowerInvariant();
+            var pathLower = imagePath!.ToLowerInvariant();
             return pathLower.Contains(@"\program files") ||
                    pathLower.Contains(@"\windowsapps\") ||
                    pathLower.Contains(@"\appdata\local\google\") ||

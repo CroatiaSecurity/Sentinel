@@ -1123,7 +1123,7 @@ namespace Sentinel.Core
                     if (string.IsNullOrWhiteSpace(p)) return;
                     try
                     {
-                        p = Path.GetFullPath(p.Trim().TrimEnd('\\'));
+                        p = Path.GetFullPath(p!.Trim().TrimEnd('\\'));
                     }
                     catch { return; }
                     if (!paths.Exists(x => string.Equals(x, p, StringComparison.OrdinalIgnoreCase)))

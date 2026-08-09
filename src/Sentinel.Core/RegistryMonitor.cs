@@ -940,7 +940,7 @@ namespace Sentinel.Core
                                 { "Hive", prefix },
                                 { "KeyPath", path },
                                 { "ValueName", valueName },
-                                { "ExtensionConfig", currentVal }
+                                { "ExtensionConfig", currentVal! }
                             }
                         };
 

@@ -101,7 +101,7 @@ namespace Sentinel.Core
         public static bool IsRemoteAccessToolProcess(string? processName)
         {
             if (string.IsNullOrWhiteSpace(processName)) return false;
-            var stem = processName.Trim();
+            var stem = processName!.Trim();
             if (stem.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
                 stem = stem.Substring(0, stem.Length - 4);
             if (RemoteAccessToolNames.Contains(stem))
@@ -148,7 +148,7 @@ namespace Sentinel.Core
             if (string.IsNullOrWhiteSpace(ruleName)) return false;
             foreach (var n in CoercionCompositeNames)
             {
-                if (ruleName.IndexOf(n, StringComparison.OrdinalIgnoreCase) >= 0)
+                if (ruleName!.IndexOf(n, StringComparison.OrdinalIgnoreCase) >= 0)
                     return true;
             }
             return false;
@@ -236,7 +236,7 @@ namespace Sentinel.Core
             if (string.IsNullOrEmpty(haystack)) return false;
             foreach (var f in fragments)
             {
-                if (haystack.IndexOf(f, StringComparison.OrdinalIgnoreCase) >= 0)
+                if (haystack!.IndexOf(f, StringComparison.OrdinalIgnoreCase) >= 0)
                     return true;
             }
             return false;

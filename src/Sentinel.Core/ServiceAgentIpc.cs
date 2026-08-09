@@ -257,7 +257,7 @@ namespace Sentinel.Core
 
         public static bool Verify(byte[] token, string payload, string? providedHex)
         {
-            if (string.IsNullOrEmpty(providedHex) || providedHex.Length != 64)
+            if (string.IsNullOrEmpty(providedHex) || providedHex!.Length != 64)
                 return false;
             var expected = Sign(token, payload);
             return SecurityValidation.SecureCompare(

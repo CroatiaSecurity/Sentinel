@@ -88,7 +88,7 @@ namespace Sentinel.Core
                         if (isDev || isBrowser)
                         {
                             // Only skip if the binary is validly signed — no path-based trust
-                            if (!string.IsNullOrEmpty(imagePath) && _signerTrust.IsSignedFile(imagePath))
+                            if (!string.IsNullOrEmpty(imagePath) && _signerTrust.IsSignedFile(imagePath!))
                             {
                                 continue;
                             }
@@ -103,7 +103,7 @@ namespace Sentinel.Core
                         // Signed official installers (Git-2.x-64-bit.exe, etc.)
                         if (!string.IsNullOrEmpty(imagePath) &&
                             InstallerHeuristics.LooksLikeInstallerName(proc.ProcessName, imagePath) &&
-                            (SecurityValidation.VerifyAuthenticodeSignature(imagePath) || _signerTrust.IsSignedFile(imagePath)))
+                            (SecurityValidation.VerifyAuthenticodeSignature(imagePath!) || _signerTrust.IsSignedFile(imagePath!)))
                         {
                             continue;
                         }
@@ -130,7 +130,7 @@ namespace Sentinel.Core
                             // Signed / stock System32 hosts (esp. conhost) race ETW constantly —
                             // kill-class response chain-kills legitimate tools (WinReducer, installers).
                             bool selfSigned = !string.IsNullOrEmpty(imagePath) &&
-                                (_signerTrust.IsSignedFile(imagePath) ||
+                                (_signerTrust.IsSignedFile(imagePath!) ||
                                  SecurityValidation.VerifyAuthenticodeSignature(imagePath));
                             bool demote = ShouldDemotePpidToLogOnly(proc.ProcessName, imagePath, selfSigned);
                             var response = demote
@@ -193,7 +193,7 @@ namespace Sentinel.Core
                 if (InstallerHeuristics.IsInstallerExtractor(name, path)) return true;
                 if (InstallerHeuristics.LooksLikeInstallerName(name, path) &&
                     !string.IsNullOrEmpty(path) &&
-                    (SecurityValidation.VerifyAuthenticodeSignature(path) || _signerTrust.IsSignedFile(path)))
+                    (SecurityValidation.VerifyAuthenticodeSignature(path!) || _signerTrust.IsSignedFile(path!)))
                     return true;
             }
             catch { }

@@ -181,7 +181,7 @@ namespace Sentinel.Core
             var baseName = Path.GetFileNameWithoutExtension(exeName);
             if (AllowedEphemeral.Contains(baseName))
             {
-                var exePath2 = FindExecutable(exeName);
+                var exePath2 = FindExecutable(exeName!);
                 if (exePath2 != null)
                 {
                     var winDir = Environment.GetFolderPath(Environment.SpecialFolder.Windows).ToLowerInvariant();
@@ -212,7 +212,7 @@ namespace Sentinel.Core
                 return;
 
             // Check cooldown
-            if (_alertedExecutables.TryGetValue(exeName, out var lastAlert) &&
+            if (_alertedExecutables.TryGetValue(exeName!, out var lastAlert) &&
                 DateTimeOffset.UtcNow - lastAlert < AlertCooldown)
                 return;
 
@@ -381,7 +381,7 @@ namespace Sentinel.Core
         private static bool IsKnownGameEphemeralName(string? name)
         {
             if (string.IsNullOrEmpty(name)) return false;
-            var n = name.EndsWith(".exe")
+            var n = name!.EndsWith(".exe")
                 ? Path.GetFileNameWithoutExtension(name)
                 : name;
             if (n.Equals("fm")) return true;

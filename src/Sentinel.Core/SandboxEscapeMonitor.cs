@@ -302,7 +302,7 @@ namespace Sentinel.Core
                     if (string.IsNullOrEmpty(imagePath)) continue;
 
                     // If it's running from a host path (not container layer), that's suspicious
-                    if (imagePath.Contains(@"\docker\") ||
+                    if (imagePath!.Contains(@"\docker\") ||
                         imagePath.Contains(@"\containerd\"))
                         continue;
 

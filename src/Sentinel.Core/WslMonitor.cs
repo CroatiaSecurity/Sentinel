@@ -318,7 +318,7 @@ namespace Sentinel.Core
                     using var sub = key.OpenSubKey(subKeyName);
                     var name = sub?.GetValue("DistributionName")?.ToString();
                     if (!string.IsNullOrEmpty(name))
-                        distros.Add(name);
+                        distros.Add(name!);
                 }
             }
             catch { }

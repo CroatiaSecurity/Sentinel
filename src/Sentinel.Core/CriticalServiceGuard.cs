@@ -158,7 +158,7 @@ namespace Sentinel.Core
                         var serviceName = ExtractServiceName(record);
                         if (string.IsNullOrEmpty(serviceName)) continue;
 
-                        var history = _crashHistory.GetOrAdd(serviceName, _ => new ServiceCrashHistory());
+                        var history = _crashHistory.GetOrAdd(serviceName!, _ => new ServiceCrashHistory());
 
                         // Dedup by timestamp
                         var timestamp = record.TimeCreated ?? DateTime.UtcNow;

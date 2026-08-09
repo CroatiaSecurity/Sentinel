@@ -184,7 +184,7 @@ namespace Sentinel.Core
             // SECURITY v1.4.4: Validate imageId from docker inspect output before use.
             // imageId comes from external process output, not our own validation — a malicious
             // container could craft its image reference to include shell metacharacters.
-            if (!string.IsNullOrWhiteSpace(imageId) && IsValidDockerIdentifier(imageId))
+            if (!string.IsNullOrWhiteSpace(imageId) && IsValidDockerIdentifier(imageId!))
             {
                 try
                 {

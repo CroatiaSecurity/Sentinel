@@ -67,7 +67,7 @@ namespace Sentinel.Core
             {
                 // Verify the process is legitimately signed
                 var path = ResolveImagePath(pid);
-                if (!string.IsNullOrEmpty(path) && SecurityValidation.VerifyAuthenticodeSignature(path))
+                if (!string.IsNullOrEmpty(path) && SecurityValidation.VerifyAuthenticodeSignature(path!))
                 {
                     // HARDENING: Never exclude Tier1 signals from correlation, even for signed
                     // Electron apps. A supply-chain compromise (e.g., malicious update to Discord,
@@ -77,7 +77,7 @@ namespace Sentinel.Core
                     // and similar high-severity chains.
                     if (signal.Tier != DetectionTier.Tier1Behavioral)
                     {
-                        var existingBuffer = _signalBuffers.GetValueOrDefault(pid);
+                        var existingBuffer = _signalBuffers!.GetValueOrDefault(pid);
                         bool hasExistingSignals = false;
                         if (existingBuffer != null)
                         {

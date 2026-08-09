@@ -389,7 +389,7 @@ namespace Sentinel.Core
                 Confidence = confidence,
                 Tier = DetectionTier.Tier1Behavioral,
                 AuthorizedResponse = response,
-                ProcessName = string.IsNullOrEmpty(resolution.Name) ? "EMPTY_NAME" : resolution.Name,
+                ProcessName = string.IsNullOrEmpty(resolution.Name) ? "EMPTY_NAME" : resolution.Name!,
                 ProcessId = pid,
                 SignalType = mitmGhostCast ? SignalType.NetworkC2 : SignalType.SuspiciousProcess,
                 Metadata = metadata

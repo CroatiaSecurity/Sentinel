@@ -98,7 +98,7 @@ namespace Sentinel.Core
         internal static string? NormalizeVidPid(string? raw)
         {
             if (string.IsNullOrWhiteSpace(raw)) return null;
-            var s = raw.Trim().ToUpperInvariant()
+            var s = raw!.Trim().ToUpperInvariant()
                 .Replace("VID_", "")
                 .Replace("PID_", "")
                 .Replace("&", ":")
@@ -185,7 +185,7 @@ namespace Sentinel.Core
                 return false;
 
             // Exact Windows USB failure substrings (usb.inf device_descriptor_failure etc.)
-            if (name.Contains("Device Descriptor Request Failed"))
+            if (name!.Contains("Device Descriptor Request Failed"))
                 return true;
             if (name.Contains("Device Descriptor Failure"))
                 return true;

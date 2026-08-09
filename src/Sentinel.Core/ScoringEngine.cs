@@ -90,7 +90,7 @@ namespace Sentinel.Core
                             {
                                 var name = (string?)nameProp.GetValue(instance);
                                 if (!string.IsNullOrEmpty(name))
-                                    _registry[name] = attr.Category;
+                                    _registry[name!] = attr.Category;
                             }
                         }
                         catch
@@ -113,7 +113,7 @@ namespace Sentinel.Core
         public static DetectionCategory? Resolve(string? ruleName)
         {
             if (string.IsNullOrEmpty(ruleName)) return null;
-            return _registry.TryGetValue(ruleName, out var category) ? category : null;
+            return _registry.TryGetValue(ruleName!, out var category) ? category : null;
         }
     }
 
@@ -362,7 +362,7 @@ namespace Sentinel.Core
 
             // Fallback: string-pattern matching for composite detections, dynamic rules,
             // and monitor-emitted events that don't map to a rule class.
-            var r = ruleName.ToLowerInvariant();
+            var r = ruleName!.ToLowerInvariant();
             if (r.Contains("beacon")) return DetectionCategory.C2Beaconing;
             if (r.Contains("lsass") || r.Contains("credential") || r.Contains("credtool") || r.Contains("canary")) return DetectionCategory.CredentialDump;
             if (r.Contains("reverse shell") || r.Contains("reverseshell") || r.Contains("c2") || r.Contains("callback")) return DetectionCategory.ReverseShell;

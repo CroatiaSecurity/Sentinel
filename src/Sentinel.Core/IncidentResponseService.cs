@@ -126,18 +126,18 @@ namespace Sentinel.Core
                 {
                     if (SecurityValidation.IsOsCriticalPath(imagePath))
                     {
-                        evidence["QuarantineSkippedOsCritical"] = imagePath;
+                        evidence["QuarantineSkippedOsCritical"] = imagePath!;
                         _logger.LogWarning(
                             "[IncidentResponseService] Refusing quarantine of OS-critical path: {Path}",
                             imagePath);
                     }
                     else if (SecurityValidation.IsGameOrAntiCheatPath(imagePath))
                     {
-                        evidence["QuarantineSkippedGamePath"] = imagePath;
+                        evidence["QuarantineSkippedGamePath"] = imagePath!;
                     }
                     else
                     {
-                        var qPath = await _quarantine.QuarantineFileAtomicAsync(imagePath);
+                        var qPath = await _quarantine.QuarantineFileAtomicAsync(imagePath!);
                         if (qPath != null)
                             evidence["QuarantinedBinary"] = imagePath;
                         else

@@ -12,7 +12,7 @@ namespace Sentinel.Core
 {
     public class QuarantineManager
     {
-        private readonly string _quarantineDir;
+        private readonly string _quarantineDir = null!;
         private static readonly Regex MetadataRegex = new(@"^q_([a-fA-F0-9]+)_([a-zA-Z0-9_\-\s\.]+)$", RegexOptions.Compiled);
 
         /// <summary>v1.8.1 RT-NEW-5: refuse multi-GB in-memory quarantine (OOM / service death).</summary>
@@ -24,7 +24,7 @@ namespace Sentinel.Core
         {
             if (!string.IsNullOrWhiteSpace(customPath))
             {
-                _quarantineDir = customPath;
+                _quarantineDir = customPath!;
             }
             else
             {
@@ -42,7 +42,7 @@ namespace Sentinel.Core
                 }
                 // v1.8.1 RT-NEW-4: lock production quarantine only (not unit-test temp dirs —
                 // SYSTEM+Admins-only ACLs break non-elevated Admin tests under UAC).
-                if (IsProductionQuarantinePath(_quarantineDir))
+                if (IsProductionQuarantinePath(_quarantineDir!))
                     SecureQuarantineDirectory(_quarantineDir);
             }
             catch (UnauthorizedAccessException)
@@ -288,7 +288,7 @@ namespace Sentinel.Core
             // Never restore into OS-critical paths (WRP / System32 / Windows)
             if (string.IsNullOrWhiteSpace(destinationPath) ||
                 SecurityValidation.IsOsCriticalPath(destinationPath) ||
-                destinationPath.Contains(".."))
+                destinationPath!.Contains(".."))
             {
                 throw new InvalidOperationException("Restore denied: destination path is missing, traversal-like, or OS-critical.");
             }

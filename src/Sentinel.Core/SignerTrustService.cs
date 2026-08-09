@@ -50,7 +50,7 @@ namespace Sentinel.Core
             {
                 var path = SecurityValidation.GetProcessImagePath(pid);
                 if (string.IsNullOrEmpty(path)) return false;
-                return IsSignedFile(path);
+                return IsSignedFile(path!);
             }
             catch
             {
@@ -142,7 +142,7 @@ namespace Sentinel.Core
         public double AdjustConfidence(double baseConfidence, string? filePath)
         {
             if (string.IsNullOrEmpty(filePath)) return baseConfidence;
-            if (!IsSignedFile(filePath)) return baseConfidence;
+            if (!IsSignedFile(filePath!)) return baseConfidence;
             return baseConfidence * SignedConfidenceMultiplier;
         }
 
@@ -168,7 +168,7 @@ namespace Sentinel.Core
         public bool IsTrustedProcessByPath(string? imagePath)
         {
             if (string.IsNullOrEmpty(imagePath)) return false;
-            return IsSignedFile(imagePath);
+            return IsSignedFile(imagePath!);
         }
 
         // ── End legacy shims ──

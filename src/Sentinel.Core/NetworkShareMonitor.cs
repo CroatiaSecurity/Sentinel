@@ -204,9 +204,9 @@ namespace Sentinel.Core
 
                     // Determine severity based on what's being shared
                     bool isFullDrive = !string.IsNullOrEmpty(share.Path) &&
-                        share.Path.Length <= 3 && share.Path.IndexOf(':') >= 0;
+                        share.Path!.Length <= 3 && share.Path.IndexOf(':') >= 0;
                     bool isSystemPath = !string.IsNullOrEmpty(share.Path) &&
-                        (share.Path.StartsWith(@"C:\Windows") ||
+                        (share.Path!.StartsWith(@"C:\Windows") ||
                          share.Path.StartsWith(@"C:\Users") ||
                          share.Path.StartsWith(@"C:\Program"));
 

@@ -795,7 +795,7 @@ namespace Sentinel.Core
                         var scriptBlock = record.Properties?.Count > 2
                             ? record.Properties[2]?.Value?.ToString()
                             : null;
-                        if (string.IsNullOrEmpty(scriptBlock) || scriptBlock.Length < 50) continue;
+                        if (string.IsNullOrEmpty(scriptBlock) || scriptBlock!.Length < 50) continue;
 
                         // ─── Download Cradle Detection ───
                         if (DownloadCradleRegex.IsMatch(scriptBlock))

@@ -51,7 +51,9 @@ namespace Sentinel.Core
         private static readonly HttpClient _vtProxyHttpClient = ProxyAuthHelper.CreatePinnedHttpClient(5);
 
         // v2.0.4 LOW-1: Proxy health monitoring — track consecutive failures to alert on degradation
+#pragma warning disable CS0169
         private int _proxyConsecutiveFailures;
+#pragma warning restore CS0169
         private DateTimeOffset _lastProxyHealthAlert = DateTimeOffset.MinValue;
         private const int ProxyHealthAlertThreshold = 10; // Alert after 10 consecutive failures
 
@@ -734,7 +736,7 @@ namespace Sentinel.Core
             {
                 var data = _cacheStore.Load("filerepo", hash);
                 if (string.IsNullOrEmpty(data)) return null;
-                var parts = data.Split('|');
+                var parts = data!.Split('|');
                 if (parts.Length != 3) return null;
                 return new FileReputationResult
                 {
