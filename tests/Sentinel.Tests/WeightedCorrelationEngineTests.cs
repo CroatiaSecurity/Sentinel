@@ -219,16 +219,7 @@ namespace Sentinel.Tests
         }
     }
 
-    public class SelfPathGuardTests
-    {
-        [Fact]
-        public void EmptyPath_NotSelf()
-        {
-            Assert.False(SelfPathGuard.IsSentinelSelfBinary(null));
-            Assert.False(SelfPathGuard.IsSentinelSelfBinary(""));
-            Assert.False(SelfPathGuard.IsUnderInstallDirectory("C:\\Windows\\System32\\cmd.exe"));
-        }
-    }
+    // SelfPathGuardTests moved to dedicated SelfPathGuardTests.cs
 
     public class SentinelMetricsV2Tests
     {
@@ -248,7 +239,7 @@ namespace Sentinel.Tests
             Assert.Equal(1, snap.TelemetryReceived);
             Assert.Equal(1, snap.CompositesEmitted);
             Assert.Equal(1, snap.WeightedCompositesEmitted);
-            Assert.Equal("2.0.0", snap.ProductVersion);
+            Assert.Equal("2.0.3", snap.ProductVersion);
         }
     }
 }

@@ -11,7 +11,7 @@ UninstallDisplayIcon={app}\Sentinel.ico
 Compression=lzma2
 SolidCompression=yes
 OutputDir=.
-OutputBaseFilename=SentinelSetup-2.0.2
+OutputBaseFilename=SentinelSetup-2.0.3
 PrivilegesRequired=admin
 ; One active Setup wizard at a time (elevation handoff still works: non-elevated exits first)
 SetupMutex=Global\SentinelSetupMutex
