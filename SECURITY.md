@@ -4,7 +4,7 @@
 
 | Version | Supported |
 |---------|-----------|
-| 2.0.x   | Yes (current: 2.0.3) |
+| 2.0.x   | Yes (current: 2.0.4) |
 | 1.9.x   | Security fixes only |
 | 1.8.x   | Security fixes only |
 | < 1.8   | No        |
@@ -67,6 +67,9 @@ The following are NOT in scope:
 - **Replay protection:** 60-second timestamp window.
 - **Read-only commands only:** `ping`, `ops`, `health`. No ActiveResponse toggle over IPC.
 - **Pipe ACL:** SYSTEM + Authenticated Users (user session Agent can connect).
+- **v2.0.4:** Server-side nonce tracking prevents replay attacks within the 60s timestamp window.
+- **v2.0.4:** Pipe name includes machine-unique suffix (anti-fingerprinting).
+- **v2.0.4:** Rule packs now use RSA-SHA256 asymmetric signatures (private key never on endpoint).
 - **v2.0.3:** Token file is now written atomically with pre-set ACL to eliminate creation-time race.
 
 ### Signed Rule Packs (`%ProgramData%\Sentinel\rules\packs\`)
@@ -98,6 +101,7 @@ The following are NOT in scope:
 
 See [CHANGELOG.md](CHANGELOG.md) for the full history of security fixes, including:
 
+- v2.0.4: Full red team audit remediation (asymmetric rule pack signing, IPC nonce tracking, EncryptedConfigStore, cert pinning, FIPS enforcement removed)
 - v2.0.3: IPC token ACL race fix (atomic write with pre-set security descriptor)
 - v2.0.0: RT-CRIT-3 HMAC key derivation with DPAPI machine secret, RT-HIGH-2 SelfPathGuard hardlink-aware exclusion, RT-HIGH-4 authenticated named-pipe IPC
 - v1.8.1: RT-CRIT-1 removed cleartext shared secret from request headers, RT-MED-3 restricted ProgramData ACLs

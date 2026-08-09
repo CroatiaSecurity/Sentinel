@@ -34,8 +34,8 @@ namespace Sentinel.Tests
         {
             var cfg = new SentinelConfig();
             Assert.True(cfg.ActiveResponse);
-            // v1.8.6 product: do not force-arm AR over observe-until-chain defaults
-            Assert.False(cfg.EnforceActiveResponse);
+            // v2.0.4: EnforceActiveResponse defaults to true (red team audit CRIT-3)
+            Assert.True(cfg.EnforceActiveResponse);
             Assert.True(cfg.ObserveUntilChain);
             Assert.Equal(15, cfg.MaxKillsPerMinute);
         }

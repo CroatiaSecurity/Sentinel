@@ -200,7 +200,8 @@ namespace Sentinel.Core
         {
             if (input == null) return false;
             if (string.IsNullOrEmpty(input)) return true;
-            foreach (var c in new[] { '<', '>', '\'', '`', '$' })
+            // v2.0.4 MED-2: Added &, ;, |, {, }, (, ) to prevent shell metacharacter injection
+            foreach (var c in new[] { '<', '>', '\'', '`', '$', '&', ';', '|', '{', '}', '(', ')' })
                 if (input.Contains(c)) return false;
             return true;
         }

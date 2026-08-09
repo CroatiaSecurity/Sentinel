@@ -47,7 +47,13 @@ namespace Sentinel.Core
         // Each has appropriate timeout for its target API. Thread-safe, reuses connections.
         private static readonly HttpClient _circlHttpClient = new() { Timeout = TimeSpan.FromSeconds(4) };
         private static readonly HttpClient _mbHttpClient = new() { Timeout = TimeSpan.FromSeconds(3) };
-        private static readonly HttpClient _vtProxyHttpClient = new() { Timeout = TimeSpan.FromSeconds(5) };
+        // v2.0.4 HIGH-3: VT proxy uses certificate-pinned HttpClient
+        private static readonly HttpClient _vtProxyHttpClient = ProxyAuthHelper.CreatePinnedHttpClient(5);
+
+        // v2.0.4 LOW-1: Proxy health monitoring — track consecutive failures to alert on degradation
+        private int _proxyConsecutiveFailures;
+        private DateTimeOffset _lastProxyHealthAlert = DateTimeOffset.MinValue;
+        private const int ProxyHealthAlertThreshold = 10; // Alert after 10 consecutive failures
 
         // Composite score cache: SHA256 → (score, timestamp)
         private readonly ConcurrentDictionary<string, (FileReputationResult Result, DateTimeOffset CachedAt)> _resultCache = new();

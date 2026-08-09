@@ -18,6 +18,13 @@ namespace Sentinel.Service
     {
         public static async Task Main(string[] args)
         {
+            // v2.0.4: Handle --set-config before anything else (CLI config management)
+            if (args.Length >= 2 && args[0].Equals("--set-config", StringComparison.OrdinalIgnoreCase))
+            {
+                HandleSetConfig(args);
+                return;
+            }
+
             // DIAGNOSTIC: Write immediately on process start, before anything else.
             // v1.8.1 RT-MED-3: ensure ProgramData\Sentinel exists with restricted ACLs
             // before any world-readable inherited default can apply to diagnostic files.
@@ -26,14 +33,15 @@ namespace Sentinel.Service
 
             // v1.9.7: work-first by default. RestrictivePortHardening=false means observe-until-malice
             // only — no proactive IPSec/RPC/ASR/service lockdown (ReleaseUserWorkSurface on apply).
+            // v2.0.4: Configuration loaded from compiled defaults + DPAPI-encrypted overrides.
+            // appsettings.json is no longer shipped — eliminates plaintext config tamper surface.
+            // RestrictivePortHardening defaults to false (work-first); override via encrypted config.
             try
             {
-                var earlyCfg = new ConfigurationBuilder()
-                    .SetBasePath(AppContext.BaseDirectory)
-                    .AddJsonFile("appsettings.json", optional: true, reloadOnChange: false)
-                    .Build();
+                var earlyStore = new EncryptedConfigStore();
+                var rhVal = earlyStore.GetOverride("RestrictivePortHardening");
                 HardeningModule.RestrictivePortHardeningEnabled =
-                    earlyCfg.GetSection("Sentinel").GetValue("RestrictivePortHardening", false);
+                    rhVal != null && bool.TryParse(rhVal, out var rh) && rh;
             }
             catch
             {
@@ -86,6 +94,50 @@ namespace Sentinel.Service
             // This prevents the .NET Host's "BackgroundService completed → shutdown" behavior
             // from propagating to a process exit.
             Thread.Sleep(Timeout.Infinite);
+        }
+
+        /// <summary>
+        /// v2.0.4: CLI config management — sets secrets in the DPAPI-encrypted store.
+        /// Usage: Sentinel.Service.exe --set-config Key=Value [Key2=Value2 ...]
+        /// Example: Sentinel.Service.exe --set-config ProxySharedSecret=my-secret-here
+        /// </summary>
+        private static void HandleSetConfig(string[] args)
+        {
+            var store = new EncryptedConfigStore();
+            int count = 0;
+            for (int i = 1; i < args.Length; i++)
+            {
+                var eqIdx = args[i].IndexOf('=');
+                if (eqIdx <= 0)
+                {
+                    Console.Error.WriteLine($"Invalid format: '{args[i]}' — expected Key=Value");
+                    continue;
+                }
+                var key = args[i].Substring(0, eqIdx).Trim();
+                var value = args[i].Substring(eqIdx + 1);
+                if (string.IsNullOrEmpty(value) || value.Equals("null", StringComparison.OrdinalIgnoreCase))
+                {
+                    store.SetOverride(key, null);
+                    Console.WriteLine($"  Removed: {key}");
+                }
+                else
+                {
+                    store.SetOverride(key, value);
+                    Console.WriteLine($"  Set: {key} = ****");
+                }
+                count++;
+            }
+
+            if (count > 0 && store.Save())
+            {
+                Console.WriteLine($"Saved {count} config value(s) to encrypted store.");
+                Console.WriteLine("Restart the Sentinel service for changes to take effect.");
+            }
+            else if (count > 0)
+            {
+                Console.Error.WriteLine("ERROR: Failed to save encrypted config. Run as Administrator/SYSTEM.");
+                Environment.ExitCode = 1;
+            }
         }
 
         /// <summary>
@@ -153,7 +205,8 @@ namespace Sentinel.Service
                         opts.ShutdownTimeout = TimeSpan.FromSeconds(10);
                     });
 
-                    // Configuration
+                    // Configuration — v2.0.4: compiled defaults + DPAPI-encrypted overrides only.
+                    // appsettings.json is retained as optional fallback for migration/dev only.
                     var config = new SentinelConfig();
                     hostContext.Configuration.GetSection("Sentinel").Bind(config);
                     // Keep static hardening flag in sync with bound config (host may re-read settings)
@@ -170,14 +223,15 @@ namespace Sentinel.Service
                     hostContext.Configuration.GetSection("ApplicationIntegrity").Bind(appIntegrityConfig);
                     services.AddSingleton(appIntegrityConfig);
 
+                    // v2.0.4: Apply DPAPI-encrypted config overrides (secrets, per-deployment values)
+                    var encryptedStore = new EncryptedConfigStore();
+                    encryptedStore.ApplyOverrides(config, threatReportingConfig, autoIncidentReportingConfig);
+                    services.AddSingleton(encryptedStore);
+
                     // CLI flag overrides
                     for (int i = 0; i < args.Length; i++)
                     {
-                        if (args[i].Equals("--active-response", StringComparison.OrdinalIgnoreCase))
-                        {
-                            config.ActiveResponse = true;
-                        }
-                        else if ((args[i].Equals("--log", StringComparison.OrdinalIgnoreCase) || args[i].Equals("-l", StringComparison.OrdinalIgnoreCase)) && i + 1 < args.Length)
+                        if ((args[i].Equals("--log", StringComparison.OrdinalIgnoreCase) || args[i].Equals("-l", StringComparison.OrdinalIgnoreCase)) && i + 1 < args.Length)
                         {
                             config.LogPath = args[++i];
                         }

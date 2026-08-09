@@ -63,36 +63,31 @@ namespace Sentinel.Core
         }
 
         /// <summary>
-        /// v1.9.7: Tear down proactive host lockdowns from prior versions so normal work
-        /// (NTLite, RDP, RPC/DISM, File/Print, Office, USB tools, installers) is not blocked.
-        /// Does not force-enable services the user disabled; only removes Sentinel-applied policy.
+        /// v1.9.7 / v2.0.4: Tear down proactive host lockdowns from prior Sentinel versions
+        /// so normal work (NTLite, RDP, RPC/DISM, File/Print, Office, USB tools, installers)
+        /// is not blocked.
+        ///
+        /// v2.0.4 HIGH-5: ONLY removes rules/policies that Sentinel itself created (identified
+        /// by Sentinel-specific naming conventions). Never modifies RemoteRegistry or other
+        /// system service states that may have been set by the organization's sysadmin.
         /// </summary>
         public static void ReleaseUserWorkSurface()
         {
             try
             {
-                // IPSec GSecurity (blocked ports / broke some stacks)
+                // IPSec GSecurity — Sentinel-created policy (identified by name "GSecurity")
                 RemoveIPSecPolicyIfPresent();
 
-                // Inbound RPC ephemeral block (LAN lateral — also hostile to some admin tools)
+                // Inbound RPC ephemeral block — Sentinel-created (identified by prefix "Sentinel-")
                 RemoveFirewallRuleByName("Sentinel-Block-Remote-RPC-Ephemeral");
 
-                // ASR Block rules we wrote under Policy hive (break installers / Office / USB tools)
+                // ASR Block rules Sentinel wrote under Policy hive (identified by known GUIDs)
                 ReleaseAsrBlockPolicy();
 
-                // Undo RemoteRegistry=Disabled from older builds (Start=4). Manual(3) is safe default.
-                try
-                {
-                    using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(
-                        @"SYSTEM\CurrentControlSet\Services\RemoteRegistry", writable: true);
-                    if (key != null)
-                    {
-                        var start = key.GetValue("Start");
-                        if (start is int s && s == 4)
-                            key.SetValue("Start", 3, Microsoft.Win32.RegistryValueKind.DWord);
-                    }
-                }
-                catch { /* ignore */ }
+                // v2.0.4 HIGH-5: Removed RemoteRegistry re-enablement. Sentinel must not
+                // modify system service states it didn't set. If an admin disabled RemoteRegistry,
+                // Sentinel should not override that decision. Only Sentinel-created artifacts
+                // (IPSec "GSecurity", "Sentinel-*" firewall rules, known ASR GUIDs) are removed.
 
                 // Keep install-dir exclusions only (safe for upgrades)
                 ApplyAsrOnlyExclusions();

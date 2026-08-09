@@ -1,6 +1,6 @@
 [Setup]
 AppName=Sentinel
-AppVersion=2.0.3
+AppVersion=2.0.4
 AppPublisher=Gorstak
 AppPublisherURL=https://gorstak.eu
 SourceDir=.
@@ -11,7 +11,7 @@ UninstallDisplayIcon={app}\Sentinel.ico
 Compression=lzma2
 SolidCompression=yes
 OutputDir=.
-OutputBaseFilename=SentinelSetup-2.0.3
+OutputBaseFilename=SentinelSetup-2.0.4
 PrivilegesRequired=admin
 ; One active Setup wizard at a time (elevation handoff still works: non-elevated exits first)
 SetupMutex=Global\SentinelSetupMutex
@@ -26,8 +26,8 @@ RestartApplications=no
 Source: "assets\Sentinel.ico"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\publish\service\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\publish\agent\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
-; Never overwrite user customizations on upgrade
-Source: "..\publish\service\appsettings.json"; DestDir: "{app}"; Flags: onlyifdoesntexist
+; v2.0.4: appsettings.json is no longer shipped — config uses compiled defaults + DPAPI-encrypted store.
+; If the file exists from a prior install, it is ignored (but detected as suspicious by AntiTamperGuard).
 
 [Icons]
 Name: "{group}\Sentinel Agent"; Filename: "{app}\Sentinel.Agent.exe"; IconFilename: "{app}\Sentinel.ico"
@@ -38,9 +38,9 @@ Root: HKLM; Subkey: "SOFTWARE\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 ; v1.4.2: Register service for Safe Mode (both Minimal and Network)
 Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Control\SafeBoot\Minimal\Sentinel"; ValueType: string; ValueName: ""; ValueData: "Service"; Flags: uninsdeletekey
 Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Control\SafeBoot\Network\Sentinel"; ValueType: string; ValueName: ""; ValueData: "Service"; Flags: uninsdeletekey
-; Disable FIPS Algorithm Policy
-Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Control\Lsa\FipsAlgorithmPolicy"; ValueType: dword; ValueName: "Enabled"; ValueData: 0
-Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Control\Lsa"; ValueType: dword; ValueName: "FipsAlgorithmPolicy"; ValueData: 0
+; v2.0.4 HIGH-4: Removed FIPS Algorithm Policy manipulation. An EDR must not weaken
+; system cryptographic posture. Organizations with FIPS compliance (FedRAMP, HIPAA, DoD)
+; should not have their policy overridden by security tooling.
 
 [Run]
 ; Clean up .old files from rename-on-upgrade fallback (ignore failures — silent)

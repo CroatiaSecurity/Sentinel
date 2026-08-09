@@ -30,6 +30,34 @@ namespace Sentinel.Core
         public const string ProtocolVersion = "2.0";
         private static readonly TimeSpan MaxSkew = TimeSpan.FromSeconds(60);
 
+        /// <summary>v2.0.4: Expose MaxSkew for nonce pruning in IpcHost.</summary>
+        internal static TimeSpan MaxSkewInternal => MaxSkew;
+
+        // v2.0.4 MED-5: Instance-unique pipe name suffix derived from machine GUID.
+        // Prevents fingerprinting via static pipe name while remaining consistent across reboots.
+        private static readonly Lazy<string> _instancePipeName = new(() =>
+        {
+            try
+            {
+                using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(
+                    @"SOFTWARE\Microsoft\Cryptography");
+                var guid = key?.GetValue("MachineGuid")?.ToString() ?? "";
+                if (!string.IsNullOrEmpty(guid))
+                {
+                    using var sha = SHA256.Create();
+                    var hash = sha.ComputeHash(Encoding.UTF8.GetBytes(guid + "-SentinelIpc"));
+                    return PipeName + "-" + BitConverter.ToString(hash, 0, 4).Replace("-", "").ToLowerInvariant();
+                }
+            }
+            catch { }
+            return PipeName;
+        });
+
+        /// <summary>
+        /// v2.0.4: Returns machine-specific pipe name (static base + 8-char hex suffix from MachineGuid).
+        /// </summary>
+        public static string InstancePipeName => _instancePipeName.Value;
+
         public static string TokenPath
         {
             get
@@ -179,7 +207,11 @@ namespace Sentinel.Core
 
                 dirInfo.SetAccessControl(security);
             }
-            catch { /* best effort — LockTokenAcl is the final guard */ }
+            catch (Exception ex)
+            {
+                // v2.0.4 LOW-2: Log ACL failures instead of silently swallowing
+                System.Diagnostics.Debug.WriteLine($"[ServiceAgentIpc] LockDirectoryAcl failed: {ex.Message}");
+            }
         }
 
         /// <summary>
@@ -209,7 +241,11 @@ namespace Sentinel.Core
 
                 fi.SetAccessControl(security);
             }
-            catch { }
+            catch (Exception ex)
+            {
+                // v2.0.4 LOW-2: Log ACL failures in security-critical paths instead of swallowing
+                System.Diagnostics.Debug.WriteLine($"[ServiceAgentIpc] LockTokenAcl failed for '{path}': {ex.Message}");
+            }
         }
 
         public static string Sign(byte[] token, string payload)
@@ -249,6 +285,12 @@ namespace Sentinel.Core
         private readonly ILogger<ServiceAgentIpcHost> _logger;
         private byte[] _token = Array.Empty<byte>();
 
+        // v2.0.4 CRIT-1: Server-side nonce tracking to prevent replay attacks within the 60s window.
+        // Bounded to MaxNonceEntries; oldest entries pruned when capacity reached.
+        private const int MaxNonceEntries = 2048;
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<string, long> _usedNonces = new();
+        private long _lastNoncePruneTs;
+
         public ServiceAgentIpcHost(
             SentinelMetrics metrics,
             WeightedCorrelationConfig weighted,
@@ -268,7 +310,7 @@ namespace Sentinel.Core
             try
             {
                 _token = ServiceAgentIpc.EnsureServerToken();
-                _logger.LogInformation("[IPC] Named pipe host ready ({Pipe})", ServiceAgentIpc.PipeName);
+                _logger.LogInformation("[IPC] Named pipe host ready ({Pipe})", ServiceAgentIpc.InstancePipeName);
             }
             catch (Exception ex)
             {
@@ -313,7 +355,7 @@ namespace Sentinel.Core
                 authUsers, PipeAccessRights.ReadWrite, AccessControlType.Allow));
 
             return new NamedPipeServerStream(
-                ServiceAgentIpc.PipeName,
+                ServiceAgentIpc.InstancePipeName,
                 PipeDirection.InOut,
                 2,
                 PipeTransmissionMode.Byte,
@@ -356,6 +398,13 @@ namespace Sentinel.Core
                 if (!ServiceAgentIpc.Verify(_token, payload, sig))
                 {
                     await writer.WriteLineAsync("{\"ok\":false,\"error\":\"auth_sig\"}").ConfigureAwait(false);
+                    return;
+                }
+
+                // v2.0.4 CRIT-1: Reject replayed nonces within the timestamp window.
+                if (!TryConsumeNonce(nonce, ts))
+                {
+                    await writer.WriteLineAsync("{\"ok\":false,\"error\":\"auth_replay\"}").ConfigureAwait(false);
                     return;
                 }
 
@@ -411,6 +460,39 @@ namespace Sentinel.Core
                 await writer.WriteLineAsync("{\"ok\":false,\"error\":\"bad_request\"}").ConfigureAwait(false);
             }
         }
+
+        /// <summary>
+        /// v2.0.4 CRIT-1: Returns true if the nonce has not been seen before within the replay window.
+        /// Prunes expired entries periodically to bound memory.
+        /// </summary>
+        private bool TryConsumeNonce(string nonce, long requestTs)
+        {
+            // Try to add the nonce; if it already exists, it's a replay
+            if (!_usedNonces.TryAdd(nonce, requestTs))
+                return false;
+
+            // Periodic pruning: remove nonces older than MaxSkew window
+            var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            var lastPrune = Interlocked.Read(ref _lastNoncePruneTs);
+            if (now - lastPrune > 30 && Interlocked.CompareExchange(ref _lastNoncePruneTs, now, lastPrune) == lastPrune)
+            {
+                var cutoff = now - (long)ServiceAgentIpc.MaxSkewInternal.TotalSeconds;
+                foreach (var kvp in _usedNonces)
+                {
+                    if (kvp.Value < cutoff)
+                        _usedNonces.TryRemove(kvp.Key, out _);
+                }
+                // Hard cap to prevent unbounded growth under DoS
+                if (_usedNonces.Count > MaxNonceEntries)
+                {
+                    var oldest = _usedNonces.OrderBy(x => x.Value).Take(_usedNonces.Count - MaxNonceEntries);
+                    foreach (var kvp in oldest)
+                        _usedNonces.TryRemove(kvp.Key, out _);
+                }
+            }
+
+            return true;
+        }
     }
 
     /// <summary>Agent-side client (user session).</summary>
@@ -424,7 +506,7 @@ namespace Sentinel.Core
             try
             {
                 using var pipe = new NamedPipeClientStream(
-                    ".", ServiceAgentIpc.PipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+                    ".", ServiceAgentIpc.InstancePipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
                 var connectTask = pipe.ConnectAsync(timeoutMs);
                 await connectTask.ConfigureAwait(false);
                 if (!pipe.IsConnected) return null;

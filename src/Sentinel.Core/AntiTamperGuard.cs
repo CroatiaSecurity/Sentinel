@@ -120,8 +120,8 @@ namespace Sentinel.Core
             QueryPerformanceFrequency(out _perfFrequency);
             QueryPerformanceCounter(out _lastPerfCount);
 
-            // v1.6.0: Capture initial appsettings hash for integrity monitoring
-            _appsettingsHash = TryHashAppsettings();
+            // v2.0.4: Capture initial encrypted config hash for integrity monitoring
+            _appsettingsHash = TryHashEncryptedConfig();
         }
 
         public override Task StartAsync(CancellationToken cancellationToken)
@@ -142,26 +142,13 @@ namespace Sentinel.Core
         }
 
         /// <summary>
-        /// v1.6.0: If ActiveResponse is false when the service starts (e.g. appsettings edited
-        /// then reboot), force it back on when EnforceActiveResponse is true.
-        /// Alert is deferred to first integrity tick so DetectionEngine is fully online.
+        /// v2.0.4: ActiveResponse is always true (compile-time constant). This method is now a no-op
+        /// retained for structural compatibility. The property cannot be disabled.
         /// </summary>
         private void EnforceActiveResponseAtStartup()
         {
-            if (!_config.EnforceActiveResponse)
-            {
-                _logger.LogWarning("[AntiTamperGuard] EnforceActiveResponse=false — observation mode; ActiveResponse will not be force-enabled.");
-                return;
-            }
-
-            if (!_config.ActiveResponse)
-            {
-                _logger.LogCritical("[AntiTamperGuard] ActiveResponse was FALSE at startup — force-enabling (v1.6.0 boot integrity).");
-                _config.ActiveResponse = true;
-                _bootActiveResponseForcePending = true; // emit detection on first integrity check
-            }
-
-            _activeResponseLastKnown = _config.ActiveResponse;
+            // v2.0.4: ActiveResponse has no off switch — nothing to enforce.
+            _activeResponseLastKnown = true;
         }
 
         public override void Dispose()
@@ -260,7 +247,8 @@ namespace Sentinel.Core
                         await CheckActiveResponseConfig();
                         await CheckAppsettingsIntegrity();
                         await CheckAndEnforceQosPolicies();
-                        EnforceFipsDisabled();
+                        // v2.0.4 HIGH-4: Removed EnforceFipsDisabled() — an EDR must not
+                        // weaken system cryptographic posture.
                     }
                 }
                 catch (OperationCanceledException) { break; }
@@ -300,73 +288,14 @@ namespace Sentinel.Core
         }
 
         /// <summary>
-        /// HARDENING v1.5.9 + v1.6.0: Detects when ActiveResponse is disabled.
-        ///
-        /// v1.5.9: true→false transition at runtime → alert + force re-enable.
-        /// v1.6.0: Also handles boot-time false (appsettings edit + restart) and
-        /// any check where ActiveResponse is false while EnforceActiveResponse is true.
-        /// Alert is LogOnly so it always fires even if ActiveResponse was off.
+        /// v2.0.4: ActiveResponse is a compile-time constant (always true). This check is now
+        /// a no-op. Retained as a stub for structural compatibility with the tick loop.
         /// </summary>
-        private async Task CheckActiveResponseConfig()
+        private Task CheckActiveResponseConfig()
         {
-            if (!_config.EnforceActiveResponse)
-            {
-                _activeResponseLastKnown = _config.ActiveResponse;
-                return;
-            }
-
-            bool current = _config.ActiveResponse;
-
-            // Runtime true→false transition
-            bool runtimeTransition = _activeResponseLastKnown && !current;
-            // Sticky false while enforce is on (any time ActiveResponse is off)
-            bool stickyFalse = !current;
-            // Boot path: force already applied in StartAsync; still need to alert once
-            bool bootPending = _bootActiveResponseForcePending && !_bootActiveResponseAlerted;
-
-            if (runtimeTransition || stickyFalse)
-            {
-                _config.ActiveResponse = true;
-                _logger.LogCritical("[AntiTamperGuard] CRITICAL: ActiveResponse was DISABLED — force re-enabled (v1.6.0).");
-            }
-
-            if (runtimeTransition || bootPending)
-            {
-                string tamperType = bootPending && !runtimeTransition
-                    ? "ActiveResponseDisabledAtBoot"
-                    : "ActiveResponseDisabled";
-
-                await _detectionEngine.EmitAsync(new DetectionEvent
-                {
-                    RuleName = "Anti-Tamper: ActiveResponse Disabled",
-                    Evidence = bootPending && !runtimeTransition
-                        ? "SentinelConfig.ActiveResponse was false at startup (appsettings/reboot tamper). Force-enabled."
-                        : "SentinelConfig.ActiveResponse changed from true to false at runtime. Force-enabled.",
-                    Reasoning = "The ActiveResponse flag was off, which would neutralize kill/quarantine/isolate. " +
-                                "This is treated as high-confidence configuration tampering.",
-                    Confidence = 0.99,
-                    Tier = DetectionTier.Tier1Behavioral,
-                    AuthorizedResponse = ResponseAction.LogOnly,
-                    ProcessName = "SYSTEM",
-                    ProcessId = 0,
-                    SignalType = SignalType.AntiTamper,
-                    Metadata = new Dictionary<string, string>
-                    {
-                        ["TamperType"] = tamperType,
-                        ["PreviousState"] = _activeResponseLastKnown.ToString(),
-                        ["CurrentState"] = "false",
-                        ["ForcedState"] = "true"
-                    }
-                });
-
-                if (bootPending)
-                {
-                    _bootActiveResponseAlerted = true;
-                    _bootActiveResponseForcePending = false;
-                }
-            }
-
-            _activeResponseLastKnown = _config.ActiveResponse;
+            // v2.0.4: ActiveResponse has no off switch — nothing to check.
+            _activeResponseLastKnown = true;
+            return Task.CompletedTask;
         }
 
         /// <summary>
@@ -376,9 +305,40 @@ namespace Sentinel.Core
         /// </summary>
         private async Task CheckAppsettingsIntegrity()
         {
+            // v2.0.4: Monitor encrypted config store instead of plaintext appsettings.json.
+            // If appsettings.json exists on disk (leftover from upgrade or attacker plant),
+            // detect that as suspicious. The encrypted config.enc is the authoritative source.
             try
             {
-                var currentHash = TryHashAppsettings();
+                // Alert if appsettings.json appears on disk (should not exist in v2.0.4+)
+                var appsettingsPath = Path.Combine(AppContext.BaseDirectory, "appsettings.json");
+                if (File.Exists(appsettingsPath) && !_appsettingsTamperAlerted)
+                {
+                    _appsettingsTamperAlerted = true;
+                    _logger.LogWarning("[AntiTamperGuard] appsettings.json found on disk — this file should not exist in v2.0.4+. Possible tamper/downgrade attempt.");
+                    await _detectionEngine.EmitAsync(new DetectionEvent
+                    {
+                        RuleName = "Anti-Tamper: Unauthorized appsettings.json",
+                        Evidence = "appsettings.json exists in install directory. v2.0.4+ uses DPAPI-encrypted config only.",
+                        Reasoning = "The plaintext configuration file appsettings.json was found on disk. " +
+                                    "Since v2.0.4, Sentinel uses compiled defaults + DPAPI-encrypted config store. " +
+                                    "An attacker may have planted this file to inject malicious configuration on next restart.",
+                        Confidence = 0.85,
+                        Tier = DetectionTier.Tier1Behavioral,
+                        AuthorizedResponse = ResponseAction.LogOnly,
+                        ProcessName = "SYSTEM",
+                        ProcessId = 0,
+                        SignalType = SignalType.AntiTamper,
+                        Metadata = new Dictionary<string, string>
+                        {
+                            ["TamperType"] = "UnauthorizedAppsettingsJson",
+                            ["FilePath"] = appsettingsPath
+                        }
+                    });
+                }
+
+                // Monitor encrypted config store integrity
+                var currentHash = TryHashEncryptedConfig();
                 if (currentHash == null) return;
 
                 if (_appsettingsHash == null)
@@ -389,51 +349,42 @@ namespace Sentinel.Core
 
                 if (!string.Equals(_appsettingsHash, currentHash))
                 {
-                    _logger.LogWarning("[AntiTamperGuard] appsettings.json hash changed (config file modified on disk).");
+                    _logger.LogWarning("[AntiTamperGuard] config.enc hash changed (encrypted config modified on disk).");
 
-                    if (_config.EnforceActiveResponse && !_config.ActiveResponse)
-                        _config.ActiveResponse = true;
-
-                    if (!_appsettingsTamperAlerted)
+                    await _detectionEngine.EmitAsync(new DetectionEvent
                     {
-                        _appsettingsTamperAlerted = true;
-                        await _detectionEngine.EmitAsync(new DetectionEvent
+                        RuleName = "Anti-Tamper: Encrypted Config Modified",
+                        Evidence = $"config.enc hash changed from {_appsettingsHash[..Math.Min(16, _appsettingsHash.Length)]}... to {currentHash[..Math.Min(16, currentHash.Length)]}...",
+                        Reasoning = "Sentinel DPAPI-encrypted configuration was modified while the service is running. " +
+                                    "If not initiated by an administrator via --set-config, this may indicate tampering.",
+                        Confidence = 0.80,
+                        Tier = DetectionTier.Tier1Behavioral,
+                        AuthorizedResponse = ResponseAction.LogOnly,
+                        ProcessName = "SYSTEM",
+                        ProcessId = 0,
+                        SignalType = SignalType.AntiTamper,
+                        Metadata = new Dictionary<string, string>
                         {
-                            RuleName = "Anti-Tamper: appsettings.json Modified",
-                            Evidence = $"appsettings.json content hash changed from {_appsettingsHash[..Math.Min(16, _appsettingsHash.Length)]}… to {currentHash[..Math.Min(16, currentHash.Length)]}…",
-                            Reasoning = "Sentinel configuration file was modified while the service is running. " +
-                                        "This may indicate an attacker disabling ActiveResponse or altering watch paths.",
-                            Confidence = 0.90,
-                            Tier = DetectionTier.Tier1Behavioral,
-                            AuthorizedResponse = ResponseAction.LogOnly,
-                            ProcessName = "SYSTEM",
-                            ProcessId = 0,
-                            SignalType = SignalType.AntiTamper,
-                            Metadata = new Dictionary<string, string>
-                            {
-                                ["TamperType"] = "AppsettingsModified",
-                                ["PreviousHashPrefix"] = _appsettingsHash[..Math.Min(16, _appsettingsHash.Length)],
-                                ["CurrentHashPrefix"] = currentHash[..Math.Min(16, currentHash.Length)]
-                            }
-                        });
-                    }
+                            ["TamperType"] = "EncryptedConfigModified",
+                            ["PreviousHashPrefix"] = _appsettingsHash[..Math.Min(16, _appsettingsHash.Length)],
+                            ["CurrentHashPrefix"] = currentHash[..Math.Min(16, currentHash.Length)]
+                        }
+                    });
 
-                    // Accept new baseline so we alert again only on the next change
                     _appsettingsHash = currentHash;
-                    _appsettingsTamperAlerted = false;
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogDebug(ex, "[AntiTamperGuard] Appsettings integrity check failed");
+                _logger.LogDebug(ex, "[AntiTamperGuard] Config integrity check failed");
             }
         }
 
-        private static string? TryHashAppsettings()
+        private static string? TryHashEncryptedConfig()
         {
             try
             {
-                var path = Path.Combine(AppContext.BaseDirectory, "appsettings.json");
+                var path = EncryptedConfigStore.DefaultConfigPath;
                 if (!File.Exists(path)) return null;
                 var bytes = File.ReadAllBytes(path);
                 return ConvertHex.ToHexString(System.Security.Cryptography.Sha256Net48.HashData(bytes));
@@ -587,90 +538,6 @@ namespace Sentinel.Core
             catch (Exception ex)
             {
                 _logger.LogDebug(ex, "[AntiTamperGuard] Error checking QoS policies");
-            }
-        }
-
-        /// <summary>
-        /// v1.5.4: Self-healing enforcement of FIPS Algorithm Policy = Disabled.
-        /// 
-        /// Windows Group Policy Client (gpsvc) refreshes security policy every 90-120 minutes.
-        /// If the local security database or a domain GPO has FIPS enabled, it overwrites 
-        /// Sentinel's registry disable. This method detects and re-disables FIPS every check
-        /// cycle (10s), and additionally uses secedit to override the security database so the
-        /// fix persists across GP refresh cycles.
-        /// </summary>
-        private void EnforceFipsDisabled()
-        {
-            try
-            {
-                // Check the primary FIPS registry value
-                using var fipsKey = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(
-                    @"SYSTEM\CurrentControlSet\Control\Lsa\FipsAlgorithmPolicy", true);
-                if (fipsKey != null)
-                {
-                    var val = fipsKey.GetValue("Enabled");
-                    if (val is int intVal && intVal != 0)
-                    {
-                        // FIPS was re-enabled (likely by Group Policy refresh) — disable it
-                        fipsKey.SetValue("Enabled", 0, Microsoft.Win32.RegistryValueKind.DWord);
-                        _logger.LogWarning("[AntiTamperGuard] FIPS Algorithm Policy was re-enabled (likely by Group Policy). Disabled it.");
-
-                        // Also override the local security database so the next GP refresh
-                        // doesn't re-enable it again. This writes directly to secedit.sdb.
-                        ApplyFipsSecurityDatabaseOverride();
-                    }
-                }
-
-                // Also check the legacy flat value
-                using var lsaKey = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(
-                    @"SYSTEM\CurrentControlSet\Control\Lsa", true);
-                if (lsaKey != null)
-                {
-                    var val = lsaKey.GetValue("FipsAlgorithmPolicy");
-                    if (val is int intVal && intVal != 0)
-                    {
-                        lsaKey.SetValue("FipsAlgorithmPolicy", 0, Microsoft.Win32.RegistryValueKind.DWord);
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogDebug(ex, "[AntiTamperGuard] Error enforcing FIPS disabled");
-            }
-        }
-
-        /// <summary>
-        /// Applies FIPS=0 to the local security policy database via secedit.
-        /// This makes the setting authoritative so Group Policy refresh won't override it
-        /// (unless a domain GPO explicitly forces it, which overrides local policy).
-        /// </summary>
-        private void ApplyFipsSecurityDatabaseOverride()
-        {
-            try
-            {
-                var tempDir = Path.Combine(Path.GetTempPath(), "SentinelFips");
-                Directory.CreateDirectory(tempDir);
-                var infPath = Path.Combine(tempDir, "fips_off.inf");
-
-                var infContent = "[Unicode]\r\nUnicode=yes\r\n[Version]\r\nsignature=\"$CHICAGO$\"\r\n[Registry Values]\r\nMACHINE\\System\\CurrentControlSet\\Control\\Lsa\\FIPSAlgorithmPolicy\\Enabled=4,0\r\n";
-                File.WriteAllText(infPath, infContent, System.Text.Encoding.Unicode);
-
-                var psi = new ProcessStartInfo("secedit.exe",
-                    $"/configure /db secedit.sdb /cfg \"{infPath}\" /areas SECURITYPOLICY /quiet")
-                {
-                    CreateNoWindow = true,
-                    UseShellExecute = false,
-                    WorkingDirectory = tempDir
-                };
-                using var proc = Process.Start(psi);
-                proc?.WaitForExit(10000);
-
-                // Cleanup
-                try { File.Delete(infPath); Directory.Delete(tempDir); } catch { }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogDebug(ex, "[AntiTamperGuard] secedit FIPS override failed — registry-only enforcement active");
             }
         }
 

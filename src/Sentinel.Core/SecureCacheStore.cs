@@ -179,9 +179,26 @@ namespace Sentinel.Core
                 // Fail-soft: older installs without secret still derive from entropy+GUID
             }
 
-            // 4. Domain-specific label to derive a unique key for cache HMAC
+            // 4. v2.0.4 HIGH-1: Process-specific entropy — SHA-256 of our own executable.
+            // Even if an attacker achieves SYSTEM, they cannot forge cache entries without
+            // also having access to the exact Sentinel binary that generated the key.
+            // This binds the HMAC key to the specific Sentinel build/version.
+            try
+            {
+                var ownExe = System.Net48Environment.ProcessPath;
+                if (!string.IsNullOrEmpty(ownExe) && File.Exists(ownExe))
+                {
+                    using var exeStream = new FileStream(ownExe, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                    using var sha = SHA256.Create();
+                    var exeHash = sha.ComputeHash(exeStream);
+                    ms.Write(exeHash, 0, exeHash.Length);
+                }
+            }
+            catch { }
+
+            // 5. Domain-specific label to derive a unique key for cache HMAC
             // (prevents reuse of this key material for other purposes)
-            ms.Write(Encoding.UTF8.GetBytes("sentinel-secure-cache-hmac-v3"));
+            ms.Write(Encoding.UTF8.GetBytes("sentinel-secure-cache-hmac-v4"));
 
             return System.Security.Cryptography.Sha256Net48.HashData(ms.ToArray());
         }

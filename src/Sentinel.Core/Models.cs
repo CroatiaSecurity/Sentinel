@@ -90,7 +90,16 @@ namespace Sentinel.Core
 
     public class SentinelConfig
     {
-        public bool ActiveResponse { get; set; } = true;
+        /// <summary>
+        /// v2.0.4: ActiveResponse is always true. The setter is retained for deserialization
+        /// compatibility but silently ignores attempts to set it to false.
+        /// There is no way to disable response actions from configuration.
+        /// </summary>
+        public bool ActiveResponse
+        {
+            get => true; // Always armed — no off switch
+            set { } // No-op: cannot be disabled
+        }
         public string? LogPath { get; set; }
         public string? WatchPath { get; set; }
         /// <summary>
@@ -133,9 +142,12 @@ namespace Sentinel.Core
 
         /// <summary>
         /// When true, ActiveResponse=false at startup is treated as tampering and force re-enabled.
-        /// Default false: observe-until-chain is the product posture; operators may disable AR.
+        /// <summary>
+        /// v2.0.4: Removed. ActiveResponse is now always true (no off switch).
+        /// This property is retained as a no-op for deserialization compatibility only.
         /// </summary>
-        public bool EnforceActiveResponse { get; set; } = false;
+        [System.Obsolete("v2.0.4: ActiveResponse cannot be disabled. This property is a no-op.")]
+        public bool EnforceActiveResponse { get; set; } = true;
 
         /// <summary>
         /// When true (default): all monitors log only until a multi-signal chain points at a
@@ -318,8 +330,9 @@ namespace Sentinel.Core
         /// URL of the Cloudflare Worker proxy that holds API keys server-side.
         /// When set, reports go to this endpoint instead of directly to abuse.ch.
         /// This allows open-source distribution without leaking API keys.
+        /// v2.0.4: Default endpoint compiled into binary (no appsettings.json dependency).
         /// </summary>
-        public string? ProxyEndpoint { get; set; }
+        public string? ProxyEndpoint { get; set; } = "https://sentinel-threat-proxy.znastidobrostoje-6ee.workers.dev";
 
         /// <summary>
         /// v1.6.0: Shared secret matching Worker env SENTINEL_SHARED_SECRET.

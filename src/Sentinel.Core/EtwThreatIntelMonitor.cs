@@ -12,6 +12,13 @@ namespace Sentinel.Core
     /// <summary>
     /// Thread-start and unbacked RWX injection scanner.
     /// Uses <see cref="NativeProcessMemory"/> (dynamic APIs). Skips game/anti-cheat paths only.
+    ///
+    /// KNOWN LIMITATION (v2.0.4 LOW-4): Process hollowing where an attacker overwrites the
+    /// .text section of a legitimate signed binary without changing memory type (remains MEM_IMAGE)
+    /// will NOT be detected by unbacked-RWX scanning. The Authenticode check on-disk will pass
+    /// since the file is genuine. Detection relies on behavioral signals from other monitors
+    /// (credential access, C2 beaconing, etc.) that feed into the correlation engine.
+    /// Partial mitigation: memory-mapped section hash comparison (future work).
     /// </summary>
     public sealed class EtwThreatIntelMonitor : IMonitor, IDisposable
     {

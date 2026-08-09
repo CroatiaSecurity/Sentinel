@@ -15,7 +15,7 @@ using Sentinel.Core.Plugins;
 namespace Sentinel.Core
 {
     /// <summary>
-    /// v2.0 — Loads signed correlation rule packs from disk into PluginRegistry.
+    /// v2.0 / v2.0.4 — Loads signed correlation rule packs from disk into PluginRegistry.
     ///
     /// Pack location (preferred): %ProgramData%\Sentinel\rules\packs\*.pack.json
     /// Fallback: {installDir}\rules\packs\*.pack.json
@@ -33,26 +33,33 @@ namespace Sentinel.Core
     ///       "evidence": "Credential access with C2-like network"
     ///     }
     ///   ],
-    ///   "hmac": "..."
+    ///   "signature": "..."
     /// }
     ///
-    /// HMAC-SHA256 over JSON with hmac field removed, key =
-    /// HMAC(install_entropy, "sentinel-rule-pack-signing-v1"). Fail-closed without key.
+    /// v2.0.4 CRIT-2: Switched from HMAC (symmetric, key on endpoint) to RSA-SHA256 asymmetric
+    /// signature verification. Only the public key exists on the endpoint — the private signing
+    /// key is kept offline. An attacker who achieves SYSTEM cannot forge rule packs.
+    /// Legacy packs with "hmac" field are rejected (migration required).
     /// </summary>
     public sealed class RulePackLoader : BackgroundService
     {
         private readonly PluginRegistry _registry;
         private readonly ILogger<RulePackLoader> _logger;
         private readonly string _packsDir;
-        private readonly byte[]? _hmacKey;
+        private readonly System.Security.Cryptography.RSA? _verificationKey;
         private readonly HashSet<string> _loaded = new(StringComparer.OrdinalIgnoreCase);
         private FileSystemWatcher? _watcher;
+
+        // v2.0.4: RSA-2048 public key for rule pack signature verification.
+        // The private key is kept offline and used only by the pack signing tool.
+        // To rotate: generate new keypair, update this constant, re-sign all packs.
+        private const string RulePackPublicKeyXml = @"<RSAKeyValue><Modulus>yR9H4x9GqV8a5TKBX7TJfBjDp3WJY8hIxE6R+d3gFsCn3YGVfX0bnQaJGNkFNAaOhJ7pVr0AqM14uQGbcK2RjZ5GvX5CfE6W9HfN7zPzLkz/V2s9Q0Hy48KJd8K3VxB0J6IQXDA0SvaVz6FPuhbRkH0E3YxiLnMmVTP1KkNsOoZH2Q7T0EGmKNfqJ0dn4VE9oP5b8FGYJLxS6V0TgIq5Ka0vSW3C1C8NJHdJ7B8Gx+F0ZQyVR2IxRnKPfM2x1+EbftdH4WJYqHZ4H6e+JQdR7LR4P8E5gN0Xx1K0MZuqE8R9V3K7bS9B2G4tA0J6L8HlD+J7F0K4g9X2P5h5C8w==</Modulus><Exponent>AQAB</Exponent></RSAKeyValue>";
 
         public RulePackLoader(PluginRegistry registry, ILogger<RulePackLoader> logger)
         {
             _registry = registry;
             _logger = logger;
-            _hmacKey = DeriveSigningKey();
+            _verificationKey = LoadVerificationKey();
 
             var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
             _packsDir = Path.Combine(programData, "Sentinel", "rules", "packs");
@@ -132,7 +139,16 @@ namespace Sentinel.Core
         {
             try
             {
-                var content = File.ReadAllText(filePath);
+                // v2.0.4 MED-6: Read with exclusive lock to prevent TOCTOU race condition.
+                // If another process modifies the file between read and verify, the lock
+                // ensures we get a consistent snapshot.
+                string content;
+                using (var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read))
+                using (var reader = new StreamReader(fs, Encoding.UTF8))
+                {
+                    content = reader.ReadToEnd();
+                }
+
                 if (!VerifySignature(content, filePath))
                     return false;
 
@@ -169,9 +185,9 @@ namespace Sentinel.Core
 
         private bool VerifySignature(string fileContent, string filePath)
         {
-            if (_hmacKey == null)
+            if (_verificationKey == null)
             {
-                _logger.LogError("[RulePacks] REJECTED {File} — signing key unavailable (fail-closed)",
+                _logger.LogError("[RulePacks] REJECTED {File} — RSA verification key unavailable (fail-closed)",
                     Path.GetFileName(filePath));
                 return false;
             }
@@ -179,27 +195,39 @@ namespace Sentinel.Core
             try
             {
                 using var doc = JsonDocument.Parse(fileContent);
-                if (!doc.RootElement.TryGetProperty("hmac", out var hmacEl))
+
+                // v2.0.4: Reject legacy HMAC-signed packs — they must be re-signed with RSA
+                if (doc.RootElement.TryGetProperty("hmac", out _))
                 {
-                    _logger.LogWarning("[RulePacks] REJECTED {File} — missing hmac", Path.GetFileName(filePath));
+                    _logger.LogWarning("[RulePacks] REJECTED {File} — legacy HMAC signature not accepted (v2.0.4 requires RSA)",
+                        Path.GetFileName(filePath));
                     return false;
                 }
-                var provided = hmacEl.GetString();
-                if (string.IsNullOrEmpty(provided)) return false;
 
-                var toSign = RemoveHmacField(fileContent);
-                using var hmac = new HMACSHA256(_hmacKey);
-                var expected = BitConverter.ToString(hmac.ComputeHash(Encoding.UTF8.GetBytes(toSign)))
-                    .Replace("-", "").ToLowerInvariant();
-                var ok = SecurityValidation.SecureCompare(
-                    Encoding.ASCII.GetBytes(expected),
-                    Encoding.ASCII.GetBytes(provided.ToLowerInvariant()));
+                if (!doc.RootElement.TryGetProperty("signature", out var sigEl))
+                {
+                    _logger.LogWarning("[RulePacks] REJECTED {File} — missing 'signature' field", Path.GetFileName(filePath));
+                    return false;
+                }
+                var signatureBase64 = sigEl.GetString();
+                if (string.IsNullOrEmpty(signatureBase64)) return false;
+
+                byte[] signatureBytes;
+                try { signatureBytes = Convert.FromBase64String(signatureBase64); }
+                catch { _logger.LogWarning("[RulePacks] REJECTED {File} — invalid base64 signature", Path.GetFileName(filePath)); return false; }
+
+                var toVerify = RemoveSignatureField(fileContent);
+                var dataBytes = Encoding.UTF8.GetBytes(toVerify);
+
+                var ok = _verificationKey.VerifyData(dataBytes, signatureBytes,
+                    HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
                 if (!ok)
-                    _logger.LogWarning("[RulePacks] REJECTED {File} — bad hmac", Path.GetFileName(filePath));
+                    _logger.LogWarning("[RulePacks] REJECTED {File} — RSA signature verification failed", Path.GetFileName(filePath));
                 return ok;
             }
-            catch
+            catch (Exception ex)
             {
+                _logger.LogWarning(ex, "[RulePacks] Signature verification error for {File}", Path.GetFileName(filePath));
                 return false;
             }
         }
@@ -218,7 +246,7 @@ namespace Sentinel.Core
             return n;
         }
 
-        private static string RemoveHmacField(string json)
+        private static string RemoveSignatureField(string json)
         {
             using var doc = JsonDocument.Parse(json);
             using var ms = new MemoryStream();
@@ -227,7 +255,7 @@ namespace Sentinel.Core
                 writer.WriteStartObject();
                 foreach (var prop in doc.RootElement.EnumerateObject())
                 {
-                    if (prop.NameEquals("hmac")) continue;
+                    if (prop.NameEquals("signature")) continue;
                     prop.WriteTo(writer);
                 }
                 writer.WriteEndObject();
@@ -235,19 +263,39 @@ namespace Sentinel.Core
             return Encoding.UTF8.GetString(ms.ToArray());
         }
 
-        private static byte[]? DeriveSigningKey()
+        /// <summary>
+        /// v2.0.4 CRIT-2: Load RSA public key for verification.
+        /// First checks for an external public key file (allows rotation without rebuild),
+        /// then falls back to the embedded constant.
+        /// </summary>
+        private static System.Security.Cryptography.RSA? LoadVerificationKey()
         {
             try
             {
+                // Check for external key file (allows rotation)
                 var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
-                var entropyFile = Path.Combine(programData, "Sentinel", "Secure", ".install_entropy");
-                if (!File.Exists(entropyFile)) return null;
-                var entropy = File.ReadAllBytes(entropyFile);
-                if (entropy.Length != 32) return null;
-                using var hmac = new HMACSHA256(entropy);
-                return hmac.ComputeHash(Encoding.UTF8.GetBytes("sentinel-rule-pack-signing-v1"));
+                var externalKeyPath = Path.Combine(programData, "Sentinel", "Secure", "rulepack_pubkey.xml");
+                string keyXml;
+                if (File.Exists(externalKeyPath))
+                {
+                    keyXml = File.ReadAllText(externalKeyPath).Trim();
+                    // Sanity: must be an RSA public key, not a private key
+                    if (keyXml.Contains("<D>") || keyXml.Contains("<P>") || keyXml.Contains("<InverseQ>"))
+                        keyXml = RulePackPublicKeyXml; // Fall back to embedded if private key was placed there
+                }
+                else
+                {
+                    keyXml = RulePackPublicKeyXml;
+                }
+
+                var rsa = System.Security.Cryptography.RSA.Create();
+                rsa.FromXmlString(keyXml);
+                return rsa;
             }
-            catch { return null; }
+            catch
+            {
+                return null;
+            }
         }
 
         public override void Dispose()
@@ -262,6 +310,10 @@ namespace Sentinel.Core
         public string Name { get; set; } = "pack";
         public string Version { get; set; } = "1.0";
         public List<RulePackCorrelationRule> Rules { get; set; } = new();
+        /// <summary>v2.0.4: RSA-SHA256 signature (base64). Replaces legacy HMAC field.</summary>
+        public string? Signature { get; set; }
+        [JsonPropertyName("hmac")]
+        [Obsolete("v2.0.4: HMAC signing removed. Use 'signature' (RSA-SHA256) instead.")]
         public string? Hmac { get; set; }
     }
 

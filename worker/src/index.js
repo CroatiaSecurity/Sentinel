@@ -26,8 +26,12 @@
  *          wrangler secret put VIRUSTOTAL_KEY
  */
 
-// Simple per-isolate rate limit: max requests per IP per minute
-const RATE_LIMIT_PER_MINUTE = 60;
+// v2.0.4 MED-1: Per-isolate rate limit with sliding window.
+// NOTE: This is in-memory and resets on cold start / isolate recycle.
+// For production hardening, migrate to Cloudflare Rate Limiting Rules (dashboard)
+// or Durable Objects for persistent state across isolate restarts.
+// Current implementation is defense-in-depth alongside CF's built-in DDoS protection.
+const RATE_LIMIT_PER_MINUTE = 30;
 const rateBuckets = new Map();
 
 function checkRateLimit(ip) {
@@ -52,10 +56,12 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
+    // v2.0.4 HIGH-2: Removed wildcard CORS. The Worker is called by Sentinel agents
+    // (non-browser HTTP clients) that don't need CORS. Removing CORS prevents browser-based
+    // abuse if a shared secret is ever leaked via XSS or malicious extensions.
     const corsHeaders = {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
-      // v1.8.1: X-Sentinel-Auth removed — shared secret must never be sent as a header
+      'Access-Control-Allow-Origin': '',
+      'Access-Control-Allow-Methods': 'POST, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type, X-Sentinel-Signature, X-Sentinel-Timestamp',
     };
 

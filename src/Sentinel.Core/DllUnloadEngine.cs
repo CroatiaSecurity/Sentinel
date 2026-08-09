@@ -23,6 +23,14 @@ namespace Sentinel.Core
     /// - Scan finds a process that has <b>actually loaded</b> a hostile Temp/plant DLL
     ///   (behavior: loading the plant — not "file exists on disk alone").
     /// Disk-only plants with no loader → Tier2 LogOnly (observe).
+    ///
+    /// SECURITY NOTE (v2.0.4 MED-3): Remote DLL unloading uses QueueUserAPC with FreeLibrary.
+    /// Known risks:
+    ///   1. Can crash target processes if the DLL has active threads, hooks, or DllMain callbacks
+    ///   2. Uses the same APC injection technique that Sentinel detects in other processes
+    ///   3. EDR-aware malware can fingerprint this behavior to identify Sentinel's presence
+    /// Mitigation: Unload is only attempted for proven-hostile DLLs after Tier1 chain confirmation.
+    /// A graceful unload failure does NOT prevent subsequent quarantine+kill of the host process.
     /// </summary>
     public sealed class DllUnloadEngine : IDisposable
     {

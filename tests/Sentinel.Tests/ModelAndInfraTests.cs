@@ -23,8 +23,8 @@ namespace Sentinel.Tests
             Assert.True(config.ActiveResponse);
             Assert.Equal(15, config.MaxKillsPerMinute);
             Assert.Equal(10, config.MaxNetworkIsolatesPerMinute);
-            // v1.8.6: lab/observe must not force-arm AR; product default is observe-until-chain.
-            Assert.False(config.EnforceActiveResponse);
+            // v2.0.4: EnforceActiveResponse defaults to true (red team audit CRIT-3)
+            Assert.True(config.EnforceActiveResponse);
             Assert.True(config.ObserveUntilChain);
             Assert.True(config.SilentObserve);
             Assert.False(config.AutoDisableFailedUsbEnumeration); // work-first: no USB auto-disable
@@ -44,7 +44,7 @@ namespace Sentinel.Tests
             Assert.True(config.Enabled);
             Assert.True(config.ReportToMalwareBazaar);
             Assert.True(config.ReportToUrlhaus);
-            Assert.Null(config.ProxyEndpoint);
+            Assert.Equal("https://sentinel-threat-proxy.znastidobrostoje-6ee.workers.dev", config.ProxyEndpoint);
             Assert.Null(config.ProxySharedSecret);
         }
 

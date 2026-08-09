@@ -1491,11 +1491,12 @@ namespace Sentinel.Agent
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 1,
-                RowCount = 3,
+                RowCount = 4,
                 BackColor = Bg
             };
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 160));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 52));
             page.Controls.Add(layout);
             layout.Controls.Add(MakeTitle("Safety"), 0, 0);
@@ -1526,6 +1527,10 @@ namespace Sentinel.Agent
                 "from a Discord ban reason. It stops and documents machine-side abuse tools.\n";
             layout.Controls.Add(body, 0, 1);
 
+            // v2.0.4: Hardened Mode panel
+            var hardenPanel = BuildHardenedModePanel();
+            layout.Controls.Add(hardenPanel, 0, 2);
+
             var bar = new FlowLayoutPanel
             {
                 Dock = DockStyle.Fill,
@@ -1551,8 +1556,116 @@ namespace Sentinel.Agent
                 }
             }));
             bar.Controls.Add(MakeChromeButton("Report to Police", (_, _) => ShowPage(2)));
-            layout.Controls.Add(bar, 0, 2);
+            layout.Controls.Add(bar, 0, 3);
             return page;
+        }
+
+        /// <summary>
+        /// v2.0.4: Hardened Mode UI panel with toggle and explanation.
+        /// Persists to DPAPI-encrypted config store. Requires service restart to apply.
+        /// </summary>
+        private Panel BuildHardenedModePanel()
+        {
+            var panel = new Panel
+            {
+                Dock = DockStyle.Fill,
+                BackColor = System.Drawing.Color.FromArgb(30, 30, 35),
+                Padding = new Padding(12)
+            };
+
+            var title = new Label
+            {
+                Text = "\u26a0 HARDENED MODE",
+                Font = new System.Drawing.Font("Segoe UI", 10f, System.Drawing.FontStyle.Bold),
+                ForeColor = System.Drawing.Color.FromArgb(255, 180, 60),
+                AutoSize = true,
+                Dock = DockStyle.Top
+            };
+            panel.Controls.Add(title);
+
+            var desc = new Label
+            {
+                Text = "Enables aggressive network lockdown: IPSec policy blocks all non-essential ports,\n" +
+                       "ASR Block rules are enforced, RPC/DCOM ephemeral ports are firewalled.\n\n" +
+                       "USE THIS when you are under active attack or on an untrusted network.\n" +
+                       "WARNING: This WILL block RDP, SMB file sharing, SSH, DISM, and some admin tools.\n" +
+                       "Normal work (browsers, apps, games) is unaffected.",
+                ForeColor = System.Drawing.Color.FromArgb(200, 200, 200),
+                AutoSize = true,
+                Dock = DockStyle.Top,
+                Padding = new Padding(0, 6, 0, 6)
+            };
+            panel.Controls.Add(desc);
+            desc.BringToFront();
+
+            var toggleBtn = MakeChromeButton(
+                HardeningModule.RestrictivePortHardeningEnabled ? "\u2705 HARDENED (active)" : "\u274c NORMAL (work-first)",
+                (sender, _) => OnToggleHardenedMode(sender));
+            toggleBtn.Dock = DockStyle.Bottom;
+            panel.Controls.Add(toggleBtn);
+            toggleBtn.BringToFront();
+
+            return panel;
+        }
+
+        private void OnToggleHardenedMode(object? sender)
+        {
+            bool current = HardeningModule.RestrictivePortHardeningEnabled;
+            bool next = !current;
+
+            string msg = next
+                ? "ENABLE Hardened Mode?\n\n" +
+                  "This will:\n" +
+                  "  • Block all non-essential inbound/outbound ports (IPSec)\n" +
+                  "  • Enable ASR Block rules\n" +
+                  "  • Firewall RPC/DCOM ephemeral ports\n\n" +
+                  "RDP, SMB, SSH, DISM, and some admin tools will stop working.\n" +
+                  "Browsers, apps, and games are unaffected.\n\n" +
+                  "The Sentinel service must restart for this to take effect."
+                : "DISABLE Hardened Mode?\n\n" +
+                  "This will return to work-first mode:\n" +
+                  "  • Remove IPSec port blocking\n" +
+                  "  • Remove Sentinel firewall rules\n" +
+                  "  • Release ASR Block policy\n\n" +
+                  "Detection and response remain fully active.\n" +
+                  "The Sentinel service must restart for this to take effect.";
+
+            var result = MessageBox.Show(this, msg, "Sentinel — Hardened Mode",
+                MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2);
+
+            if (result != DialogResult.Yes) return;
+
+            try
+            {
+                var store = new EncryptedConfigStore();
+                store.SetOverride("RestrictivePortHardening", next.ToString());
+                if (store.Save())
+                {
+                    MessageBox.Show(this,
+                        $"Hardened Mode {(next ? "ENABLED" : "DISABLED")} in config.\n\n" +
+                        "Restart the Sentinel service for this to take effect.\n" +
+                        "(The service will apply the change on next startup.)",
+                        "Sentinel", MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+                    // Update button text
+                    if (sender is Button btn)
+                    {
+                        btn.Text = next ? "\u2705 HARDENED (pending restart)" : "\u274c NORMAL (pending restart)";
+                    }
+                }
+                else
+                {
+                    MessageBox.Show(this,
+                        "Failed to save config. Run Sentinel Agent as Administrator,\n" +
+                        "or use the command line:\n\n" +
+                        $"  Sentinel.Service.exe --set-config RestrictivePortHardening={next}",
+                        "Sentinel", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, $"Error: {ex.Message}", "Sentinel", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
         }
 
         // ═══════════════════════════════════════════════════════════════

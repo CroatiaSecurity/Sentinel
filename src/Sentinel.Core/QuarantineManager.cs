@@ -195,7 +195,11 @@ namespace Sentinel.Core
 
             try
             {
-                await System.IO.FileNet48.WriteAllTextAsync(metaPath, filePath);
+                // v2.0.4 MED-4: Encrypt .meta content (original path) with DPAPI to prevent
+                // information leakage about detected file locations to attackers with Admin access.
+                var metaBytes = System.Text.Encoding.UTF8.GetBytes(filePath);
+                var encryptedMeta = ProtectedData.Protect(metaBytes, null, DataProtectionScope.LocalMachine);
+                await System.IO.FileNet48.WriteAllBytesAsync(metaPath, encryptedMeta);
             }
             catch { /* restore still possible by filename guess */ }
 

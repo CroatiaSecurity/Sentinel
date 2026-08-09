@@ -430,9 +430,7 @@ namespace Sentinel.Core
                 }
                 else
                 {
-                    reason = _config.ActiveResponse
-                        ? "LogOnly (observe-until-chain)"
-                        : "LogOnly (ActiveResponse disabled)";
+                    reason = "LogOnly (observe-until-chain)";
                 }
             }
             else if (effectiveResponse == ResponseAction.RemoveCertAndKillAdder && effectiveTier == DetectionTier.Tier1Behavioral)
@@ -444,9 +442,7 @@ namespace Sentinel.Core
                 }
                 else
                 {
-                    reason = _config.ActiveResponse
-                        ? "LogOnly (observe-until-chain)"
-                        : "LogOnly (ActiveResponse disabled)";
+                    reason = "LogOnly (observe-until-chain)";
                 }
             }
             else if (effectiveResponse == ResponseAction.RemoveRegistryEntry && effectiveTier == DetectionTier.Tier1Behavioral)
@@ -458,9 +454,7 @@ namespace Sentinel.Core
                 }
                 else
                 {
-                    reason = _config.ActiveResponse
-                        ? "LogOnly (observe-until-chain)"
-                        : "LogOnly (ActiveResponse disabled)";
+                    reason = "LogOnly (observe-until-chain)";
                 }
             }
             else if (effectiveResponse == ResponseAction.RemoveCert && effectiveTier == DetectionTier.Tier1Behavioral)
@@ -472,9 +466,7 @@ namespace Sentinel.Core
                 }
                 else
                 {
-                    reason = _config.ActiveResponse
-                        ? "LogOnly (observe-until-chain)"
-                        : "LogOnly (ActiveResponse disabled)";
+                    reason = "LogOnly (observe-until-chain)";
                 }
             }
             else if (effectiveResponse == ResponseAction.NetworkIsolate && effectiveTier == DetectionTier.Tier1Behavioral)
@@ -486,9 +478,7 @@ namespace Sentinel.Core
                 }
                 else
                 {
-                    reason = _config.ActiveResponse
-                        ? "LogOnly (observe-until-chain)"
-                        : "LogOnly (ActiveResponse disabled)";
+                    reason = "LogOnly (observe-until-chain)";
                 }
             }
             else if ((effectiveKillAuthorized ||
@@ -503,9 +493,7 @@ namespace Sentinel.Core
                 }
                 else
                 {
-                    reason = _config.ActiveResponse
-                        ? "LogOnly (observe-until-chain)"
-                        : "LogOnly (ActiveResponse disabled)";
+                    reason = "LogOnly (observe-until-chain)";
                 }
             }
             else if (effectiveTier == DetectionTier.Tier1Behavioral)

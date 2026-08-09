@@ -1,6 +1,6 @@
 # Sentinel — Design Document
 
-**Version: 2.0.3**
+**Version: 2.0.4**
 
 ---
 
@@ -35,12 +35,13 @@ Monitors → TelemetryFusionEngine → DetectionEngine → AdvancedResponseEngin
 | `WeightedCorrelationEngine` | Explainable category weights; emits when Total ≥ Threshold |
 | `AttackTechniqueMap` | MITRE ATT&CK technique IDs on detections |
 | `PluginRegistry` + interfaces | Extensibility surface for detectors / correlation / response |
-| `RulePackLoader` | Signed `*.pack.json` → `ICorrelationRule` plugins |
+| `RulePackLoader` | RSA-SHA256 signed `*.pack.json` → `ICorrelationRule` plugins |
 | `EventGraph.GetProcessDiversity` | Graph fan-out boost for weighted score cards |
-| `ServiceAgentIpcHost` / `ServiceAgentIpcClient` | HMAC authenticated named pipe (ops/health only) |
+| `ServiceAgentIpcHost` / `ServiceAgentIpcClient` | HMAC authenticated named pipe with nonce replay prevention (ops/health only) |
 | `OpsMetricsPublisher` | Writes `%ProgramData%\Sentinel\ops_metrics.json` |
 | `SelfPathGuard` | Hardlink-aware install self-exclusion |
-| `ProductInfo.Version` | `2.0.3` |
+| `EncryptedConfigStore` | DPAPI-encrypted per-deployment config (`config.enc`); replaces plaintext appsettings.json |
+| `ProductInfo.Version` | `2.0.4` |
 
 All components are wired via Microsoft.Extensions.DependencyInjection. No static mutable state anywhere.
 
@@ -78,7 +79,7 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 
 | Component | Mechanism | Interval |
 |-----------|-----------|----------|
-| `AntiTamperGuard` | Service self-reinstall, anti-suspend timing, binary integrity, FIPS enforcement | 2s timing / 10s integrity |
+| `AntiTamperGuard` | Service self-reinstall, anti-suspend timing, binary integrity, encrypted config monitoring | 2s timing / 10s integrity |
 | `IPSecIntegrityGuard` | Self-heals GSecurity IPSec: **attack-only** ports by default; full lockdown if `RestrictivePortHardening` | 30s |
 | `AsrPolicyGuard` | Verifies Defender ASR Block rules (Policy hive); re-applies on drift/tamper | 60s |
 | `AgentWatchdog` | Polls for Agent process; relaunches via CreateProcessAsUser if absent | 10s |

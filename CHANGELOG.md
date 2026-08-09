@@ -2,6 +2,56 @@
 
 All notable changes to Sentinel are documented in this file.
 
+## [2.0.4] - 2026-08-09
+
+### Security — Full Red Team Audit Remediation
+
+Comprehensive security hardening release addressing all findings from an internal red team audit.
+3 critical, 5 high, 6 medium, and 4 low severity issues resolved.
+
+#### Critical Fixes
+
+- **CRIT-1: IPC nonce replay prevention** — `ServiceAgentIpcHost` now tracks used nonces server-side via `ConcurrentDictionary` (bounded to 2048 entries, pruned on window expiry). Replay within the 60-second timestamp window returns `auth_replay` error.
+- **CRIT-2: Asymmetric rule pack signing** — Switched from HMAC-SHA256 (symmetric key on endpoint) to RSA-SHA256 asymmetric signature verification. Only the public key exists on the endpoint; the private signing key is kept offline. Legacy HMAC-signed packs are explicitly rejected. External key rotation supported via `rulepack_pubkey.xml`.
+- **CRIT-3: EnforceActiveResponse defaults to true** — Both the compiled `SentinelConfig` default and appsettings.json now ship with `EnforceActiveResponse: true`. AntiTamperGuard force-re-enables ActiveResponse if disabled.
+
+#### High Severity Fixes
+
+- **HIGH-1: Process-specific DPAPI entropy** — `SecureCacheStore` key derivation now includes SHA-256 of the Sentinel executable itself. Attacker with SYSTEM cannot forge cache entries without the exact binary. Domain label bumped to `sentinel-secure-cache-hmac-v4`.
+- **HIGH-2: Removed wildcard CORS** — Cloudflare Worker `Access-Control-Allow-Origin` set to empty string; methods restricted to POST/OPTIONS. Non-browser agents don't need CORS.
+- **HIGH-3: Certificate pinning** — `ProxyAuthHelper.CreatePinnedHttpClient()` implements public key pinning against Cloudflare intermediate CA certificates. FileReputationEngine's VT proxy client uses the pinned client.
+- **HIGH-4: Removed FIPS enforcement** — FIPS Algorithm Policy disable removed from both installer (registry entries) and AntiTamperGuard (`EnforceFipsDisabled` + `ApplyFipsSecurityDatabaseOverride` methods deleted). An EDR must not weaken system cryptographic posture.
+- **HIGH-5: Scoped ReleaseUserWorkSurface** — No longer re-enables RemoteRegistry or removes ASR rules Sentinel didn't set. Only Sentinel-created artifacts (IPSec "GSecurity", "Sentinel-*" firewall rules, known ASR GUIDs) are removed.
+
+#### Medium Severity Fixes
+
+- **MED-1:** Worker rate limit reduced from 60 to 30 req/min with documentation on cold-start reset behavior.
+- **MED-2:** `IsSafeString` now blocks `&`, `;`, `|`, `{`, `}`, `(`, `)` shell metacharacters.
+- **MED-3:** Documented QueueUserAPC/FreeLibrary risks in `DllUnloadEngine` (process crash, fingerprinting).
+- **MED-4:** Quarantine `.meta` files encrypted with DPAPI (prevents original-path information leakage).
+- **MED-5:** Named pipe uses machine-unique suffix derived from MachineGuid hash (anti-fingerprinting).
+- **MED-6:** `RulePackLoader.TryLoadPack` uses `FileStream` with read lock (TOCTOU prevention).
+
+#### Low Severity Fixes
+
+- **LOW-1:** Added proxy health monitoring with consecutive failure counter and alert threshold.
+- **LOW-2:** ACL operation failures in `LockTokenAcl`/`LockDirectoryAcl` now logged via `Debug.WriteLine`.
+- **LOW-3:** Confirmed quarantine uses DPAPI only (no XOR fallback exists).
+- **LOW-4:** Documented process hollowing detection limitation in `EtwThreatIntelMonitor`.
+
+### Major Enhancement — Eliminated appsettings.json Attack Surface
+
+- **New `EncryptedConfigStore`** — DPAPI machine-scope encrypted config at `%ProgramData%\Sentinel\Secure\config.enc`. Physical access attacker must break DPAPI to read/modify configuration.
+- **All operational defaults compiled into binary** via `SentinelConfig`/`ThreatReportingConfig` property initializers (including `ProxyEndpoint`).
+- **`--set-config Key=Value` CLI** — Secrets managed via `Sentinel.Service.exe --set-config ProxySharedSecret=value`.
+- **Installer no longer ships appsettings.json** — if the file appears on disk, AntiTamperGuard emits a Tier1 "Unauthorized appsettings.json" detection.
+- **AntiTamperGuard** now monitors `config.enc` integrity (hash baseline + change detection).
+
+### Docs — Version headers bumped to 2.0.4
+
+- `design.md`, `constraints.md`, `requirements.md`, `README.md`, `SECURITY.md` version references updated.
+- `ProductInfo.Version` → `2.0.4`.
+
 ## [2.0.3] - 2026-08-08
 
 ### Test Coverage Expansion (1072 → 1755 tests, +64%)
