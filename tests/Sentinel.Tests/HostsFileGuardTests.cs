@@ -29,36 +29,69 @@ namespace Sentinel.Tests
         }
 
         [Fact]
-        public void TrustedHostsContent_DoesNotBlockForumHr()
+        public void HostsFileGuard_NoLongerEnforcesAdBlocklist()
         {
-            // v1.7.6: forum.hr hosts block removed as opinionated — ForumHrWatchMonitor watches instead.
+            // v2.1: HostsFileGuard no longer ships an embedded ad-blocking hosts file.
+            // It monitors for suspicious modifications instead.
             var sourceFile = FindCoreSourceFile("SystemIntegrityMonitors.cs");
             if (sourceFile == null) return; // CI without source tree
 
             var content = File.ReadAllText(sourceFile);
 
-            // Must not contain active hosts block lines for forum.hr
-            Assert.DoesNotContain("0.0.0.0 forum.hr", content);
-            Assert.DoesNotContain("0.0.0.0 www.forum.hr", content);
-            Assert.DoesNotContain("0.0.0.0 m.forum.hr", content);
-            Assert.DoesNotContain("0.0.0.0 cdn.forum.hr", content);
-            Assert.DoesNotContain("0.0.0.0 static.forum.hr", content);
-            Assert.DoesNotContain("0.0.0.0 api.forum.hr", content);
-            Assert.DoesNotContain("0.0.0.0 img.forum.hr", content);
-            Assert.DoesNotContain("0.0.0.0 mail.forum.hr", content);
-            Assert.DoesNotContain("0.0.0.0 ads.forum.hr", content);
-            Assert.DoesNotContain("0.0.0.0 tracker.forum.hr", content);
+            // Must not contain any hardcoded ad-blocking entries
+            Assert.DoesNotContain("TrustedHostsContentBase", content);
+            Assert.DoesNotContain("BuildTrustedHostsContent", content);
+            Assert.DoesNotContain("0.0.0.0 doubleclick.net", content);
+            Assert.DoesNotContain("0.0.0.0 google-analytics.com", content);
+            Assert.DoesNotContain("0.0.0.0 hotjar.com", content);
+            Assert.DoesNotContain("0.0.0.0 taboola.com", content);
         }
 
         [Fact]
-        public void TrustedHostsContent_StillBlocksAdTrackers()
+        public void HostsFileGuard_DoesNotOverwriteUserContent()
         {
+            // v2.1: The guard must NOT contain logic to overwrite the entire hosts file
             var sourceFile = FindCoreSourceFile("SystemIntegrityMonitors.cs");
             if (sourceFile == null) return;
 
             var content = File.ReadAllText(sourceFile);
-            Assert.Contains("0.0.0.0 doubleclick.net", content);
-            Assert.Contains("0.0.0.0 google-analytics.com", content);
+
+            // Old enforcement patterns must be gone
+            Assert.DoesNotContain("File.WriteAllText(HostsFilePath, _trustedContent", content);
+            Assert.DoesNotContain("Reverted hosts to trusted baseline", content);
+            Assert.DoesNotContain("DeleteUnauthorizedFilesAsync", content);
+        }
+
+        [Fact]
+        public void HostsFileGuard_MitmLinesDefinedForFcmBlock()
+        {
+            // When MitmDefense is enabled, FCM mtalk lines should be enforced
+            var sourceFile = FindCoreSourceFile("SystemIntegrityMonitors.cs");
+            if (sourceFile == null) return;
+
+            var content = File.ReadAllText(sourceFile);
+
+            // MitM defense lines must still be present for enforcement
+            Assert.Contains("mtalk.google.com", content);
+            Assert.Contains("alt1-mtalk.google.com", content);
+            Assert.Contains("EnsureMitmLinesAsync", content);
+        }
+
+        [Fact]
+        public void HostsFileGuard_DetectsSuspiciousPatterns()
+        {
+            // The guard should have suspicious IP detection and protected domain lists
+            var sourceFile = FindCoreSourceFile("SystemIntegrityMonitors.cs");
+            if (sourceFile == null) return;
+
+            var content = File.ReadAllText(sourceFile);
+
+            // Should detect redirects to known C2 IP ranges
+            Assert.Contains("SuspiciousRedirectTargets", content);
+            // Should protect security update domains
+            Assert.Contains("ProtectedDomains", content);
+            Assert.Contains("windowsupdate.com", content);
+            Assert.Contains("virustotal.com", content);
         }
 
         [Fact]

@@ -1450,7 +1450,8 @@ namespace Sentinel.Core
 
 
     // ──────────────────────────────────────────────
-    // Hosts File Guard — enforces embedded hosts content, deletes all other files in drivers\etc
+    // Hosts File Guard — monitors hosts file for suspicious modifications (malware indicators)
+    // Users may freely edit the hosts file; only MitM-defense lines are enforced when enabled.
     // ──────────────────────────────────────────────
     public sealed class HostsFileGuard : BackgroundService
     {
@@ -1459,43 +1460,76 @@ namespace Sentinel.Core
         private readonly ILogger<HostsFileGuard> _logger;
         private FileSystemWatcher? _watcher;
 
-        // The directory being protected
         private static readonly string DriversEtcPath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.Windows),
             "System32", "drivers", "etc");
 
         private static readonly string HostsFilePath = Path.Combine(DriversEtcPath, "hosts");
 
-        // Debounce to avoid revert loops (our own writes trigger watcher events)
-        private readonly ConcurrentDictionary<string, DateTime> _revertCooldown = new(StringComparer.OrdinalIgnoreCase);
-        private static readonly TimeSpan CooldownPeriod = TimeSpan.FromSeconds(3);
+        // Debounce to avoid alert storms on rapid writes
+        private readonly ConcurrentDictionary<string, DateTime> _eventCooldown = new(StringComparer.OrdinalIgnoreCase);
+        private static readonly TimeSpan CooldownPeriod = TimeSpan.FromSeconds(5);
 
-        private readonly SemaphoreSlim _enforceLock = new(1, 1);
+        private readonly SemaphoreSlim _scanLock = new(1, 1);
 
-        // Precomputed SHA-256 of the trusted content for fast comparison
-        private readonly string _trustedHash;
-        private readonly string _trustedContent;
+        // Previous file hash — used to detect actual changes (not just watcher noise)
+        private string _lastKnownHash = string.Empty;
+
+        // MitM defense: FCM mtalk lines that must remain present when MitmDefense is active
+        private readonly bool _enforceMitmLines;
+        private static readonly string[] MitmRequiredLines = new[]
+        {
+            "0.0.0.0 mtalk.google.com",
+            "0.0.0.0 mobile-gtalk.l.google.com",
+            "0.0.0.0 alt1-mtalk.google.com",
+            "0.0.0.0 alt2-mtalk.google.com",
+            "0.0.0.0 alt3-mtalk.google.com",
+            "0.0.0.0 alt4-mtalk.google.com",
+            "0.0.0.0 alt5-mtalk.google.com",
+            "0.0.0.0 alt6-mtalk.google.com",
+            "0.0.0.0 alt7-mtalk.google.com",
+            "0.0.0.0 alt8-mtalk.google.com",
+        };
+
+        // Patterns that indicate malware DNS hijacking (not legitimate user edits)
+        private static readonly string[] SuspiciousRedirectTargets = new[]
+        {
+            // Known malware/C2 IP patterns — redirecting legitimate domains to these is suspicious
+            "185.215.", "194.180.", "91.215.", "45.133.", "23.106.",
+            "193.233.", "77.91.", "79.137.", "94.232.", "5.42.",
+        };
+
+        // Domains that should never be redirected away from their real IPs —
+        // if someone points these at 127.0.0.1 or another IP, it's likely malware blocking security updates
+        private static readonly HashSet<string> ProtectedDomains = new(StringComparer.OrdinalIgnoreCase)
+        {
+            // Windows Update
+            "windowsupdate.com", "update.microsoft.com", "download.microsoft.com",
+            "windowsupdate.microsoft.com", "ntservicepack.microsoft.com",
+            // Security vendors
+            "microsoft.com", "defender.microsoft.com",
+            "virustotal.com", "malwarebytes.com", "kaspersky.com",
+            "avast.com", "avg.com", "eset.com", "bitdefender.com",
+            "norton.com", "symantec.com", "mcafee.com", "trendmicro.com",
+            // Certificate revocation
+            "ocsp.digicert.com", "crl.microsoft.com", "ocsp.msocsp.com",
+            "mscrl.microsoft.com", "crl3.digicert.com", "crl4.digicert.com",
+        };
 
         public HostsFileGuard(DetectionEngine de, SentinelConfig config, ILogger<HostsFileGuard> l)
         {
             _detectionEngine = de;
             _config = config;
             _logger = l;
-            // MitmDefense.Enabled implies FCM hosts blocks (Send Tab to Self after token theft)
-            bool fcmBlock = config.BlockFcmPushChannel
-                || (config.MitmDefense?.Enabled == true && (config.MitmDefense.BlockFcmPushChannel));
-            _trustedContent = BuildTrustedHostsContent(fcmBlock);
-            using var sha = SHA256.Create();
-            _trustedHash = ConvertHex.ToHexString(sha.ComputeHash(new UTF8Encoding(false).GetBytes(_trustedContent)));
+            _enforceMitmLines = config.BlockFcmPushChannel
+                || (config.MitmDefense?.Enabled == true && config.MitmDefense.BlockFcmPushChannel);
         }
 
         protected override async Task ExecuteAsync(CancellationToken ct)
         {
-            bool fcmBlock = _config.BlockFcmPushChannel
-                || (_config.MitmDefense?.Enabled == true && _config.MitmDefense.BlockFcmPushChannel);
             _logger.LogInformation(
-                "[HostsFileGuard] Started — enforcing hosts (FCM mtalk block={Fcm}) in {Path}",
-                fcmBlock, DriversEtcPath);
+                "[HostsFileGuard] Started — monitoring hosts file for suspicious modifications (MitM enforce={MitM}) in {Path}",
+                _enforceMitmLines, DriversEtcPath);
 
             if (!Directory.Exists(DriversEtcPath))
             {
@@ -1503,19 +1537,23 @@ namespace Sentinel.Core
                 return;
             }
 
-            // Initial enforcement
-            await EnforceAsync("Startup", ct);
+            // Capture initial baseline hash
+            _lastKnownHash = ComputeFileHash(HostsFilePath);
 
-            // Set up FileSystemWatcher for the entire directory
+            // If MitM defense is active, ensure the FCM lines are present on startup
+            if (_enforceMitmLines)
+                await EnsureMitmLinesAsync("Startup", ct);
+
+            // Set up FileSystemWatcher
             StartWatcher();
 
-            // Periodic integrity verification (catches offline modifications)
+            // Periodic scan (catches offline modifications)
             while (!ct.IsCancellationRequested)
             {
                 try
                 {
                     await Task.Delay(30000, ct);
-                    await EnforceAsync("PeriodicIntegrityCheck", ct);
+                    await ScanHostsFileAsync("PeriodicCheck", ct);
                 }
                 catch (OperationCanceledException) { break; }
                 catch (Exception ex)
@@ -1528,76 +1566,91 @@ namespace Sentinel.Core
         }
 
         /// <summary>
-        /// Core enforcement: write trusted content to hosts, delete everything else.
+        /// Scans hosts file for suspicious entries. Does NOT overwrite user content.
+        /// Only enforces MitM-defense lines when that feature is enabled.
         /// </summary>
-        private async Task EnforceAsync(string trigger, CancellationToken ct)
+        private async Task ScanHostsFileAsync(string trigger, CancellationToken ct)
         {
-            await _enforceLock.WaitAsync(ct);
+            await _scanLock.WaitAsync(ct);
             try
             {
-                // 1. Enforce hosts file content
-                await EnforceHostsFileAsync(trigger, ct);
+                if (!File.Exists(HostsFilePath)) return;
 
-                // 2. Delete all other files in the directory
-                await DeleteUnauthorizedFilesAsync(trigger, ct);
+                // Check if file actually changed
+                var currentHash = ComputeFileHash(HostsFilePath);
+                if (string.Equals(currentHash, _lastKnownHash))
+                    return;
+
+                _lastKnownHash = currentHash;
+
+                // Read and analyze the hosts file
+                var lines = await ReadHostsFileSafe();
+                if (lines == null) return;
+
+                await AnalyzeForSuspiciousEntries(lines, trigger, ct);
+
+                // If MitM defense is active, ensure FCM lines haven't been removed
+                if (_enforceMitmLines)
+                    await EnsureMitmLinesAsync(trigger, ct);
             }
             finally
             {
-                _enforceLock.Release();
+                _scanLock.Release();
             }
         }
 
-        private async Task EnforceHostsFileAsync(string trigger, CancellationToken ct)
+        private async Task AnalyzeForSuspiciousEntries(string[] lines, string trigger, CancellationToken ct)
         {
-            try
+            var suspiciousEntries = new List<string>();
+
+            foreach (var rawLine in lines)
             {
-                // Check if hosts file matches trusted content
-                if (File.Exists(HostsFilePath))
+                var line = rawLine.Trim();
+                if (string.IsNullOrEmpty(line) || line.StartsWith("#"))
+                    continue;
+
+                // Parse: <ip> <hostname> [<hostname2> ...]
+                var parts = line.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length < 2) continue;
+
+                var ip = parts[0];
+
+                for (int i = 1; i < parts.Length; i++)
                 {
-                    var currentHash = ComputeFileHash(HostsFilePath);
-                    if (string.Equals(currentHash, _trustedHash))
-                        return; // Already correct
+                    var hostname = parts[i];
+                    if (hostname.StartsWith("#")) break; // inline comment
+
+                    // Check 1: Is a protected domain being redirected?
+                    if (IsProtectedDomain(hostname) && !IsLoopback(ip))
+                    {
+                        suspiciousEntries.Add($"Protected domain '{hostname}' redirected to {ip}");
+                    }
+
+                    // Check 2: Is any domain being redirected to a known malicious IP range?
+                    if (IsSuspiciousIp(ip))
+                    {
+                        suspiciousEntries.Add($"Domain '{hostname}' redirected to suspicious IP {ip}");
+                    }
                 }
+            }
 
-                // File is modified or missing — revert
-                _logger.LogWarning("[HostsFileGuard] hosts file diverged from trusted baseline (trigger: {Trigger})", trigger);
-
+            if (suspiciousEntries.Count > 0)
+            {
+                var evidence = string.Join("; ", suspiciousEntries.Take(10));
                 var (pid, processName) = GetModifyingProcess(HostsFilePath);
-
-                bool reverted = false;
-                for (int i = 0; i < 3 && !reverted; i++)
-                {
-                    try
-                    {
-                        File.WriteAllText(HostsFilePath, _trustedContent, new UTF8Encoding(false));
-                        reverted = true;
-                    }
-                    catch (IOException) when (i < 2)
-                    {
-                        await Task.Delay(500, ct);
-                    }
-                }
-
-                _revertCooldown[HostsFilePath] = DateTime.UtcNow;
-
-                if (reverted)
-                    _logger.LogWarning("[HostsFileGuard] Reverted hosts to trusted baseline");
-                else
-                    _logger.LogError("[HostsFileGuard] Failed to revert hosts after 3 attempts");
 
                 await _detectionEngine.EmitAsync(new DetectionEvent
                 {
-                    RuleName = "Anti-Tamper: Hosts File Modification Reverted",
-                    Evidence = $"hosts file was modified (trigger: {trigger}). " +
-                               $"Reverted to embedded trusted baseline. Modifier: {processName} (PID {pid})",
-                    Reasoning = "The Windows hosts file controls local DNS resolution. Malware modifies it " +
-                                "to redirect traffic to C2 servers, block security updates, or perform DNS poisoning. " +
-                                "Sentinel enforces the hardcoded trusted baseline at all times.",
-                    Confidence = 0.95,
+                    RuleName = "Hosts File: Suspicious DNS Redirect Detected",
+                    Evidence = $"Hosts file contains {suspiciousEntries.Count} suspicious entries (trigger: {trigger}). " +
+                               $"Examples: {evidence}. Last modifier: {processName} (PID {pid})",
+                    Reasoning = "Malware modifies the hosts file to redirect security update domains, " +
+                                "antivirus update servers, or legitimate sites to C2/phishing IPs. " +
+                                "Sentinel monitors for known malicious patterns without overwriting user content.",
+                    Confidence = suspiciousEntries.Count >= 3 ? 0.92 : 0.75,
                     Tier = DetectionTier.Tier1Behavioral,
-                    // Never kill on Startup — hosts file is expected to differ on first boot/install.
-                    // Only kill if we have a valid PID and this isn't the initial enforcement.
-                    AuthorizedResponse = (pid > 0 && trigger != "Startup") ? ResponseAction.KillProcessTree : ResponseAction.LogOnly,
+                    AuthorizedResponse = (pid > 0 && suspiciousEntries.Count >= 3)
+                        ? ResponseAction.KillProcessTree : ResponseAction.LogOnly,
                     ProcessName = processName,
                     ProcessId = pid,
                     SignalType = SignalType.AntiTamper,
@@ -1605,73 +1658,124 @@ namespace Sentinel.Core
                     {
                         { "File", "hosts" },
                         { "Trigger", trigger },
-                        { "Reverted", reverted.ToString() }
+                        { "SuspiciousCount", suspiciousEntries.Count.ToString() }
+                    }
+                });
+            }
+        }
+
+        /// <summary>
+        /// When MitM defense is active, ensures the FCM mtalk blocking lines are present.
+        /// Appends them if missing — does NOT touch any other user content.
+        /// </summary>
+        private async Task EnsureMitmLinesAsync(string trigger, CancellationToken ct)
+        {
+            try
+            {
+                var content = await ReadHostsFileSafe();
+                if (content == null) return;
+
+                var existingLines = new HashSet<string>(
+                    content.Select(l => l.Trim()),
+                    StringComparer.OrdinalIgnoreCase);
+
+                var missingLines = MitmRequiredLines
+                    .Where(l => !existingLines.Contains(l))
+                    .ToList();
+
+                if (missingLines.Count == 0) return;
+
+                // Append missing MitM lines — preserve everything else
+                _logger.LogWarning(
+                    "[HostsFileGuard] MitM defense active — appending {Count} missing FCM block lines (trigger: {Trigger})",
+                    missingLines.Count, trigger);
+
+                var appendText = "\r\n# Sentinel MitM Defense — FCM push channel block (do not remove while MitmDefense is enabled)\r\n" +
+                                 string.Join("\r\n", missingLines) + "\r\n";
+
+                for (int i = 0; i < 3; i++)
+                {
+                    try
+                    {
+                        File.AppendAllText(HostsFilePath, appendText, new UTF8Encoding(false));
+                        break;
+                    }
+                    catch (IOException) when (i < 2)
+                    {
+                        await Task.Delay(500, ct);
+                    }
+                }
+
+                // Update hash after our write
+                _eventCooldown[HostsFilePath] = DateTime.UtcNow;
+                _lastKnownHash = ComputeFileHash(HostsFilePath);
+
+                await _detectionEngine.EmitAsync(new DetectionEvent
+                {
+                    RuleName = "MitM Defense: FCM Hosts Lines Restored",
+                    Evidence = $"MitM defense is active but {missingLines.Count} FCM blocking lines were missing from hosts. " +
+                               $"Lines have been re-appended (trigger: {trigger}).",
+                    Reasoning = "When MitmDefense is enabled, the FCM push channel (mtalk.google.com) must be " +
+                                "blocked in hosts to prevent 'Send Tab to Self' attacks after Chrome token theft. " +
+                                "Removal of these lines while MitmDefense is active indicates tampering.",
+                    Confidence = 0.85,
+                    Tier = DetectionTier.Tier1Behavioral,
+                    AuthorizedResponse = ResponseAction.LogOnly,
+                    ProcessName = "Sentinel",
+                    ProcessId = System.Net48Environment.ProcessId,
+                    SignalType = SignalType.AntiTamper,
+                    Metadata = new Dictionary<string, string>
+                    {
+                        { "File", "hosts" },
+                        { "Trigger", trigger },
+                        { "MissingLines", missingLines.Count.ToString() }
                     }
                 });
             }
             catch (OperationCanceledException) { }
             catch (Exception ex)
             {
-                _logger.LogDebug(ex, "[HostsFileGuard] EnforceHostsFile error");
+                _logger.LogDebug(ex, "[HostsFileGuard] EnsureMitmLines error");
             }
         }
 
-        private async Task DeleteUnauthorizedFilesAsync(string trigger, CancellationToken ct)
+        private static bool IsProtectedDomain(string hostname)
+        {
+            foreach (var domain in ProtectedDomains)
+            {
+                if (string.Equals(hostname, domain, StringComparison.OrdinalIgnoreCase) ||
+                    hostname.EndsWith("." + domain, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+            return false;
+        }
+
+        private static bool IsSuspiciousIp(string ip)
+        {
+            foreach (var prefix in SuspiciousRedirectTargets)
+            {
+                if (ip.StartsWith(prefix, StringComparison.Ordinal))
+                    return true;
+            }
+            return false;
+        }
+
+        private static bool IsLoopback(string ip)
+        {
+            return ip == "127.0.0.1" || ip == "::1" || ip == "0.0.0.0";
+        }
+
+        private static async Task<string[]?> ReadHostsFileSafe()
         {
             try
             {
-                var allowedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-                {
-                    "hosts", "services", "protocol", "networks", "lmhosts.sam"
-                };
-
-                foreach (var file in Directory.GetFiles(DriversEtcPath))
-                {
-                    var fileName = Path.GetFileName(file);
-                    if (allowedFiles.Contains(fileName))
-                        continue; // Keep standard system files
-
-                    // Delete it
-                    try
-                    {
-                        File.Delete(file);
-                        _logger.LogWarning("[HostsFileGuard] Deleted unauthorized file: {File}", fileName);
-
-                        _revertCooldown[file] = DateTime.UtcNow;
-
-                        await _detectionEngine.EmitAsync(new DetectionEvent
-                        {
-                            RuleName = "Anti-Tamper: Unauthorized File Deleted from drivers\\etc",
-                            Evidence = $"File '{fileName}' existed in drivers\\etc and was deleted (trigger: {trigger}). " +
-                                       "Only the 'hosts' file is permitted in this directory.",
-                            Reasoning = "Files like hosts.ics, lmhosts.sam, and others in drivers\\etc can be " +
-                                        "abused as DNS resolution bypass vectors. hosts.ics is loaded by the DNS " +
-                                        "client alongside hosts and is a known attack surface. Sentinel removes " +
-                                        "all files except the enforced hosts file.",
-                            Confidence = 0.90,
-                            Tier = DetectionTier.Tier1Behavioral,
-                            AuthorizedResponse = ResponseAction.LogOnly,
-                            ProcessName = "SYSTEM",
-                            ProcessId = 0,
-                            SignalType = SignalType.AntiTamper,
-                            Metadata = new Dictionary<string, string>
-                            {
-                                { "File", fileName },
-                                { "Trigger", trigger },
-                                { "Action", "Deleted" }
-                            }
-                        });
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogDebug(ex, "[HostsFileGuard] Failed to delete {File}", fileName);
-                    }
-                }
+                // Use FileShare.ReadWrite so we don't block other editors
+                using var stream = File.Open(HostsFilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                using var reader = new StreamReader(stream, Encoding.UTF8);
+                var text = await reader.ReadToEndAsync();
+                return text.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
             }
-            catch (Exception ex)
-            {
-                _logger.LogDebug(ex, "[HostsFileGuard] DeleteUnauthorizedFiles error");
-            }
+            catch { return null; }
         }
 
         private void StartWatcher()
@@ -1680,18 +1784,15 @@ namespace Sentinel.Core
             {
                 _watcher = new FileSystemWatcher(DriversEtcPath)
                 {
-                    NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName |
-                                   NotifyFilters.CreationTime | NotifyFilters.Size,
-                    Filter = "*",
+                    NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.Size,
+                    Filter = "hosts",
                     IncludeSubdirectories = false,
                     EnableRaisingEvents = true
                 };
 
-                _watcher.Changed += OnFileEvent;
-                _watcher.Created += OnFileEvent;
-                _watcher.Renamed += (s, e) => OnFileEvent(s, e);
+                _watcher.Changed += OnHostsChanged;
 
-                _logger.LogInformation("[HostsFileGuard] Watcher active on {Path}", DriversEtcPath);
+                _logger.LogInformation("[HostsFileGuard] Watcher active on {Path}", HostsFilePath);
             }
             catch (Exception ex)
             {
@@ -1699,20 +1800,20 @@ namespace Sentinel.Core
             }
         }
 
-        private async void OnFileEvent(object sender, FileSystemEventArgs e)
+        private async void OnHostsChanged(object sender, FileSystemEventArgs e)
         {
             try
             {
-                // Cooldown check
-                if (_revertCooldown.TryGetValue(e.FullPath, out var lastAction) &&
+                // Cooldown check (avoid processing our own MitM line appends)
+                if (_eventCooldown.TryGetValue(e.FullPath, out var lastAction) &&
                     DateTime.UtcNow - lastAction < CooldownPeriod)
                     return;
 
-                await EnforceAsync(e.ChangeType.ToString(), CancellationToken.None);
+                await ScanHostsFileAsync(e.ChangeType.ToString(), CancellationToken.None);
             }
             catch (Exception ex)
             {
-                _logger.LogDebug(ex, "[HostsFileGuard] OnFileEvent error for {File}", e.FullPath);
+                _logger.LogDebug(ex, "[HostsFileGuard] OnHostsChanged error");
             }
         }
 
@@ -1726,23 +1827,16 @@ namespace Sentinel.Core
                 {
                     try
                     {
-                        // Never target critical system processes or user shells — killing these causes BSOD or breaks user workflow
                         var name = proc.ProcessName;
-                        if (string.Equals(name, "csrss") ||
-                            string.Equals(name, "wininit") ||
-                            string.Equals(name, "services") ||
-                            string.Equals(name, "smss") ||
-                            string.Equals(name, "lsass") ||
-                            string.Equals(name, "svchost") ||
-                            string.Equals(name, "winlogon") ||
-                            string.Equals(name, "explorer") ||
-                            string.Equals(name, "dwm") ||
-                            string.Equals(name, "System") ||
-                            string.Equals(name, "msiexec") ||
-                            string.Equals(name, "TrustedInstaller") ||
-                            string.Equals(name, "cmd") ||
-                            string.Equals(name, "powershell") ||
-                            string.Equals(name, "pwsh"))
+                        if (string.Equals(name, "csrss") || string.Equals(name, "wininit") ||
+                            string.Equals(name, "services") || string.Equals(name, "smss") ||
+                            string.Equals(name, "lsass") || string.Equals(name, "svchost") ||
+                            string.Equals(name, "winlogon") || string.Equals(name, "explorer") ||
+                            string.Equals(name, "dwm") || string.Equals(name, "System") ||
+                            string.Equals(name, "msiexec") || string.Equals(name, "TrustedInstaller") ||
+                            string.Equals(name, "cmd") || string.Equals(name, "powershell") ||
+                            string.Equals(name, "pwsh") || string.Equals(name, "notepad") ||
+                            string.Equals(name, "code"))
                         {
                             continue;
                         }
@@ -1787,177 +1881,6 @@ namespace Sentinel.Core
             DisposeWatcher();
             await base.StopAsync(ct);
         }
-
-        // ── Embedded trusted hosts file content (no external file dependency) ──
-        // v1.8.3: FCM mtalk lines only when BlockFcmPushChannel=true (see BuildTrustedHostsContent).
-        private static string BuildTrustedHostsContent(bool blockFcmPushChannel)
-        {
-            var sb = new System.Text.StringBuilder(TrustedHostsContentBase);
-            if (blockFcmPushChannel)
-            {
-                sb.Append(
-                    "# Google FCM push channel (blocks 443 fallback for Send Tab to Self attack)\r\n" +
-                    "0.0.0.0 mtalk.google.com\r\n" +
-                    "0.0.0.0 mobile-gtalk.l.google.com\r\n" +
-                    "0.0.0.0 alt1-mtalk.google.com\r\n" +
-                    "0.0.0.0 alt2-mtalk.google.com\r\n" +
-                    "0.0.0.0 alt3-mtalk.google.com\r\n" +
-                    "0.0.0.0 alt4-mtalk.google.com\r\n" +
-                    "0.0.0.0 alt5-mtalk.google.com\r\n" +
-                    "0.0.0.0 alt6-mtalk.google.com\r\n" +
-                    "0.0.0.0 alt7-mtalk.google.com\r\n" +
-                    "0.0.0.0 alt8-mtalk.google.com\r\n");
-            }
-            return sb.ToString();
-        }
-
-        private const string TrustedHostsContentBase =
-            "# Sentinel hosts file\r\n" +
-            "127.0.0.1 localhost\r\n" +
-            "127.0.0.1 localhost.localdomain\r\n" +
-            "127.0.0.1 local\r\n" +
-            "255.255.255.255 broadcasthost\r\n" +
-            "::1 localhost\r\n" +
-            "::1 ip6-localhost\r\n" +
-            "::1 ip6-loopback\r\n" +
-            "fe80::1%lo0 localhost\r\n" +
-            "ff00::0 ip6-localnet\r\n" +
-            "ff00::0 ip6-mcastprefix\r\n" +
-            "ff02::1 ip6-allnodes\r\n" +
-            "ff02::2 ip6-allrouters\r\n" +
-            "ff02::3 ip6-allhosts\r\n" +
-            "0.0.0.0 0.0.0.0\r\n" +
-            // v1.7.6: forum.hr hosts block removed (opinionated). Watched by ForumHrWatchMonitor instead.
-            "0.0.0.0 adtago.s3.amazonaws.com\r\n" +
-            "0.0.0.0 analyticsengine.s3.amazonaws.com\r\n" +
-            "0.0.0.0 advice-ads.s3.amazonaws.com\r\n" +
-            "0.0.0.0 affiliationjs.s3.amazonaws.com\r\n" +
-            "0.0.0.0 advertising-api-eu.amazon.com\r\n" +
-            "0.0.0.0 ssl.google-analytics.com\r\n" +
-            "0.0.0.0 fastclick.com\r\n" +
-            "0.0.0.0 fastclick.net\r\n" +
-            "0.0.0.0 media.fastclick.net\r\n" +
-            "0.0.0.0 cdn.fastclick.net\r\n" +
-            "0.0.0.0 analytics.yahoo.com\r\n" +
-            "0.0.0.0 global.adserver.yahoo.com\r\n" +
-            "0.0.0.0 ads.yap.yahoo.com\r\n" +
-            "0.0.0.0 appmetrica.yandex.com\r\n" +
-            "0.0.0.0 yandexadexchange.net\r\n" +
-            "0.0.0.0 analytics.mobile.yandex.net\r\n" +
-            "0.0.0.0 extmaps-api.yandex.net\r\n" +
-            "0.0.0.0 adsdk.yandex.ru\r\n" +
-            "0.0.0.0 appmetrica.yandex.com\r\n" +
-            "0.0.0.0 hotjar.com\r\n" +
-            "0.0.0.0 static.hotjar.com\r\n" +
-            "0.0.0.0 api-hotjar.com\r\n" +
-            "0.0.0.0 jotjar-analytics.com\r\n" +
-            "0.0.0.0 mouseflow.com\r\n" +
-            "0.0.0.0 freshmarketer.com\r\n" +
-            "0.0.0.0 luckyorange.com\r\n" +
-            "0.0.0.0 cdn.luckyorange.com\r\n" +
-            "0.0.0.0 w1.luckyorange.com\r\n" +
-            "0.0.0.0 upload.luckyorange.com\r\n" +
-            "0.0.0.0 cs.luckyorange.com\r\n" +
-            "0.0.0.0 settings.luckyorange.com\r\n" +
-            "0.0.0.0 stats.wp.com\r\n" +
-            "0.0.0.0 app.bugsnag.com\r\n" +
-            "0.0.0.0 api.bugsnag.com\r\n" +
-            "0.0.0.0 notify.bugsnag.com\r\n" +
-            "0.0.0.0 sessions.bugsnag.com\r\n" +
-            "0.0.0.0 browser.sentry-cdn.com\r\n" +
-            "0.0.0.0 app.getsentry.com\r\n" +
-            "0.0.0.0 amazonaws.com\r\n" +
-            "0.0.0.0 amazonaax.com\r\n" +
-            "0.0.0.0 amazonclix.com\r\n" +
-            "0.0.0.0 assoc-amazon.com\r\n" +
-            "0.0.0.0 ads.google.com\r\n" +
-            "0.0.0.0 pagead2.googlesyndication.com\r\n" +
-            "0.0.0.0 pagead2.googleadservices.com\r\n" +
-            "# 0.0.0.0 facebook.com\r\n" +
-            "0.0.0.0 amazon-adsystem.com\r\n" +
-            "0.0.0.0 googleadservices.com\r\n" +
-            "0.0.0.0 doubleclick.net\r\n" +
-            "0.0.0.0 ad.doubleclick.net\r\n" +
-            "0.0.0.0 static.doubleclick.net\r\n" +
-            "0.0.0.0 m.doubleclick.net\r\n" +
-            "0.0.0.0 mediavisor.doubleclick.net\r\n" +
-            "0.0.0.0 googleads.g.doubleclick.net\r\n" +
-            "0.0.0.0 adclick.g.doubleclick.net\r\n" +
-            "0.0.0.0 carbonads.net\r\n" +
-            "0.0.0.0 advertising.amazon.com\r\n" +
-            "0.0.0.0 advertising.amazon.ca\r\n" +
-            "0.0.0.0 google-analytics.com\r\n" +
-            "0.0.0.0 doubleclick.net\r\n" +
-            "0.0.0.0 doubleclick.com\r\n" +
-            "0.0.0.0 doubleclick.de\r\n" +
-            "0.0.0.0 partner.googleadservices.com\r\n" +
-            "0.0.0.0 googlesyndication.com\r\n" +
-            "0.0.0.0 google-analytics.com\r\n" +
-            "0.0.0.0 zedo.com\r\n" +
-            "0.0.0.0 amazon.ae\r\n" +
-            "0.0.0.0 amazon.cn\r\n" +
-            "0.0.0.0 advertising.amazon.co.jp\r\n" +
-            "0.0.0.0 amazon.co.uk\r\n" +
-            "0.0.0.0 advertising.amazon.com.au\r\n" +
-            "0.0.0.0 advertising.amazon.com.mx\r\n" +
-            "0.0.0.0 advertising.amazon.de\r\n" +
-            "0.0.0.0 advertising.amazon.es\r\n" +
-            "0.0.0.0 advertising.amazon.fr\r\n" +
-            "0.0.0.0 advertising.amazon.in\r\n" +
-            "0.0.0.0 advertising.amazon.it\r\n" +
-            "0.0.0.0 advertising.amazon.sa\r\n" +
-            "0.0.0.0 bingads.microsoft.com\r\n" +
-            "0.0.0.0 adcash.com\r\n" +
-            "0.0.0.0 taboola.com\r\n" +
-            "0.0.0.0 outbrain.com\r\n" +
-            "0.0.0.0 smartyads.com\r\n" +
-            "0.0.0.0 popads.net\r\n" +
-            "0.0.0.0 adpushup.com\r\n" +
-            "0.0.0.0 trafficforce.com\r\n" +
-            "0.0.0.0 adsterra.com\r\n" +
-            "0.0.0.0 creative.ak.fbcdn.net\r\n" +
-            "0.0.0.0 adbrite.com\r\n" +
-            "0.0.0.0 exponential.com\r\n" +
-            "0.0.0.0 quantserve.com\r\n" +
-            "0.0.0.0 scorecardresearch.com\r\n" +
-            "0.0.0.0 propellerads.com\r\n" +
-            "0.0.0.0 admedia.net\r\n" +
-            "0.0.0.0 admedia.com\r\n" +
-            "0.0.0.0 bidvertiser.com\r\n" +
-            "0.0.0.0 undertone.com\r\n" +
-            "0.0.0.0 web.adblade.com\r\n" +
-            "0.0.0.0 revenuehits.com\r\n" +
-            "0.0.0.0 infolinks.com\r\n" +
-            "0.0.0.0 vibrantmedia.com\r\n" +
-            "0.0.0.0 ads.yahoosmallbusiness.com\r\n" +
-            "0.0.0.0 ads.yahoo.com\r\n" +
-            "0.0.0.0 hilltopads.net\r\n" +
-            "0.0.0.0 clickadu.com\r\n" +
-            "0.0.0.0 citysex.com\r\n" +
-            "0.0.0.0 ad-maven.com\r\n" +
-            "0.0.0.0 propelmedia.com\r\n" +
-            "0.0.0.0 enginemediaexchange.com\r\n" +
-            "0.0.0.0 advertisers.adversense.com\r\n" +
-            "0.0.0.0 a.adtng.com\r\n" +
-            "0.0.0.0 ads.facebook.com\r\n" +
-            "0.0.0.0 an.facebook.com\r\n" +
-            "0.0.0.0 analytics.facebook.com\r\n" +
-            "0.0.0.0 pixel.facebook.com\r\n" +
-            "0.0.0.0 ads.youtube.com\r\n" +
-            "0.0.0.0 youtube.cleverads.vn\r\n" +
-            "0.0.0.0 ads-twitter.com\r\n" +
-            "0.0.0.0 ads-api.twitter.com\r\n" +
-            "0.0.0.0 advertising.twitter.com\r\n" +
-            "0.0.0.0 ads.linkedin.com\r\n" +
-            "0.0.0.0 analytics.pointdrive.linkedin.com\r\n" +
-            "0.0.0.0 ads.reddit.com\r\n" +
-            "0.0.0.0 d.reddit.com\r\n" +
-            "0.0.0.0 rereddit.com\r\n" +
-            "0.0.0.0 events.redditmedia.com\r\n" +
-            "0.0.0.0 analytics.tiktok.com\r\n" +
-            "0.0.0.0 ads.tiktok.com\r\n" +
-            "0.0.0.0 analytics-sg.tiktok.com\r\n" +
-            "0.0.0.0 ads-sg.tiktok.com\r\n";
     }
 
 

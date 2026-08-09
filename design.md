@@ -167,7 +167,7 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 | `ServiceProcessMap` | Service name ↔ PID map (shared `svchost` attribution for privacy observe) | on demand |
 | `TlsCertificateMonitor` | Monitors LocalMachine\Root + TrustedPublisher; baselines at startup. BYOVD follow-up: exact cert **thumbprint** match only → stop service + delete SCM key (does **not** delete `System32\drivers\*.sys`) | 60s |
 | `UacBypassSurfaceMonitor` | Detects COM AutoElevation vectors and manifest autoElevate + copy-drop | periodic |
-| `HostsFileGuard` | Enforces embedded hosts (ads baseline SHA-256); FCM `mtalk.*` lines only when `BlockFcmPushChannel=true`; purges other files in drivers\etc | FSW + 30s |
+| `HostsFileGuard` | Monitors hosts file for suspicious modifications (C2 IP redirects, security domain blocking); users may freely edit. Only enforces FCM `mtalk.*` lines when `MitmDefense.Enabled` or `BlockFcmPushChannel=true` (appends missing lines, never overwrites) | FSW + 30s |
 | `BrowserDnsPolicyGuard` | Disables DoH system-wide across all browsers; 15s self-healing | 15s |
 | `BootIntegrityGuard` | Monitors BCD, boot drivers, EFI partition for bootkit indicators | 60s |
 | `CveShieldHardener` | Fetches CISA KEV feed; maps against local assets; generates block rules | 4h |
@@ -655,7 +655,7 @@ Config section: `AutoIncidentReporting` (see CHANGELOG 1.7.7 / 1.7.8).
 
 | Item | Value |
 |------|--------|
-| Hosts block | **Removed** from `HostsFileGuard` trusted content (was opinionated) |
+| Hosts block | **Removed** — `HostsFileGuard` no longer enforces any embedded blocklist (ad-blocking was opinionated); now monitor-only |
 | Monitor | `ForumHrWatchMonitor` (NetworkIntegrity) |
 | Allowed | Browser processes browsing forum.hr |
 | Enforced | Non-browser DNS/TCP to forum.hr IPs; persistent non-browser sessions ≥5 min |

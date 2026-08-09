@@ -1,0 +1,422 @@
+﻿==============================================
+   Sentinel - Building Minimum Installer      
+   (net48-windows, framework-dependent)       
+==============================================
+Version: 2.0.5
+Stamped project versions to 2.0.5
+Cleaning publish outputs...
+Publishing Sentinel Service (net48-windows, framework-dependent)...
+  Determining projects to restore...
+  All projects are up-to-date for restore.
+D:\Gorstak\Sentinel\src\Sentinel.Core\AdvancedResponseEngine.cs(230,17): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\AllowlistService.cs(124,29): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\AttackTechniqueMap.cs(93,21): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\AllowlistService.cs(160,80): warning CS8604: Possible null reference argument for parameter 'json' in 'List<AllowlistEntry>? JsonSerializer.Deserialize<List<AllowlistEntry>>(string json, JsonSerializerOptions? options = null)'. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\BehavioralBaselineService.cs(91,31): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\BehavioralBaselineService.cs(99,32): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\AppNetworkPolicyMonitor.cs(361,33): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\AppNetworkPolicyMonitor.cs(404,71): warning CS8604: Possible null reference argument for parameter 'filePath' in 'bool SignerTrustService.IsSignedFile(string filePath)'. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\AppNetworkPolicyMonitor.cs(413,33): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\ApplicationIntegrityMonitor.cs(365,81): warning CS8601: Possible null reference assignment. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\ApplicationIntegrityMonitor.cs(366,91): warning CS8601: Possible null reference assignment. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\ApplicationIntegrityMonitor.cs(367,87): warning CS8601: Possible null reference assignment. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\CoercionAbusePolicy.cs(104,24): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\BehavioralCorrelationEngine.cs(70,99): warning CS8604: Possible null reference argument for parameter 'filePath' in 'bool SecurityValidation.VerifyAuthenticodeSignature(string filePath, ILogger? logger = null)'. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\BehavioralCorrelationEngine.cs(80,46): warning CS8620: Argument of type 'ConcurrentDictionary<int, List<DetectionEvent>>' cannot be used for parameter 'dict' of type 'ConcurrentDictionary<int, List<DetectionEvent>?>' in 'List<DetectionEvent>? DictionaryNet48Extensions.GetValueOrDefault<int, List<DetectionEvent>?>(ConcurrentDictionary<int, List<DetectionEvent>?> dict, int key, List<DetectionEvent>? defaultValue = null)' due to differences in the nullability of reference types. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\BeaconingDetector.cs(269,42): warning CS8604: Possible null reference argument for parameter 'imagePath' in 'HashVerdict BeaconingDetector.GetFileVerdict(string imagePath)'. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\CoercionAbusePolicy.cs(151,21): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\AntiTamperGuard.cs(516,25): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\CoercionAbusePolicy.cs(239,21): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\BehavioralBaselineService.cs(180,69): warning CS8604: Possible null reference argument for parameter 'json' in 'BaselineData? JsonSerializer.Deserialize<BaselineData>(string json, JsonSerializerOptions? options = null)'. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\WslMonitor.cs(321,37): warning CS8604: Possible null reference argument for parameter 'item' in 'bool HashSet<string>.Add(string item)'. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\ChainTracer.cs(225,76): warning CS8604: Possible null reference argument for parameter 'filePath' in 'bool SecurityValidation.VerifyAuthenticodeSignature(string filePath, ILogger? logger = null)'. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\AutoIncidentReporter.cs(291,25): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\CriticalServiceGuard.cs(161,62): warning CS8604: Possible null reference argument for parameter 'key' in 'ServiceCrashHistory ConcurrentDictionary<string, ServiceCrashHistory>.GetOrAdd(string key, Func<string, ServiceCrashHistory> valueFactory)'. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\DynamicRulesEvaluator.cs(41,79): warning CS8604: Possible null reference argument for parameter 'item' in 'bool HashSet<string>.Contains(string item)'. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\DllUnloadEngine.cs(69,17): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\AdvancedResponseEngine.cs(523,33): warning CS8604: Possible null reference argument for parameter 'dict' in 'string DictionaryNet48Extensions.GetValueOrDefault<string, string>(Dictionary<string, string> dict, string key, string defaultValue = null)'. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\AdvancedResponseEngine.cs(554,33): warning CS8604: Possible null reference argument for parameter 'dict' in 'string DictionaryNet48Extensions.GetValueOrDefault<string, string>(Dictionary<string, string> dict, string key, string defaultValue = null)'. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\AdvancedResponseEngine.cs(593,36): warning CS8604: Possible null reference argument for parameter 'dict' in 'string DictionaryNet48Extensions.GetValueOrDefault<string, string>(Dictionary<string, string> dict, string key, string defaultValue = null)'. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\AdvancedResponseEngine.cs(624,88): warning CS8604: Possible null reference argument for parameter 'filePath' in 'Task<string?> QuarantineManager.QuarantineFileAtomicAsync(string filePath, bool forceQuarantineSigned = false)'. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\AdvancedResponseEngine.cs(671,32): warning CS8604: Possible null reference argument for parameter 'dict' in 'string DictionaryNet48Extensions.GetValueOrDefault<string, string>(Dictionary<string, string> dict, string key, string defaultValue = null)'. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\AdvancedResponseEngine.cs(713,28): warning CS8604: Possible null reference argument for parameter 'dict' in 'string DictionaryNet48Extensions.GetValueOrDefault<string, string>(Dictionary<string, string> dict, string key, string defaultValue = null)'. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\AdvancedResponseEngine.cs(888,63): warning CS8604: Possible null reference argument for parameter 'hash' in 'void ReinfectionCorrelator.RegisterKilledHash(string hash, string imagePath, string processName)'. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\ChainTracer.cs(438,42): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\ChainTracer.cs(472,29): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\ChainTracer.cs(486,72): warning CS8604: Possible null reference argument for parameter 'filePath' in 'bool SecurityValidation.VerifyAuthenticodeSignature(string filePath, ILogger? logger = null)'. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\CveShieldHardener.cs(190,78): warning CS8604: Possible null reference argument for parameter 'path' in 'Task<string> FileNet48.ReadAllTextAsync(string path, CancellationToken ct = default(CancellationToken))'. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\ChainTracer.cs(523,33): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\FileVerdictAds.cs(60,30): warning CS8601: Possible null reference assignment. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\FileVerdictAds.cs(56,16): warning CS8618: Non-nullable field '_secureDir' must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring the field as nullable. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\FileActivityMonitor.cs(103,31): warning CS8604: Possible null reference argument for parameter 'item' in 'void List<string>.Add(string item)'. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\ClickjackingGuard.cs(578,83): warning CS8604: Possible null reference argument for parameter 'filePath' in 'bool SignerTrustService.IsSignedFile(string filePath)'. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\CveShieldHardener.cs(318,46): warning CS8604: Possible null reference argument for parameter 'item' in 'void List<string>.Add(string item)'. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\CveShieldHardener.cs(341,42): warning CS8604: Possible null reference argument for parameter 'item' in 'void List<string>.Add(string item)'. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\ForumHrWatchMonitor.cs(149,22): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\EphemeralProcessMonitor.cs(184,47): warning CS8604: Possible null reference argument for parameter 'exeName' in 'string? EphemeralProcessMonitor.FindExecutable(string exeName)'. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\EphemeralProcessMonitor.cs(215,49): warning CS8604: Possible null reference argument for parameter 'key' in 'bool ConcurrentDictionary<string, DateTimeOffset>.TryGetValue(string key, out DateTimeOffset value)'. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\FileVerdictAds.cs(226,48): warning CS8604: Possible null reference argument for parameter 'text' in 'HashVerdict FileVerdictAds.ParseAndValidatePayload(string text, string expectedSha256)'. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\ApplicationIntegrityMonitor.cs(890,43): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\EphemeralProcessMonitor.cs(384,21): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\DllUnloadEngine.cs(248,38): warning CS8601: Possible null reference assignment. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\DllUnloadEngine.cs(252,42): warning CS8604: Possible null reference argument for parameter 'processName' in 'bool DllUnloadEngine.IsOsServicingProcess(string processName, string? imagePath)'. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\DllUnloadEngine.cs(328,49): warning CS8601: Possible null reference assignment. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\DllUnloadEngine.cs(415,45): warning CS8601: Possible null reference assignment. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\IoCScanner.cs(29,38): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\IncidentResponseService.cs(129,67): warning CS8601: Possible null reference assignment. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\IncidentResponseService.cs(136,65): warning CS8601: Possible null reference assignment. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\IncidentResponseService.cs(140,81): warning CS8604: Possible null reference argument for parameter 'filePath' in 'Task<string?> QuarantineManager.QuarantineFileAtomicAsync(string filePath, bool forceQuarantineSigned = false)'. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\DllUnloadEngine.cs(565,20): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\JsonlEventLogger.cs(28,32): warning CS8601: Possible null reference assignment. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\JsonlEventLogger.cs(24,16): warning CS8618: Non-nullable field '_logFilePath' must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring the field as nullable. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\IsolationResponseEngine.cs(187,80): warning CS8604: Possible null reference argument for parameter 'id' in 'bool IsolationResponseEngine.IsValidDockerIdentifier(string id)'. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\LawEnforcementPortals.cs(210,20): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\FileActivityMonitor.cs(736,26): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\InstallerHeuristics.cs(99,29): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\MemoryBehaviorAnalyzer.cs(98,38): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\MemoryBehaviorAnalyzer.cs(139,30): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\LsassDumpCanaryMonitor.cs(119,47): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\LsassDumpCanaryMonitor.cs(152,51): warning CS8601: Possible null reference assignment. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\GhostProcessMonitor.cs(392,31): warning CS8601: Possible null reference assignment. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\InstallerHeuristics.cs(277,25): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\InstallerHeuristics.cs(316,21): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\Monitors\ConnectivityCanaryMonitor.cs(142,47): warning CS8604: Possible null reference argument for parameter 'url' in 'Task<bool> ConnectivityCanaryMonitor.TryHeadRequestAsync(string url, CancellationToken ct)'. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\DynamicRulesEvaluator.cs(343,62): warning CS8604: Possible null reference argument for parameter 'hex' in 'byte[] ConvertHex.FromHexString(string hex)'. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\HardeningModule.cs(1126,46): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\Monitors\CloudSyncExfilMonitor.cs(188,26): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\Monitors\CloudSyncExfilMonitor.cs(275,91): warning CS8604: Possible null reference argument for parameter 'item' in 'bool List<string>.Contains(string item)'. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\Monitors\CredentialProtectionMonitors.cs(244,42): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\FileReputationEngine.cs(737,29): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\Monitors\BrowserC2Guard.cs(143,103): warning CS8604: Possible null reference argument for parameter 'input' in 'string StringNet48.ReplaceIgnoreCase(string input, string oldValue, string newValue)'. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\AutoIncidentReporter.cs(1105,25): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\Monitors\EtwProviderTamperMonitor.cs(273,52): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\Monitors\PsPortedMonitors.cs(179,31): warning CS8604: Possible null reference argument for parameter 'item' in 'void List<string>.Add(string item)'. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\NetworkMonitor.cs(170,25): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\NetworkMonitor.cs(182,25): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\NetworkMonitor.cs(195,29): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\ParentPidSpoofDetector.cs(91,95): warning CS8604: Possible null reference argument for parameter 'filePath' in 'bool SignerTrustService.IsSignedFile(string filePath)'. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\ParentPidSpoofDetector.cs(106,77): warning CS8604: Possible null reference argument for parameter 'filePath' in 'bool SecurityValidation.VerifyAuthenticodeSignature(string filePath, ILogger? logger = null)'. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\ParentPidSpoofDetector.cs(133,60): warning CS8604: Possible null reference argument for parameter 'filePath' in 'bool SignerTrustService.IsSignedFile(string filePath)'. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\Monitors\SystemIntegrityMonitors.cs(2069,56): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\ParentPidSpoofDetector.cs(196,69): warning CS8604: Possible null reference argument for parameter 'filePath' in 'bool SecurityValidation.VerifyAuthenticodeSignature(string filePath, ILogger? logger = null)'. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\NetworkShareMonitor.cs(207,25): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\NetworkShareMonitor.cs(209,26): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\NetworkReinfectionDetector.cs(204,43): warning CS8604: Possible null reference argument for parameter 'path' in 'bool NetworkReinfectionDetector.IsSuspiciousPath(string path)'. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\QuarantineManager.cs(27,34): warning CS8601: Possible null reference assignment. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\QuarantineManager.cs(45,48): warning CS8604: Possible null reference argument for parameter 'dirPath' in 'bool QuarantineManager.IsProductionQuarantinePath(string dirPath)'. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\QuarantineManager.cs(23,16): warning CS8618: Non-nullable field '_quarantineDir' must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring the field as nullable. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\ProxyAuthHelper.cs(116,16): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\NetworkInterfaceGuard.cs(318,67): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\RansomwareIoMonitor.cs(78,41): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\RansomwareIoMonitor.cs(98,72): warning CS8604: Possible null reference argument for parameter 'filePath' in 'bool SecurityValidation.VerifyAuthenticodeSignature(string filePath, ILogger? logger = null)'. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\ReinfectionCorrelator.cs(125,30): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\QuarantineManager.cs(291,17): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\Monitors\NetworkIntegrityMonitors.cs(697,59): warning CS8604: Possible null reference argument for parameter 'item' in 'bool HashSet<string>.Contains(string item)'. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\VolumeMountMonitor.cs(143,59): warning CS8604: Possible null reference argument for parameter 'driveLetter' in 'Task VolumeMountMonitor.HuntSubstCreatorProcess(string driveLetter, bool skipPhase4 = false)'. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\VolumeMountMonitor.cs(152,47): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\VolumeMountMonitor.cs(175,46): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\VolumeMountMonitor.cs(202,60): warning CS8604: Possible null reference argument for parameter 'item' in 'bool HashSet<string>.Contains(string item)'. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\VolumeMountMonitor.cs(207,55): warning CS8604: Possible null reference argument for parameter 'item' in 'bool HashSet<string>.Add(string item)'. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\VolumeMountMonitor.cs(239,63): warning CS8604: Possible null reference argument for parameter 'driveLetter' in 'Task VolumeMountMonitor.HuntSubstCreatorProcess(string driveLetter, bool skipPhase4 = false)'. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\VolumeMountMonitor.cs(262,59): warning CS8604: Possible null reference argument for parameter 'driveLetter' in 'Task VolumeMountMonitor.HuntSubstCreatorProcess(string driveLetter, bool skipPhase4 = false)'. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\VolumeMountMonitor.cs(306,46): warning CS8604: Possible null reference argument for parameter 'driveLetter' in 'bool VolumeMountMonitor.IsWimMountDrive(string driveLetter)'. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\PersistentConnectionMonitor.cs(404,46): warning CS8604: Possible null reference argument for parameter 'item' in 'bool HashSet<string>.Contains(string item)'. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\ReinfectionCorrelator.cs(245,48): warning CS8604: Possible null reference argument for parameter 'path' in 'string? ReinfectionCorrelator.ComputeFileHash(string path)'. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\Monitors\SystemIntegrityMonitors.cs(2606,59): warning CS8604: Possible null reference argument for parameter 'path' in 'bool WmiProviderIntegrityMonitor.IsSystemProtectedPath(string path)'. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\VolumeMountMonitor.cs(483,45): warning CS8604: Possible null reference argument for parameter 'substTarget' in 'Task VolumeMountMonitor.HuntBySubstTarget(string substTarget, string driveLetter, HashSet<int> killed)'. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\ScoringEngine.cs(93,47): warning CS8604: Possible null reference argument for parameter 'key' in 'DetectionCategory Dictionary<string, DetectionCategory>.this[string key]'. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\Monitors\ScriptHardeningMonitor.cs(798,66): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\ScoringEngine.cs(116,42): warning CS8604: Possible null reference argument for parameter 'key' in 'bool Dictionary<string, DetectionCategory>.TryGetValue(string key, out DetectionCategory value)'. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\SecurityValidation.cs(24,21): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\SecurityValidation.cs(41,60): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\SecurityValidation.cs(67,17): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\ScriptExecutionMonitor.cs(176,41): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\ScriptExecutionMonitor.cs(215,87): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\ScriptExecutionMonitor.cs(215,59): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\SignerTrustService.cs(53,37): warning CS8604: Possible null reference argument for parameter 'filePath' in 'bool SignerTrustService.IsSignedFile(string filePath)'. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\ScoringEngine.cs(365,21): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\ServiceProcessMap.cs(71,42): warning CS8604: Possible null reference argument for parameter 'key' in 'string ConcurrentDictionary<string, string>.this[string key]'. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\ServiceProcessMap.cs(71,50): warning CS8601: Possible null reference assignment. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\SentinelEventLogWriter.cs(303,40): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\SentinelEventLogWriter.cs(314,44): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\ServiceAgentIpc.cs(260,54): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\SandboxEscapeMonitor.cs(305,25): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\SignerTrustService.cs(145,31): warning CS8604: Possible null reference argument for parameter 'filePath' in 'bool SignerTrustService.IsSignedFile(string filePath)'. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\SignerTrustService.cs(171,33): warning CS8604: Possible null reference argument for parameter 'filePath' in 'bool SignerTrustService.IsSignedFile(string filePath)'. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\UsbDeviceFingerprinter.cs(101,21): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\UserSessionMonitors.cs(61,46): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\LsassDumpCanaryMonitor.cs(279,69): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\LsassDumpCanaryMonitor.cs(283,50): warning CS8604: Possible null reference argument for parameter 'filePath' in 'bool SignerTrustService.IsSignedFile(string filePath)'. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\UsbDeviceFingerprinter.cs(188,17): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\SecurityValidation.cs(658,25): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\RawDiskAccessMonitor.cs(327,78): warning CS8604: Possible null reference argument for parameter 'path' in 'bool RawDiskAccessMonitor.IsRawDiskPath(string path)'. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\LnkShortcutMonitor.cs(113,31): warning CS8604: Possible null reference argument for parameter 'item' in 'bool HashSet<string>.Add(string item)'. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\UserSessionMonitors.cs(1021,34): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\VolumeMountMonitor.cs(1250,18): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\RegistryMonitor.cs(943,54): warning CS8604: Possible null reference argument for parameter 'value' in 'void Dictionary<string, string>.Add(string key, string value)'. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\VolumeMountMonitor.cs(1308,75): warning CS8604: Possible null reference argument for parameter 'item' in 'bool HashSet<string>.Contains(string item)'. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\VolumeMountMonitor.cs(1315,55): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\Monitors\TokenTheftMonitor.cs(411,32): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\VolumeMountMonitor.cs(1517,46): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\VolumeMountMonitor.cs(1743,51): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\VolumeMountMonitor.cs(1751,46): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\FileReputationEngine.cs(54,21): warning CS0169: The field 'FileReputationEngine._proxyConsecutiveFailures' is never used [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\AntiTamperGuard.cs(53,22): warning CS0169: The field 'AntiTamperGuard._bootActiveResponseAlerted' is never used [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Core\AntiTamperGuard.cs(52,22): warning CS0169: The field 'AntiTamperGuard._bootActiveResponseForcePending' is never used [D:\Gorstak\Sentinel\src\Sentinel.Core\Sentinel.Core.csproj]
+  Sentinel.Core -> D:\Gorstak\Sentinel\src\Sentinel.Core\bin\Release\net48-windows\Sentinel.Core.dll
+  Sentinel.Service -> D:\Gorstak\Sentinel\src\Sentinel.Service\bin\Release\net48-windows\Sentinel.Service.exe
+  Sentinel.Service -> D:\Gorstak\Sentinel\publish\service\
+Publishing Sentinel Agent (net48-windows, framework-dependent)...
+  Determining projects to restore...
+  All projects are up-to-date for restore.
+  Sentinel.Core -> D:\Gorstak\Sentinel\src\Sentinel.Core\bin\Release\net48-windows\Sentinel.Core.dll
+D:\Gorstak\Sentinel\src\Sentinel.Agent\AgentDashboardForm.cs(1384,63): warning CS8604: Possible null reference argument for parameter 'json' in 'JsonDocument JsonDocument.Parse(string json, JsonDocumentOptions options = default(JsonDocumentOptions))'. [D:\Gorstak\Sentinel\src\Sentinel.Agent\Sentinel.Agent.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Agent\AgentDashboardForm.cs(1893,85): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Agent\Sentinel.Agent.csproj]
+D:\Gorstak\Sentinel\src\Sentinel.Agent\AgentDashboardForm.cs(1921,20): warning CS8602: Dereference of a possibly null reference. [D:\Gorstak\Sentinel\src\Sentinel.Agent\Sentinel.Agent.csproj]
+  Sentinel.Agent -> D:\Gorstak\Sentinel\src\Sentinel.Agent\bin\Release\net48-windows\Sentinel.Agent.exe
+  Sentinel.Agent -> D:\Gorstak\Sentinel\publish\agent\
+Deploying Sentinel.ico and version.txt...
+Copied ML model pe_model.zip -> service\MlModels
+Copied ML model url_model.zip -> service\MlModels
+Copied ML model pe_model.zip -> agent\MlModels
+Copied ML model url_model.zip -> agent\MlModels
+Locating Inno Setup compiler...
+Found Inno Setup at: C:\Program Files\Inno Setup 7\ISCC.exe
+Compiling installer with Inno Setup...
+Inno Setup 7 Command-Line Compiler
+Copyright (C) 1997-2026 Jordan Russell. All rights reserved.
+Portions Copyright (C) 2000-2026 Martijn Laan. All rights reserved.
+Portions Copyright (C) 2001-2004 Alex Yackimoff. All rights reserved.
+https://www.innosetup.com
+
+Compiler engine version: Inno Setup 7.0.2
+Non-commercial use only
+
+Preprocessing
+   Reading file: C:\Program Files\Inno Setup 7\ISPPBuiltins.iss
+Parsing [Setup] section, line 2
+Parsing [Setup] section, line 3
+Parsing [Setup] section, line 4
+Parsing [Setup] section, line 5
+Parsing [Setup] section, line 6
+Parsing [Setup] section, line 7
+Parsing [Setup] section, line 8
+Parsing [Setup] section, line 9
+Parsing [Setup] section, line 10
+Parsing [Setup] section, line 11
+Parsing [Setup] section, line 12
+Parsing [Setup] section, line 13
+Parsing [Setup] section, line 14
+Parsing [Setup] section, line 15
+Parsing [Setup] section, line 17
+Parsing [Setup] section, line 19
+Parsing [Setup] section, line 20
+Parsing [Setup] section, line 21
+Reading file (WizardImageFile)
+Reading file (WizardSmallImageFile)
+Preparing Setup program executable
+   Verification successful
+   Updating icons (Setup.e32)
+   Updating version info (Setup.e32)
+Determining language code pages
+   Reading file: C:\Program Files\Inno Setup 7\Default.isl
+   Messages in script file
+Reading default messages from Default.isl
+Parsing [LangOptions], [Messages], and [CustomMessages] sections
+   Reading file: C:\Program Files\Inno Setup 7\Default.isl
+   Messages in script file
+Reading [Code] section
+Parsing [Icons] section, line 33
+Parsing [Registry] section, line 37
+Parsing [Registry] section, line 39
+Parsing [Registry] section, line 40
+Parsing [UninstallDelete] section, line 59
+Parsing [UninstallDelete] section, line 61
+Parsing [Run] section, line 48
+Parsing [UninstallRun] section, line 54
+Parsing [UninstallRun] section, line 55
+Parsing [Files] section, line 26
+Parsing [Files] section, line 27
+Parsing [Files] section, line 28
+Compiling [Code] section
+Deleting SentinelSetup-2.0.5.exe from output directory
+Creating setup files
+   Verification successful
+   Updating icons (Setup.exe)
+   Compressing: \\?\D:\Gorstak\Sentinel\installer\assets\Sentinel.ico
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\appsettings.json
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\CpuMathNative.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\FastTreeNative.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\IndexRange.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\LdaNative.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\Microsoft.Bcl.AsyncInterfaces.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\Microsoft.Bcl.Numerics.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\Microsoft.Extensions.Configuration.Abstractions.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\Microsoft.Extensions.Configuration.Binder.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\Microsoft.Extensions.Configuration.CommandLine.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\Microsoft.Extensions.Configuration.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\Microsoft.Extensions.Configuration.EnvironmentVariables.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\Microsoft.Extensions.Configuration.FileExtensions.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\Microsoft.Extensions.Configuration.Json.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\Microsoft.Extensions.Configuration.UserSecrets.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\Microsoft.Extensions.DependencyInjection.Abstractions.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\Microsoft.Extensions.DependencyInjection.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\Microsoft.Extensions.Diagnostics.Abstractions.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\Microsoft.Extensions.Diagnostics.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\Microsoft.Extensions.FileProviders.Abstractions.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\Microsoft.Extensions.FileProviders.Physical.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\Microsoft.Extensions.FileSystemGlobbing.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\Microsoft.Extensions.Hosting.Abstractions.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\Microsoft.Extensions.Hosting.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\Microsoft.Extensions.Hosting.WindowsServices.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\Microsoft.Extensions.Logging.Abstractions.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\Microsoft.Extensions.Logging.Configuration.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\Microsoft.Extensions.Logging.Console.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\Microsoft.Extensions.Logging.Debug.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\Microsoft.Extensions.Logging.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\Microsoft.Extensions.Logging.EventLog.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\Microsoft.Extensions.Logging.EventSource.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\Microsoft.Extensions.Options.ConfigurationExtensions.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\Microsoft.Extensions.Options.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\Microsoft.Extensions.Primitives.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\Microsoft.ML.Core.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\Microsoft.ML.CpuMath.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\Microsoft.ML.Data.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\Microsoft.ML.DataView.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\Microsoft.ML.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\Microsoft.ML.FastTree.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\Microsoft.ML.KMeansClustering.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\Microsoft.ML.PCA.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\Microsoft.ML.StandardTrainers.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\Microsoft.ML.Transforms.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\Microsoft.Win32.Registry.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\NAudio.Asio.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\NAudio.Core.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\NAudio.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\NAudio.Midi.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\NAudio.Wasapi.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\NAudio.WinForms.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\NAudio.WinMM.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\Newtonsoft.Json.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\Sentinel.Core.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\Sentinel.Core.pdb
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\Sentinel.ico
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\Sentinel.Service.exe
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\Sentinel.Service.exe.config
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\Sentinel.Service.pdb
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\System.Buffers.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\System.CodeDom.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\System.Collections.Immutable.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\System.Diagnostics.DiagnosticSource.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\System.Diagnostics.EventLog.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\System.IO.FileSystem.AccessControl.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\System.Memory.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\System.Net.Http.Json.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\System.Numerics.Tensors.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\System.Numerics.Vectors.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\System.Runtime.CompilerServices.Unsafe.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\System.Security.AccessControl.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\System.Security.Principal.Windows.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\System.ServiceProcess.ServiceController.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\System.Text.Encodings.Web.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\System.Text.Json.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\System.Threading.Channels.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\System.Threading.Tasks.Extensions.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\System.ValueTuple.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\version.txt
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\MlModels\pe_model.zip
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\service\MlModels\url_model.zip
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\appsettings.json
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\CpuMathNative.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\FastTreeNative.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\IndexRange.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\LdaNative.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\Microsoft.Bcl.AsyncInterfaces.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\Microsoft.Bcl.Numerics.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\Microsoft.Extensions.Configuration.Abstractions.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\Microsoft.Extensions.Configuration.Binder.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\Microsoft.Extensions.Configuration.CommandLine.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\Microsoft.Extensions.Configuration.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\Microsoft.Extensions.Configuration.EnvironmentVariables.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\Microsoft.Extensions.Configuration.FileExtensions.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\Microsoft.Extensions.Configuration.Json.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\Microsoft.Extensions.Configuration.UserSecrets.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\Microsoft.Extensions.DependencyInjection.Abstractions.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\Microsoft.Extensions.DependencyInjection.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\Microsoft.Extensions.Diagnostics.Abstractions.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\Microsoft.Extensions.Diagnostics.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\Microsoft.Extensions.FileProviders.Abstractions.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\Microsoft.Extensions.FileProviders.Physical.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\Microsoft.Extensions.FileSystemGlobbing.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\Microsoft.Extensions.Hosting.Abstractions.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\Microsoft.Extensions.Hosting.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\Microsoft.Extensions.Logging.Abstractions.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\Microsoft.Extensions.Logging.Configuration.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\Microsoft.Extensions.Logging.Console.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\Microsoft.Extensions.Logging.Debug.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\Microsoft.Extensions.Logging.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\Microsoft.Extensions.Logging.EventLog.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\Microsoft.Extensions.Logging.EventSource.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\Microsoft.Extensions.Options.ConfigurationExtensions.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\Microsoft.Extensions.Options.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\Microsoft.Extensions.Primitives.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\Microsoft.ML.Core.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\Microsoft.ML.CpuMath.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\Microsoft.ML.Data.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\Microsoft.ML.DataView.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\Microsoft.ML.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\Microsoft.ML.FastTree.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\Microsoft.ML.KMeansClustering.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\Microsoft.ML.PCA.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\Microsoft.ML.StandardTrainers.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\Microsoft.ML.Transforms.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\Microsoft.Win32.Registry.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\NAudio.Asio.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\NAudio.Core.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\NAudio.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\NAudio.Midi.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\NAudio.Wasapi.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\NAudio.WinForms.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\NAudio.WinMM.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\Newtonsoft.Json.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\Sentinel.Agent.exe
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\Sentinel.Agent.exe.config
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\Sentinel.Agent.pdb
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\Sentinel.Core.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\Sentinel.Core.pdb
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\Sentinel.ico
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\System.Buffers.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\System.CodeDom.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\System.Collections.Immutable.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\System.Diagnostics.DiagnosticSource.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\System.Diagnostics.EventLog.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\System.IO.FileSystem.AccessControl.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\System.Memory.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\System.Net.Http.Json.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\System.Numerics.Tensors.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\System.Numerics.Vectors.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\System.Runtime.CompilerServices.Unsafe.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\System.Security.AccessControl.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\System.Security.Principal.Windows.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\System.ServiceProcess.ServiceController.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\System.Text.Encodings.Web.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\System.Text.Json.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\System.Threading.Channels.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\System.Threading.Tasks.Extensions.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\System.ValueTuple.dll
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\version.txt
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\MlModels\pe_model.zip
+   Compressing: \\?\D:\Gorstak\Sentinel\publish\agent\MlModels\url_model.zip
+   Compressing Setup program executable
+   Updating version info (Setup.exe)
+   Updating manifest (Setup.exe)
+
+
+Successful compile (2.500 sec). Resulting Setup program filename is:
+D:\Gorstak\Sentinel\installer\SentinelSetup-2.0.5.exe
+==============================================
+Build completed successfully!
+Installer: installer\SentinelSetup-2.0.5.exe (8.83 MB)
+Runtime:   .NET Framework 4.8 (framework-dependent)
+==============================================
+Copied installer to releases\2.0.5\

@@ -2,6 +2,32 @@
 
 All notable changes to Sentinel are documented in this file.
 
+## [2.0.5] - 2026-08-09
+
+### Changed — HostsFileGuard Refactored to Monitor-Only Mode
+
+The `HostsFileGuard` no longer enforces a hardcoded hosts file. Users may freely edit their Windows hosts file without Sentinel overwriting it.
+
+#### What was removed
+- **Embedded ad-blocking hosts baseline** — the ~100-entry ad/tracker blocklist (doubleclick, google-analytics, hotjar, taboola, etc.) has been entirely removed. Ad-blocking is not Sentinel's responsibility.
+- **Full-file overwrite enforcement** — Sentinel no longer overwrites the hosts file with a hardcoded SHA-256 baseline on every change.
+- **Directory purging** — Sentinel no longer deletes files from `drivers\etc` (hosts.ics, etc.).
+
+#### What was added
+- **Suspicious modification detection** — monitors the hosts file for malware indicators:
+  - Redirects of security-critical domains (Windows Update, AV vendors, certificate revocation endpoints) to non-loopback IPs
+  - Redirects of any domain to known C2/malware IP ranges (185.215.x, 194.180.x, 91.215.x, etc.)
+- **Confidence-based alerting** — emits detection events with scaled confidence (0.75 for single suspicious entry, 0.92 for 3+ entries). Only authorizes process kill for high-confidence multi-entry detections.
+
+#### MitM Defense lines (unchanged behavior)
+- When `MitmDefense.Enabled=true` or `BlockFcmPushChannel=true`, the FCM `mtalk.google.com` blocking lines are still enforced by **appending** missing lines (never overwriting user content).
+- Removal of MitM lines while MitmDefense is active triggers a detection event and re-appends them.
+
+### Fixed — .NET 4.8 Compatibility
+
+- Fixed `StartsWith(char)` usage in HostsFileGuard (char overload unavailable in .NET Framework 4.8).
+- Fixed `Environment.ProcessId` usage → `System.Net48Environment.ProcessId` shim.
+
 ## [2.0.4] - 2026-08-09
 
 ### Security — Full Red Team Audit Remediation
