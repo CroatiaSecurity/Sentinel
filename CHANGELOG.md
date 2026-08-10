@@ -2,6 +2,18 @@
 
 All notable changes to Sentinel are documented in this file.
 
+## [2.0.6] - 2026-08-10
+
+### Fixed — Games and DirectX installers killed by file reputation engine
+
+**Root cause:** `DetectionEngine.ProcessTelemetryQueueAsync` had no game/anti-cheat or DirectX path guard before reputation scanning. Game binaries (packed, high-entropy, unsigned, unknown to reputation DBs) scored as `HighRisk` or `Malicious`, emitting Tier1/KillProcessTree detections. Under multi-signal correlation, a second weak signal on the same PID (e.g. System32 write during DirectX redist) could chain-confirm a nuke — killing the game.
+
+**Fix:** Added early-return guards (consistent with DllUnloadEngine, AdvancedResponseEngine, and IncidentResponseService which already skip these paths):
+- `SecurityValidation.IsGameOrAntiCheatPath(imagePath)` — skips all Steam, Epic, GOG, EA, Ubisoft, Riot, Battle.net, Xbox, anti-cheat (EAC/BattlEye/Vanguard/Denuvo) paths
+- `InstallerHeuristics.IsDirectXOrRuntimeRedist(processName, imagePath)` — skips DXSETUP, vcredist, XNA, OpenAL, PhysX, and all runtime redistributable processes regardless of install location
+
+Behavioral monitors still observe everything — if an actual attack uses a game path, rule-based detections still fire and go through normal ObserveUntilChain gating.
+
 ## [2.0.5] - 2026-08-09
 
 ### Changed — HostsFileGuard Refactored to Monitor-Only Mode

@@ -174,6 +174,15 @@ namespace Sentinel.Core
                                                 Path.GetFileName(imagePath).StartsWith("Sentinel.", StringComparison.OrdinalIgnoreCase))
                                                 return;
 
+                                            // v2.0.5: Never reputation-scan game/anti-cheat or DirectX/runtime
+                                            // redistributable binaries. These are interactive entertainment or
+                                            // runtime installers that Sentinel must never touch — observe only.
+                                            // Consistent with DllUnloadEngine, AdvancedResponseEngine, and
+                                            // IncidentResponseService which already skip these paths.
+                                            if (SecurityValidation.IsGameOrAntiCheatPath(imagePath) ||
+                                                InstallerHeuristics.IsDirectXOrRuntimeRedist(pt.ProcessName, imagePath))
+                                                return;
+
                                             // v1.3.1: Use multi-signal FileReputationEngine for on-execute verdicts
                                             var repoResult = await _fileReputationEngine.EvaluateFileAsync(imagePath, ct);
 

@@ -215,7 +215,7 @@ namespace Sentinel.Tests
         [Fact]
         public void Version_Is204()
         {
-            Assert.Equal("2.0.4", ProductInfo.Version);
+            Assert.Equal("2.0.6", ProductInfo.Version);
         }
     }
 
