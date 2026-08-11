@@ -4,7 +4,7 @@ Real-time endpoint detection and response for Windows. Built to **battle real at
 
 Runs as a background SYSTEM service, watches behavior (not just signatures), and only destroys processes when **multiple independent signals** prove a terminal attack chain. Games, anti-cheat, DirectX/GPU redists, and normal developer tooling are treated as work — not threats.
 
-**Current version: 2.0.8**
+**Current version: 2.0.9**
 
 ### Honest mission
 
@@ -159,7 +159,7 @@ Full transparency in [THREAT_MODEL.md](THREAT_MODEL.md).
 
 ## Installation
 
-Download **`SentinelSetup-2.0.8.exe`** from [GitHub Releases](https://github.com/CroatiaSecurity/Sentinel/releases) (or `releases/2.0.8/` after a local build) and run it as Administrator.
+Download **`SentinelSetup-2.0.9.exe`** from [GitHub Releases](https://github.com/CroatiaSecurity/Sentinel/releases) (or `releases/2.0.9/` after a local build) and run it as Administrator.
 
 If Setup fails with **Error 5 / temporary directory** while an older Sentinel is installed, that was ASR rule `c1db55ab` (fixed in 1.9.6+). Use elevated `installer\install-no-inno.ps1` or `fix-asr-for-setup.ps1`, then upgrade.
 

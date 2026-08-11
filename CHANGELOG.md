@@ -2,6 +2,14 @@
 
 All notable changes to Sentinel are documented in this file.
 
+## [2.0.9] - 2026-08-12
+
+### Fixed — Upgrade install "Access is denied" on unins000.exe
+
+**Root cause:** v2.0.8 reduced upgrade ACL unlock to a few product PE files. Hardened installs keep the install directory SYSTEM-owned; Inno Setup still needs to create/overwrite `unins000.exe`, `unins000.dat`, and the full payload tree. Result: `Access is denied` mid-install — not acceptable for end users.
+
+**Fix:** Setup again takes ownership of the entire install tree (and prior x86/x64 paths) and grants Administrators + SYSTEM full control after the service is stopped. Explicit unlock of `unins000.*`. `HardeningModule.SecureInstallationDirectory()` re-locks ACLs when the service starts. No manual takeown required.
+
 ## [2.0.8] - 2026-08-12
 
 ### Security — Deep real-world red/blue audit (gamers + high-profile hosts)

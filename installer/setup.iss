@@ -1,6 +1,6 @@
 [Setup]
 AppName=Sentinel
-AppVersion=2.0.8
+AppVersion=2.0.9
 AppPublisher=Gorstak
 AppPublisherURL=https://gorstak.eu
 SourceDir=.
@@ -11,7 +11,7 @@ UninstallDisplayIcon={app}\Sentinel.ico
 Compression=lzma2
 SolidCompression=yes
 OutputDir=.
-OutputBaseFilename=SentinelSetup-2.0.8
+OutputBaseFilename=SentinelSetup-2.0.9
 PrivilegesRequired=admin
 ; One active Setup wizard at a time (elevation handoff still works: non-elevated exits first)
 SetupMutex=Global\SentinelSetupMutex
@@ -282,32 +282,48 @@ begin
   Exec(PsPath, Cmd, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
 
-// v2.0.8 RT-HIGH-3: Do NOT takeown/icacls the entire install tree.
-// Broad ACL reset created a plant window for a trojanized Service binary.
-// Unlock only known product PE names that Setup must replace.
-procedure UnlockInstallBinary(const FilePath: String);
+// v2.0.9: Full install-dir unlock for upgrades (required for unins000.exe + all payload files).
+// v2.0.8 per-file unlock broke upgrades: hardened installs denied create of unins000.exe
+// ("Access is denied") — users cannot be asked to run takeown manually.
+//
+// Security model: Setup already requires PrivilegesRequired=admin. The unlock window is only
+// while elevated Setup runs after the service is stopped. On first service start,
+// HardeningModule.SecureInstallationDirectory() re-applies SYSTEM-centric ACLs.
+procedure ResetInstallDirAcls(const DirPath: String);
 var
   ResultCode: Integer;
-begin
-  if not FileExists(FilePath) then
-    Exit;
-
-  Exec(ExpandConstant('{sysnative}\takeown.exe'), '/F "' + FilePath + '" /A /D Y', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Exec(ExpandConstant('{sysnative}\icacls.exe'), '"' + FilePath + '" /grant Administrators:F /C /Q', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Exec(ExpandConstant('{sysnative}\icacls.exe'), '"' + FilePath + '" /grant SYSTEM:F /C /Q', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-end;
-
-procedure ResetInstallDirAcls(const DirPath: String);
 begin
   if not DirExists(DirPath) then
     Exit;
 
-  // Only unlock binaries we replace — leave directory tree ACLs intact.
-  UnlockInstallBinary(DirPath + '\Sentinel.Service.exe');
-  UnlockInstallBinary(DirPath + '\Sentinel.Agent.exe');
-  UnlockInstallBinary(DirPath + '\Sentinel.Core.dll');
-  UnlockInstallBinary(DirPath + '\Sentinel.Service.dll');
-  UnlockInstallBinary(DirPath + '\Sentinel.Agent.dll');
+  // Take ownership of the whole tree (AntiTamper may have SYSTEM-only ownership)
+  Exec(ExpandConstant('{sysnative}\takeown.exe'), '/F "' + DirPath + '" /R /A /D Y', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+  // Grant Administrators + SYSTEM full control (files + containers inherit)
+  Exec(ExpandConstant('{sysnative}\icacls.exe'), '"' + DirPath + '" /grant Administrators:(OI)(CI)F /T /C /Q', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{sysnative}\icacls.exe'), '"' + DirPath + '" /grant SYSTEM:(OI)(CI)F /T /C /Q', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+  // Explicit root ACE so Setup can create unins000.exe / new files even if inheritance was broken
+  Exec(ExpandConstant('{sysnative}\icacls.exe'), '"' + DirPath + '" /grant Administrators:F /C /Q', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{sysnative}\icacls.exe'), '"' + DirPath + '" /grant SYSTEM:F /C /Q', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+  // Drop Deny ACEs AntiTamper / older hardening may have set
+  Exec(ExpandConstant('{sysnative}\icacls.exe'), '"' + DirPath + '" /remove:d Users /T /C /Q', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{sysnative}\icacls.exe'), '"' + DirPath + '" /remove:d *S-1-5-32-545 /T /C /Q', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{sysnative}\icacls.exe'), '"' + DirPath + '" /remove:d Everyone /T /C /Q', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{sysnative}\icacls.exe'), '"' + DirPath + '" /remove:d *S-1-1-0 /T /C /Q', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+  // Explicitly unlock uninstaller stubs Inno rewrites
+  if FileExists(DirPath + '\unins000.exe') then
+  begin
+    Exec(ExpandConstant('{sysnative}\takeown.exe'), '/F "' + DirPath + '\unins000.exe" /A /D Y', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec(ExpandConstant('{sysnative}\icacls.exe'), '"' + DirPath + '\unins000.exe" /grant Administrators:F /C /Q', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  end;
+  if FileExists(DirPath + '\unins000.dat') then
+  begin
+    Exec(ExpandConstant('{sysnative}\takeown.exe'), '/F "' + DirPath + '\unins000.dat" /A /D Y', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec(ExpandConstant('{sysnative}\icacls.exe'), '"' + DirPath + '\unins000.dat" /grant Administrators:F /C /Q', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  end;
 end;
 
 procedure StopExistingService();
@@ -327,11 +343,13 @@ begin
   Exec(PsPath, '-ExecutionPolicy Bypass -Command "Get-Process -Name ''Sentinel.Service'',''Sentinel.Agent'' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Sleep(500);
 
-  // Reset ACLs on install directories
+  // Unlock every known prior install path (x64 + x86 + previous {app})
   ResetInstallDirAcls(ExpandConstant('{app}'));
+  ResetInstallDirAcls(ExpandConstant('{commonpf}\Sentinel'));
   ResetInstallDirAcls(ExpandConstant('{commonpf32}\Sentinel'));
+  ResetInstallDirAcls(ExpandConstant('{autopf}\Sentinel'));
 
-  // NOW try rename as final fallback (ACLs are reset, file should be writable)
+  // Rename locked PE as final fallback (ACLs reset — file should be writable)
   if FileExists(ExpandConstant('{app}\Sentinel.Service.exe')) then
     RenameFile(ExpandConstant('{app}\Sentinel.Service.exe'), ExpandConstant('{app}\Sentinel.Service.exe.old'));
   if FileExists(ExpandConstant('{app}\Sentinel.Agent.exe')) then

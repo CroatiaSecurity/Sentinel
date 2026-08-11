@@ -4,7 +4,7 @@
 
 | Version | Supported |
 |---------|-----------|
-| 2.0.x   | Yes (current: 2.0.8) |
+| 2.0.x   | Yes (current: 2.0.9) |
 | 1.9.x   | Security fixes only |
 | 1.8.x   | Security fixes only |
 | < 1.8   | No        |
@@ -97,9 +97,9 @@ The following are NOT in scope:
 - `ops_metrics.json` and `events.jsonl`: SYSTEM+Admins full; **Interactive Users read** (tray Agent). Non-interactive service accounts cannot harvest detection history.
 - Quarantine remains SYSTEM+Admins only.
 
-### Installer (v2.0.8)
+### Installer (v2.0.9)
 
-- Upgrade unlocks **only** product PE files (`Sentinel.Service.exe`, `Sentinel.Agent.exe`, Core/Agent/Service DLLs) — no full-tree `takeown` / ACL reset plant window.
+- Upgrade **must** unlock the full install tree (including `unins000.exe`) after stopping the service — otherwise hardened installs fail with Access denied. Window is admin-elevated Setup only; service re-applies install-dir ACLs on start via `SecureInstallationDirectory`.
 
 ## Previously Fixed Vulnerabilities
 
