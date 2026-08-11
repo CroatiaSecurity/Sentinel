@@ -4,7 +4,7 @@
 
 | Version | Supported |
 |---------|-----------|
-| 2.0.x   | Yes (current: 2.0.4) |
+| 2.0.x   | Yes (current: 2.0.8) |
 | 1.9.x   | Security fixes only |
 | 1.8.x   | Security fixes only |
 | < 1.8   | No        |
@@ -59,25 +59,25 @@ The following are NOT in scope:
 - Social engineering of the machine operator
 - Vulnerabilities in third-party dependencies (report upstream, notify us)
 
-## Attack Surface (v2.0)
+## Attack Surface (v2.0.8)
 
 ### Service-Agent IPC (`SentinelIpc-v2` named pipe)
 
-- **Auth model:** HMAC-SHA256 over `timestamp|nonce|op|body` with a 32-byte random token stored at `%ProgramData%\Sentinel\Secure\.ipc_token`. Token file is ACL-locked (SYSTEM full, Admins full, Authenticated Users read).
-- **Replay protection:** 60-second timestamp window.
+- **Auth model:** HMAC-SHA256 over `timestamp|nonce|op|body` with a 32-byte random token stored at `%ProgramData%\Sentinel\Secure\.ipc_token`.
+- **Token ACL (v2.0.8):** SYSTEM full, Admins full, **Interactive Users read** (not all Authenticated Users). Secure directory itself is SYSTEM+Admins only.
+- **Replay protection:** 60-second timestamp window + server-side nonce map (v2.0.4+).
 - **Read-only commands only:** `ping`, `ops`, `health`. No ActiveResponse toggle over IPC.
-- **Pipe ACL:** SYSTEM + Authenticated Users (user session Agent can connect).
-- **v2.0.4:** Server-side nonce tracking prevents replay attacks within the 60s timestamp window.
+- **Pipe ACL:** SYSTEM + Authenticated Users (connect); authentication still required.
 - **v2.0.4:** Pipe name includes machine-unique suffix (anti-fingerprinting).
-- **v2.0.4:** Rule packs now use RSA-SHA256 asymmetric signatures (private key never on endpoint).
-- **v2.0.3:** Token file is now written atomically with pre-set ACL to eliminate creation-time race.
+- **v2.0.3:** Token file written atomically with pre-set ACL.
 
 ### Signed Rule Packs (`%ProgramData%\Sentinel\rules\packs\`)
 
-- `.pack.json` files are verified via HMAC before loading.
+- `.pack.json` files verified with **RSA-SHA256** (embedded public key only; private key offline).
+- **v2.0.8:** External `rulepack_pubkey.xml` is **ignored** — admins cannot swap the trust root to load attacker-signed packs.
 - Fail-closed: unsigned or tampered packs are rejected and logged.
 - Packs can only register `ICorrelationRule` implementations (no response actions or host mutations).
-- The pack signer key is derived from the machine-bound DPAPI secret.
+- Dynamic JSON rules (separate path) still use host HMAC with install entropy (SYSTEM-only key material).
 
 ### Plugin Registry
 
@@ -88,19 +88,24 @@ The following are NOT in scope:
 ### Threat Intelligence Proxy
 
 - HMAC-SHA256 authenticated requests (shared secret never transmitted in headers since v1.8.1).
-- The Cloudflare Worker proxy fails closed if `SENTINEL_SHARED_SECRET` is unset.
-- Minimum 16-character secret enforced client-side.
+- **v2.0.8 payload:** `timestamp.nonce.path.body` with `X-Sentinel-Nonce`; Worker enforces 60s window + nonce replay cache.
+- Certificate pinning on proxy clients uses true **SPKI** (and cert DER / legacy key hashes as rotation-safe candidates).
+- Worker fails closed if `SENTINEL_SHARED_SECRET` is unset. Minimum 16-character secret client-side.
 
-### Ops Metrics (`ops_metrics.json`)
+### Ops Metrics / Event Log ACLs
 
-- Written to `%ProgramData%\Sentinel\` (ACL-restricted directory).
-- Contains operational counters only (no secrets, no event content, no detection evidence).
-- Agent reads via IPC (preferred) or file fallback.
+- `ops_metrics.json` and `events.jsonl`: SYSTEM+Admins full; **Interactive Users read** (tray Agent). Non-interactive service accounts cannot harvest detection history.
+- Quarantine remains SYSTEM+Admins only.
+
+### Installer (v2.0.8)
+
+- Upgrade unlocks **only** product PE files (`Sentinel.Service.exe`, `Sentinel.Agent.exe`, Core/Agent/Service DLLs) — no full-tree `takeown` / ACL reset plant window.
 
 ## Previously Fixed Vulnerabilities
 
 See [CHANGELOG.md](CHANGELOG.md) for the full history of security fixes, including:
 
+- v2.0.8: Deep red/blue audit — SPKI pinning, proxy nonces, IPC Interactive ACL, SafeKill plant fix, rulepack trust root lock, installer per-file unlock
 - v2.0.4: Full red team audit remediation (asymmetric rule pack signing, IPC nonce tracking, EncryptedConfigStore, cert pinning, FIPS enforcement removed)
 - v2.0.3: IPC token ACL race fix (atomic write with pre-set security descriptor)
 - v2.0.0: RT-CRIT-3 HMAC key derivation with DPAPI machine secret, RT-HIGH-2 SelfPathGuard hardlink-aware exclusion, RT-HIGH-4 authenticated named-pipe IPC

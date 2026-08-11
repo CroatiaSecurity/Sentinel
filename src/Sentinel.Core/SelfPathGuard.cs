@@ -66,7 +66,6 @@ namespace Sentinel.Core
                 return false;
             }
 
-            string finalPath = TryGetFinalPath(normalized) ?? normalized;
             string installDir;
             try
             {
@@ -81,10 +80,18 @@ namespace Sentinel.Core
             if (!finalInstall.EndsWith("\\", StringComparison.Ordinal))
                 finalInstall += "\\";
 
-            // Must live under install tree on the final path
-            bool underInstall =
-                finalPath.StartsWith(finalInstall, StringComparison.OrdinalIgnoreCase) ||
-                normalized.StartsWith(installDir, StringComparison.OrdinalIgnoreCase);
+            // v2.0.8: When final NT path resolves, require it under install (hardlink-safe).
+            // Only fall back to Path.GetFullPath when final path is unavailable.
+            string? resolvedPath = TryGetFinalPath(normalized);
+            bool underInstall;
+            if (resolvedPath != null)
+            {
+                underInstall = resolvedPath.StartsWith(finalInstall, StringComparison.OrdinalIgnoreCase);
+            }
+            else
+            {
+                underInstall = normalized.StartsWith(installDir, StringComparison.OrdinalIgnoreCase);
+            }
             if (!underInstall)
                 return false;
 
@@ -118,13 +125,15 @@ namespace Sentinel.Core
             {
                 var normalized = Path.GetFullPath(path);
                 var installDir = Path.GetFullPath(AppContext.BaseDirectory).TrimEnd('\\') + '\\';
-                var finalPath = TryGetFinalPath(normalized) ?? normalized;
                 var finalInstall = TryGetFinalPath(installDir.TrimEnd('\\')) ?? installDir.TrimEnd('\\');
                 if (!finalInstall.EndsWith("\\", StringComparison.Ordinal))
                     finalInstall += "\\";
 
-                return finalPath.StartsWith(finalInstall, StringComparison.OrdinalIgnoreCase)
-                    || normalized.StartsWith(installDir, StringComparison.OrdinalIgnoreCase);
+                // v2.0.8: prefer final path; no OR-fallback that ignores resolution
+                var resolved = TryGetFinalPath(normalized);
+                if (resolved != null)
+                    return resolved.StartsWith(finalInstall, StringComparison.OrdinalIgnoreCase);
+                return normalized.StartsWith(installDir, StringComparison.OrdinalIgnoreCase);
             }
             catch
             {

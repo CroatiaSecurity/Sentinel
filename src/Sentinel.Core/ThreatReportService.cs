@@ -14,7 +14,8 @@ namespace Sentinel.Core
     ///   - All requests HMAC-signed with ThreatReporting:ProxySharedSecret (server-known).
     ///   - Never uses a client-generated key; never sends X-Sentinel-Key.
     ///   - Reporting is skipped (fail closed) when ProxySharedSecret is missing.
-    ///   - Replay protection via X-Sentinel-Timestamp (5-minute window on worker).
+    ///   - Replay protection via X-Sentinel-Timestamp + X-Sentinel-Nonce (60s window, v2.0.8).
+    ///   - TLS certificate pinning on the proxy HttpClient (v2.0.8).
     ///
     /// If ProxyEndpoint is null or secret is unset, reporting is silently skipped
     /// (lookups still work via HashReputationService / FileReputationEngine when configured).
@@ -23,13 +24,14 @@ namespace Sentinel.Core
     {
         private readonly ThreatReportingConfig _config;
         private readonly ILogger<ThreatReportService> _logger;
+        // v2.0.8: pinned TLS for proxy endpoint (same pins as FileReputationEngine VT path)
         private readonly HttpClient _httpClient;
 
         public ThreatReportService(ThreatReportingConfig config, ILogger<ThreatReportService> logger, SecureCacheStore? cacheStore = null)
         {
             _config = config;
             _logger = logger;
-            _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+            _httpClient = ProxyAuthHelper.CreatePinnedHttpClient(10);
 
             if (_config.Enabled && !string.IsNullOrWhiteSpace(_config.ProxyEndpoint) && !ProxyAuthHelper.HasSharedSecret(_config))
             {

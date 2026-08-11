@@ -2,24 +2,27 @@
 
 Cloudflare Worker that receives threat reports from Sentinel agents and forwards them to threat intelligence platforms (MalwareBazaar, URLhaus, AbuseIPDB, VirusTotal) using server-side API keys.
 
-**Version: 1.6.0** — authentication is mandatory.
+**Version: 2.0.8** — authentication + nonce replay protection are mandatory.
 
-## Auth model (v1.6.0)
+## Auth model (v2.0.8)
 
 | Header | Required | Purpose |
 |--------|----------|---------|
-| `X-Sentinel-Timestamp` | Yes | Unix seconds; must be within ±5 minutes |
-| `X-Sentinel-Signature` | Yes | Hex HMAC-SHA256 of `{timestamp}.{path}.{rawBody}` |
+| `X-Sentinel-Timestamp` | Yes | Unix seconds; must be within ±60 seconds |
+| `X-Sentinel-Nonce` | Yes | 16+ hex chars; unique within the window (replay rejected) |
+| `X-Sentinel-Signature` | Yes | Hex HMAC-SHA256 of `{timestamp}.{nonce}.{path}.{rawBody}` |
 
-Signing key is the **server-side** `SENTINEL_SHARED_SECRET` (also configured on agents as `ThreatReporting:ProxySharedSecret`).  
+Signing key is the **server-side** `SENTINEL_SHARED_SECRET` (also configured on agents as `ThreatReporting:ProxySharedSecret` via encrypted config store).  
 The secret is used **only** as the HMAC key and is **never** sent in a request header.  
-**v1.8.1:** Agents no longer send `X-Sentinel-Auth` (it previously leaked the secret). The Worker ignores that header if present.  
+**v1.8.1:** Agents no longer send `X-Sentinel-Auth`.  
 **There is no client-supplied signing key.** Missing secret → Worker returns 503.
+
+Agents use certificate-pinned HTTPS to the Worker (true SPKI + rotation-safe pin candidates).
 
 ## Free Tier Limits
 
 - 100,000 requests/day (Cloudflare Workers free plan)
-- Worker enforces ~60 requests/IP/minute
+- Worker enforces ~30 requests/IP/minute (in-memory; pair with CF Rate Limiting Rules in production)
 
 ## Setup
 
@@ -41,14 +44,9 @@ wrangler secret put VIRUSTOTAL_KEY
 
 ## Sentinel Integration
 
-```json
-{
-  "ThreatReporting": {
-    "Enabled": true,
-    "ProxyEndpoint": "https://sentinel-threat-proxy.your-subdomain.workers.dev",
-    "ProxySharedSecret": "same-value-as-SENTINEL_SHARED_SECRET"
-  }
-}
+```powershell
+# Production (DPAPI store):
+Sentinel.Service.exe --set-config ProxySharedSecret=your-long-unique-secret ProxyEndpoint=https://your-worker.workers.dev
 ```
 
 If `ProxySharedSecret` is null/short, agents **skip** reporting and VT proxy lookups (fail closed).
@@ -60,10 +58,3 @@ If `ProxySharedSecret` is null/short, agents **skip** reporting and VT proxy loo
 - `POST /report/ip` — AbuseIPDB
 - `POST /lookup/vt` — VirusTotal hash lookup
 - `GET /health` — unauthenticated health (no secrets)
-
-## Getting API Keys (Free)
-
-- **MalwareBazaar**: https://auth.abuse.ch/
-- **URLhaus**: https://urlhaus.abuse.ch/api/
-- **AbuseIPDB**: https://www.abuseipdb.com/register
-- **VirusTotal**: https://www.virustotal.com/

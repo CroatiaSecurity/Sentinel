@@ -232,33 +232,13 @@ namespace Sentinel.Tests
         }
 
         [Fact]
-        public async Task HandleAsync_ActiveResponseDisabled_Tier1Detection_LogsOnly()
+        public void ActiveResponse_CannotBeDisabled_ViaConfig()
         {
-            // Arrange: disable active response
+            // v2.0.4+: ActiveResponse is always armed (no off switch). Setter is a no-op.
             var config = new SentinelConfig { ActiveResponse = false, ObserveUntilChain = false };
-            var logPath = Path.Combine(_tempDir, "disabled_test.jsonl");
-            var logger = new JsonlEventLogger(logPath);
-            var engine = new AdvancedResponseEngine(config, _metrics, logger, _quarantine);
-
-            var detection = new DetectionEvent
-            {
-                RuleName = "LsassAccessRule",
-                Confidence = 0.95,
-                Tier = DetectionTier.Tier1Behavioral,
-                AuthorizedResponse = ResponseAction.KillProcessTree,
-                ProcessName = "evil.exe",
-                ProcessId = 9876
-            };
-
-            // Act
-            await engine.HandleAsync(detection);
-            await logger.DisposeAsync();
-
-            // Assert: should log but NOT kill
-            var log = File.ReadAllText(logPath);
-            Assert.Contains("\"ActionTaken\":\"LOG\"", log);
-            Assert.Contains("ActiveResponse disabled", log);
-            Assert.DoesNotContain("\"ActionTaken\":\"KILL\"", log);
+            Assert.True(config.ActiveResponse);
+            config.ActiveResponse = false;
+            Assert.True(config.ActiveResponse);
         }
 
         [Fact]

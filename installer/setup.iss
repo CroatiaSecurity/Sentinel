@@ -1,6 +1,6 @@
 [Setup]
 AppName=Sentinel
-AppVersion=2.0.6
+AppVersion=2.0.8
 AppPublisher=Gorstak
 AppPublisherURL=https://gorstak.eu
 SourceDir=.
@@ -11,7 +11,7 @@ UninstallDisplayIcon={app}\Sentinel.ico
 Compression=lzma2
 SolidCompression=yes
 OutputDir=.
-OutputBaseFilename=SentinelSetup-2.0.6
+OutputBaseFilename=SentinelSetup-2.0.8
 PrivilegesRequired=admin
 ; One active Setup wizard at a time (elevation handoff still works: non-elevated exits first)
 SetupMutex=Global\SentinelSetupMutex
@@ -282,20 +282,32 @@ begin
   Exec(PsPath, Cmd, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
 
-procedure ResetInstallDirAcls(const DirPath: String);
+// v2.0.8 RT-HIGH-3: Do NOT takeown/icacls the entire install tree.
+// Broad ACL reset created a plant window for a trojanized Service binary.
+// Unlock only known product PE names that Setup must replace.
+procedure UnlockInstallBinary(const FilePath: String);
 var
   ResultCode: Integer;
+begin
+  if not FileExists(FilePath) then
+    Exit;
+
+  Exec(ExpandConstant('{sysnative}\takeown.exe'), '/F "' + FilePath + '" /A /D Y', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{sysnative}\icacls.exe'), '"' + FilePath + '" /grant Administrators:F /C /Q', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{sysnative}\icacls.exe'), '"' + FilePath + '" /grant SYSTEM:F /C /Q', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
+procedure ResetInstallDirAcls(const DirPath: String);
 begin
   if not DirExists(DirPath) then
     Exit;
 
-  Exec(ExpandConstant('{sysnative}\takeown.exe'), '/F "' + DirPath + '" /R /A /D Y', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Exec(ExpandConstant('{sysnative}\icacls.exe'), '"' + DirPath + '" /grant Administrators:F /T /C /Q', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Exec(ExpandConstant('{sysnative}\icacls.exe'), '"' + DirPath + '" /grant SYSTEM:F /T /C /Q', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Exec(ExpandConstant('{sysnative}\icacls.exe'), '"' + DirPath + '" /remove:d Users /T /C /Q', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Exec(ExpandConstant('{sysnative}\icacls.exe'), '"' + DirPath + '" /remove:d *S-1-5-32-545 /T /C /Q', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Exec(ExpandConstant('{sysnative}\icacls.exe'), '"' + DirPath + '" /remove:d Everyone /T /C /Q', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Exec(ExpandConstant('{sysnative}\icacls.exe'), '"' + DirPath + '" /reset /T /C /Q', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  // Only unlock binaries we replace — leave directory tree ACLs intact.
+  UnlockInstallBinary(DirPath + '\Sentinel.Service.exe');
+  UnlockInstallBinary(DirPath + '\Sentinel.Agent.exe');
+  UnlockInstallBinary(DirPath + '\Sentinel.Core.dll');
+  UnlockInstallBinary(DirPath + '\Sentinel.Service.dll');
+  UnlockInstallBinary(DirPath + '\Sentinel.Agent.dll');
 end;
 
 procedure StopExistingService();

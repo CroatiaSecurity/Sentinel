@@ -1,15 +1,17 @@
 /**
- * Sentinel — Threat Report Proxy Worker (v1.6.0)
+ * Sentinel — Threat Report Proxy Worker (v2.0.8)
  *
  * Receives threat reports from Sentinel agents and forwards them to
  * abuse.ch (MalwareBazaar, URLhaus) using server-side API keys.
  *
- * SECURITY v1.6.0:
+ * SECURITY:
  *   - SENTINEL_SHARED_SECRET is REQUIRED (fail closed).
- *   - HMAC-SHA256 over `timestamp.path.body` using the shared secret
+ *   - HMAC-SHA256 over `timestamp.nonce.path.body` using the shared secret
  *     as the key (never accept a client-provided signing key).
- *   - 5-minute timestamp window against replay.
- *   - Optional CF-Connecting-IP rate limiting (simple in-memory).
+ *   - 60-second timestamp window (v2.0.8: was 5 minutes).
+ *   - Server-side nonce replay cache (in-memory per isolate; CF Rate Limiting
+ *     recommended as durable backstop).
+ *   - No wildcard CORS (non-browser agents only).
  *
  * Endpoints:
  *   POST /report/hash    — Report a malicious hash to MalwareBazaar
@@ -26,13 +28,15 @@
  *          wrangler secret put VIRUSTOTAL_KEY
  */
 
-// v2.0.4 MED-1: Per-isolate rate limit with sliding window.
-// NOTE: This is in-memory and resets on cold start / isolate recycle.
-// For production hardening, migrate to Cloudflare Rate Limiting Rules (dashboard)
-// or Durable Objects for persistent state across isolate restarts.
-// Current implementation is defense-in-depth alongside CF's built-in DDoS protection.
+// Per-isolate rate limit with sliding window.
+// NOTE: Resets on cold start. Prefer Cloudflare Rate Limiting Rules in production.
 const RATE_LIMIT_PER_MINUTE = 30;
 const rateBuckets = new Map();
+
+// v2.0.8: Nonce replay cache (timestamp.nonce → expiry unix sec)
+const MAX_NONCE_ENTRIES = 4096;
+const usedNonces = new Map();
+const TIMESTAMP_WINDOW_SEC = 60;
 
 function checkRateLimit(ip) {
   const now = Math.floor(Date.now() / 1000);
@@ -41,7 +45,6 @@ function checkRateLimit(ip) {
   const count = rateBuckets.get(key) || 0;
   if (count >= RATE_LIMIT_PER_MINUTE) return false;
   rateBuckets.set(key, count + 1);
-  // Opportunistic cleanup of old windows
   if (rateBuckets.size > 5000) {
     for (const k of rateBuckets.keys()) {
       if (!k.endsWith(`:${window}`) && !k.endsWith(`:${window - 1}`)) {
@@ -52,31 +55,56 @@ function checkRateLimit(ip) {
   return true;
 }
 
+function consumeNonce(nonce, ts) {
+  if (!nonce || typeof nonce !== 'string' || nonce.length < 16 || nonce.length > 64) {
+    return false;
+  }
+  // Hex-ish only
+  if (!/^[a-fA-F0-9]+$/.test(nonce)) return false;
+
+  const key = `${ts}:${nonce.toLowerCase()}`;
+  if (usedNonces.has(key)) return false;
+  usedNonces.set(key, ts + TIMESTAMP_WINDOW_SEC);
+
+  // Prune expired
+  if (usedNonces.size > 64) {
+    const now = Math.floor(Date.now() / 1000);
+    for (const [k, exp] of usedNonces.entries()) {
+      if (exp < now) usedNonces.delete(k);
+    }
+  }
+  // Hard cap
+  if (usedNonces.size > MAX_NONCE_ENTRIES) {
+    const keys = [...usedNonces.keys()].slice(0, usedNonces.size - MAX_NONCE_ENTRIES);
+    for (const k of keys) usedNonces.delete(k);
+  }
+  return true;
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
-    // v2.0.4 HIGH-2: Removed wildcard CORS. The Worker is called by Sentinel agents
-    // (non-browser HTTP clients) that don't need CORS. Removing CORS prevents browser-based
-    // abuse if a shared secret is ever leaked via XSS or malicious extensions.
+    // No CORS for browser abuse surface
     const corsHeaders = {
       'Access-Control-Allow-Origin': '',
       'Access-Control-Allow-Methods': 'POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, X-Sentinel-Signature, X-Sentinel-Timestamp',
+      'Access-Control-Allow-Headers': 'Content-Type, X-Sentinel-Signature, X-Sentinel-Timestamp, X-Sentinel-Nonce',
     };
 
     if (request.method === 'OPTIONS') {
       return new Response(null, { headers: corsHeaders });
     }
 
-    // Health check — unauthenticated (no secrets exposed)
     if (url.pathname === '/health') {
       return new Response(JSON.stringify({
         status: 'ok',
         service: 'sentinel-threat-proxy',
-        version: '1.6.0',
+        version: '2.0.8',
         timestamp: new Date().toISOString(),
-        authRequired: true
+        authRequired: true,
+        nonceRequired: true,
+        timestampWindowSec: TIMESTAMP_WINDOW_SEC
       }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
     }
 
@@ -87,7 +115,6 @@ export default {
       });
     }
 
-    // ── v1.6.0: Fail closed if shared secret is not configured ──────────
     if (!env.SENTINEL_SHARED_SECRET || env.SENTINEL_SHARED_SECRET.length < 16) {
       return new Response(JSON.stringify({
         error: 'Service misconfigured: SENTINEL_SHARED_SECRET required'
@@ -97,7 +124,6 @@ export default {
       });
     }
 
-    // Rate limit by client IP
     const clientIp = request.headers.get('CF-Connecting-IP')
       || request.headers.get('X-Forwarded-For')?.split(',')[0]?.trim()
       || 'unknown';
@@ -110,26 +136,29 @@ export default {
 
     const signature = request.headers.get('X-Sentinel-Signature');
     const timestamp = request.headers.get('X-Sentinel-Timestamp');
+    const nonce = request.headers.get('X-Sentinel-Nonce');
 
-    if (!signature || !timestamp) {
+    if (!signature || !timestamp || !nonce) {
       return new Response(JSON.stringify({
-        error: 'Bad Request: Missing X-Sentinel-Signature or X-Sentinel-Timestamp'
+        error: 'Bad Request: Missing X-Sentinel-Signature, X-Sentinel-Timestamp, or X-Sentinel-Nonce'
       }), {
         status: 400,
         headers: { 'Content-Type': 'application/json', ...corsHeaders }
       });
     }
 
-    // v1.8.1 (RT-CRIT-1): X-Sentinel-Auth is ignored. Agents no longer send the shared
-    // secret as a header; HMAC over timestamp+path+body is the sole authenticator.
-    // Legacy clients that still send Auth are not rejected (HMAC still required).
-
-    // Timestamp within 5 minutes
     const timestampVal = parseInt(timestamp, 10);
     const nowSec = Math.floor(Date.now() / 1000);
-    if (isNaN(timestampVal) || Math.abs(nowSec - timestampVal) > 300) {
+    if (isNaN(timestampVal) || Math.abs(nowSec - timestampVal) > TIMESTAMP_WINDOW_SEC) {
       return new Response(JSON.stringify({ error: 'Bad Request: Stale or invalid timestamp' }), {
         status: 400,
+        headers: { 'Content-Type': 'application/json', ...corsHeaders }
+      });
+    }
+
+    if (!consumeNonce(nonce, timestampVal)) {
+      return new Response(JSON.stringify({ error: 'Unauthorized: Replay or invalid nonce' }), {
+        status: 401,
         headers: { 'Content-Type': 'application/json', ...corsHeaders }
       });
     }
@@ -137,11 +166,12 @@ export default {
     try {
       const rawBody = await request.text();
 
-      // Verify HMAC with server-side shared secret only (never client-supplied key)
+      // v2.0.8 payload: timestamp.nonce.path.body
       const signatureValid = await verifySignature(
         signature,
         env.SENTINEL_SHARED_SECRET,
         timestamp,
+        nonce,
         url.pathname,
         rawBody
       );
@@ -333,10 +363,9 @@ function hexToBytes(hex) {
 }
 
 /**
- * Verify HMAC-SHA256(secret, `${timestamp}.${path}.${body}`) against hex signature.
- * Uses server-side shared secret only — client cannot supply the key.
+ * Verify HMAC-SHA256(secret, `${timestamp}.${nonce}.${path}.${body}`) against hex signature.
  */
-async function verifySignature(signatureHex, sharedSecret, timestamp, path, bodyJson) {
+async function verifySignature(signatureHex, sharedSecret, timestamp, nonce, path, bodyJson) {
   try {
     const encoder = new TextEncoder();
     const keyBytes = encoder.encode(sharedSecret);
@@ -351,7 +380,7 @@ async function verifySignature(signatureHex, sharedSecret, timestamp, path, body
       ['verify']
     );
 
-    const payloadStr = `${timestamp}.${path}.${bodyJson}`;
+    const payloadStr = `${timestamp}.${nonce}.${path}.${bodyJson}`;
     const payloadBytes = encoder.encode(payloadStr);
 
     return await crypto.subtle.verify('HMAC', cryptoKey, sigBytes, payloadBytes);

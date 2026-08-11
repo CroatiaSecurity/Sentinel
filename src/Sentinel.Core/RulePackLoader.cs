@@ -264,29 +264,31 @@ namespace Sentinel.Core
         }
 
         /// <summary>
-        /// v2.0.4 CRIT-2: Load RSA public key for verification.
-        /// First checks for an external public key file (allows rotation without rebuild),
-        /// then falls back to the embedded constant.
+        /// v2.0.4 CRIT-2 / v2.0.8: Load RSA public key for verification.
+        ///
+        /// v2.0.8 RT-2026-04: External <c>rulepack_pubkey.xml</c> is no longer trusted by
+        /// default. An Administrator with write access to ProgramData could replace it with
+        /// their own public key and load attacker-signed packs that drive false chain-nukes.
+        /// Only the embedded public key is used. Key rotation requires a product update that
+        /// ships a new embedded key (or a future signed key-pin list).
         /// </summary>
         private static System.Security.Cryptography.RSA? LoadVerificationKey()
         {
             try
             {
-                // Check for external key file (allows rotation)
                 var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
                 var externalKeyPath = Path.Combine(programData, "Sentinel", "Secure", "rulepack_pubkey.xml");
-                string keyXml;
                 if (File.Exists(externalKeyPath))
                 {
-                    keyXml = File.ReadAllText(externalKeyPath).Trim();
-                    // Sanity: must be an RSA public key, not a private key
-                    if (keyXml.Contains("<D>") || keyXml.Contains("<P>") || keyXml.Contains("<InverseQ>"))
-                        keyXml = RulePackPublicKeyXml; // Fall back to embedded if private key was placed there
+                    // Log-and-ignore: never load admin-writable replacement keys.
+                    System.Diagnostics.Debug.WriteLine(
+                        "[RulePacks] Ignoring external rulepack_pubkey.xml (v2.0.8: embedded key only)");
                 }
-                else
-                {
-                    keyXml = RulePackPublicKeyXml;
-                }
+
+                var keyXml = RulePackPublicKeyXml;
+                // Refuse private key material if someone ever embeds one by mistake
+                if (keyXml.Contains("<D>") || keyXml.Contains("<P>") || keyXml.Contains("<InverseQ>"))
+                    return null;
 
                 var rsa = System.Security.Cryptography.RSA.Create();
                 rsa.FromXmlString(keyXml);

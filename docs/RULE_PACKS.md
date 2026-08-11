@@ -1,4 +1,4 @@
-# Sentinel Rule Packs (v2.0)
+# Sentinel Rule Packs (v2.0.8)
 
 Signed correlation rule packs extend multi-signal detection **without recompiling** Sentinel.
 
@@ -26,30 +26,34 @@ Signed correlation rule packs extend multi-signal detection **without recompilin
       "attackTechniques": ["T1003.001", "T1071"]
     }
   ],
-  "hmac": "<hex HMAC-SHA256>"
+  "signature": "<base64 RSA-SHA256 signature>"
 }
 ```
 
-## Signing
+Legacy `"hmac"` fields are **rejected** (v2.0.4+). Packs must be re-signed with RSA.
 
-HMAC key = `HMAC-SHA256(install_entropy, "sentinel-rule-pack-signing-v1")`  
-where `install_entropy` is the 32-byte file at `%ProgramData%\Sentinel\Secure\.install_entropy` (SYSTEM-only).
+## Signing (RSA-SHA256, offline private key)
 
-Sign the JSON **with the `hmac` field removed**. Fail-closed: packs without a valid signature never load.
+v2.0.4+ uses **asymmetric** signatures. Only the public key is embedded in Sentinel.
+The private key never ships to endpoints.
 
-PowerShell (run as SYSTEM / with entropy read access):
+1. Build the JSON **without** the `signature` field (canonical object property order as written).
+2. Sign the UTF-8 bytes with RSA-SHA256 (PKCS#1 v1.5 padding).
+3. Add `"signature": "<base64>"` to the pack file.
 
 ```powershell
-# Conceptual — production signing should run under SYSTEM context
-$entropy = [IO.File]::ReadAllBytes("$env:ProgramData\Sentinel\Secure\.install_entropy")
-$hmacKey = [Security.Cryptography.HMACSHA256]::new($entropy).ComputeHash(
-  [Text.Encoding]::UTF8.GetBytes("sentinel-rule-pack-signing-v1"))
-# Remove hmac field from JSON, then:
-$payload = [Text.Encoding]::UTF8.GetBytes($jsonWithoutHmac)
-$sig = [BitConverter]::ToString(
-  [Security.Cryptography.HMACSHA256]::new($hmacKey).ComputeHash($payload)
-).Replace("-","").ToLowerInvariant()
+# Offline signing tool (private key never on endpoints)
+# Example conceptual flow — use your HSM / secure signer in production:
+$payload = [IO.File]::ReadAllText("pack.unsigned.json")
+# Sign with offline RSA private key → base64 → write pack with signature field
 ```
+
+### Trust root (v2.0.8)
+
+- Verification uses the **embedded** RSA public key only.
+- `%ProgramData%\Sentinel\Secure\rulepack_pubkey.xml` is **ignored** if present
+  (prevents admin-writable trust-root swap).
+- Key rotation requires a product update that ships a new embedded public key.
 
 ## Semantics
 
@@ -60,6 +64,6 @@ $sig = [BitConverter]::ToString(
 
 ## Security notes
 
-- Only SYSTEM can read install entropy → only SYSTEM can forge packs.
-- Administrators with file write but without entropy cannot inject kill rules.
+- SYSTEM on the endpoint **cannot** forge packs without the offline private key.
 - Packs never disable ActiveResponse or product posture.
+- Fail-closed: missing/invalid signature → pack rejected and logged.

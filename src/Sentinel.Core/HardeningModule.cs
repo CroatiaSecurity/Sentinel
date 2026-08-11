@@ -486,27 +486,18 @@ namespace Sentinel.Core
             // CRITICAL: Never kill our own process or our Agent sibling
             if (processId == System.Net48Environment.ProcessId) return;
 
-            // HARDENING v1.3.8: Never kill any process whose binary resides in our install directory.
-            // When explorer.exe was killed with entireProcessTree:true, it cascaded
-            // and killed the Agent tray app (child of explorer). This self-exclusion
-            // ensures even if a parent process tree kill occurs, our processes survive.
-            //
-            // SECURITY: Path-verified, not name-based. An attacker naming their binary
-            // "Sentinel.Agent.exe" in a user-writable directory is NOT excluded.
+            // HARDENING v1.3.8 / v2.0.8: Never kill verified Sentinel product binaries.
+            // v2.0.8 RT: Do NOT exclude every PE under the install directory — that let an
+            // attacker plant malware during the installer ACL window and become unkillable.
+            // SelfPathGuard requires known Sentinel binary names under the install final path
+            // (hardlink-aware). Arbitrary files under Program Files\Sentinel are fair game.
             try
             {
                 var targetImagePath = SecurityValidation.GetProcessImagePath(processId);
-                // SECURITY v1.4.4: Normalize with Path.GetFullPath() to resolve junctions/symlinks.
-                // Trailing separator prevents prefix collision (e.g., Sentinel2\evil.exe).
-                var selfDir = Path.GetFullPath(AppContext.BaseDirectory).TrimEnd('\\') + '\\';
-                if (targetImagePath != null)
+                if (targetImagePath != null && SelfPathGuard.IsSentinelSelfBinary(targetImagePath))
                 {
-                    var normalizedTarget = Path.GetFullPath(targetImagePath);
-                    if (normalizedTarget.StartsWith(selfDir))
-                    {
-                        Debug.WriteLine($"SafeKillProcessTree: REFUSED to kill sibling Sentinel process PID {processId} at verified install path '{targetImagePath}'");
-                        return;
-                    }
+                    Debug.WriteLine($"SafeKillProcessTree: REFUSED to kill Sentinel self binary PID {processId} at '{targetImagePath}'");
+                    return;
                 }
             }
             catch { /* process may have already exited — continue with kill attempt */ }

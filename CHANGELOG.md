@@ -2,6 +2,37 @@
 
 All notable changes to Sentinel are documented in this file.
 
+## [2.0.8] - 2026-08-12
+
+### Security — Deep real-world red/blue audit (gamers + high-profile hosts)
+
+Thorough source audit with attacker and defender perspectives for gaming PCs and high-profile targets. Hardening release (version stays in the 2.0.x line by product choice).
+
+#### Critical / High
+
+- **SPKI certificate pinning (fix)** — `ProxyAuthHelper` now hashes true SubjectPublicKeyInfo (DER) for pin matching, plus cert DER and legacy `GetPublicKey()` candidates for CA rotation. Prior code claimed SPKI but hashed raw key material only.
+- **Threat proxy replay (nonce)** — Client and Cloudflare Worker use `timestamp.nonce.path.body` HMAC; Worker requires `X-Sentinel-Nonce`, 60s window (was 5 min), and in-isolate nonce replay cache.
+- **Rule pack trust root lock** — External `rulepack_pubkey.xml` is **ignored**. Only the embedded RSA public key verifies packs (prevents admin-writable key swap → false chain-nukes).
+- **SafeKill plant resistance** — `HardeningModule.SafeKillProcessTree` excludes only `SelfPathGuard.IsSentinelSelfBinary` (known product names under install final path). Arbitrary PE planted under the install directory is no longer immortal.
+- **Installer ACL race reduced** — Setup unlocks only product binaries for replace; no recursive `takeown`/`icacls` on the full tree.
+
+#### Medium
+
+- **IPC token ACL** — Interactive Users read (not Authenticated Users); Secure directory SYSTEM+Admins only.
+- **events.jsonl ACL** — Interactive Users read only (tray Agent), not Builtin\Users.
+- **ThreatReportService** uses the pinned proxy `HttpClient` (same pins as VT path).
+- **SelfPathGuard** no longer OR-falls back to pre-resolution paths when final NT path is available (hardlink/junction safe).
+
+#### Docs / product honesty
+
+- README positions Sentinel for **real attackers**, gamers, and high-profile targets without overclaiming kernel invincibility.
+- SECURITY.md / THREAT_MODEL attack surface updated for v2.0.8.
+
+#### Tests
+
+- New `V208SecurityHardeningTests` (SPKI encode, nonce auth, plant resistance, version stamp).
+- `ProxyAuthHelperTests` updated for nonce payload.
+
 ## [2.0.6] - 2026-08-10
 
 ### Fixed — Games and DirectX installers killed by file reputation engine

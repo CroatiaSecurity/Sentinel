@@ -151,8 +151,8 @@ namespace Sentinel.Core
         }
 
         /// <summary>
-        /// v2.0.3: Build a FileSecurity descriptor for the token file BEFORE creation.
-        /// SYSTEM=Full, Admins=Full, AuthenticatedUsers=Read.
+        /// v2.0.3 / v2.0.8: Build a FileSecurity descriptor for the token file BEFORE creation.
+        /// SYSTEM=Full, Admins=Full, Interactive=Read (not all Authenticated Users).
         /// </summary>
         private static FileSecurity CreateTokenFileSecurity()
         {
@@ -167,16 +167,18 @@ namespace Sentinel.Core
             security.AddAccessRule(new FileSystemAccessRule(
                 admins, FileSystemRights.FullControl, AccessControlType.Allow));
 
-            var authUsers = new SecurityIdentifier(WellKnownSidType.AuthenticatedUserSid, null);
+            var interactive = new SecurityIdentifier(WellKnownSidType.InteractiveSid, null);
             security.AddAccessRule(new FileSystemAccessRule(
-                authUsers, FileSystemRights.Read, AccessControlType.Allow));
+                interactive, FileSystemRights.Read, AccessControlType.Allow));
 
             return security;
         }
 
         /// <summary>
-        /// v2.0.3: Lock the Secure directory to SYSTEM + Admins so even the temp file
-        /// inherits restricted permissions during creation.
+        /// v2.0.3 / v2.0.8: Lock Secure directory to SYSTEM + Admins only.
+        /// v2.0.8: Removed Authenticated Users from the directory — listing Secure
+        /// must not be possible for standard users (entropy / machine_secret live here).
+        /// Token file gets a separate Interactive-user read ACE via <see cref="LockTokenAcl"/>.
         /// </summary>
         private static void LockDirectoryAcl(string dirPath)
         {
@@ -198,24 +200,18 @@ namespace Sentinel.Core
                     InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
                     PropagationFlags.None, AccessControlType.Allow));
 
-                // Authenticated Users need Read on the token file (Agent auth)
-                var authUsers = new SecurityIdentifier(WellKnownSidType.AuthenticatedUserSid, null);
-                security.AddAccessRule(new FileSystemAccessRule(
-                    authUsers, FileSystemRights.ReadAndExecute,
-                    InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
-                    PropagationFlags.None, AccessControlType.Allow));
-
                 dirInfo.SetAccessControl(security);
             }
             catch (Exception ex)
             {
-                // v2.0.4 LOW-2: Log ACL failures instead of silently swallowing
                 System.Diagnostics.Debug.WriteLine($"[ServiceAgentIpc] LockDirectoryAcl failed: {ex.Message}");
             }
         }
 
         /// <summary>
-        /// SYSTEM full control; Authenticated Users read — Agent (user session) can auth.
+        /// SYSTEM + Admins full; Interactive Users read (tray Agent in console session).
+        /// v2.0.8: No longer grants Authenticated Users — service accounts and non-interactive
+        /// malware cannot read the IPC token for recon of ops/health.
         /// </summary>
         public static void LockTokenAcl(string path)
         {
@@ -235,15 +231,15 @@ namespace Sentinel.Core
                 security.AddAccessRule(new FileSystemAccessRule(
                     admins, FileSystemRights.FullControl, AccessControlType.Allow));
 
-                var authUsers = new SecurityIdentifier(WellKnownSidType.AuthenticatedUserSid, null);
+                // Interactive logon sessions only (S-1-5-4) — the human desktop Agent
+                var interactive = new SecurityIdentifier(WellKnownSidType.InteractiveSid, null);
                 security.AddAccessRule(new FileSystemAccessRule(
-                    authUsers, FileSystemRights.Read, AccessControlType.Allow));
+                    interactive, FileSystemRights.Read, AccessControlType.Allow));
 
                 fi.SetAccessControl(security);
             }
             catch (Exception ex)
             {
-                // v2.0.4 LOW-2: Log ACL failures in security-critical paths instead of swallowing
                 System.Diagnostics.Debug.WriteLine($"[ServiceAgentIpc] LockTokenAcl failed for '{path}': {ex.Message}");
             }
         }

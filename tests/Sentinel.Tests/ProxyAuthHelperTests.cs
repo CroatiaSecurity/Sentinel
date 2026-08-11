@@ -34,14 +34,17 @@ namespace Sentinel.Tests
             Assert.True(ProxyAuthHelper.TryApplyAuthHeaders(request, config, path, body));
 
             Assert.True(request.Headers.Contains("X-Sentinel-Timestamp"));
+            Assert.True(request.Headers.Contains("X-Sentinel-Nonce"));
             Assert.True(request.Headers.Contains("X-Sentinel-Signature"));
             // v1.8.1 RT-CRIT-1: shared secret must never leave the process as a header
             Assert.False(request.Headers.Contains("X-Sentinel-Auth"));
 
             var ts = request.Headers.GetValues("X-Sentinel-Timestamp").First();
+            var nonce = request.Headers.GetValues("X-Sentinel-Nonce").First();
             var sig = request.Headers.GetValues("X-Sentinel-Signature").First();
 
-            var payload = $"{ts}.{path}.{body}";
+            // v2.0.8: timestamp.nonce.path.body
+            var payload = ProxyAuthHelper.BuildSignaturePayload(ts, nonce, path, body);
             using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secret));
             var expected = ConvertHex.ToHexString(hmac.ComputeHash(Encoding.UTF8.GetBytes(payload))).ToLowerInvariant();
             Assert.Equal(expected, sig);

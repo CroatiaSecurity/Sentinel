@@ -1,8 +1,16 @@
 # Sentinel
 
-Real-time endpoint detection and response for Windows. Runs as a background service, monitors system behavior, and kills threats automatically when multiple signals correlate.
+Real-time endpoint detection and response for Windows. Built to **battle real attackers** — commodity malware, LOLBin operators, credential thieves, stalkerware, and opportunistic remote-access abuse — on machines that people actually use: **gaming PCs, creator workstations, and high-profile targets** who need host defense without enterprise bloat.
 
-**Current version: 2.0.4**
+Runs as a background SYSTEM service, watches behavior (not just signatures), and only destroys processes when **multiple independent signals** prove a terminal attack chain. Games, anti-cheat, DirectX/GPU redists, and normal developer tooling are treated as work — not threats.
+
+**Current version: 2.0.8**
+
+### Honest mission
+
+Sentinel is **open-source host defense for people who get targeted**. It assumes the attacker has read the source. It does **not** claim nation-state invincibility or kernel omniscience. It **does** claim: full sensors, work-first defaults, silent until a real chain, then quarantine + kill + isolate + sealed evidence — hard enough to ruin a script-kiddie, a RAT campaign, or a coercion toolkit on the endpoint.
+
+Read [THREAT_MODEL.md](THREAT_MODEL.md) and [SECURITY.md](SECURITY.md) before deploying on a high-profile host.
 
 ### Product posture (v2.0 — observe-only until malice + dual audit trail + explainable correlation)
 
@@ -93,15 +101,21 @@ Full transparency in [THREAT_MODEL.md](THREAT_MODEL.md).
 ## Is this for you?
 
 **Yes, if:**
-- You want a second layer alongside Windows Defender (Sentinel doesn't replace it)
-- You run Windows 10/11 and want behavioral detection that works even against unknown threats
-- You're a power user, developer, or small team that wants endpoint visibility without paying for enterprise EDR
-- You want open-source security you can audit yourself
+- You want a second layer **alongside** Windows Defender (Sentinel does not replace it)
+- You are a **gamer / creator / developer** who refuses kiosk lockdown but still wants kill-on-chain for real attacks
+- You are a **high-profile or high-risk individual** (public figure, journalist, activist, executive, abuse survivor) who needs host-side defense against RATs, stalkerware, session theft, and remote-control toolkits — with evidence packs you can take to police
+- You want open-source security you can audit; we assume the attacker has the source
+- You run Windows 10/11 x64 and care about behavioral detection of unknown threats
 
 **Probably not, if:**
-- You need enterprise-grade management console, centralized reporting, or fleet deployment
-- You expect kernel-level protection (that requires signed drivers and Microsoft certification)
-- You want set-and-forget antivirus that never needs a glance at the Events log
+- You need an enterprise management console, fleet policy, or SOC integration out of the box
+- You expect **kernel / PPL** protection that survives a determined local admin (that needs signed drivers and Microsoft certification — we stay userland and honest about it)
+- You want set-and-forget antivirus that never needs a glance at Events
+- Your threat model is “air-gapped SCADA” or “classified network” — use purpose-built platforms
+
+**Gamers:** Steam/Epic/GOG/anti-cheat (EAC, BattlEye, Vanguard, Denuvo) and DirectX/VC redists are explicitly non-kill paths for reputation scanning. Memory inspection skips game trees. Chain-nuke still fires if a real C2/exfil/token/cred-dump chain appears *from* a game path (rare; intentional).
+
+**High-profile targets:** Default is observe-until-chain + dual audit trail (JSONL + Event Log) + integrity-sealed incident packs. Enable MitMDefense only after a real MitM/Cast incident. Back up `%ProgramData%\Sentinel\IncidentReports` off-host. Local admin compromise still wins against any pure userland EDR — plan physical/OS hygiene accordingly.
 
 **v1.8.3 note:** Sentinel is still opinionated about *attacks*, but default mode no longer kills processes solely for looking like “network from Downloads” or using SSH/torrents/portable tools.
 
@@ -145,7 +159,7 @@ Full transparency in [THREAT_MODEL.md](THREAT_MODEL.md).
 
 ## Installation
 
-Download **`SentinelSetup-2.0.4.exe`** from [GitHub Releases](https://github.com/CroatiaSecurity/Sentinel/releases) (or `releases/2.0.4/` after a local build) and run it as Administrator.
+Download **`SentinelSetup-2.0.8.exe`** from [GitHub Releases](https://github.com/CroatiaSecurity/Sentinel/releases) (or `releases/2.0.8/` after a local build) and run it as Administrator.
 
 If Setup fails with **Error 5 / temporary directory** while an older Sentinel is installed, that was ASR rule `c1db55ab` (fixed in 1.9.6+). Use elevated `installer\install-no-inno.ps1` or `fix-asr-for-setup.ps1`, then upgrade.
 

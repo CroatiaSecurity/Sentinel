@@ -1,8 +1,14 @@
 # Sentinel — Threat Model
 
-**Version: 2.0.1**
+**Version: 2.0.8**
 
 This document assumes the attacker has read the source code.
+
+### Audience (v2.0.8)
+
+- **Gamers / creators:** Work-first defaults; game and anti-cheat paths are not reputation-kill fuel; memory handles skipped on known game trees. Real terminal chains (C2/exfil/token/cred-dump/BYOVD) still authorize response.
+- **High-profile targets:** Dual audit trail + sealed incident packs. Userland limits still apply: local admin / novel kernel implants can win. Pair with Defender, Secure Boot, HVCI, unique proxy secret, and off-host evidence backup.
+- **Honest battle stance:** Sentinel is meant to fight real operators on real desktops — not to market “unhackable.”
 
 ---
 
