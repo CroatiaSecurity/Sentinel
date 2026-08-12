@@ -1,5 +1,30 @@
 # Changelog
 
+
+## [2.1.0] - 2026-08-12
+
+### Coverage — Phase A: LPE, initial access, persistence, patch posture
+
+Expands userland coverage for campaigns that lead to local privilege escalation and post-compromise stay-behind — without claiming to patch kernel races (e.g. CVE-2026-68820 / afd.sys).
+
+#### New monitors
+- **LpeScaffoldMonitor** — potato-class / LPE tooling names; elevated unsigned binaries from Temp/Downloads/Public (Tier2 observe)
+- **InitialAccessMonitor** — browser or Office parent ? LOLBin; LOLBin from staging paths (Tier2 observe)
+- **PersistenceSurfaceMonitor** — IFEO growth, accessibility debugger (sethc/utilman/…), Winlogon Userinit/Shell, ms-settings/mscfile COM hijacks (Tier2 observe)
+
+#### Correlation (BehavioralCorrelationEngine)
+- **LPE Campaign Scaffold** (0.93) — LPE scaffold + token/UAC/network
+- **Initial Access Execution Chain** (0.92) — initial access + C2/injection/script
+- **Persistence + Abuse Channel** (0.91) — persistence surface + LPE or network
+
+#### Patch posture
+- **WindowsUpdateIntegrityMonitor** expanded: WU service disabled, AU policy blocked, stale installs >45 days (LogOnly; never force-patch)
+
+#### Rules
+- PrivilegeEscalationRule patterns expanded (potato variants, coerce helpers)
+
+Still observe-until-chain / work-first. Kernel bugs require Windows Update.
+
 All notable changes to Sentinel are documented in this file.
 
 ## [2.0.9] - 2026-08-12

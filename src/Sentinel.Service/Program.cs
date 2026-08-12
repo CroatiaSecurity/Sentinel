@@ -452,6 +452,10 @@ namespace Sentinel.Service
                             sp.GetRequiredService<LnkShortcutMonitor>(),
                             sp.GetRequiredService<AgenticProcessMonitor>(),
                             sp.GetRequiredService<PackageRuntimeMonitor>(),
+                            // v2.1.0 Phase A coverage expansion
+                            sp.GetRequiredService<LpeScaffoldMonitor>(),
+                            sp.GetRequiredService<InitialAccessMonitor>(),
+                            sp.GetRequiredService<PersistenceSurfaceMonitor>(),
                         };
                         return new MonitorGroup(
                             new MonitorGroupConfig
@@ -493,6 +497,9 @@ namespace Sentinel.Service
                     services.AddSingleton<LnkShortcutMonitor>();
                     services.AddSingleton<AgenticProcessMonitor>();
                     services.AddSingleton<PackageRuntimeMonitor>();
+                    services.AddSingleton<LpeScaffoldMonitor>();
+                    services.AddSingleton<InitialAccessMonitor>();
+                    services.AddSingleton<PersistenceSurfaceMonitor>();
 
                     // ── Group 3: Credential Protection ────────────────────────────────
                     // Starts after core detection (4s). Protects credentials and sessions.

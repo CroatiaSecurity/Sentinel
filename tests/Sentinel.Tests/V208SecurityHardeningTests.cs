@@ -10,15 +10,15 @@ using Sentinel.Core;
 namespace Sentinel.Tests
 {
     /// <summary>
-    /// v2.0.9 red-team remediation tests: SPKI pinning helpers, proxy nonce auth,
+    /// v2.1.0 red-team remediation tests: SPKI pinning helpers, proxy nonce auth,
     /// SelfPathGuard plant resistance, ProductInfo version stamp.
     /// </summary>
     public class V209SecurityHardeningTests
     {
         [Fact]
-        public void ProductInfo_Version_Is209()
+        public void ProductInfo_Version_Is210()
         {
-            Assert.Equal("2.0.9", ProductInfo.Version);
+            Assert.Equal("2.1.0", ProductInfo.Version);
         }
 
         [Fact]

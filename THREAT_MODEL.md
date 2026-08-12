@@ -1,10 +1,23 @@
 # Sentinel — Threat Model
 
-**Version: 2.0.8**
+**Version: 2.1.0**
 
 This document assumes the attacker has read the source code.
 
-### Audience (v2.0.8)
+### Phase A coverage expansion (v2.1.0)
+
+Additional **userland** sensors for campaigns that use local privilege escalation after foothold:
+
+| Capability | Role | Not a substitute for |
+|------------|------|----------------------|
+| LpeScaffoldMonitor | Potato-class tools, elevated staging PEs | Kernel LPE patches (e.g. afd.sys CVE) |
+| InitialAccessMonitor | Browser/Office → LOLBin, staging LOLBins | Email/web content filtering |
+| PersistenceSurfaceMonitor | IFEO, accessibility, Winlogon, COM hijack | Full registry integrity product |
+| WU posture | Disabled AU / stale updates (LogOnly) | Installing the cumulative update |
+
+Composites: `LPE Campaign Scaffold`, `Initial Access Execution Chain`, `Persistence + Abuse Channel` (chain-confirmed with corroboration).
+
+### Audience (v2.0.8+)
 
 - **Gamers / creators:** Work-first defaults; game and anti-cheat paths are not reputation-kill fuel; memory handles skipped on known game trees. Real terminal chains (C2/exfil/token/cred-dump/BYOVD) still authorize response.
 - **High-profile targets:** Dual audit trail + sealed incident packs. Userland limits still apply: local admin / novel kernel implants can win. Pair with Defender, Secure Boot, HVCI, unique proxy secret, and off-host evidence backup.

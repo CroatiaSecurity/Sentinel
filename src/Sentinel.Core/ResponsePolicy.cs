@@ -73,6 +73,8 @@ namespace Sentinel.Core
                 "Token Theft", "Token Stealing", "SYSTEM Token", "Impersonat",
                 "SeImpersonate", "DuplicateToken", "MakeToken", "GodPotato", "PrintSpoofer",
                 "Potato", "JuicyPotato", "RoguePotato", "SharpEfsPotato",
+                // v2.1.0: LPE scaffold composites promote via chain (not single-signal)
+                "LPE Campaign Scaffold", "LPE Scaffold: Privilege Escalation Tool",
             }),
             ("ReverseShell", new[]
             {

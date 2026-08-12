@@ -1057,47 +1057,156 @@ namespace Sentinel.Core
 
 
     // ──────────────────────────────────────────────
-    // Windows Update Integrity Monitor — checks WU tampering
+    // Windows Update Integrity Monitor — WU tampering + patch posture (v2.1.0)
+    // LogOnly only — never force install updates (work-first).
     // ──────────────────────────────────────────────
     public sealed class WindowsUpdateIntegrityMonitor : BackgroundService
     {
         private readonly DetectionEngine _detectionEngine;
         private readonly ILogger<WindowsUpdateIntegrityMonitor> _logger;
+        private DateTime _lastPostureAlert = DateTime.MinValue;
 
         public WindowsUpdateIntegrityMonitor(DetectionEngine de, ILogger<WindowsUpdateIntegrityMonitor> l) { _detectionEngine = de; _logger = l; }
 
         protected override async Task ExecuteAsync(CancellationToken ct)
         {
-            _logger.LogInformation("[WindowsUpdateIntegrityMonitor] Started");
+            _logger.LogInformation("[WindowsUpdateIntegrityMonitor] Started — service + policy + posture");
+
+            // First posture check after 2 minutes (avoid boot noise)
+            try { await Task.Delay(TimeSpan.FromMinutes(2), ct); } catch (OperationCanceledException) { return; }
 
             while (!ct.IsCancellationRequested)
             {
                 try
                 {
-                    await Task.Delay(600000, ct);
-                    // Check if Windows Update service is disabled
-                    try
-                    {
-                        using var key = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Services\wuauserv");
-                        var startVal = key?.GetValue("Start");
-                        if (startVal is int start && start == 4) // Disabled
-                        {
-                            await _detectionEngine.EmitAsync(new DetectionEvent
-                            {
-                                RuleName = "Tampering: Windows Update Service Disabled",
-                                Evidence = "wuauserv service Start value is 4 (Disabled)",
-                                Reasoning = "The Windows Update service was disabled, which prevents security patches and is a common malware persistence technique.",
-                                Confidence = 0.75, Tier = DetectionTier.Tier1Behavioral,
-                                AuthorizedResponse = ResponseAction.LogOnly,
-                                ProcessName = "SYSTEM", ProcessId = 0
-                            });
-                        }
-                    }
-                    catch { }
+                    await CheckWuServiceDisabledAsync().ConfigureAwait(false);
+                    await CheckAuPolicyAsync().ConfigureAwait(false);
+                    await CheckPostureStaleAsync().ConfigureAwait(false);
+
+                    await Task.Delay(TimeSpan.FromMinutes(10), ct).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException) { break; }
                 catch (Exception ex) { _logger.LogDebug(ex, "[WindowsUpdateIntegrityMonitor] Error"); }
             }
+        }
+
+        private async Task CheckWuServiceDisabledAsync()
+        {
+            try
+            {
+                using var key = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Services\wuauserv");
+                var startVal = key?.GetValue("Start");
+                if (startVal is int start && start == 4) // Disabled
+                {
+                    await _detectionEngine.EmitAsync(new DetectionEvent
+                    {
+                        RuleName = "Tampering: Windows Update Service Disabled",
+                        Evidence = "wuauserv service Start value is 4 (Disabled)",
+                        Reasoning = "Windows Update disabled — blocks security patches (e.g. kernel LPE fixes). Common malware / ransomware technique. Sentinel cannot replace missing OS patches.",
+                        Confidence = 0.88,
+                        Tier = DetectionTier.Tier2Indicator,
+                        AuthorizedResponse = ResponseAction.LogOnly,
+                        ProcessName = "SYSTEM",
+                        ProcessId = 0,
+                        SignalType = SignalType.AntiTamper,
+                        Metadata = new Dictionary<string, string> { ["Posture"] = "WUDisabled" }
+                    }).ConfigureAwait(false);
+                }
+            }
+            catch { }
+        }
+
+        private async Task CheckAuPolicyAsync()
+        {
+            try
+            {
+                // NoAutoUpdate = 1 or AUOptions = 1 (never check) under WindowsUpdate\AU
+                using var au = Registry.LocalMachine.OpenSubKey(
+                    @"SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU");
+                if (au == null) return;
+
+                var noAuto = au.GetValue("NoAutoUpdate");
+                var auOpts = au.GetValue("AUOptions");
+                bool blocked = (noAuto is int n && n == 1) || (auOpts is int o && o == 1);
+                if (!blocked) return;
+
+                await _detectionEngine.EmitAsync(new DetectionEvent
+                {
+                    RuleName = "Patch Posture: Automatic Updates Policy Blocked",
+                    Evidence = $"WindowsUpdate\\AU NoAutoUpdate={noAuto} AUOptions={auOpts}",
+                    Reasoning =
+                        "Group Policy / registry disables automatic updates. Host may miss critical patches " +
+                        "(including actively exploited kernel bugs). LogOnly — operator must remediate policy.",
+                    Confidence = 0.80,
+                    Tier = DetectionTier.Tier2Indicator,
+                    AuthorizedResponse = ResponseAction.LogOnly,
+                    ProcessName = "SYSTEM",
+                    ProcessId = 0,
+                    SignalType = SignalType.AntiTamper,
+                    Metadata = new Dictionary<string, string> { ["Posture"] = "AUPolicyBlocked" }
+                }).ConfigureAwait(false);
+            }
+            catch { }
+        }
+
+        private async Task CheckPostureStaleAsync()
+        {
+            // Rate-limit posture alerts to once per 24h
+            if (DateTime.UtcNow - _lastPostureAlert < TimeSpan.FromHours(24))
+                return;
+
+            try
+            {
+                // Auto Update Detection frequency / last success under WindowsUpdate\UX\Settings
+                // Fallback: Wuauserv last start is weak — use DetectionFrequency or Servicing stack
+                using var ux = Registry.LocalMachine.OpenSubKey(
+                    @"SOFTWARE\Microsoft\WindowsUpdate\UX\Settings");
+                var lastSuccess = ux?.GetValue("LastSuccessfulScanTimeUtc") ??
+                                  ux?.GetValue("LastScanTimeUtc");
+
+                // Alternate: CBS package age is expensive; use WU API-free heuristic —
+                // if Suspended or Pause feature updates forever
+                var pause = ux?.GetValue("PauseFeatureUpdatesStartTime") ??
+                            ux?.GetValue("FlightSettingsMaxPauseDays");
+
+                using var wu = Registry.LocalMachine.OpenSubKey(
+                    @"SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\Results\Install");
+                var lastInstall = wu?.GetValue("LastSuccessTime") as string;
+
+                bool stale = false;
+                string detail = "";
+                if (!string.IsNullOrEmpty(lastInstall) &&
+                    DateTime.TryParse(lastInstall, out var installDt))
+                {
+                    var age = DateTime.Now - installDt;
+                    if (age > TimeSpan.FromDays(45))
+                    {
+                        stale = true;
+                        detail = $"Last successful update install ~{age.TotalDays:F0} days ago ({lastInstall})";
+                    }
+                }
+
+                if (!stale) return;
+
+                _lastPostureAlert = DateTime.UtcNow;
+                await _detectionEngine.EmitAsync(new DetectionEvent
+                {
+                    RuleName = "Patch Posture: Security Updates Stale",
+                    Evidence = detail,
+                    Reasoning =
+                        "No successful Windows Update install in >45 days. Kernel and server RCEs " +
+                        "(e.g. actively exploited afd.sys LPE) require OS patches Sentinel cannot apply. " +
+                        "Install the latest cumulative update. This alert is LogOnly.",
+                    Confidence = 0.70,
+                    Tier = DetectionTier.Tier2Indicator,
+                    AuthorizedResponse = ResponseAction.LogOnly,
+                    ProcessName = "SYSTEM",
+                    ProcessId = 0,
+                    SignalType = SignalType.AntiTamper,
+                    Metadata = new Dictionary<string, string> { ["Posture"] = "UpdatesStale" }
+                }).ConfigureAwait(false);
+            }
+            catch { }
         }
     }
 

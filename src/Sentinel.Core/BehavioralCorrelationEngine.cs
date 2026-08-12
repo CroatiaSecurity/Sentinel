@@ -19,13 +19,13 @@ namespace Sentinel.Core
             "spotify", "brave", "chrome", "msedge", "fm", "kiro",
             // Windows system processes
             // HARDENING v1.5.9: REMOVED "svchost" from this list.
-            // svchost.exe is NOT a JIT/Electron app — it's the #1 process injection target
+            // svchost.exe is NOT a JIT/Electron app â€” it's the #1 process injection target
             // for living-off-the-land attacks (LOLBins). Attackers inject into svchost because
             // it's always running, has network access, and runs as SYSTEM. Blanket-exempting it
             // from composite correlation meant that an attacker generating only Tier2 signals
             // (suspicious DNS, unusual network patterns, credential probing) inside svchost
             // would NEVER trigger composite detection. Now svchost participates fully in
-            // correlation — legitimate svchost activity won't accumulate multiple distinct
+            // correlation â€” legitimate svchost activity won't accumulate multiple distinct
             // threat-category signals, so false positives remain low.
             "sppsvc", "WmiPrvSE", "MsMpEng", "MpDefenderCoreService",
             "NisSrv", "SgrmBroker", "OneDrive",
@@ -53,7 +53,7 @@ namespace Sentinel.Core
             if (pid <= 0) return;
 
             // DirectX / redistributable / System32 installer noise: log only, never composite legs.
-            // A Steam DirectX install may emit 1–2 Tier2 signals; that is not multi-signal malice.
+            // A Steam DirectX install may emit 1â€“2 Tier2 signals; that is not multi-signal malice.
             if (ResponsePolicy.IsNonCorrelatingObserveNoise(signal))
                 return;
 
@@ -102,7 +102,7 @@ namespace Sentinel.Core
                             return; // Don't evaluate composites for lone Tier2 on allowlisted apps
                         }
                     }
-                    // Tier1 or PID already has signals — allow into correlation
+                    // Tier1 or PID already has signals â€” allow into correlation
                 }
             }
 
@@ -139,10 +139,10 @@ namespace Sentinel.Core
             var types = new HashSet<SignalType>(currentSignals.Select(s => s.SignalType));
             var distinctRules = currentSignals.Select(s => s.RuleName).Distinct().Count();
 
-            // ═══════════════════════════════════════════════════════════════
+            // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
             // Highest confidence composites first (return on match)
             // Require signals from DIFFERENT sources (distinct SignalTypes)
-            // ═══════════════════════════════════════════════════════════════
+            // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
             // Active Ransomware Chain (0.99)
             // Multiple distinct ransomware indicators (e.g., shadow copy + mass rename)
@@ -176,13 +176,13 @@ namespace Sentinel.Core
             }
 
             // In-Memory Implant + Network (0.96)
-            // Memory anomaly (RWX/unbacked) + any network C2 — classic fileless implant
+            // Memory anomaly (RWX/unbacked) + any network C2 â€” classic fileless implant
             if (types.Contains(SignalType.ProcessInjection) &&
                 (types.Contains(SignalType.NetworkC2) || types.Contains(SignalType.ReverseShell)))
             {
                 await EmitCompositeAsync(pid, "In-Memory Implant Active", 0.96,
                     "Memory anomaly (injection/RWX) combined with network callback.",
-                    "Process exhibits in-memory code execution anomalies alongside active network communication — consistent with a loaded implant.");
+                    "Process exhibits in-memory code execution anomalies alongside active network communication â€” consistent with a loaded implant.");
                 return;
             }
 
@@ -193,7 +193,7 @@ namespace Sentinel.Core
             {
                 await EmitCompositeAsync(pid, "Fileless Attack Chain", 0.95,
                     "Security evasion (AMSI/ETW tampering) combined with shell or C2 activity.",
-                    "Process disabled security telemetry then established external communication — hallmark of staged fileless attack.");
+                    "Process disabled security telemetry then established external communication â€” hallmark of staged fileless attack.");
                 return;
             }
 
@@ -208,11 +208,11 @@ namespace Sentinel.Core
             {
                 await EmitCompositeAsync(pid, "DGA + C2 Beaconing", 0.94,
                     "Algorithmically-generated DNS queries correlated with periodic C2 callbacks.",
-                    "Process resolved high-entropy or high-volume domains and maintains regular beacon timing — DGA-based C2 channel.");
+                    "Process resolved high-entropy or high-volume domains and maintains regular beacon timing â€” DGA-based C2 channel.");
                 return;
             }
 
-            // ═══ v1.7.1: Covert RAT — Unsigned + Hidden + Network (0.88–0.92) ═══
+            // â•â•â• v1.7.1: Covert RAT â€” Unsigned + Hidden + Network (0.88â€“0.92) â•â•â•
             // Unsigned binary from staging path + sustained network + no visible window or recon activity
             var hasUnsignedOrSuspicious = currentSignals.Any(s =>
                 s.SignalType == SignalType.SuspiciousProcess ||
@@ -232,11 +232,11 @@ namespace Sentinel.Core
                 double covertRatConfidence = hasRecon ? 0.92 : 0.88;
                 await EmitCompositeAsync(pid, "Covert RAT: Unsigned + Hidden + Network", covertRatConfidence,
                     "Unsigned binary from staging path with sustained network activity.",
-                    "A binary from a staging directory (Temp/AppData) initiated C2 networking — behavioral RAT pattern detected without campaign IOCs.");
+                    "A binary from a staging directory (Temp/AppData) initiated C2 networking â€” behavioral RAT pattern detected without campaign IOCs.");
                 return;
             }
 
-            // ═══ v1.7.1: Confirmed C2 Beacon — Unsigned Process (0.88–0.93) ═══
+            // â•â•â• v1.7.1: Confirmed C2 Beacon â€” Unsigned Process (0.88â€“0.93) â•â•â•
             // Unsigned binary exhibiting periodic beaconing (statistical CV < threshold)
             var hasBeaconing = currentSignals.Any(s =>
                 s.RuleName.Contains("Beaconing") ||
@@ -246,11 +246,11 @@ namespace Sentinel.Core
                 double beaconConfidence = hasStagingPath ? 0.93 : 0.88;
                 await EmitCompositeAsync(pid, "Confirmed C2 Beacon: Unsigned Process", beaconConfidence,
                     "Unsigned binary exhibiting periodic beaconing pattern.",
-                    "An unsigned process maintains regular-interval callbacks characteristic of C2 beaconing — confirms active command-and-control regardless of framework.");
+                    "An unsigned process maintains regular-interval callbacks characteristic of C2 beaconing â€” confirms active command-and-control regardless of framework.");
                 return;
             }
 
-            // ═══ v1.7.1: Covert C2 — Unsigned + Sustained Connection (0.90) ═══
+            // â•â•â• v1.7.1: Covert C2 â€” Unsigned + Sustained Connection (0.90) â•â•â•
             // Unsigned binary maintaining a long-lived outbound connection (60s+)
             var hasSustainedConnection = currentSignals.Any(s =>
                 s.RuleName.Contains("Sustained") ||
@@ -262,7 +262,7 @@ namespace Sentinel.Core
             {
                 await EmitCompositeAsync(pid, "Covert C2: Unsigned + Sustained Connection", 0.90,
                     "Unsigned binary maintaining a 60s+ outbound connection.",
-                    "An unsigned binary holds a persistent outbound connection — matches PlugX/RAT pattern of fake updater from temp path holding HTTPS to C2.");
+                    "An unsigned binary holds a persistent outbound connection â€” matches PlugX/RAT pattern of fake updater from temp path holding HTTPS to C2.");
                 return;
             }
 
@@ -272,11 +272,11 @@ namespace Sentinel.Core
             {
                 await EmitCompositeAsync(pid, "Dropped Payload Active", 0.93,
                     "Unsigned or staged binary established C2 communication.",
-                    "A binary from an untrusted path initiated command-and-control networking — consistent with a deployed implant or RAT.");
+                    "A binary from an untrusted path initiated command-and-control networking â€” consistent with a deployed implant or RAT.");
                 return;
             }
 
-            // ═══ v1.6.8: Named Pipe C2 + Network Beaconing (0.95) ═══
+            // â•â•â• v1.6.8: Named Pipe C2 + Network Beaconing (0.95) â•â•â•
             // Named pipe matching C2/lateral-movement pattern + network C2 beaconing on same PID
             var hasNamedPipe = currentSignals.Any(s =>
                 s.RuleName.Contains("Named Pipe"));
@@ -284,7 +284,7 @@ namespace Sentinel.Core
             {
                 await EmitCompositeAsync(pid, "Named Pipe C2 + Network Beaconing", 0.95,
                     "Suspicious named pipe correlated with C2 network beaconing on the same process.",
-                    "A process created a named pipe matching C2/lateral-movement patterns AND maintains periodic network beaconing — confirms active C2 implant using IPC for inter-process staging.");
+                    "A process created a named pipe matching C2/lateral-movement patterns AND maintains periodic network beaconing â€” confirms active C2 implant using IPC for inter-process staging.");
                 return;
             }
 
@@ -297,7 +297,7 @@ namespace Sentinel.Core
             {
                 await EmitCompositeAsync(pid, "Spoofed Process Phoning Home", 0.92,
                     "Process with spoofed parent established network communication.",
-                    "Parent PID spoofing was detected on a process that subsequently made outbound connections — evading parent-chain-based trust.");
+                    "Parent PID spoofing was detected on a process that subsequently made outbound connections â€” evading parent-chain-based trust.");
                 return;
             }
 
@@ -312,11 +312,11 @@ namespace Sentinel.Core
             {
                 await EmitCompositeAsync(pid, "Evasion + Persistence Install", 0.91,
                     "Security evasion combined with persistence mechanism installation.",
-                    "Process evaded security controls then installed persistence — establishing long-term access.");
+                    "Process evaded security controls then installed persistence â€” establishing long-term access.");
                 return;
             }
 
-            // ═══ v1.6.8: Token Theft + Lateral Movement (0.93) ═══
+            // â•â•â• v1.6.8: Token Theft + Lateral Movement (0.93) â•â•â•
             // Token theft/impersonation + RPC/SMB lateral movement or named pipe IPC
             var hasTokenTheft = currentSignals.Any(s =>
                 s.RuleName.Contains("Token Theft") ||
@@ -330,7 +330,7 @@ namespace Sentinel.Core
             {
                 await EmitCompositeAsync(pid, "Token Theft + Lateral Movement", 0.93,
                     "Token manipulation combined with lateral movement indicators on the same process.",
-                    "Process stole/impersonated a privileged token then initiated lateral movement (RPC/SMB/named pipe) — classic post-exploitation pivot pattern (MITRE T1134 + T1021).");
+                    "Process stole/impersonated a privileged token then initiated lateral movement (RPC/SMB/named pipe) â€” classic post-exploitation pivot pattern (MITRE T1134 + T1021).");
                 return;
             }
 
@@ -339,16 +339,72 @@ namespace Sentinel.Core
             var hasPrivEsc = currentSignals.Any(s =>
                 s.RuleName.Contains("Privilege") ||
                 s.RuleName.Contains("Escalation") ||
-                s.RuleName.Contains("Token"));
+                s.RuleName.Contains("Token") ||
+                s.RuleName.Contains("LPE Scaffold"));
             if (hasPrivEsc && (types.Contains(SignalType.NetworkC2) || types.Contains(SignalType.ReverseShell)))
             {
                 await EmitCompositeAsync(pid, "Escalation + C2 Channel", 0.90,
                     "Privilege escalation observed alongside outbound C2 communication.",
-                    "Process escalated privileges then communicated externally — post-exploitation lateral movement preparation.");
+                    "Process escalated privileges then communicated externally â€” post-exploitation lateral movement preparation.");
                 return;
             }
 
-            // ═══ v1.9.4: Digital coercion toolkit (platform-agnostic) ═══
+            // â•â•â• v2.1.0 Phase A: LPE campaign scaffolding â•â•â•
+            var hasLpeScaffold = currentSignals.Any(s =>
+                s.RuleName.Contains("LPE Scaffold") ||
+                s.RuleName.Contains("Privilege Escalation Tool") ||
+                s.RuleName.Contains("Elevated Process from Staging"));
+            var hasUacOrPotato = currentSignals.Any(s =>
+                s.RuleName.Contains("UAC Bypass") ||
+                s.RuleName.Contains("Potato") ||
+                s.RuleName.Contains("PrintSpoof") ||
+                s.RuleName.Contains("PrivilegeEscalation"));
+            if (hasLpeScaffold && (hasTokenTheft || hasUacOrPotato || types.Contains(SignalType.NetworkC2)))
+            {
+                await EmitCompositeAsync(pid, "LPE Campaign Scaffold", 0.93,
+                    "Local privilege-escalation tooling or elevated staging binary correlated with token/network activity.",
+                    "Userland LPE campaign pattern (potato-class / elevated unsigned staging + token or C2). " +
+                    "Stops post-exploitation scaffolding; does not patch kernel races (apply OS updates for afd.sys-class bugs).");
+                return;
+            }
+
+            // â•â•â• v2.1.0 Phase A: Initial access â†’ execute â•â•â•
+            var hasInitialAccess = currentSignals.Any(s =>
+                s.RuleName.Contains("Initial Access:") ||
+                s.RuleName.Contains("Browser Spawned LOLBin") ||
+                s.RuleName.Contains("Office Spawned LOLBin") ||
+                s.RuleName.Contains("LOLBin from Staging"));
+            if (hasInitialAccess &&
+                (types.Contains(SignalType.NetworkC2) || types.Contains(SignalType.ReverseShell) ||
+                 types.Contains(SignalType.ProcessInjection) || hasUnsignedOrSuspicious ||
+                 currentSignals.Any(s => s.RuleName.Contains("Script") || s.RuleName.Contains("Encoded"))))
+            {
+                await EmitCompositeAsync(pid, "Initial Access Execution Chain", 0.92,
+                    "Browser/Office/staging LOLBin correlated with network, injection, or script abuse.",
+                    "Classic initial-access chain: document or download path spawning LOLBin with corroborating " +
+                    "C2/injection/script signals (ISO/smuggling/macro-adjacent).");
+                return;
+            }
+
+            // Persistence surface + remote/network
+            var hasPersistSurface = currentSignals.Any(s =>
+                s.RuleName.Contains("Persistence:") ||
+                s.RuleName.Contains("IFEO") ||
+                s.RuleName.Contains("COM/Protocol Handler") ||
+                s.RuleName.Contains("Accessibility") ||
+                s.RuleName.Contains("Winlogon"));
+            if (hasPersistSurface &&
+                (types.Contains(SignalType.NetworkC2) || types.Contains(SignalType.ReverseShell) ||
+                 hasLpeScaffold || hasUacOrPotato))
+            {
+                await EmitCompositeAsync(pid, "Persistence + Abuse Channel", 0.91,
+                    "IFEO/COM/accessibility/Winlogon persistence correlated with LPE or network channel.",
+                    "Host persistence surface modified alongside escalation or remote channel â€” " +
+                    "post-compromise stay-behind pattern.");
+                return;
+            }
+
+            // â•â•â• v1.9.4: Digital coercion toolkit (platform-agnostic) â•â•â•
             // Covert surveillance + remote/network channel (stalkerware / coercive control PC)
             var hasSurveillance = currentSignals.Any(CoercionAbusePolicy.IsSurveillanceRule);
             var hasRemoteLeg = currentSignals.Any(CoercionAbusePolicy.IsRemoteControlRule) ||
@@ -358,9 +414,9 @@ namespace Sentinel.Core
             {
                 await EmitCompositeAsync(pid, "Covert Surveillance + Remote Channel", 0.94,
                     "Screen/camera/input surveillance correlated with remote control or outbound C2.",
-                    "Covert capture (screen/webcam/keystroke-class) plus remote channel on the same process — " +
+                    "Covert capture (screen/webcam/keystroke-class) plus remote channel on the same process â€” " +
                     "endpoint pattern used in stalkerware and coercive remote control of a victim PC. " +
-                    "Platform-agnostic (messaging, social, email, browsers, games — host traces only).",
+                    "Platform-agnostic (messaging, social, email, browsers, games â€” host traces only).",
                     tagCoercionToolkit: true);
                 return;
             }
@@ -380,7 +436,7 @@ namespace Sentinel.Core
                 await EmitCompositeAsync(pid, "Remote Control Abuse Toolkit", 0.93,
                     "Remote-control tooling from untrusted context with network or injection corroboration.",
                     "Remote administration / RAT-class tooling combined with staging path, unsigned binary, " +
-                    "or injection — common in coercive takeover of a victim workstation (AnyDesk/TeamViewer-class " +
+                    "or injection â€” common in coercive takeover of a victim workstation (AnyDesk/TeamViewer-class " +
                     "abuse, commodity RATs). Not a judgment about the operator's identity.",
                     tagCoercionToolkit: true);
                 return;
@@ -394,7 +450,7 @@ namespace Sentinel.Core
             {
                 await EmitCompositeAsync(pid, "Session Theft + Abuse Channel", 0.95,
                     "Credential/session store access correlated with outbound abuse channel.",
-                    "Browser/OS credential or session material accessed with concurrent network/exfil channel — " +
+                    "Browser/OS credential or session material accessed with concurrent network/exfil channel â€” " +
                     "account takeover toolkit for email, messaging, social, banking, games (not limited to one app).",
                     tagCoercionToolkit: true);
                 return;
@@ -411,7 +467,7 @@ namespace Sentinel.Core
             {
                 await EmitCompositeAsync(pid, "Stalkerware Persistence Chain", 0.92,
                     "Covert surveillance capability combined with persistence installation.",
-                    "Capture/surveillance signal plus autorun/persistence — classic stalkerware footprint " +
+                    "Capture/surveillance signal plus autorun/persistence â€” classic stalkerware footprint " +
                     "for long-term monitoring of a victim device.",
                     tagCoercionToolkit: true);
                 return;

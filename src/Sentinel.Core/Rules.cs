@@ -229,13 +229,17 @@ namespace Sentinel.Core
             // Token manipulation
             "tokenvator", "incognito", "getsystem",
             // Privilege escalation exploits (GodPotato, JuicyPotato, PrintSpoofer, etc.)
-            "potato", "printspoof",
+            "potato", "printspoof", "juicypotato", "godpotato", "sweetpotato",
+            "roguepotato", "localpotato", "printspoofer", "efspotato",
             // Defense evasion: Clearing Windows Application, System, or Security event logs
             "wevtutil cl ", "wevtutil.exe cl ", "wevtutil clear-log",
             // Named pipe impersonation
             "\\pipe\\", "ImpersonateNamedPipeClient",
             // DLL hijack indicators
-            "\\syswow64\\version.dll", "\\temp\\version.dll", "\\temp\\winmm.dll"
+            "\\syswow64\\version.dll", "\\temp\\version.dll", "\\temp\\winmm.dll",
+            // v2.1.0: additional LPE / coerce helpers (command-line)
+            "petitpotam", "dfscoerce", "spoolsample", "sharpup", "winpeas",
+            "seatbelt", "privesccheck", "getsystem", "enable-privilege",
         };
 
         public DetectionEvent? Evaluate(FusedTelemetryContext context)
