@@ -4,7 +4,7 @@
 
 | Version | Supported |
 |---------|-----------|
-| 2.0.x   | Yes (current: 2.1.0) |
+| 2.1.x   | Yes (current: 2.1.2) |
 | 1.9.x   | Security fixes only |
 | 1.8.x   | Security fixes only |
 | < 1.8   | No        |

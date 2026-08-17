@@ -1834,23 +1834,40 @@ namespace Sentinel.Core
             });
         }
 
+        internal static bool IsSingleDriveLetter(string? driveLetter)
+        {
+            if (string.IsNullOrWhiteSpace(driveLetter)) return false;
+            var s = driveLetter!.Trim().TrimEnd(':', '\\');
+            return s.Length == 1 && char.IsLetter(s[0]);
+        }
+
+        private static async Task<bool> RunEncodedPowerShellAsync(string script)
+        {
+            var encoded = Convert.ToBase64String(System.Text.Encoding.Unicode.GetBytes(script));
+            var psi = new ProcessStartInfo
+            {
+                FileName = "powershell.exe",
+                Arguments = $"-NoProfile -NonInteractive -EncodedCommand {encoded}",
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true
+            };
+            using var proc = Process.Start(psi);
+            if (proc == null) return false;
+            await proc.WaitForExitAsync();
+            return proc.ExitCode == 0;
+        }
+
         private async Task<bool> DismountVhd(string driveLetter)
         {
             try
             {
-                var psi = new ProcessStartInfo
-                {
-                    FileName = "powershell.exe",
-                    Arguments = $"-NoProfile -Command \"Dismount-VHD -DiskNumber ((Get-Partition -DriveLetter '{driveLetter}').DiskNumber) -Confirm:$false\"",
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true
-                };
-                using var proc = Process.Start(psi);
-                if (proc == null) return false;
-                await proc.WaitForExitAsync();
-                return proc.ExitCode == 0;
+                if (!IsSingleDriveLetter(driveLetter)) return false;
+                var letter = driveLetter.Trim().TrimEnd(':', '\\').ToUpperInvariant();
+                var script =
+                    $"Dismount-VHD -DiskNumber ((Get-Partition -DriveLetter '{letter}').DiskNumber) -Confirm:$false";
+                return await RunEncodedPowerShellAsync(script);
             }
             catch (Exception ex)
             {
@@ -1863,19 +1880,10 @@ namespace Sentinel.Core
         {
             try
             {
-                var psi = new ProcessStartInfo
-                {
-                    FileName = "powershell.exe",
-                    Arguments = $"-NoProfile -Command \"Dismount-DiskImage -DevicePath '\\\\.\\{driveLetter}:' -ErrorAction SilentlyContinue\"",
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true
-                };
-                using var proc = Process.Start(psi);
-                if (proc == null) return false;
-                await proc.WaitForExitAsync();
-                return proc.ExitCode == 0;
+                if (!IsSingleDriveLetter(driveLetter)) return false;
+                var letter = driveLetter.Trim().TrimEnd(':', '\\').ToUpperInvariant();
+                var script = $"Dismount-DiskImage -DevicePath '\\\\.\\{letter}:' -ErrorAction SilentlyContinue";
+                return await RunEncodedPowerShellAsync(script);
             }
             catch (Exception ex)
             {

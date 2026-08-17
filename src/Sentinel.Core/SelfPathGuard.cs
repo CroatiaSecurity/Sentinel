@@ -102,13 +102,6 @@ namespace Sentinel.Core
                     return true;
             }
 
-            // DLLs under install may still be scanned; only exclude our primary PE names
-            // and Sentinel.*.dll products we ship.
-            if (fileName.StartsWith("Sentinel.", StringComparison.OrdinalIgnoreCase) &&
-                (fileName.EndsWith(".dll", StringComparison.OrdinalIgnoreCase) ||
-                 fileName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)))
-                return true;
-
             return false;
         }
 
@@ -141,7 +134,7 @@ namespace Sentinel.Core
             }
         }
 
-        private static string? TryGetFinalPath(string path)
+        internal static string? TryGetFinalPath(string path)
         {
             if (string.IsNullOrEmpty(path) || !File.Exists(path) && !Directory.Exists(path))
                 return null;

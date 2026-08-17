@@ -132,7 +132,7 @@ namespace Sentinel.Tests
                 MitmDefense = new MitmDefenseConfig { Enabled = true }
             };
             Assert.True(ProductPosture.AllowsMitmDefenseMutations(cfg));
-            Assert.True(ResponsePolicy.MayPerformInlineHostMutation(cfg));
+            Assert.False(ResponsePolicy.MayPerformInlineHostMutation(cfg));
 
             var castEvt = new DetectionEvent
             {

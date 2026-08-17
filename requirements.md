@@ -61,7 +61,7 @@ The system must detect the following behavioral threats:
 | T1-19 | Digital coercion / surveillance toolkit | Covert surveillance + remote channel, remote-control abuse toolkit, session theft + abuse channel, stalkerware persistence chain (host-tool composites only; no chat moderation) |
 | T1-20 | AI agent / MCP abuse | Coding agents spawning shells, LOLBins, credential tools; burst recon patterns |
 | T1-21 | Package supply-chain runtime | Package managers spawning LOLBins; executables under package trees; AI agent config poison (CLAUDE.md, .cursorrules, MCP configs) |
-| T1-22 | Indirect syscall / Hell's Gate | Non-image executable memory containing `mov r10,rcx; mov eax,SSN; syscall` stubs (3+ stubs = Tier1) |
+| T1-22 | Indirect syscall / Hell's Gate | Non-image executable memory containing a well-formed stub table: `mov r10,rcx; mov eax,SSN; syscall; ret` or a copied ntdll SharedUserData prologue, with 3+ distinct SSNs (loose JIT `0F 05` bytes are not a hit) |
 | T1-23 | MitM attack chain | Planted self-signed root cert removal, ghost process → rogue Cast kill, FCM Send-Tab-to-Self block, rogue Cast firewall block (when `MitmDefense.Enabled`) |
 
 ### FR-3: Tier 2 Detection Rules

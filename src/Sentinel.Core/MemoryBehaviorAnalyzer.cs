@@ -150,7 +150,12 @@ namespace Sentinel.Core
                                 Tier = DetectionTier.Tier2Indicator,
                                 AuthorizedResponse = ResponseAction.LogOnly,
                                 ProcessName = name,
-                                ProcessId = proc.Id
+                                ProcessId = proc.Id,
+                                Metadata = new Dictionary<string, string>
+                                {
+                                    ["WeakObserveSeed"] = "true",
+                                    ["ImagePath"] = path ?? ""
+                                }
                             });
                         }
                     }

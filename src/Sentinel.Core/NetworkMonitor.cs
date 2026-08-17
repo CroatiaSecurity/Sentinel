@@ -266,11 +266,12 @@ namespace Sentinel.Core
                                 Confidence = 0.45,
                                 Tier = DetectionTier.Tier2Indicator,
                                 AuthorizedResponse = ResponseAction.LogOnly,
-                                SignalType = SignalType.ReverseShell,
+                                SignalType = SignalType.SuspiciousProcess,
                                 ProcessName = processName,
                                 ProcessId = owningPid,
                                 Metadata = new Dictionary<string, string>
                                 {
+                                    { "WeakObserveSeed", "true" },
                                     { "RemoteAddress", remoteIp },
                                     { "RemotePort", remotePort.ToString() },
                                     { "LocalAddress", localIp },
@@ -328,9 +329,10 @@ namespace Sentinel.Core
                                 AuthorizedResponse = ResponseAction.LogOnly,
                                 ProcessName = processName,
                                 ProcessId = owningPid,
-                                SignalType = SignalType.NetworkC2,
+                                SignalType = SignalType.SuspiciousProcess,
                                 Metadata = new Dictionary<string, string>
                                 {
+                                    { "WeakObserveSeed", "true" },
                                     { "RemoteAddress", remoteIp },
                                     { "RemotePort", remotePort.ToString() },
                                     { "LocalAddress", localIp },

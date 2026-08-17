@@ -73,8 +73,6 @@ namespace Sentinel.Core
                 "Token Theft", "Token Stealing", "SYSTEM Token", "Impersonat",
                 "SeImpersonate", "DuplicateToken", "MakeToken", "GodPotato", "PrintSpoofer",
                 "Potato", "JuicyPotato", "RoguePotato", "SharpEfsPotato",
-                // v2.1.0: LPE scaffold composites promote via chain (not single-signal)
-                "LPE Campaign Scaffold", "LPE Scaffold: Privilege Escalation Tool",
             }),
             ("ReverseShell", new[]
             {
@@ -155,6 +153,17 @@ namespace Sentinel.Core
             "Persistence: New Scheduled Task",
             "Token Theft: SeImpersonatePrivilege",
             "Named Pipe: High-Entropy Name",
+            // v2.1.2: browse/play heuristics — observe fuel only, never a chain seed
+            "Suspicious Outbound Connection",
+            "Classic Malware Port",
+            "Application-Level DoH",
+            "DNS Bypass:",
+            "C2 Pairing: Defensive Process Spawn",
+            "Image File Missing",
+            "Clickjacking",
+            "Junction/Symlink",
+            "LPE Scaffold: Privilege Escalation Tool",
+            "Unmapped Thread Start Address",
             // Surveillance: composite fuel for coercion toolkit; never sole chain seed
             "Screen Capture",
             "DXGI Desktop Duplication",
@@ -644,17 +653,14 @@ namespace Sentinel.Core
             if (config == null || !config.ActiveResponse)
                 return false;
 
-            // Post-incident MITM suite: cert plant removal, FCM tab-injection block, rogue Cast.
-            // Explicit MitmDefense.Enabled — not full RestrictivePortHardening.
-            if (ProductPosture.AllowsMitmDefenseMutations(config))
-                return true;
-
             if (!config.ObserveUntilChain)
                 return true;
 
             if (chainContext != null && MayPerformDestructiveResponse(chainContext, config))
                 return true;
 
+            // MitmDefense does not unlock USB / admin / registry / volume mutations.
+            // Those callers must use AllowsMitmDefenseMutations / IsMitmDefenseAction.
             return false;
         }
 

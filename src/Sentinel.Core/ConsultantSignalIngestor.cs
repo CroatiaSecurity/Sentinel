@@ -207,7 +207,7 @@ namespace Sentinel.Core
                 {
                     try
                     {
-                        fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                        fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
                         break;
                     }
                     catch (IOException)

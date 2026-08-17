@@ -189,6 +189,16 @@ namespace Sentinel.Core
                 if (KnownBrowserProcesses.Contains(tit.ProcessName))
                     return null;
 
+                // UnifiedEtwSession currently labels TI events as ThreatIntel_EventId_N,
+                // not the real API name. That string never contains VirtualAllocEx etc.
+                if (string.IsNullOrEmpty(tit.ApiName) ||
+                    tit.ApiName.StartsWith("ThreatIntel_EventId_", StringComparison.Ordinal))
+                    return null;
+
+                var imagePath = SecurityValidation.GetProcessImagePath(tit.ProcessId);
+                if (SecurityValidation.IsGameOrAntiCheatPath(imagePath))
+                    return null;
+
                 foreach (var api in InjectionAPIs)
                 {
                     if (tit.ApiName.Contains(api))

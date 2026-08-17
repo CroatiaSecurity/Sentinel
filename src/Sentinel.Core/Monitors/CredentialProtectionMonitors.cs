@@ -655,8 +655,6 @@ namespace Sentinel.Core
                 // The "F" binary value at offset 0x38 contains account flags.
                 // Bit 0x0002 = Account Disabled. If NOT set, account is active.
                 //
-                // Alternative: use 'net user Administrator' but that's slower and spawns a process.
-                // We use WMI Win32_UserAccount for reliability.
                 bool isActive = IsBuiltinAdminActive();
 
                 if (isActive)
@@ -700,65 +698,101 @@ namespace Sentinel.Core
             }
         }
 
-        private static bool IsBuiltinAdminActive()
-        {
-            // Use 'net user Administrator' directly — WMI Win32_UserAccount.Disabled
-            // is known to return stale cached values after the account is disabled,
-            // causing a false-positive loop where the guard re-disables every 15s.
-            try
-            {
-                var psi = new ProcessStartInfo("net.exe", "user Administrator")
-                {
-                    CreateNoWindow = true,
-                    UseShellExecute = false,
-                    RedirectStandardOutput = true
-                };
-                using var proc = Process.Start(psi);
-                if (proc == null) return false;
-                var output = proc.StandardOutput.ReadToEnd();
-                proc.WaitForExit(5000);
-                // Line format: "Account active               Yes" or "No"
-                // Match the specific line to avoid false matches on other fields
-                foreach (var line in output.Split('\n'))
-                {
-                    var trimmed = line.Trim();
-                    if (trimmed.StartsWith("Account active", StringComparison.OrdinalIgnoreCase))
-                    {
-                        return trimmed.EndsWith("Yes", StringComparison.OrdinalIgnoreCase);
-                    }
-                }
-            }
-            catch { }
-            return false;
-        }
+        private static bool IsBuiltinAdminActive() => BuiltinAdminAccount.IsActive();
 
         private void DisableBuiltinAdmin()
         {
+            if (BuiltinAdminAccount.TryDisable(out var error))
+                _logger.LogWarning("[BuiltinAdminGuard] DISABLED built-in Administrator account");
+            else
+                _logger.LogError("[BuiltinAdminGuard] Failed to disable Administrator account (NetUser={Error})", error);
+        }
+    }
+
+    /// <summary>
+    /// SAM query/set for RID 500 via NetUser APIs — no net.exe.
+    /// USER_INFO_1008 updates flags only (does not touch the password).
+    /// </summary>
+    internal static class BuiltinAdminAccount
+    {
+        private const int UfAccountDisable = 0x0002;
+        private const int NerrSuccess = 0;
+
+        [DllImport("netapi32.dll", CharSet = CharSet.Unicode)]
+        private static extern int NetUserGetInfo(string? serverName, string userName, int level, out IntPtr bufPtr);
+
+        [DllImport("netapi32.dll", CharSet = CharSet.Unicode)]
+        private static extern int NetUserSetInfo(string? serverName, string userName, int level, IntPtr buf, out int parmErr);
+
+        [DllImport("netapi32.dll")]
+        private static extern int NetApiBufferFree(IntPtr buffer);
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        private struct USER_INFO_1
+        {
+            public string usri1_name;
+            public string usri1_password;
+            public int usri1_password_age;
+            public int usri1_priv;
+            public string usri1_home_dir;
+            public string usri1_comment;
+            public int usri1_flags;
+            public string usri1_script_path;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct USER_INFO_1008
+        {
+            public int usri1008_flags;
+        }
+
+        public static bool IsActive()
+        {
+            if (!TryGetFlags(out var flags))
+                return false;
+            return (flags & UfAccountDisable) == 0;
+        }
+
+        public static bool TryDisable(out int error)
+        {
+            error = -1;
+            if (!TryGetFlags(out var flags))
+                return false;
+            if ((flags & UfAccountDisable) != 0)
+            {
+                error = NerrSuccess;
+                return true;
+            }
+
+            var info = new USER_INFO_1008 { usri1008_flags = flags | UfAccountDisable };
+            IntPtr ptr = Marshal.AllocHGlobal(Marshal.SizeOf<USER_INFO_1008>());
             try
             {
-                var psi = new ProcessStartInfo("net.exe", "user Administrator /active:no")
-                {
-                    CreateNoWindow = true,
-                    UseShellExecute = false,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true
-                };
-                using var proc = Process.Start(psi);
-                proc?.WaitForExit(5000);
-
-                if (proc?.ExitCode == 0)
-                {
-                    _logger.LogWarning("[BuiltinAdminGuard] DISABLED built-in Administrator account");
-                }
-                else
-                {
-                    _logger.LogError("[BuiltinAdminGuard] Failed to disable Administrator account (exit code: {Code})",
-                        proc?.ExitCode);
-                }
+                Marshal.StructureToPtr(info, ptr, false);
+                error = NetUserSetInfo(null, "Administrator", 1008, ptr, out _);
+                return error == NerrSuccess;
             }
-            catch (Exception ex)
+            finally
             {
-                _logger.LogError(ex, "[BuiltinAdminGuard] Failed to disable Administrator account");
+                Marshal.FreeHGlobal(ptr);
+            }
+        }
+
+        internal static bool TryGetFlags(out int flags)
+        {
+            flags = 0;
+            int rc = NetUserGetInfo(null, "Administrator", 1, out var buf);
+            if (rc != NerrSuccess || buf == IntPtr.Zero)
+                return false;
+            try
+            {
+                var info = Marshal.PtrToStructure<USER_INFO_1>(buf);
+                flags = info.usri1_flags;
+                return true;
+            }
+            finally
+            {
+                NetApiBufferFree(buf);
             }
         }
     }

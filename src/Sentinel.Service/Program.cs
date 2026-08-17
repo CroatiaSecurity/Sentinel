@@ -209,8 +209,6 @@ namespace Sentinel.Service
                     // appsettings.json is retained as optional fallback for migration/dev only.
                     var config = new SentinelConfig();
                     hostContext.Configuration.GetSection("Sentinel").Bind(config);
-                    // Keep static hardening flag in sync with bound config (host may re-read settings)
-                    HardeningModule.RestrictivePortHardeningEnabled = config.RestrictivePortHardening;
 
                     var threatReportingConfig = new ThreatReportingConfig();
                     hostContext.Configuration.GetSection("ThreatReporting").Bind(threatReportingConfig);
@@ -223,9 +221,10 @@ namespace Sentinel.Service
                     hostContext.Configuration.GetSection("ApplicationIntegrity").Bind(appIntegrityConfig);
                     services.AddSingleton(appIntegrityConfig);
 
-                    // v2.0.4: Apply DPAPI-encrypted config overrides (secrets, per-deployment values)
+                    // DPAPI overrides win over any leftover appsettings.json (Hardened Mode lives here).
                     var encryptedStore = new EncryptedConfigStore();
                     encryptedStore.ApplyOverrides(config, threatReportingConfig, autoIncidentReportingConfig);
+                    HardeningModule.RestrictivePortHardeningEnabled = config.RestrictivePortHardening;
                     services.AddSingleton(encryptedStore);
 
                     // CLI flag overrides

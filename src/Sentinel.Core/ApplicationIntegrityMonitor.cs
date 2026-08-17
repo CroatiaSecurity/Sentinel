@@ -742,7 +742,7 @@ namespace Sentinel.Core
         {
             try
             {
-                using var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                using var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
                 var hashBytes = System.Security.Cryptography.Sha256Net48.HashData(fs);
                 return ConvertHex.ToHexString(hashBytes).ToLowerInvariant();
             }

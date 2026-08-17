@@ -127,7 +127,7 @@ namespace Sentinel.Core
         {
             try
             {
-                using var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                using var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
                 if (fs.Length < 2) return false;
                 var b1 = fs.ReadByte();
                 var b2 = fs.ReadByte();
@@ -214,7 +214,7 @@ namespace Sentinel.Core
                         throw new IOException("File is still being modified");
                     }
 
-                    using (var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                    using (var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
                     {
                         await ScanFileInternalAsync(filePath);
                         return;
@@ -263,7 +263,7 @@ namespace Sentinel.Core
                         throw new IOException("File is still being modified");
                     }
 
-                    using (var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                    using (var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
                     {
                         await ScanFileInternalAsync(filePath);
                         return;
@@ -290,7 +290,7 @@ namespace Sentinel.Core
             {
                 string hash;
                 using (var sha = SHA256.Create())
-                using (var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                using (var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
                 {
                     var hashBytes = await sha.ComputeHashAsync(fs);
                     hash = ConvertHex.ToHexString(hashBytes).ToLowerInvariant();

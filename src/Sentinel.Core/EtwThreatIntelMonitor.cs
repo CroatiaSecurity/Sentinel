@@ -35,13 +35,6 @@ namespace Sentinel.Core
         private static readonly TimeSpan AlertCooldown = TimeSpan.FromMinutes(2);
         private static readonly TimeSpan ScanInterval = TimeSpan.FromSeconds(5);
 
-        private static readonly HashSet<string> AllowedJitProcesses = new(StringComparer.OrdinalIgnoreCase)
-        {
-            "java.exe", "javaw.exe", "node.exe", "python.exe", "python3.exe",
-            "dotnet.exe", "pwsh.exe", "powershell.exe", "chrome.exe", "msedge.exe",
-            "firefox.exe", "brave.exe", "teams.exe", "discord.exe", "spotify.exe"
-        };
-
         public EtwThreatIntelMonitor(
             DetectionEngine detectionEngine,
             TelemetryFusionEngine fusionEngine,
@@ -106,8 +99,6 @@ namespace Sentinel.Core
                 try
                 {
                     var name = proc.ProcessName;
-                    if (AllowedJitProcesses.Contains(name + ".exe")) { proc.Dispose(); continue; }
-
                     var imagePath = SecurityValidation.GetProcessImagePath(proc.Id);
                     if (!NativeProcessMemory.CanInspect(proc.Id, imagePath))
                     {
@@ -141,6 +132,8 @@ namespace Sentinel.Core
                         ulong sa = (ulong)start;
                         bool inside = ranges.Any(r => sa >= r.Base && sa < r.End);
                         if (inside) continue;
+                        if (!LooksLikeUnbackedShellcode(proc.Id, start))
+                            continue;
 
                         _alertedPids[proc.Id] = DateTimeOffset.UtcNow;
                         await _detectionEngine.EmitAsync(new DetectionEvent
@@ -192,7 +185,6 @@ namespace Sentinel.Core
                 try
                 {
                     var name = proc.ProcessName;
-                    if (AllowedJitProcesses.Contains(name + ".exe")) { proc.Dispose(); continue; }
                     if (!IsHighValueTarget(name)) { proc.Dispose(); continue; }
 
                     var imagePath = SecurityValidation.GetProcessImagePath(proc.Id);
@@ -286,6 +278,36 @@ namespace Sentinel.Core
             }
 
             return results;
+        }
+
+        /// <summary>
+        /// True for a compact private executable page (classic shellcode).
+        /// Large JIT / Chromium / OBS regions are not a hit.
+        /// </summary>
+        internal static bool IsCompactPrivateExecutable(uint state, uint type, uint protect, long regionSize)
+        {
+            if (state != NativeProcessMemory.MEM_COMMIT) return false;
+            if (type == NativeProcessMemory.MEM_IMAGE) return false;
+            if (!NativeProcessMemory.IsExecutableProtection(protect)) return false;
+            return regionSize > 0 && regionSize <= 16 * 1024;
+        }
+
+        internal static bool LooksLikeUnbackedShellcode(int pid, IntPtr start)
+        {
+            if (start == IntPtr.Zero || pid <= 4) return false;
+            uint access = NativeProcessMemory.PROCESS_QUERY_INFORMATION | NativeProcessMemory.PROCESS_VM_READ;
+            IntPtr h = NativeProcessMemory.OpenRemoteHandle(access, pid);
+            if (h == IntPtr.Zero) return false;
+            try
+            {
+                if (NativeProcessMemory.QueryRemoteRegion(h, start, out var mbi) == 0)
+                    return false;
+                return IsCompactPrivateExecutable(mbi.State, mbi.Type, mbi.Protect, (long)mbi.RegionSize);
+            }
+            finally
+            {
+                NativeProcessMemory.CloseHandle(h);
+            }
         }
 
         private static bool IsHighValueTarget(string processName)

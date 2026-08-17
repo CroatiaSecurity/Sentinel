@@ -255,17 +255,25 @@ namespace Sentinel.Core
                 confidence = 0.80;
                 tier = DetectionTier.Tier1Behavioral;
                 response = ResponseAction.LogOnly;
-                // Best-effort disable unknown HID keyboards (UsbHidWhitelist also covers Enum\HID)
-                disabled = DisableUsbDevice(dev.DeviceId);
-                if (disabled)
-                    evidence += " Device disabled via registry ConfigFlags.";
-
-                // v1.6.4 / v1.7.2: Full PnP removal — verify node gone
-                bool ejected = EjectUsbDevice(dev.DeviceId);
-                if (ejected)
+                // Work-first: never disable/eject HID on a default install.
+                // Xbox controllers, wheels, HOTAS, tablets, and 2.4 GHz receivers
+                // appear as unknown HID after boot. Kiosk only.
+                if (ProductPosture.AllowsProactiveHostLockdown(_config))
                 {
-                    evidence += " Device removed from PnP tree.";
-                    _baseline.Remove(dev.DeviceId);
+                    disabled = DisableUsbDevice(dev.DeviceId);
+                    if (disabled)
+                        evidence += " Device disabled via registry ConfigFlags.";
+
+                    bool ejected = EjectUsbDevice(dev.DeviceId);
+                    if (ejected)
+                    {
+                        evidence += " Device removed from PnP tree.";
+                        _baseline.Remove(dev.DeviceId);
+                    }
+                }
+                else
+                {
+                    evidence += " Logged only (work-first: HID auto-disable requires Hardened Mode).";
                 }
             }
             else if (dev.IsComposite)

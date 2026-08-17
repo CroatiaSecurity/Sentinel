@@ -134,6 +134,7 @@ namespace Sentinel.Core
                                 SignalType = SignalType.SecurityEvasion,
                                 Metadata = new Dictionary<string, string>
                                 {
+                                    ["WeakObserveSeed"] = "true",
                                     ["LpeTool"] = matched ?? "",
                                     ["StagingPath"] = staging ? "true" : "false",
                                     ["ImagePath"] = path ?? ""

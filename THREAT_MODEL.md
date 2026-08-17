@@ -1,8 +1,12 @@
 # Sentinel — Threat Model
 
-**Version: 2.1.0**
+**Version: 2.1.2**
 
 This document assumes the attacker has read the source code.
+
+### v2.1.2 — battle hackers, keep play/browse working
+
+Work-first defaults: HID auto-disable is kiosk-only; Steam/Xbox/Store/DirectX/OBS are work surface; Hell's Gate and unmapped-thread scanners require a real stub table / compact shellcode page. Weak browse/play heuristics cannot complete a chain nuke. MitMDefense does not unlock arbitrary host mutation.
 
 ### Phase A coverage expansion (v2.1.0)
 

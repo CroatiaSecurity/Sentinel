@@ -154,7 +154,7 @@ namespace Sentinel.Core
         {
             var freq = new long[256];
             long total = 0;
-            using (var fs = File.OpenRead(filePath))
+            using (var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
             {
                 var buf = new byte[8192];
                 int read;

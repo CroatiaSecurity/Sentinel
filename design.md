@@ -482,7 +482,7 @@ Full browser-based C2 detection expanding `ChromeRemoteDebuggingRule`:
 | Monitor | What was added |
 |---------|----------------|
 | `EtwThreatIntelMonitor` | VirtualQueryEx-based detection of unbacked RWX regions in high-value targets (ALLOCVM_REMOTE + PROTECTVM_REMOTE effects). Runs every 3rd cycle. Provider GUID `{F4E1897C-BB5D-5668-F1D8-040F4D8DD344}`. |
-| `SyscallStubMonitor` | Indirect syscall / Hell's Gate pattern detection via ReadProcessMemory. Scans non-image executable memory for `mov r10,rcx; mov eax,SSN; syscall` (4C 8B D1 B8 xx xx 00 00 ... 0F 05). Fires at 3+ stubs (0.92 confidence). |
+| `SyscallStubMonitor` | Indirect syscall / Hell's Gate table detection via ReadProcessMemory. Scans non-image executable memory for well-formed `mov r10,rcx; mov eax,SSN; syscall; ret` or copied ntdll prologues. Fires at 3+ distinct SSNs (0.92). Name-based JIT skips are not used. |
 | `PrintSpoolerMonitor` | PrintNightmare-class exploitation: baselines printer driver DLLs, detects new unsigned DLLs in spool\drivers, catches spoolsv.exe spawning unexpected child processes. |
 | `WslMonitor` | Container-to-host lateral movement: (1) WSL writing to sensitive host paths via /mnt/c/, (2) WSL interop spawning security-sensitive Windows .exe, (3) Docker overlay filesystem processes accessing host resources. |
 

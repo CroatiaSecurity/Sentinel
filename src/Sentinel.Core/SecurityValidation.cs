@@ -127,6 +127,9 @@ namespace Sentinel.Core
             try
             {
                 var full = Path.GetFullPath(path);
+                var resolved = SelfPathGuard.TryGetFinalPath(full);
+                if (resolved != null)
+                    full = resolved;
                 var lower = full.ToLowerInvariant();
 
                 // Entire Windows tree except Windows\Temp (user/installer scratch)
@@ -679,7 +682,17 @@ namespace Sentinel.Core
                    lower.Contains(@"\battle.net\") ||
                    lower.Contains(@"\blizzard\") ||
                    lower.Contains(@"\xboxgames\") ||
+                   lower.Contains(@"\xbox games\") ||
                    lower.Contains(@"\windowsapps\") ||
+                   lower.Contains(@"\gamingservices\") ||
+                   lower.Contains(@"\xboxapp\") ||
+                   lower.Contains(@"\gamebar\") ||
+                   lower.Contains(@"\microsoft.xbox") ||
+                   lower.Contains(@"\microsoft.gamingapp") ||
+                   lower.Contains(@"\obs-studio\") ||
+                   lower.Contains(@"\obs studio\") ||
+                   lower.Contains(@"\streamlabs\") ||
+                   lower.Contains(@"\nvidia corporation\") ||
                    lower.Contains(@"\sports interactive\") ||
                    lower.Contains(@"\football manager\") ||
                    lower.Contains(@"\sega\") ||
@@ -707,10 +720,15 @@ namespace Sentinel.Core
             "football manager",
             // Common launchers / overlays / anti-cheat agents
             "steam", "steamwebhelper", "gameoverlayui", "steamerrorreporter",
+            "steamservice", "steamsetup",
             "easyanticheat", "easyanticheat_eos", "beclient", "beclient_x64",
             "beservice", "vgc", "vgtray", "riotclientservices",
             "epicgameslauncher", "eadesktop", "ubisoftconnect",
-            "galaxyclient"
+            "galaxyclient",
+            "obs64", "obs32", "obs", "obs-browser-page", "obs-ffmpeg-mux",
+            "streamlabs obs", "streamlabs",
+            "gamebar", "gamebarftw", "xboxapp", "xboxpcappft", "gamingservices",
+            "gamingoverlay", "xboxgamebar"
         };
 
         /// <summary>

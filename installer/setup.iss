@@ -1,6 +1,6 @@
 [Setup]
 AppName=Sentinel
-AppVersion=2.1.1
+AppVersion=2.1.2
 AppPublisher=Gorstak
 AppPublisherURL=https://gorstak.eu
 SourceDir=.
@@ -11,7 +11,7 @@ UninstallDisplayIcon={app}\Sentinel.ico
 Compression=lzma2
 SolidCompression=yes
 OutputDir=.
-OutputBaseFilename=SentinelSetup-2.1.1
+OutputBaseFilename=SentinelSetup-2.1.2
 PrivilegesRequired=admin
 ; One active Setup wizard at a time (elevation handoff still works: non-elevated exits first)
 SetupMutex=Global\SentinelSetupMutex
@@ -24,8 +24,8 @@ RestartApplications=no
 [Files]
 ; Framework-dependent net48 publish: all managed deps + exes (small installer; needs .NET 4.8)
 Source: "assets\Sentinel.ico"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\publish\service\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "..\publish\agent\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\publish\service\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "appsettings.json"
+Source: "..\publish\agent\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "appsettings.json"
 ; v2.0.4: appsettings.json is no longer shipped — config uses compiled defaults + DPAPI-encrypted store.
 ; If the file exists from a prior install, it is ignored (but detected as suspicious by AntiTamperGuard).
 

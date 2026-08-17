@@ -178,6 +178,8 @@ namespace Sentinel.Core
 
                 string imagePath = "";
                 imagePath = SecurityValidation.GetProcessImagePath(conn.OwnerPid) ?? "";
+                if (SecurityValidation.IsGameOrAntiCheatPath(imagePath))
+                    continue;
 
                 await _detectionEngine.EmitAsync(new DetectionEvent
                 {
@@ -186,18 +188,18 @@ namespace Sentinel.Core
                                $"maintaining persistent connection to DoH resolver {conn.RemoteAddress}:443. " +
                                $"Seen {state.ConnectionCount} times over {(state.LastSeen - state.FirstSeen).TotalSeconds:F0}s.",
                     Reasoning = "A non-browser process is communicating directly with a known DNS-over-HTTPS " +
-                                "resolver, bypassing the Windows DNS client entirely. DNS queries made this way " +
-                                "do not appear in the Windows DNS event log and are not subject to hosts file " +
-                                "blocking. Malware uses embedded DoH to resolve C2 domains without triggering " +
-                                "DNS-based detection (DnsQueryMonitor is blind to these queries).",
+                                "resolver, bypassing the Windows DNS client entirely. Logged as observe fuel; " +
+                                "browsers, QtWebEngine embeds, and games often do this. Kill requires a real " +
+                                "C2/token/cred-dump chain, not DoH alone.",
                     Confidence = 0.75,
-                    Tier = DetectionTier.Tier1Behavioral,
-                    AuthorizedResponse = ResponseAction.KillProcessTree,
+                    Tier = DetectionTier.Tier2Indicator,
+                    AuthorizedResponse = ResponseAction.LogOnly,
                     ProcessName = procName,
                     ProcessId = conn.OwnerPid,
-                    SignalType = SignalType.NetworkC2,
+                    SignalType = SignalType.SuspiciousProcess,
                     Metadata = new Dictionary<string, string>
                     {
+                        ["WeakObserveSeed"] = "true",
                         ["RemoteIP"] = conn.RemoteAddress,
                         ["ConnectionCount"] = state.ConnectionCount.ToString(),
                         ["ImagePath"] = imagePath,

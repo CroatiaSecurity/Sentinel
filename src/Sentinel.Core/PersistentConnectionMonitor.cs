@@ -305,9 +305,10 @@ namespace Sentinel.Core
                                 AuthorizedResponse = spawnResponse,
                                 ProcessName = drop.State.ProcessName,
                                 ProcessId = drop.State.Pid,
-                                SignalType = SignalType.NetworkC2,
+                                SignalType = SignalType.SuspiciousProcess,
                                 Metadata = new Dictionary<string, string>
                                 {
+                                    { "WeakObserveSeed", "true" },
                                     { "OriginalTarget", $"{drop.State.RemoteIp}:{drop.State.RemotePort}" },
                                     { "ConnectionDuration", $"{drop.Duration.TotalSeconds:F0}s" },
                                     { "SpawnedChildren", childNames }

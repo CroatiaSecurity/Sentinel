@@ -19,6 +19,9 @@ namespace Sentinel.Core
     /// On-disk ntdll integrity + remote Hell's Gate / indirect-syscall scan.
     /// Memory APIs resolved via <see cref="NativeProcessMemory"/> (not PE imports).
     /// Skips game/anti-cheat paths only — defenses stay armed for everything else.
+    /// Hell's Gate requires a well-formed stub table (compact syscall+ret or a copied
+    /// ntdll prologue) with 3+ distinct SSNs. Loose <c>0F 05</c> bytes in V8/Chromium
+    /// JIT regions are not a hit — process-name skips are not used as a trust grant.
     /// </summary>
     public sealed class SyscallStubMonitor : BackgroundService
     {
@@ -38,7 +41,7 @@ namespace Sentinel.Core
             {
                 try
                 {
-                    using var fs = new FileStream(ntdllPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                    using var fs = new FileStream(ntdllPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
                     _baselineNtdllHash = System.Security.Cryptography.Sha256Net48.HashData(fs);
                 }
                 catch { /* access race */ }
@@ -92,8 +95,6 @@ namespace Sentinel.Core
                 try
                 {
                     var name = proc.ProcessName;
-                    if (IsJitProcess(name)) { proc.Dispose(); continue; }
-
                     var imagePath = SecurityValidation.GetProcessImagePath(proc.Id);
                     if (!NativeProcessMemory.CanInspect(proc.Id, imagePath))
                     {
@@ -114,17 +115,19 @@ namespace Sentinel.Core
 
                     try
                     {
-                        int stubCount = ScanProcessForSyscallStubs(hProcess);
-                        if (stubCount >= 3)
+                        var scan = ScanProcessForSyscallStubs(hProcess);
+                        if (scan.IsHit)
                         {
                             _syscallAlertedPids[proc.Id] = DateTimeOffset.UtcNow;
                             await _detectionEngine.EmitAsync(new DetectionEvent
                             {
                                 RuleName = "Evasion: Indirect Syscall / Hell's Gate Pattern Detected",
-                                Evidence = $"Process '{name}' (PID {proc.Id}) contains {stubCount} syscall stub(s) " +
-                                           $"in non-image (private) executable memory. Pattern: mov r10,rcx; mov eax,SSN; syscall.",
-                                Reasoning = "Multiple syscall sequences in private executable memory indicate Hell's Gate / " +
-                                            "SysWhispers-style EDR bypass (MITRE T1106, T1562.001).",
+                                Evidence = $"Process '{name}' (PID {proc.Id}) contains {scan.WellFormedStubs} well-formed " +
+                                           $"syscall stub(s) ({scan.DistinctSsns} distinct SSNs) in non-image executable memory. " +
+                                           "Pattern: mov r10,rcx; mov eax,SSN; syscall; ret.",
+                                Reasoning = "A table of compact, ret-terminated syscall stubs with multiple SSNs in private " +
+                                            "executable memory indicates Hell's Gate / SysWhispers-style EDR bypass " +
+                                            "(MITRE T1106, T1562.001). Sparse 0F 05 bytes in JIT code are ignored.",
                                 Confidence = 0.92,
                                 Tier = DetectionTier.Tier1Behavioral,
                                 AuthorizedResponse = ResponseAction.KillProcessTree,
@@ -133,7 +136,8 @@ namespace Sentinel.Core
                                 SignalType = SignalType.SecurityEvasion,
                                 Metadata = new Dictionary<string, string>
                                 {
-                                    ["SyscallStubCount"] = stubCount.ToString(),
+                                    ["SyscallStubCount"] = scan.WellFormedStubs.ToString(),
+                                    ["DistinctSsnCount"] = scan.DistinctSsns.ToString(),
                                     ["ImagePath"] = imagePath ?? "",
                                     ["Technique"] = "IndirectSyscall/HellsGate"
                                 }
@@ -153,9 +157,10 @@ namespace Sentinel.Core
             }
         }
 
-        private static int ScanProcessForSyscallStubs(IntPtr hProcess)
+        private static HellsGateScanResult ScanProcessForSyscallStubs(IntPtr hProcess)
         {
             int stubCount = 0;
+            var ssns = new HashSet<int>();
             IntPtr address = IntPtr.Zero;
             int regionsScanned = 0;
 
@@ -176,8 +181,13 @@ namespace Sentinel.Core
                     if (NativeProcessMemory.CopyRemote(hProcess, mbi.BaseAddress, buffer, out int bytesRead) &&
                         bytesRead > 16)
                     {
-                        stubCount += CountSyscallStubs(buffer, bytesRead);
-                        if (stubCount >= 3) return stubCount;
+                        foreach (var hit in FindSyscallStubs(buffer, bytesRead))
+                        {
+                            stubCount++;
+                            ssns.Add(hit.Ssn);
+                            if (stubCount >= 3 && ssns.Count >= 3)
+                                return new HellsGateScanResult(stubCount, ssns.Count);
+                        }
                     }
                 }
 
@@ -186,44 +196,85 @@ namespace Sentinel.Core
                 address = (IntPtr)nextAddr;
             }
 
-            return stubCount;
+            return new HellsGateScanResult(stubCount, ssns.Count);
         }
 
-        private static int CountSyscallStubs(byte[] buffer, int length)
+        /// <summary>
+        /// Compact Hell's Gate / SysWhispers stub, or a copied ntdll prologue.
+        /// Does not count a lone <c>syscall</c> floating near <c>mov r10,rcx; mov eax,imm</c>
+        /// — that is the V8 / Chromium JIT false positive.
+        /// </summary>
+        internal static List<SyscallStubHit> FindSyscallStubs(byte[] buffer, int length)
         {
-            int count = 0;
-            for (int i = 0; i <= length - 12; i++)
+            var hits = new List<SyscallStubHit>();
+            if (buffer == null || length < 11) return hits;
+            int lim = Math.Min(length, buffer.Length);
+
+            for (int i = 0; i <= lim - 11; i++)
             {
-                if (buffer[i] == 0x4C && buffer[i + 1] == 0x8B && buffer[i + 2] == 0xD1 && buffer[i + 3] == 0xB8)
+                if (buffer[i] != 0x4C || buffer[i + 1] != 0x8B ||
+                    buffer[i + 2] != 0xD1 || buffer[i + 3] != 0xB8)
+                    continue;
+                if (buffer[i + 6] != 0x00 || buffer[i + 7] != 0x00)
+                    continue;
+
+                int ssn = buffer[i + 4] | (buffer[i + 5] << 8);
+
+                // mov r10,rcx; mov eax,SSN; syscall; ret
+                if (i + 10 < lim &&
+                    buffer[i + 8] == 0x0F && buffer[i + 9] == 0x05 && buffer[i + 10] == 0xC3)
                 {
-                    if (buffer[i + 6] == 0x00 && buffer[i + 7] == 0x00)
-                    {
-                        int searchEnd = Math.Min(i + 28, length - 1);
-                        for (int j = i + 8; j < searchEnd; j++)
-                        {
-                            if (buffer[j] == 0x0F && buffer[j + 1] == 0x05)
-                            {
-                                count++;
-                                i = j + 1;
-                                break;
-                            }
-                        }
-                    }
+                    hits.Add(new SyscallStubHit(i, ssn));
+                    i += 10;
+                    continue;
+                }
+
+                // Copied ntdll: test byte ptr [SharedUserData+0x308],1 / jne +3 / syscall / ret
+                if (i + 20 < lim &&
+                    buffer[i + 8] == 0xF6 && buffer[i + 9] == 0x04 && buffer[i + 10] == 0x25 &&
+                    buffer[i + 11] == 0x08 && buffer[i + 12] == 0x03 && buffer[i + 13] == 0xFE &&
+                    buffer[i + 14] == 0x7F && buffer[i + 15] == 0x01 &&
+                    buffer[i + 16] == 0x75 && buffer[i + 17] == 0x03 &&
+                    buffer[i + 18] == 0x0F && buffer[i + 19] == 0x05 &&
+                    buffer[i + 20] == 0xC3)
+                {
+                    hits.Add(new SyscallStubHit(i, ssn));
+                    i += 20;
                 }
             }
-            return count;
+
+            return hits;
         }
 
-        private static bool IsJitProcess(string name)
+        internal static int CountSyscallStubs(byte[] buffer, int length) =>
+            FindSyscallStubs(buffer, length).Count;
+
+        internal static bool IsHellsGateEvidence(IReadOnlyList<SyscallStubHit> hits)
         {
-            var jit = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            if (hits == null || hits.Count < 3) return false;
+            var ssns = new HashSet<int>();
+            foreach (var hit in hits)
+                ssns.Add(hit.Ssn);
+            return ssns.Count >= 3;
+        }
+
+        internal readonly struct SyscallStubHit
+        {
+            public readonly int Offset;
+            public readonly int Ssn;
+            public SyscallStubHit(int offset, int ssn) { Offset = offset; Ssn = ssn; }
+        }
+
+        internal readonly struct HellsGateScanResult
+        {
+            public readonly int WellFormedStubs;
+            public readonly int DistinctSsns;
+            public bool IsHit => WellFormedStubs >= 3 && DistinctSsns >= 3;
+            public HellsGateScanResult(int stubs, int ssns)
             {
-                "java", "javaw", "node", "python", "python3", "dotnet", "pwsh",
-                "powershell", "chrome", "msedge", "firefox", "brave", "teams",
-                "discord", "spotify", "code", "cursor", "kiro", "electron",
-                "msedgewebview2", "slack", "steamwebhelper"
-            };
-            return jit.Contains(name);
+                WellFormedStubs = stubs;
+                DistinctSsns = ssns;
+            }
         }
     }
 

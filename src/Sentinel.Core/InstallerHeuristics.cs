@@ -52,7 +52,14 @@ namespace Sentinel.Core
                 n.IndexOf("windowsdesktop-runtime", StringComparison.Ordinal) >= 0 ||
                 n.IndexOf("vcredist", StringComparison.Ordinal) >= 0 ||
                 n.IndexOf("sentinelsetup", StringComparison.Ordinal) >= 0 ||
-                n.IndexOf("finalizer", StringComparison.Ordinal) >= 0) // WiX burn
+                n.IndexOf("finalizer", StringComparison.Ordinal) >= 0 ||
+                n.IndexOf("steamsetup", StringComparison.Ordinal) >= 0 ||
+                n.IndexOf("steamservice", StringComparison.Ordinal) >= 0 ||
+                n.IndexOf("xbox", StringComparison.Ordinal) >= 0 ||
+                n.IndexOf("gamingservices", StringComparison.Ordinal) >= 0 ||
+                n.IndexOf("windowsgaming", StringComparison.Ordinal) >= 0 ||
+                n.IndexOf("obs-studio", StringComparison.Ordinal) >= 0 ||
+                n.IndexOf("obs studio", StringComparison.Ordinal) >= 0)
                 return true;
 
             // Product-1.2.3-64-bit / Product-x64 / Product-amd64

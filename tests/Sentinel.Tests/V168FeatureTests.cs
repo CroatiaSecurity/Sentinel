@@ -247,7 +247,7 @@ namespace Sentinel.Tests
         [Fact]
         public void CountSyscallStubs_DetectsValidPattern()
         {
-            // Valid Hell's Gate stub: 4C 8B D1 B8 xx xx 00 00 ... 0F 05
+            // Valid Hell's Gate stub: 4C 8B D1 B8 xx xx 00 00 0F 05 C3
             var buffer = new byte[]
             {
                 0x4C, 0x8B, 0xD1, 0xB8, 0x18, 0x00, 0x00, 0x00, // mov r10,rcx; mov eax,0x18
@@ -255,86 +255,104 @@ namespace Sentinel.Tests
                 0xC3,                                              // ret
                 0x00,
             };
-            int count = TestCountSyscallStubs(buffer, buffer.Length);
+            int count = SyscallStubMonitor.CountSyscallStubs(buffer, buffer.Length);
             Assert.Equal(1, count);
         }
 
         [Fact]
         public void CountSyscallStubs_DetectsMultipleStubs()
         {
-            // Three stubs with padding to ensure buffer length check passes
             var buffer = new byte[]
             {
                 0x4C, 0x8B, 0xD1, 0xB8, 0x18, 0x00, 0x00, 0x00, 0x0F, 0x05, 0xC3, 0x90,
                 0x4C, 0x8B, 0xD1, 0xB8, 0x26, 0x00, 0x00, 0x00, 0x0F, 0x05, 0xC3, 0x90,
                 0x4C, 0x8B, 0xD1, 0xB8, 0x50, 0x00, 0x00, 0x00, 0x0F, 0x05, 0xC3, 0x90,
             };
-            int count = TestCountSyscallStubs(buffer, buffer.Length);
-            Assert.Equal(3, count);
+            var hits = SyscallStubMonitor.FindSyscallStubs(buffer, buffer.Length);
+            Assert.Equal(3, hits.Count);
+            Assert.True(SyscallStubMonitor.IsHellsGateEvidence(hits));
         }
 
         [Fact]
         public void CountSyscallStubs_IgnoresNormalCode()
         {
-            // Random bytes that don't form the pattern
             var buffer = new byte[]
             {
                 0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x74,
                 0x24, 0x10, 0x57, 0x48, 0x83, 0xEC, 0x20, 0x48,
                 0x8B, 0xF9, 0x33, 0xF6, 0x48, 0x8D, 0x0D, 0xAA,
             };
-            int count = TestCountSyscallStubs(buffer, buffer.Length);
+            int count = SyscallStubMonitor.CountSyscallStubs(buffer, buffer.Length);
             Assert.Equal(0, count);
         }
 
         [Fact]
         public void CountSyscallStubs_IgnoresInvalidSsn()
         {
-            // Pattern with non-zero high bytes in SSN (invalid)
             var buffer = new byte[]
             {
                 0x4C, 0x8B, 0xD1, 0xB8, 0x18, 0x00, 0xFF, 0xFF, // high bytes non-zero
                 0x0F, 0x05, 0xC3,
             };
-            int count = TestCountSyscallStubs(buffer, buffer.Length);
+            int count = SyscallStubMonitor.CountSyscallStubs(buffer, buffer.Length);
             Assert.Equal(0, count);
         }
 
         [Fact]
         public void CountSyscallStubs_EmptyBuffer_ReturnsZero()
         {
-            int count = TestCountSyscallStubs(Array.Empty<byte>(), 0);
+            int count = SyscallStubMonitor.CountSyscallStubs(Array.Empty<byte>(), 0);
             Assert.Equal(0, count);
         }
 
-        /// <summary>
-        /// Reimplements the CountSyscallStubs logic from SyscallStubMonitor for testing.
-        /// (The original is private; we test the algorithm directly.)
-        /// </summary>
-        private static int TestCountSyscallStubs(byte[] buffer, int length)
+        [Fact]
+        public void CountSyscallStubs_IgnoresLooseSyscallInJitNoise()
         {
-            int count = 0;
-            for (int i = 0; i <= length - 12; i++)
+            // V8/Chromium FP: mov r10,rcx; mov eax,imm then unrelated bytes then a floating syscall.
+            var buffer = new byte[]
             {
-                if (buffer[i] == 0x4C && buffer[i + 1] == 0x8B &&
-                    buffer[i + 2] == 0xD1 && buffer[i + 3] == 0xB8)
-                {
-                    if (buffer[i + 6] == 0x00 && buffer[i + 7] == 0x00)
-                    {
-                        int searchEnd = Math.Min(i + 28, length - 1);
-                        for (int j = i + 8; j < searchEnd; j++)
-                        {
-                            if (buffer[j] == 0x0F && buffer[j + 1] == 0x05)
-                            {
-                                count++;
-                                i = j + 1;
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-            return count;
+                0x4C, 0x8B, 0xD1, 0xB8, 0x18, 0x00, 0x00, 0x00,
+                0x48, 0x89, 0xC1, 0x90, 0x90, 0x90,
+                0x0F, 0x05, 0x90, 0x90,
+            };
+            Assert.Equal(0, SyscallStubMonitor.CountSyscallStubs(buffer, buffer.Length));
+        }
+
+        [Fact]
+        public void CountSyscallStubs_IgnoresCompactStubWithoutRet()
+        {
+            var buffer = new byte[]
+            {
+                0x4C, 0x8B, 0xD1, 0xB8, 0x18, 0x00, 0x00, 0x00,
+                0x0F, 0x05, 0x90, 0x90,
+            };
+            Assert.Equal(0, SyscallStubMonitor.CountSyscallStubs(buffer, buffer.Length));
+        }
+
+        [Fact]
+        public void CountSyscallStubs_DetectsCopiedNtdllPrologue()
+        {
+            var buffer = new byte[]
+            {
+                0x4C, 0x8B, 0xD1, 0xB8, 0x18, 0x00, 0x00, 0x00,
+                0xF6, 0x04, 0x25, 0x08, 0x03, 0xFE, 0x7F, 0x01,
+                0x75, 0x03, 0x0F, 0x05, 0xC3,
+            };
+            Assert.Equal(1, SyscallStubMonitor.CountSyscallStubs(buffer, buffer.Length));
+        }
+
+        [Fact]
+        public void IsHellsGateEvidence_RequiresThreeDistinctSsns()
+        {
+            var sameSsn = new byte[]
+            {
+                0x4C, 0x8B, 0xD1, 0xB8, 0x18, 0x00, 0x00, 0x00, 0x0F, 0x05, 0xC3, 0x90,
+                0x4C, 0x8B, 0xD1, 0xB8, 0x18, 0x00, 0x00, 0x00, 0x0F, 0x05, 0xC3, 0x90,
+                0x4C, 0x8B, 0xD1, 0xB8, 0x18, 0x00, 0x00, 0x00, 0x0F, 0x05, 0xC3, 0x90,
+            };
+            var hits = SyscallStubMonitor.FindSyscallStubs(sameSsn, sameSsn.Length);
+            Assert.Equal(3, hits.Count);
+            Assert.False(SyscallStubMonitor.IsHellsGateEvidence(hits));
         }
 
         #endregion

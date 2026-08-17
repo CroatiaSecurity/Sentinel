@@ -533,18 +533,20 @@ namespace Sentinel.Core
                         _alertedDevices.Add(dev);
                         _logger.LogWarning("[UsbHidWhitelist] New unauthorized HID: {Dev}", dev);
 
-                        // Attempt to disable the device via registry
-                        DisableHidDevice(dev);
+                        bool lockdown = ProductPosture.AllowsProactiveHostLockdown(_config);
+                        if (lockdown)
+                            DisableHidDevice(dev);
 
                         await _detectionEngine.EmitAsync(new DetectionEvent
                         {
                             RuleName = "BadUSB: Unauthorized HID Device Connected",
-                            Evidence = $"New HID device '{dev}' (VID:PID={vidPid ?? "unknown"}) not in whitelist or baseline. " +
-                                       "Attempted registry-level disable.",
+                            Evidence = lockdown
+                                ? $"New HID device '{dev}' (VID:PID={vidPid ?? "unknown"}) not in whitelist or baseline. Attempted registry-level disable."
+                                : $"New HID device '{dev}' (VID:PID={vidPid ?? "unknown"}) not in whitelist or baseline. Logged only (work-first: HID auto-disable requires Hardened Mode).",
                             Reasoning = "A new Human Interface Device appeared that was not present at startup and is not " +
                                         "in the trusted device whitelist. This may be a BadUSB/Rubber Ducky attack that " +
-                                        "emulates a keyboard to inject malicious keystrokes. The device has been disabled " +
-                                        "via registry to prevent keystroke injection.",
+                                        "emulates a keyboard. Default work-first mode logs only so Xbox controllers, " +
+                                        "wheels, and tablets keep working. Hardened Mode disables the device.",
                             Confidence = 0.88, Tier = DetectionTier.Tier1Behavioral,
                             AuthorizedResponse = ResponseAction.LogOnly,
                             ProcessName = "SYSTEM", ProcessId = 0,
@@ -553,7 +555,7 @@ namespace Sentinel.Core
                             {
                                 ["DeviceId"] = dev,
                                 ["VidPid"] = vidPid ?? "unknown",
-                                ["Action"] = "RegistryDisable"
+                                ["Action"] = lockdown ? "RegistryDisable" : "LogOnly"
                             }
                         });
                     }

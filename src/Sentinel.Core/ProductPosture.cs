@@ -5,7 +5,8 @@ namespace Sentinel.Core
     /// <summary>
     /// Standing product law (v1.9.7+). Read this before adding any host mutation.
     ///
-    /// <para><b>DEFAULT = OBSERVE / WORK-FIRST.</b> Users must be free to run NTLite, RDP,
+    /// <para><b>DEFAULT = OBSERVE / WORK-FIRST.</b> Users must be free to browse, game, and
+    /// install Store / Xbox / Steam / DirectX / OBS and other creator tools. Also NTLite, RDP,
     /// installers, Office macros, USB tools, casting, DISM/RPC, games, etc.</para>
     ///
     /// <para>Proactive OS reshaping (IPSec, firewall blocks, service disable, ASR Block re-arm,

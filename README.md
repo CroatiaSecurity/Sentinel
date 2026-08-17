@@ -1,16 +1,18 @@
 # Sentinel
 
-Real-time endpoint detection and response for Windows. Built to **battle real attackers** — commodity malware, LOLBin operators, credential thieves, stalkerware, and opportunistic remote-access abuse — on machines that people actually use: **gaming PCs, creator workstations, and high-profile targets** who need host defense without enterprise bloat.
+A Windows host defender built to **battle hackers** on machines people actually use.
 
-Runs as a background SYSTEM service, watches behavior (not just signatures), and only destroys processes when **multiple independent signals** prove a terminal attack chain. Games, anti-cheat, DirectX/GPU redists, and normal developer tooling are treated as work — not threats.
+Sentinel is for **gamers, creators, and high-profile targets**. It hunts real attacker behavior — RATs, stealers, LOLBins, credential theft, stalkerware, injection, C2 — and only destroys a process when **several independent signals** prove a terminal chain. It is not a toy “AV skin.” It is also not a kernel god. It assumes the attacker has the source.
 
-**Current version: 2.1.1**
+**You can browse and play.** Default mode must not break Chrome/Edge/Firefox, Microsoft Store, Xbox, Steam, Epic, DirectX/VC++ redists, Game Bar, or creator tools such as OBS Studio. Controllers, wheels, and HOTAS stay usable. Installing a game or a GPU/runtime redist is work, not an incident.
+
+**Current version: 2.1.2**
 
 ### Honest mission
 
-Sentinel is **open-source host defense for people who get targeted**. It assumes the attacker has read the source. It does **not** claim nation-state invincibility or kernel omniscience. It **does** claim: full sensors, work-first defaults, silent until a real chain, then quarantine + kill + isolate + sealed evidence — hard enough to ruin a script-kiddie, a RAT campaign, or a coercion toolkit on the endpoint.
+Sentinel exists to fight hackers on the endpoint: script-kiddie malware, opportunistic remote-access, credential thieves, and coercion/stalkerware toolkits. Full sensors. Work-first defaults. Silent until a real chain. Then quarantine + kill + isolate + a sealed evidence pack.
 
-Read [THREAT_MODEL.md](THREAT_MODEL.md) and [SECURITY.md](SECURITY.md) before deploying on a high-profile host.
+It does **not** claim nation-state invincibility or kernel omniscience. A local admin or an already-loaded kernel implant still wins — documented in [THREAT_MODEL.md](THREAT_MODEL.md). Read [SECURITY.md](SECURITY.md) before deploying on a high-profile host.
 
 ### Product posture (v2.0 — observe-only until malice + dual audit trail + explainable correlation)
 
@@ -47,7 +49,7 @@ Sentinel is effective against:
 
 - **Browser-based C2** — Headless Chrome used as a proxy, Chrome DevTools Protocol session hijacking, malicious extensions with debugger/nativeMessaging/proxy permissions. Correlates with beaconing for high-confidence composite kills.
 
-- **Physical access attacks** — BadUSB/Rubber Ducky devices (HID whitelist), post-idle hardware change detection, new Bluetooth devices, rogue USB drives.
+- **Physical access attacks** — BadUSB/Rubber Ducky (logged on default; HID auto-disable only in Hardened / kiosk mode so Xbox and other controllers keep working), post-idle hardware change detection, new Bluetooth devices, rogue USB drives.
 
 - **Network attacks** — ARP spoofing, DNS poisoning, rogue Wi-Fi, unauthorized Cast/screen-share devices, C2 beaconing (statistical), DNS tunneling/exfiltration, phantom network devices. Threat-intel feeds are **observe + reactive isolate** by default (`ThreatIntelProactiveFirewall: false`); optional proactive FW block. Unauthorized RDP/remote sessions can be force-logged-off (`RemoteSessionGuard`).
 
@@ -63,7 +65,7 @@ Sentinel is effective against:
 
 - **BYOVD (driver-based EDR killers)** — Detects vulnerable driver staging (.sys drops in temp/user paths), service installation (Event 7045), and planted code-signing certificates. Automatically revokes non-public certs from TrustedPublisher/Root stores, kills the installer chain, and disables all driver services signed by the revoked cert. Covers 35+ known vulnerable drivers from the Microsoft WDBL and LOLDrivers project.
 
-- **Advanced evasion** — Indirect syscalls / Hell's Gate pattern detection (scans process memory for syscall stubs in non-image regions), process injection via unbacked RWX memory detection, named pipe C2 enumeration with known-bad pattern matching.
+- **Advanced evasion** — Indirect syscalls / Hell's Gate table detection (well-formed `syscall; ret` or copied ntdll stubs with 3+ distinct SSNs in non-image executable memory — not V8/Chromium JIT noise), process injection via unbacked RWX memory detection, named pipe C2 enumeration with known-bad pattern matching.
 
 - **Hardware security downgrade** — Detects if someone disables TPM, Secure Boot, BitLocker, or Credential Guard.
 
@@ -113,7 +115,12 @@ Full transparency in [THREAT_MODEL.md](THREAT_MODEL.md).
 - You want set-and-forget antivirus that never needs a glance at Events
 - Your threat model is “air-gapped SCADA” or “classified network” — use purpose-built platforms
 
-**Gamers:** Steam/Epic/GOG/anti-cheat (EAC, BattlEye, Vanguard, Denuvo) and DirectX/VC redists are explicitly non-kill paths for reputation scanning. Memory inspection skips game trees. Chain-nuke still fires if a real C2/exfil/token/cred-dump chain appears *from* a game path (rare; intentional).
+**Gamers and creators (non-negotiable default):**
+- Play and install from **Steam, Epic, GOG, Xbox, Microsoft Store**, and common launchers.
+- **DirectX, VC++, XNA, OpenAL, PhysX, GPU** redistributables writing System32 are observe-only — never a kill seed.
+- **OBS Studio / Streamlabs / Game Bar / overlays** are work surface (capture and hooks look like “injection” to naive EDRs).
+- **Controllers and other HID** plugged in after boot are logged, not disabled, unless you turn on Hardened Mode.
+- Memory inspection skips game / anti-cheat trees (Denuvo self-exits on `VM_READ`). That skip is **not** a trust grant — a real C2/exfil/token/cred-dump chain from a game path can still nuke.
 
 **High-profile targets:** Default is observe-until-chain + dual audit trail (JSONL + Event Log) + integrity-sealed incident packs. Enable MitMDefense only after a real MitM/Cast incident. Back up `%ProgramData%\Sentinel\IncidentReports` off-host. Local admin compromise still wins against any pure userland EDR — plan physical/OS hygiene accordingly.
 
@@ -149,7 +156,7 @@ Full transparency in [THREAT_MODEL.md](THREAT_MODEL.md).
 
 ## Test Suite
 
-**600+** automated tests (xUnit) on net48:
+**1786** automated tests (xUnit) on net48:
 - End-to-end integration tests (full pipeline: telemetry → detection → scoring → correlation → response)
 - Unit tests for all critical engines (Response, Correlation, ChainTracer, FileReputation, AntiTamper, Detection)
 - Monitor unit tests including LNK classification, threat-intel feed parsing, USB failed-enumeration, PS-ported guards, v1.7.5–1.7.6 features, auto incident evidence packs (v1.7.7/1.7.8)
@@ -159,7 +166,7 @@ Full transparency in [THREAT_MODEL.md](THREAT_MODEL.md).
 
 ## Installation
 
-Download **`SentinelSetup-2.1.0.exe`** from [GitHub Releases](https://github.com/CroatiaSecurity/Sentinel/releases) (or `releases/2.1.0/` after a local build) and run it as Administrator.
+Download **`SentinelSetup-2.1.2.exe`** from [GitHub Releases](https://github.com/CroatiaSecurity/Sentinel/releases) (or `releases/2.1.2/` after a local build) and run it as Administrator.
 
 If Setup fails with **Error 5 / temporary directory** while an older Sentinel is installed, that was ASR rule `c1db55ab` (fixed in 1.9.6+). Use elevated `installer\install-no-inno.ps1` or `fix-asr-for-setup.ps1`, then upgrade.
 

@@ -4,37 +4,40 @@ using Sentinel.Core;
 namespace Sentinel.Tests.Monitors
 {
     /// <summary>
-    /// Tests for CriticalMonitors — verifies SyscallStubMonitor JIT process classification,
+    /// Tests for CriticalMonitors — verifies SyscallStubMonitor Hell's Gate matching,
     /// IPSecIntegrityGuard backoff computation, and detection model behavior.
     /// </summary>
     public class CriticalMonitorsTests
     {
         // ═══════════════════════════════════════════════════════════════
-        // SyscallStubMonitor — JIT process classification
+        // SyscallStubMonitor — well-formed Hell's Gate table (no name skip)
         // ═══════════════════════════════════════════════════════════════
 
-        [Theory]
-        [InlineData("java")]
-        [InlineData("javaw")]
-        [InlineData("dotnet")]
-        [InlineData("node")]
-        [InlineData("python")]
-        [InlineData("ruby")]
-        public void IsJitProcess_CommonRuntimes_AreJit(string name)
+        [Fact]
+        public void HellsGate_ThreeDistinctWellFormedStubs_IsHit()
         {
-            // JIT processes (Java, .NET, Node, Python) generate executable code at runtime
-            // that may match syscall stub patterns — these are expected false positives
-            Assert.True(IsJitProcess(name));
+            var buffer = new byte[]
+            {
+                0x4C, 0x8B, 0xD1, 0xB8, 0x18, 0x00, 0x00, 0x00, 0x0F, 0x05, 0xC3, 0x90,
+                0x4C, 0x8B, 0xD1, 0xB8, 0x26, 0x00, 0x00, 0x00, 0x0F, 0x05, 0xC3, 0x90,
+                0x4C, 0x8B, 0xD1, 0xB8, 0x50, 0x00, 0x00, 0x00, 0x0F, 0x05, 0xC3, 0x90,
+            };
+            var hits = SyscallStubMonitor.FindSyscallStubs(buffer, buffer.Length);
+            Assert.True(SyscallStubMonitor.IsHellsGateEvidence(hits));
         }
 
-        [Theory]
-        [InlineData("malware")]
-        [InlineData("beacon")]
-        [InlineData("cmd")]
-        [InlineData("notepad")]
-        public void IsJitProcess_NonRuntime_NotJit(string name)
+        [Fact]
+        public void HellsGate_JitStyleLooseSyscall_IsNotHit()
         {
-            Assert.False(IsJitProcess(name));
+            var buffer = new byte[]
+            {
+                0x4C, 0x8B, 0xD1, 0xB8, 0x18, 0x00, 0x00, 0x00, 0x90, 0x90, 0x90, 0x0F, 0x05,
+                0x4C, 0x8B, 0xD1, 0xB8, 0x26, 0x00, 0x00, 0x00, 0x90, 0x90, 0x90, 0x0F, 0x05,
+                0x4C, 0x8B, 0xD1, 0xB8, 0x50, 0x00, 0x00, 0x00, 0x90, 0x90, 0x90, 0x0F, 0x05,
+            };
+            var hits = SyscallStubMonitor.FindSyscallStubs(buffer, buffer.Length);
+            Assert.Empty(hits);
+            Assert.False(SyscallStubMonitor.IsHellsGateEvidence(hits));
         }
 
         // ═══════════════════════════════════════════════════════════════
@@ -120,16 +123,6 @@ namespace Sentinel.Tests.Monitors
         // ═══════════════════════════════════════════════════════════════
         // Helper re-implementations (mirrors private static methods)
         // ═══════════════════════════════════════════════════════════════
-
-        private static bool IsJitProcess(string name)
-        {
-            var lower = name.ToLowerInvariant();
-            return lower == "java" || lower == "javaw" || lower == "javaws" ||
-                   lower == "dotnet" || lower == "node" || lower == "nodejs" ||
-                   lower == "python" || lower == "python3" || lower == "pythonw" ||
-                   lower == "ruby" || lower == "perl" ||
-                   lower == "mono" || lower == "coreclr";
-        }
 
         private static System.TimeSpan ComputeBackoff(int consecutiveFailures)
         {

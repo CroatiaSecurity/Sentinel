@@ -196,6 +196,10 @@ namespace Sentinel.Core
                     case "WatchPath":
                         config.WatchPath = kvp.Value;
                         break;
+                    case "RestrictivePortHardening":
+                        if (bool.TryParse(kvp.Value, out var rph))
+                            config.RestrictivePortHardening = rph;
+                        break;
 
                     // Incident reporting identity
                     case "VictimFullName":

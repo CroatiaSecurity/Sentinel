@@ -18,7 +18,7 @@ namespace Sentinel.Tests
         [Fact]
         public void ProductInfo_Version_Is210()
         {
-            Assert.Equal("2.1.0", ProductInfo.Version);
+            Assert.Equal("2.1.2", ProductInfo.Version);
         }
 
         [Fact]
@@ -129,6 +129,8 @@ namespace Sentinel.Tests
             var installDir = AppContext.BaseDirectory;
             Assert.False(SelfPathGuard.IsSentinelSelfBinary(
                 System.IO.Path.Combine(installDir, "evil.dll")));
+            Assert.False(SelfPathGuard.IsSentinelSelfBinary(
+                System.IO.Path.Combine(installDir, "Sentinel.Update.exe")));
             // Known name outside install still false
             Assert.False(SelfPathGuard.IsSentinelSelfBinary(@"C:\Temp\Sentinel.Service.exe"));
         }

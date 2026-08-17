@@ -78,7 +78,12 @@ namespace Sentinel.Tests
             Directory.CreateDirectory(tempDir);
             try
             {
-                var config = new SentinelConfig { ActiveResponse = true, ObserveUntilChain = false };
+                var config = new SentinelConfig
+                {
+                    ActiveResponse = true,
+                    ObserveUntilChain = false,
+                    MitmDefense = new MitmDefenseConfig { Enabled = true, RemovePlantedCerts = true }
+                };
                 var metrics = new SentinelMetrics();
                 var logPath = Path.Combine(tempDir, "events.jsonl");
                 var logger = new JsonlEventLogger(logPath);

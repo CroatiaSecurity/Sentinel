@@ -1,6 +1,42 @@
 # Changelog
 
 
+## [2.1.2] - 2026-08-17
+
+### Fixed
+
+- **SyscallStubMonitor no longer false-positives GBrowser / Chromium JIT as Hell's Gate** — The previous matcher counted any `mov r10,rcx; mov eax,imm16` with a `syscall` opcode floating within 20 bytes in private executable memory. V8 and QtWebEngine JIT pages produce that byte noise, so GBrowser (and any unnamed Chromium embed) alerted even though the binaries contain no syscall stubs. The detector now requires a well-formed Hell's Gate / SysWhispers table: compact `syscall; ret` or a copied ntdll SharedUserData prologue, **and** 3+ distinct SSNs. Process-name JIT skips were removed from this scan — name is not a trust grant. Real stub tables still fire at 0.92.
+
+- **USB HID auto-disable is kiosk-only** — Default work-first no longer registry-disables or ejects a new HID (Xbox controllers, wheels, tablets, 2.4 GHz receivers). `UsbDeviceFingerprinter` and `UsbHidWhitelist` log only unless `RestrictivePortHardening` is on.
+
+- **MitmDefense no longer unlocks every inline mutation** — `MayPerformInlineHostMutation` is chain / observe-off only. Enabling MitMDefense still allows cert/Cast/FCM via `IsMitmDefenseAction`, not USB / admin / volume / registry.
+
+- **Hardened Mode actually applies** — `EncryptedConfigStore.ApplyOverrides` maps `RestrictivePortHardening`; the service static is synced **after** DPAPI overrides so the Agent toggle is not clobbered by compiled defaults.
+
+- **BuiltinAdminGuard uses NetUser APIs** — no `net.exe`. Flags-only `USER_INFO_1008` so disable cannot reset the password.
+
+- **Unmapped thread starts require a compact private executable page (≤16 KB)** — V8 / QtWebEngine / OBS JIT threads in large regions are ignored. No process-name skip.
+
+- **SelfPathGuard prefix hole closed** — only the known product PE names under the install dir are self. `Sentinel.Update.exe` planted there is not immortal.
+
+- **ThreatIntelInjectionRule** ignores synthetic `ThreatIntel_EventId_*` labels (they never contain API names) and skips game/creator install trees.
+
+- **VolumeMount VHD/ISO dismount** uses `-EncodedCommand` and accepts only a single A–Z drive letter.
+
+- **Production does not copy `appsettings.json`** — csproj `CopyToOutputDirectory=Never`; Inno excludes the file. Dev copy has `MitmDefense.Enabled=false`.
+
+- **Browse/play heuristics cannot complete a chain nuke** — SSH/outbound-from-shell, classic malware ports, application DoH, C2 pairing spawn, missing-image hollowing, clickjacking, LPE name-match, and unmapped-thread alerts are weak observe seeds. They still log (and can feed composites). They do not become TokenTheft/C2 by `SignalType` stamp. LPE scaffold strings removed from kill-grade `TerminalOutcomes`.
+
+- **File scanners open with `FileShare.Delete`** so hashing does not block the user deleting a download.
+
+- **OS-critical path check** resolves the final NT path (junction-safe) before refusing quarantine.
+
+### Changed
+
+- README states Sentinel is built to **battle hackers** on gaming / creator / high-profile hosts, and that browsing plus Steam / Xbox / Store / DirectX / OBS installs are work, not incidents. Game/creator path list expanded (OBS, Streamlabs, Xbox/Game Bar, Gaming Services).
+
+- `ProductInfo.Version` and SECURITY.md supported-version table stamped **2.1.2**.
+
 ## [2.1.1] - 2026-08-13
 
 ### Fixed
