@@ -113,7 +113,24 @@ namespace Sentinel.Agent
                 // WebSocket upgrade
                 if (request.IsWebSocketRequest && path == "/ws/events")
                 {
-                    await HandleWebSocket(context, ct).ConfigureAwait(false);
+                    try
+                    {
+                        await HandleWebSocket(context, ct).ConfigureAwait(false);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug(ex, "[WebDashboard] WebSocket upgrade failed");
+                        response.StatusCode = 500;
+                        response.Close();
+                    }
+                    return;
+                }
+
+                // WebSocket not supported — return 426 so client falls back to polling
+                if (path == "/ws/events")
+                {
+                    response.StatusCode = 426;
+                    response.Close();
                     return;
                 }
 

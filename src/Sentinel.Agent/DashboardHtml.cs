@@ -441,9 +441,14 @@ function renderEvents(events, containerId) {{
 }}
 
 // WebSocket
+let wsRetries = 0;
 function connectWs() {{
     try {{
         ws = new WebSocket('ws://localhost:19845/ws/events');
+        ws.onopen = () => {{
+            wsRetries = 0;
+            document.getElementById('ev-list').innerHTML = '<div class=""empty-state"">Connected — waiting for events...</div>';
+        }};
         ws.onmessage = (msg) => {{
             eventBuffer.unshift(msg.data);
             if (eventBuffer.length > 200) eventBuffer.pop();
@@ -460,11 +465,37 @@ function connectWs() {{
                 if (parsed.type === 'detection') chartData[chartIdx % 60]++;
             }} catch {{}}
         }};
-        ws.onclose = () => setTimeout(connectWs, 3000);
+        ws.onclose = () => {{
+            wsRetries++;
+            if (wsRetries > 3) {{
+                // Fall back to polling
+                startEventPolling();
+            }} else {{
+                setTimeout(connectWs, 3000);
+            }}
+        }};
         ws.onerror = () => ws.close();
     }} catch {{
-        setTimeout(connectWs, 3000);
+        wsRetries++;
+        if (wsRetries > 3) startEventPolling();
+        else setTimeout(connectWs, 3000);
     }}
+}}
+
+let eventPollInterval = null;
+function startEventPolling() {{
+    document.getElementById('ev-list').innerHTML = '<div class=""empty-state"">Live polling (WebSocket unavailable)...</div>';
+    if (eventPollInterval) return;
+    eventPollInterval = setInterval(async () => {{
+        const data = await api('/api/events?count=30');
+        if (data && data.ok && data.events) {{
+            const evList = document.getElementById('ev-list');
+            if (document.getElementById('page-events').classList.contains('active')) {{
+                renderEvents(data.events, 'ev-list');
+                document.getElementById('ev-count').textContent = data.events.length + ' events (polling)';
+            }}
+        }}
+    }}, 3000);
 }}
 
 // Chart

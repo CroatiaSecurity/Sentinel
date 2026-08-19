@@ -974,8 +974,9 @@ namespace Sentinel.Core
         public DateTime EndTime { get; set; }
         public long DurationMs { get; set; }
         public ScanStats Stats { get; set; } = new();
-        public List<ScanFinding> Findings { get; private set; } = new();
+        public List<ScanFinding> Findings { get; set; } = new();
 
+        [System.Text.Json.Serialization.JsonIgnore]
         private readonly object _lock = new();
 
         public void AddFinding(ScanFinding finding)
