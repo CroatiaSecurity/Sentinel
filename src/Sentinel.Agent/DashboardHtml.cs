@@ -211,6 +211,13 @@ body {{
 }}
 .quarantine-item:last-child {{ border-bottom: none; }}
 .q-path {{ color: var(--text-secondary); font-family: monospace; font-size: 12px; }}
+.rp-input {{
+    width: 100%; padding: 6px 10px; border-radius: var(--radius); border: 1px solid var(--border);
+    background: var(--bg-tertiary); color: var(--text-primary); font-size: 13px;
+    margin-top: 4px; outline: none; transition: border-color 0.15s;
+}}
+.rp-input:focus {{ border-color: var(--accent); }}
+textarea.rp-input {{ font-family: inherit; }}
 ::-webkit-scrollbar {{ width: 8px; }}
 ::-webkit-scrollbar-track {{ background: var(--bg-primary); }}
 ::-webkit-scrollbar-thumb {{ background: var(--border); border-radius: 4px; }}
@@ -240,6 +247,14 @@ body {{
         <div class=""nav-item"" data-page=""quarantine"">
             <svg viewBox=""0 0 24 24"" fill=""none"" stroke=""currentColor"" stroke-width=""2""><path d=""M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z""/></svg>
             Quarantine
+        </div>
+        <div class=""nav-item"" data-page=""report"">
+            <svg viewBox=""0 0 24 24"" fill=""none"" stroke=""currentColor"" stroke-width=""2""><path d=""M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z""/><polyline points=""14 2 14 8 20 8""/><line x1=""16"" y1=""13"" x2=""8"" y2=""13""/><line x1=""16"" y1=""17"" x2=""8"" y2=""17""/></svg>
+            Report to Police
+        </div>
+        <div class=""nav-item"" data-page=""safety"">
+            <svg viewBox=""0 0 24 24"" fill=""none"" stroke=""currentColor"" stroke-width=""2""><path d=""M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z""/></svg>
+            Safety
         </div>
         <div class=""nav-item"" data-page=""ops"">
             <svg viewBox=""0 0 24 24"" fill=""none"" stroke=""currentColor"" stroke-width=""2""><path d=""M22 12h-4l-3 9L9 3l-3 9H2""/></svg>
@@ -323,6 +338,109 @@ body {{
             <div class=""panel"">
                 <div class=""panel-header""><h3>Pipeline Metrics</h3><button class=""btn"" onclick=""loadOps()"">Refresh</button></div>
                 <div class=""panel-body""><div class=""metric-grid"" id=""ops-grid""><div class=""empty-state"">Loading metrics...</div></div></div>
+            </div>
+        </div>
+
+        <!-- REPORT TO POLICE -->
+        <div class=""page"" id=""page-report"">
+            <div class=""cards"">
+                <div class=""card""><div class=""card-label"">Evidence Packs</div><div class=""card-value"" id=""rp-pack-count"">0</div><div class=""card-sub"">Sealed incident packs</div></div>
+                <div class=""card""><div class=""card-label"">Integrity</div><div class=""card-value success"" id=""rp-integrity"">—</div><div class=""card-sub"">SHA-256 manifest + HMAC</div></div>
+            </div>
+            <div class=""panel"">
+                <div class=""panel-header""><h3>Evidence Packs</h3><button class=""btn"" onclick=""loadReportPacks()"">Refresh</button></div>
+                <div class=""panel-body""><div id=""rp-packs""><div class=""empty-state"">Loading...</div></div></div>
+            </div>
+            <div class=""panel"">
+                <div class=""panel-header""><h3>File with Law Enforcement</h3></div>
+                <div class=""panel-body"">
+                    <p style=""color:var(--text-secondary);font-size:13px;margin-bottom:16px"">
+                        Sentinel prepares sealed evidence for you. It does NOT submit complaints to INTERPOL, IC3, or any police API.
+                        Fill in your details, save the affidavit, then use your national cybercrime portal to file.
+                    </p>
+                    <div class=""metric-grid"" style=""margin-bottom:16px"">
+                        <div class=""metric""><div class=""metric-label"">Full Name *</div><input type=""text"" id=""rp-name"" class=""rp-input"" placeholder=""Your legal name""></div>
+                        <div class=""metric""><div class=""metric-label"">Email</div><input type=""text"" id=""rp-email"" class=""rp-input"" placeholder=""email@example.com""></div>
+                        <div class=""metric""><div class=""metric-label"">Phone</div><input type=""text"" id=""rp-phone"" class=""rp-input"" placeholder=""+385...""></div>
+                        <div class=""metric""><div class=""metric-label"">Address</div><input type=""text"" id=""rp-address"" class=""rp-input"" placeholder=""Street, City, Country""></div>
+                        <div class=""metric""><div class=""metric-label"">National ID</div><input type=""text"" id=""rp-nationalid"" class=""rp-input"" placeholder=""OIB / SSN / etc.""></div>
+                        <div class=""metric""><div class=""metric-label"">I am the...</div><select id=""rp-relationship"" class=""rp-input""><option>owner</option><option>authorized user</option><option>administrator</option><option>other</option></select></div>
+                    </div>
+                    <div style=""margin-bottom:16px"">
+                        <div class=""metric-label"" style=""margin-bottom:4px"">Narrative (what happened)</div>
+                        <textarea id=""rp-narrative"" class=""rp-input"" rows=""4"" placeholder=""Describe the incident..."" style=""width:100%;resize:vertical""></textarea>
+                    </div>
+                    <div class=""metric-grid"" style=""margin-bottom:16px"">
+                        <div class=""metric""><div class=""metric-label"">Financial Loss</div><input type=""text"" id=""rp-loss"" class=""rp-input"" placeholder=""e.g. 500 EUR""></div>
+                        <div class=""metric""><div class=""metric-label"">Data Affected</div><input type=""text"" id=""rp-data"" class=""rp-input"" placeholder=""e.g. passwords, photos""></div>
+                        <div class=""metric""><div class=""metric-label"">Other Harm</div><input type=""text"" id=""rp-harm"" class=""rp-input"" placeholder=""e.g. emotional distress""></div>
+                    </div>
+                    <div style=""margin-bottom:16px;font-size:13px;color:var(--text-secondary)"">
+                        <label style=""display:block;margin-bottom:6px;cursor:pointer""><input type=""checkbox"" id=""rp-consent1""> I want to file a formal complaint with law enforcement / the national portal.</label>
+                        <label style=""display:block;margin-bottom:6px;cursor:pointer""><input type=""checkbox"" id=""rp-consent2""> I authorize investigators to examine this evidence pack and quarantined samples.</label>
+                        <label style=""display:block;margin-bottom:6px;cursor:pointer""><input type=""checkbox"" id=""rp-consent3""> I understand false statements to authorities may be a criminal offense.</label>
+                    </div>
+                    <div style=""display:flex;gap:8px;flex-wrap:wrap"">
+                        <button class=""btn btn-primary"" onclick=""saveAffidavit()"">Save Affidavit</button>
+                        <button class=""btn"" style=""background:var(--success);border-color:var(--success);color:#fff"" onclick=""sendReport()"">Send Report to Police</button>
+                        <button class=""btn"" onclick=""openPackFolder()"">Open Pack Folder</button>
+                        <button class=""btn"" onclick=""verifyIntegrity()"">Verify Integrity</button>
+                    </div>
+                    <div id=""rp-status"" style=""margin-top:8px;font-size:12px;color:var(--text-muted)""></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SAFETY -->
+        <div class=""page"" id=""page-safety"">
+            <div class=""panel"">
+                <div class=""panel-header""><h3>Digital Coercion Defense</h3></div>
+                <div class=""panel-body"">
+                    <p style=""color:var(--text-secondary);font-size:13px;margin-bottom:16px"">
+                        Sentinel does not identify people as offenders and does not read your chats.
+                        It watches THIS Windows PC for tools predators and stalkers often use:
+                    </p>
+                    <div class=""metric-grid"" style=""margin-bottom:16px"">
+                        <div class=""metric""><div class=""metric-label"">Remote Control</div><div class=""metric-value"" style=""font-size:13px"">RATs, abused AnyDesk/TeamViewer, reverse shells</div></div>
+                        <div class=""metric""><div class=""metric-label"">Covert Surveillance</div><div class=""metric-value"" style=""font-size:13px"">Screen/camera/input capture + persistence</div></div>
+                        <div class=""metric""><div class=""metric-label"">Session Theft</div><div class=""metric-value"" style=""font-size:13px"">Browser, messaging, email, social, games, banking</div></div>
+                        <div class=""metric""><div class=""metric-label"">Extortion Malware</div><div class=""metric-value"" style=""font-size:13px"">Exfiltration + C2 chains</div></div>
+                    </div>
+                    <p style=""color:var(--text-secondary);font-size:13px;margin-bottom:16px"">
+                        Scope is platform-agnostic: Discord, email, social apps, browsers, games, voice/video — anything that leaves host traces. Not chat moderation.
+                    </p>
+                    <p style=""color:var(--text-secondary);font-size:13px;margin-bottom:16px"">
+                        When a multi-signal chain confirms, Sentinel kills/quarantines and writes a sealed evidence pack.
+                    </p>
+                    <div class=""panel"" style=""background:var(--bg-tertiary);margin-bottom:16px"">
+                        <div class=""panel-header""><h3 style=""color:var(--warning)"">What You Should Still Do</h3></div>
+                        <div class=""panel-body"" style=""font-size:13px;color:var(--text-secondary)"">
+                            <ol style=""padding-left:20px;margin:0"">
+                                <li style=""margin-bottom:6px"">Revoke sessions on important accounts (email, messaging, social, bank).</li>
+                                <li style=""margin-bottom:6px"">Turn on 2FA everywhere you can.</li>
+                                <li style=""margin-bottom:6px"">Block and report abusers on the platform — Sentinel cannot ban them.</li>
+                                <li style=""margin-bottom:6px"">Use Report to Police with a sealed pack for device crimes.</li>
+                                <li style=""margin-bottom:6px"">If you are in danger offline, contact emergency services / local support.</li>
+                            </ol>
+                        </div>
+                    </div>
+                    <div class=""panel"" style=""background:rgba(255,180,60,0.05);border-color:var(--warning)"">
+                        <div class=""panel-header""><h3 style=""color:var(--warning)"">Hardened Mode</h3></div>
+                        <div class=""panel-body"">
+                            <p style=""font-size:13px;color:var(--text-secondary);margin-bottom:12px"">
+                                Enables aggressive network lockdown: IPSec blocks all non-essential ports, ASR Block rules enforced, RPC/DCOM firewalled.
+                                <strong>USE THIS</strong> when under active attack or on an untrusted network.
+                                Will block RDP, SMB, SSH, DISM. Browsers/apps/games unaffected.
+                            </p>
+                            <p style=""font-size:12px;color:var(--text-muted);margin-bottom:12px"">
+                                Toggle via elevated command: <code>Sentinel.Service.exe --set-config RestrictivePortHardening=true</code> then restart the service.
+                            </p>
+                        </div>
+                    </div>
+                    <p style=""color:var(--text-muted);font-size:12px;margin-top:16px"">
+                        Honest limit: Sentinel cannot stop offline assault or prove someone's identity from a Discord ban reason. It stops and documents machine-side abuse tools.
+                    </p>
+                </div>
             </div>
         </div>
 
@@ -613,6 +731,108 @@ async function checkScanStatus() {{
         // idle
         document.getElementById('btn-scan').disabled = false;
         document.getElementById('btn-scan').textContent = 'Run Full Scan';
+    }}
+}}
+
+// Report to Police
+async function loadReportPacks() {{
+    const data = await api('/api/packs');
+    const container = document.getElementById('rp-packs');
+    if (data && data.ok && data.packs && data.packs.length > 0) {{
+        document.getElementById('rp-pack-count').textContent = data.packs.length;
+        container.innerHTML = data.packs.map(p => `
+            <div class=""finding"">
+                <div class=""finding-severity critical""></div>
+                <div class=""finding-body"">
+                    <div class=""finding-title"">${{p.name}}</div>
+                    <div class=""finding-desc"">${{p.fileCount}} files | Created: ${{new Date(p.created).toLocaleString()}} | Manifest: ${{p.hasManifest ? 'Sealed' : 'Missing'}}</div>
+                </div>
+            </div>`).join('');
+        document.getElementById('rp-integrity').textContent = data.packs.every(p => p.hasManifest) ? 'Sealed' : 'Partial';
+        document.getElementById('rp-integrity').className = data.packs.every(p => p.hasManifest) ? 'card-value success' : 'card-value warning';
+    }} else {{
+        container.innerHTML = '<div class=""empty-state"">No evidence packs yet. Packs are created when Sentinel confirms and responds to a multi-signal attack chain.</div>';
+        document.getElementById('rp-pack-count').textContent = '0';
+    }}
+    loadReportPrefs();
+}}
+
+async function loadReportPrefs() {{
+    const data = await api('/api/report/prefs');
+    if (data && data.ok && data.prefs) {{
+        const p = data.prefs;
+        if (p.FullName || p.fullName) document.getElementById('rp-name').value = p.FullName || p.fullName || '';
+        if (p.Email || p.email) document.getElementById('rp-email').value = p.Email || p.email || '';
+        if (p.Phone || p.phone) document.getElementById('rp-phone').value = p.Phone || p.phone || '';
+        if (p.Address || p.address) document.getElementById('rp-address').value = p.Address || p.address || '';
+        if (p.NationalId || p.nationalId) document.getElementById('rp-nationalid').value = p.NationalId || p.nationalId || '';
+        if (p.AdditionalNarrative || p.additionalNarrative) document.getElementById('rp-narrative').value = p.AdditionalNarrative || p.additionalNarrative || '';
+        if (p.FinancialLoss || p.financialLoss) document.getElementById('rp-loss').value = p.FinancialLoss || p.financialLoss || '';
+        if (p.DataAffected || p.dataAffected) document.getElementById('rp-data').value = p.DataAffected || p.dataAffected || '';
+        if (p.OtherHarm || p.otherHarm) document.getElementById('rp-harm').value = p.OtherHarm || p.otherHarm || '';
+    }}
+}}
+
+async function saveAffidavit() {{
+    const prefs = {{
+        FullName: document.getElementById('rp-name').value,
+        Email: document.getElementById('rp-email').value,
+        Phone: document.getElementById('rp-phone').value,
+        Address: document.getElementById('rp-address').value,
+        NationalId: document.getElementById('rp-nationalid').value,
+        Relationship: document.getElementById('rp-relationship').value,
+        AdditionalNarrative: document.getElementById('rp-narrative').value,
+        FinancialLoss: document.getElementById('rp-loss').value,
+        DataAffected: document.getElementById('rp-data').value,
+        OtherHarm: document.getElementById('rp-harm').value,
+    }};
+    const res = await api('/api/report/save', {{
+        method: 'POST',
+        headers: {{ 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF }},
+        body: JSON.stringify(prefs)
+    }});
+    const status = document.getElementById('rp-status');
+    if (res && res.ok) {{
+        status.textContent = 'Affidavit saved at ' + new Date().toLocaleTimeString();
+        status.style.color = 'var(--success)';
+    }} else {{
+        status.textContent = 'Failed to save: ' + (res?.error || 'unknown');
+        status.style.color = 'var(--danger)';
+    }}
+}}
+
+function sendReport() {{
+    // Open national cybercrime portal based on detected locale
+    const portals = {{
+        'HR': 'https://epolicija.gov.hr/',
+        'US': 'https://www.ic3.gov/',
+        'UK': 'https://www.actionfraud.police.uk/',
+        'DE': 'https://www.polizei.de/onlinewache',
+        'AU': 'https://www.cyber.gov.au/report',
+    }};
+    const url = portals['HR'] || 'https://www.interpol.int/en/Contacts/Contact-INTERPOL';
+    window.open(url, '_blank');
+    openPackFolder();
+}}
+
+function openPackFolder() {{
+    // Can't open local folders from browser — show path instead
+    const status = document.getElementById('rp-status');
+    status.textContent = 'Evidence packs: %ProgramData%\\Sentinel\\IncidentReports\\';
+    status.style.color = 'var(--accent)';
+}}
+
+async function verifyIntegrity() {{
+    const status = document.getElementById('rp-status');
+    status.textContent = 'Verifying...';
+    status.style.color = 'var(--text-muted)';
+    const res = await api('/api/report/verify');
+    if (res && res.ok) {{
+        status.textContent = res.message || 'All packs verified';
+        status.style.color = 'var(--success)';
+    }} else {{
+        status.textContent = res?.error || 'Verification failed';
+        status.style.color = 'var(--danger)';
     }}
 }}
 

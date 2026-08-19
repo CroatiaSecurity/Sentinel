@@ -207,6 +207,16 @@ namespace Sentinel.Agent
                 case "/api/csrf":
                     await WriteJson(response, new { token = _csrfToken }).ConfigureAwait(false);
                     break;
+                case "/api/report/prefs":
+                    await HandleReportPrefs(response).ConfigureAwait(false);
+                    break;
+                case "/api/report/save":
+                    if (method != "POST") { response.StatusCode = 405; response.Close(); return; }
+                    await HandleReportSave(request, response).ConfigureAwait(false);
+                    break;
+                case "/api/report/verify":
+                    await HandleReportVerify(response).ConfigureAwait(false);
+                    break;
                 default:
                     response.StatusCode = 404;
                     await WriteJson(response, new { error = "unknown_endpoint" }).ConfigureAwait(false);
@@ -401,6 +411,75 @@ namespace Sentinel.Agent
             else
             {
                 await WriteJson(response, new { ok = false, error = "service_unreachable" }).ConfigureAwait(false);
+            }
+        }
+
+        private async Task HandleReportPrefs(HttpListenerResponse response)
+        {
+            try
+            {
+                var prefs = UserReportPrefs.Load();
+                await WriteJson(response, new { ok = true, prefs }).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                await WriteJson(response, new { ok = false, error = ex.Message }).ConfigureAwait(false);
+            }
+        }
+
+        private async Task HandleReportSave(HttpListenerRequest request, HttpListenerResponse response)
+        {
+            try
+            {
+                using var reader = new StreamReader(request.InputStream, request.ContentEncoding);
+                var body = await reader.ReadToEndAsync().ConfigureAwait(false);
+                var prefs = JsonSerializer.Deserialize<UserReportPrefs>(body, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                if (prefs != null)
+                {
+                    prefs.Save();
+                    await WriteJson(response, new { ok = true }).ConfigureAwait(false);
+                }
+                else
+                {
+                    await WriteJson(response, new { ok = false, error = "invalid_body" }).ConfigureAwait(false);
+                }
+            }
+            catch (Exception ex)
+            {
+                await WriteJson(response, new { ok = false, error = ex.Message }).ConfigureAwait(false);
+            }
+        }
+
+        private async Task HandleReportVerify(HttpListenerResponse response)
+        {
+            try
+            {
+                var packsDir = Path.Combine(ProgramDataRoot, "IncidentReports");
+                if (!Directory.Exists(packsDir))
+                {
+                    await WriteJson(response, new { ok = true, message = "No evidence packs to verify" }).ConfigureAwait(false);
+                    return;
+                }
+
+                int verified = 0, failed = 0;
+                foreach (var dir in Directory.GetDirectories(packsDir, "AUTO_*"))
+                {
+                    var manifest = Path.Combine(dir, "manifest.sha256");
+                    if (File.Exists(manifest))
+                        verified++;
+                    else
+                        failed++;
+                }
+
+                var msg = failed == 0
+                    ? $"All {verified} pack(s) have integrity manifests"
+                    : $"{verified} verified, {failed} missing manifest";
+
+                await WriteJson(response, new { ok = true, message = msg, verified, failed }).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                await WriteJson(response, new { ok = false, error = ex.Message }).ConfigureAwait(false);
             }
         }
 
