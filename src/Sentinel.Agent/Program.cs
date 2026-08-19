@@ -346,6 +346,9 @@ namespace Sentinel.Agent
                     // Tray Icon
                     services.AddHostedService<TrayIconService>();
 
+                    // Web Dashboard (replaces WinForms Settings)
+                    services.AddHostedService<WebDashboardService>();
+
                     // User-session monitors (require user desktop/registry hive)
                     services.AddHostedService<ScreenCaptureMonitor>();
                     services.AddHostedService<WebcamMicMonitor>();

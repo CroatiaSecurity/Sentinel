@@ -1,6 +1,23 @@
 # Changelog
 
 
+## [2.1.3] - 2026-08-19
+
+### Added
+
+- **Web Dashboard** — Sentinel Settings now opens a modern web-based dashboard at `http://localhost:19845/` instead of the WinForms `AgentDashboardForm`. Dark theme, real-time event stream via WebSocket, pipeline metrics, quarantine management, and system scan — all in the browser.
+
+- **One-Time System Scan** — New `ScanEngine` performs a comprehensive point-in-time security audit: running process reputation + staging-path check, persistence mechanisms (Run keys, scheduled tasks, startup folder, services, IFEO, Winlogon), certificate store audit (non-standard root/trusted publisher CAs), malicious LNK shortcut patterns, unsigned executables in staging paths, and network state (listeners from staging paths). Triggered from the dashboard or via IPC (`scan` / `scan_status` operations).
+
+- **IPC `scan` + `scan_status` operations** — The authenticated Service↔Agent named pipe now supports triggering and polling one-time scans from the Agent/dashboard.
+
+### Changed
+
+- **TrayIconService** — Double-click and "Settings" context menu now launch the default browser to the embedded dashboard instead of creating a WinForms window. Removes `AgentDashboardForm` dependency from the tray icon lifecycle.
+
+- **WebDashboardService** — New `BackgroundService` in the Agent hosting an `HttpListener` on localhost:19845. Serves the embedded SPA, REST API endpoints (`/api/status`, `/api/events`, `/api/ops`, `/api/health`, `/api/quarantine`, `/api/packs`, `/api/scan`, `/api/scan/status`), and a WebSocket endpoint (`/ws/events`) for live event streaming.
+
+
 ## [2.1.2] - 2026-08-17
 
 ### Fixed

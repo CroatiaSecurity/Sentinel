@@ -278,6 +278,7 @@ namespace Sentinel.Core
         private readonly MonitorRegistry? _registry;
         private readonly WeightedCorrelationConfig _weighted;
         private readonly Plugins.PluginRegistry _plugins;
+        private readonly ScanEngine _scanEngine;
         private readonly ILogger<ServiceAgentIpcHost> _logger;
         private byte[] _token = Array.Empty<byte>();
 
@@ -287,16 +288,21 @@ namespace Sentinel.Core
         private readonly System.Collections.Concurrent.ConcurrentDictionary<string, long> _usedNonces = new();
         private long _lastNoncePruneTs;
 
+        // Cache last scan result so the dashboard can poll for it
+        private ScanResult? _lastScanResult;
+
         public ServiceAgentIpcHost(
             SentinelMetrics metrics,
             WeightedCorrelationConfig weighted,
             Plugins.PluginRegistry plugins,
+            ScanEngine scanEngine,
             ILogger<ServiceAgentIpcHost> logger,
             MonitorRegistry? registry = null)
         {
             _metrics = metrics;
             _weighted = weighted;
             _plugins = plugins;
+            _scanEngine = scanEngine;
             _logger = logger;
             _registry = registry;
         }
@@ -442,6 +448,41 @@ namespace Sentinel.Core
                             monitorsFailed = stats?.Failed ?? 0,
                             plugins = _plugins.TotalCount
                         });
+                        break;
+                    case "scan":
+                        // Trigger a one-time system scan (non-blocking — returns immediately)
+                        if (_scanEngine.IsRunning)
+                        {
+                            response = JsonSerializer.Serialize(new { ok = true, status = "already_running" });
+                        }
+                        else
+                        {
+                            _ = Task.Run(async () =>
+                            {
+                                _lastScanResult = await _scanEngine.RunFullScanAsync().ConfigureAwait(false);
+                            });
+                            response = JsonSerializer.Serialize(new { ok = true, status = "started" });
+                        }
+                        break;
+                    case "scan_status":
+                        // Return scan progress/results
+                        if (_scanEngine.IsRunning)
+                        {
+                            response = JsonSerializer.Serialize(new { ok = true, status = "running" });
+                        }
+                        else if (_lastScanResult != null)
+                        {
+                            response = JsonSerializer.Serialize(new
+                            {
+                                ok = true,
+                                status = "completed",
+                                result = _lastScanResult
+                            });
+                        }
+                        else
+                        {
+                            response = JsonSerializer.Serialize(new { ok = true, status = "idle" });
+                        }
                         break;
                     default:
                         response = "{\"ok\":false,\"error\":\"unknown_op\"}";

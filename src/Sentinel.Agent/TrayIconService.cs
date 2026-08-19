@@ -35,7 +35,6 @@ namespace Sentinel.Agent
         private readonly CancellationTokenSource _cts = new();
         private readonly string _version;
         private (string RuleName, string ProcessName, double Confidence, string Evidence)? _pendingDetection;
-        private AgentDashboardForm? _dashboard;
 
         public TrayIconService(
             AutoIncidentReportingConfig reportConfig,
@@ -182,52 +181,30 @@ namespace Sentinel.Agent
         {
             try
             {
-                if (_dashboard == null || _dashboard.IsDisposed)
+                // Open the web dashboard in the default browser
+                Process.Start(new ProcessStartInfo
                 {
-                    _dashboard = new AgentDashboardForm(_version, _reportConfig, _quarantine);
-                    var created = _dashboard;
-                    created.FormClosed += (_, _) =>
-                    {
-                        if (ReferenceEquals(_dashboard, created))
-                            _dashboard = null;
-                    };
-                }
-
-                // Always force a real show. Checking Visible alone misses ghost HWNDs
-                // that still exist after shell death/recovery but have WS_VISIBLE off.
-                if (_dashboard.WindowState == FormWindowState.Minimized)
-                    _dashboard.WindowState = FormWindowState.Normal;
-
-                _dashboard.Show();
-                _dashboard.Visible = true;
-                _dashboard.ShowInTaskbar = true;
-
-                // Native restore — recovers invisible-but-alive Settings windows.
-                var hwnd = _dashboard.Handle;
-                if (hwnd != IntPtr.Zero)
-                {
-                    ShowWindow(hwnd, SwRestore);
-                    ShowWindow(hwnd, SwShow);
-                    BringWindowToTop(hwnd);
-                    SetForegroundWindow(hwnd);
-                }
-
-                // Brief TopMost steals activation past full-screen / sticky focus apps.
-                _dashboard.TopMost = true;
-                _dashboard.BringToFront();
-                _dashboard.Activate();
-                _dashboard.Focus();
-                _dashboard.TopMost = false;
-
-                if (initialPage.HasValue)
-                    _dashboard.SelectPage(initialPage.Value);
+                    FileName = WebDashboardService.DashboardUrl,
+                    UseShellExecute = true
+                });
             }
             catch (Exception ex)
             {
-                try { _dashboard?.Dispose(); } catch { /* best-effort */ }
-                _dashboard = null;
-                MessageBox.Show($"Failed to open Settings: {ex.Message}", "Sentinel",
-                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+                // Fallback: try opening with explorer
+                try
+                {
+                    Process.Start(new ProcessStartInfo
+                    {
+                        FileName = "explorer.exe",
+                        Arguments = WebDashboardService.DashboardUrl,
+                        UseShellExecute = true
+                    });
+                }
+                catch
+                {
+                    MessageBox.Show($"Failed to open dashboard: {ex.Message}", "Sentinel",
+                        MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
             }
         }
 

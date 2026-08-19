@@ -267,6 +267,8 @@ namespace Sentinel.Service
                     services.AddSingleton<ParentPidSpoofDetector>();
                     // 1.8.4 ToastService: CriticalOnly (default true) — no SuppressAllToasts / SilentObserve gate
                     services.AddSingleton<ToastService>();
+                    // v2.2: One-time system scan engine (triggered via IPC from dashboard)
+                    services.AddSingleton<ScanEngine>();
 
                     // Engines
                     services.AddSingleton<TelemetryFusionEngine>();
