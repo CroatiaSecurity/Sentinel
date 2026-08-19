@@ -388,7 +388,7 @@ namespace Sentinel.Core
                 var ts = root.TryGetProperty("ts", out var tsEl) ? tsEl.GetInt64() : 0;
                 var nonce = root.TryGetProperty("nonce", out var nEl) ? nEl.GetString() ?? "" : "";
                 var sig = root.TryGetProperty("sig", out var sEl) ? sEl.GetString() : null;
-                var body = root.TryGetProperty("body", out var bEl) ? bEl.GetRawText() : "";
+                var body = root.TryGetProperty("body", out var bEl) ? (bEl.ValueKind == JsonValueKind.String ? bEl.GetString() ?? "" : bEl.GetRawText()) : "";
 
                 if (!ServiceAgentIpc.IsTimestampFresh(ts) || string.IsNullOrEmpty(nonce) || nonce.Length < 8)
                 {
