@@ -224,6 +224,9 @@ namespace Sentinel.Agent
                     if (method != "POST") { response.StatusCode = 405; response.Close(); return; }
                     await HandleHardenedToggle(response).ConfigureAwait(false);
                     break;
+                case "/api/diagnostics":
+                    await HandleDiagnostics(response).ConfigureAwait(false);
+                    break;
                 default:
                     response.StatusCode = 404;
                     await WriteJson(response, new { error = "unknown_endpoint" }).ConfigureAwait(false);
@@ -522,6 +525,55 @@ namespace Sentinel.Agent
                         error = "Failed to save config. Run as Administrator or use: Sentinel.Service.exe --set-config RestrictivePortHardening=" + next
                     }).ConfigureAwait(false);
                 }
+            }
+            catch (Exception ex)
+            {
+                await WriteJson(response, new { ok = false, error = ex.Message }).ConfigureAwait(false);
+            }
+        }
+
+        private async Task HandleDiagnostics(HttpListenerResponse response)
+        {
+            try
+            {
+                var sb = new System.Text.StringBuilder();
+                var version = typeof(WebDashboardService).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
+                sb.AppendLine($"Sentinel diagnostics — {DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss zzz}");
+                sb.AppendLine($"Agent version: {version}");
+
+                bool agentRunning = false, serviceRunning = false;
+                try
+                {
+                    agentRunning = System.Diagnostics.Process.GetProcessesByName("Sentinel.Agent").Length > 0;
+                    serviceRunning = System.Diagnostics.Process.GetProcessesByName("Sentinel.Service").Length > 0;
+                }
+                catch { }
+
+                sb.AppendLine($"Agent process: {(agentRunning ? "running" : "not found")}");
+                sb.AppendLine($"Service process: {(serviceRunning ? "running" : "not found")}");
+                sb.AppendLine($"Machine: {Environment.MachineName}");
+                sb.AppendLine($"User: {Environment.UserDomainName}\\{Environment.UserName}");
+                sb.AppendLine($"OS: {Environment.OSVersion}");
+                sb.AppendLine($"Hardened Mode: {(HardeningModule.RestrictivePortHardeningEnabled ? "ENABLED" : "disabled (work-first)")}");
+                sb.AppendLine();
+                sb.AppendLine("Paths:");
+                sb.AppendLine($"  Install:     {AppContext.BaseDirectory}");
+                sb.AppendLine($"  ProgramData: {ProgramDataRoot}");
+
+                var eventsPath = Path.Combine(ProgramDataRoot, "events.jsonl");
+                var eventsSize = File.Exists(eventsPath) ? new FileInfo(eventsPath).Length : 0;
+                sb.AppendLine($"  Events:      {eventsPath}  ({eventsSize / 1024} KB)");
+                sb.AppendLine($"  Quarantine:  {Path.Combine(ProgramDataRoot, "Quarantine")}");
+
+                var packsDir = Path.Combine(ProgramDataRoot, "IncidentReports");
+                var packCount = Directory.Exists(packsDir) ? Directory.GetDirectories(packsDir, "AUTO_*").Length : 0;
+                sb.AppendLine($"  Evidence:    {packsDir}  ({packCount} packs)");
+                sb.AppendLine();
+                sb.AppendLine("IPC status:");
+                var pingResult = ServiceAgentIpcClient.Request("ping", "", 2000);
+                sb.AppendLine($"  Ping: {(string.IsNullOrEmpty(pingResult) ? "FAILED (service unreachable)" : "OK")}");
+
+                await WriteJson(response, new { ok = true, text = sb.ToString() }).ConfigureAwait(false);
             }
             catch (Exception ex)
             {

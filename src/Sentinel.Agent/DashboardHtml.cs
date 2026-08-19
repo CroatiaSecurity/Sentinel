@@ -260,6 +260,10 @@ textarea.rp-input {{ font-family: inherit; }}
             <svg viewBox=""0 0 24 24"" fill=""none"" stroke=""currentColor"" stroke-width=""2""><path d=""M22 12h-4l-3 9L9 3l-3 9H2""/></svg>
             Ops Metrics
         </div>
+        <div class=""nav-item"" data-page=""tools"">
+            <svg viewBox=""0 0 24 24"" fill=""none"" stroke=""currentColor"" stroke-width=""2""><path d=""M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z""/></svg>
+            Tools
+        </div>
         <div class=""nav-item"" data-page=""about"">
             <svg viewBox=""0 0 24 24"" fill=""none"" stroke=""currentColor"" stroke-width=""2""><circle cx=""12"" cy=""12"" r=""10""/><path d=""M12 16v-4""/><path d=""M12 8h.01""/></svg>
             About
@@ -447,6 +451,30 @@ textarea.rp-input {{ font-family: inherit; }}
             </div>
         </div>
 
+        <!-- TOOLS -->
+        <div class=""page"" id=""page-tools"">
+            <div class=""panel"">
+                <div class=""panel-header""><h3>Quick Access</h3></div>
+                <div class=""panel-body"">
+                    <p style=""color:var(--text-secondary);font-size:13px;margin-bottom:16px"">
+                        These paths are on your local machine. Copy them to open in Explorer.
+                    </p>
+                    <div class=""metric-grid"">
+                        <div class=""metric""><div class=""metric-label"">Data Folder</div><div class=""metric-value"" style=""font-size:12px;font-family:monospace"">%ProgramData%\Sentinel</div></div>
+                        <div class=""metric""><div class=""metric-label"">Event Log</div><div class=""metric-value"" style=""font-size:12px;font-family:monospace"">%ProgramData%\Sentinel\events.jsonl</div></div>
+                        <div class=""metric""><div class=""metric-label"">Quarantine</div><div class=""metric-value"" style=""font-size:12px;font-family:monospace"">%ProgramData%\Sentinel\Quarantine</div></div>
+                        <div class=""metric""><div class=""metric-label"">Evidence Packs</div><div class=""metric-value"" style=""font-size:12px;font-family:monospace"">%ProgramData%\Sentinel\IncidentReports</div></div>
+                        <div class=""metric""><div class=""metric-label"">Install Folder</div><div class=""metric-value"" style=""font-size:12px;font-family:monospace"">C:\Program Files (x86)\Sentinel</div></div>
+                        <div class=""metric""><div class=""metric-label"">Startup Trace</div><div class=""metric-value"" style=""font-size:12px;font-family:monospace"">%ProgramData%\Sentinel\startup_trace.log</div></div>
+                    </div>
+                </div>
+            </div>
+            <div class=""panel"">
+                <div class=""panel-header""><h3>Diagnostics</h3><button class=""btn"" onclick=""refreshDiagnostics()"">Refresh</button></div>
+                <div class=""panel-body""><pre id=""tools-diag"" style=""font-size:12px;color:var(--text-secondary);white-space:pre-wrap;margin:0"">Loading...</pre></div>
+            </div>
+        </div>
+
         <!-- ABOUT -->
         <div class=""page"" id=""page-about"">
             <div class=""panel"">
@@ -488,6 +516,7 @@ document.querySelectorAll('.nav-item').forEach(item => {{
         if (page === 'scan') checkScanStatus();
         if (page === 'report') loadReportPacks();
         if (page === 'safety') checkHardenedMode();
+        if (page === 'tools') refreshDiagnostics();
     }});
 }});
 
@@ -838,6 +867,17 @@ async function verifyIntegrity() {{
     }} else {{
         status.textContent = res?.error || 'Verification failed';
         status.style.color = 'var(--danger)';
+    }}
+}}
+
+// Tools
+async function refreshDiagnostics() {{
+    const data = await api('/api/diagnostics');
+    const pre = document.getElementById('tools-diag');
+    if (data && data.ok) {{
+        pre.textContent = data.text;
+    }} else {{
+        pre.textContent = 'Failed to load diagnostics: ' + (data?.error || 'service unreachable');
     }}
 }}
 
