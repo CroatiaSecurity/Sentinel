@@ -432,8 +432,11 @@ textarea.rp-input {{ font-family: inherit; }}
                                 <strong>USE THIS</strong> when under active attack or on an untrusted network.
                                 Will block RDP, SMB, SSH, DISM. Browsers/apps/games unaffected.
                             </p>
-                            <p style=""font-size:12px;color:var(--text-muted);margin-bottom:12px"">
-                                Toggle via elevated command: <code>Sentinel.Service.exe --set-config RestrictivePortHardening=true</code> then restart the service.
+                            <button class=""btn btn-danger"" id=""btn-harden"" onclick=""toggleHardenedMode()"">Enable Hardened Mode</button>
+                            <span id=""harden-status"" style=""margin-left:12px;font-size:12px;color:var(--text-muted)""></span>
+                            <p style=""font-size:11px;color:var(--text-muted);margin-top:8px"">
+                                Requires service restart to take effect. If toggle fails, use elevated CLI:
+                                <code>Sentinel.Service.exe --set-config RestrictivePortHardening=true</code>
                             </p>
                         </div>
                     </div>
@@ -483,6 +486,8 @@ document.querySelectorAll('.nav-item').forEach(item => {{
         if (page === 'ops') loadOps();
         if (page === 'quarantine') loadQuarantine();
         if (page === 'scan') checkScanStatus();
+        if (page === 'report') loadReportPacks();
+        if (page === 'safety') checkHardenedMode();
     }});
 }});
 
@@ -832,6 +837,55 @@ async function verifyIntegrity() {{
         status.style.color = 'var(--success)';
     }} else {{
         status.textContent = res?.error || 'Verification failed';
+        status.style.color = 'var(--danger)';
+    }}
+}}
+
+// Hardened Mode
+async function checkHardenedMode() {{
+    const res = await api('/api/hardened');
+    if (res && res.ok) {{
+        const btn = document.getElementById('btn-harden');
+        const status = document.getElementById('harden-status');
+        if (res.enabled) {{
+            btn.textContent = 'Disable Hardened Mode';
+            btn.className = 'btn';
+            btn.style.background = 'var(--success)';
+            btn.style.borderColor = 'var(--success)';
+            btn.style.color = '#fff';
+            status.textContent = 'ACTIVE — restrictive port hardening enabled';
+            status.style.color = 'var(--warning)';
+        }} else {{
+            btn.textContent = 'Enable Hardened Mode';
+            btn.className = 'btn btn-danger';
+            btn.style = '';
+            status.textContent = 'Normal (work-first) mode';
+            status.style.color = 'var(--success)';
+        }}
+    }}
+}}
+
+async function toggleHardenedMode() {{
+    const btn = document.getElementById('btn-harden');
+    const status = document.getElementById('harden-status');
+    const enabling = btn.textContent.includes('Enable');
+    const confirmed = confirm(enabling
+        ? 'ENABLE Hardened Mode?\n\nThis will block RDP, SMB, SSH, DISM, and some admin tools.\nBrowsers, apps, and games are unaffected.\n\nRequires service restart to take effect.'
+        : 'DISABLE Hardened Mode?\n\nReturn to work-first mode. Detection and response remain active.\n\nRequires service restart to take effect.');
+    if (!confirmed) return;
+
+    btn.disabled = true;
+    const res = await api('/api/hardened/toggle', {{
+        method: 'POST',
+        headers: {{ 'X-CSRF-Token': CSRF }}
+    }});
+    btn.disabled = false;
+    if (res && res.ok) {{
+        status.textContent = res.message || 'Config saved — restart service to apply';
+        status.style.color = 'var(--accent)';
+        setTimeout(checkHardenedMode, 1000);
+    }} else {{
+        status.textContent = res?.error || 'Failed — use elevated CLI instead';
         status.style.color = 'var(--danger)';
     }}
 }}

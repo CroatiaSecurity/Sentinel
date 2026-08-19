@@ -217,6 +217,13 @@ namespace Sentinel.Agent
                 case "/api/report/verify":
                     await HandleReportVerify(response).ConfigureAwait(false);
                     break;
+                case "/api/hardened":
+                    await HandleHardenedStatus(response).ConfigureAwait(false);
+                    break;
+                case "/api/hardened/toggle":
+                    if (method != "POST") { response.StatusCode = 405; response.Close(); return; }
+                    await HandleHardenedToggle(response).ConfigureAwait(false);
+                    break;
                 default:
                     response.StatusCode = 404;
                     await WriteJson(response, new { error = "unknown_endpoint" }).ConfigureAwait(false);
@@ -476,6 +483,45 @@ namespace Sentinel.Agent
                     : $"{verified} verified, {failed} missing manifest";
 
                 await WriteJson(response, new { ok = true, message = msg, verified, failed }).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                await WriteJson(response, new { ok = false, error = ex.Message }).ConfigureAwait(false);
+            }
+        }
+
+        private async Task HandleHardenedStatus(HttpListenerResponse response)
+        {
+            bool enabled = HardeningModule.RestrictivePortHardeningEnabled;
+            await WriteJson(response, new { ok = true, enabled }).ConfigureAwait(false);
+        }
+
+        private async Task HandleHardenedToggle(HttpListenerResponse response)
+        {
+            try
+            {
+                bool current = HardeningModule.RestrictivePortHardeningEnabled;
+                bool next = !current;
+
+                var store = new EncryptedConfigStore();
+                store.SetOverride("RestrictivePortHardening", next.ToString());
+                if (store.Save())
+                {
+                    await WriteJson(response, new
+                    {
+                        ok = true,
+                        enabled = next,
+                        message = $"Hardened Mode {(next ? "ENABLED" : "DISABLED")} — restart Sentinel service to apply"
+                    }).ConfigureAwait(false);
+                }
+                else
+                {
+                    await WriteJson(response, new
+                    {
+                        ok = false,
+                        error = "Failed to save config. Run as Administrator or use: Sentinel.Service.exe --set-config RestrictivePortHardening=" + next
+                    }).ConfigureAwait(false);
+                }
             }
             catch (Exception ex)
             {
