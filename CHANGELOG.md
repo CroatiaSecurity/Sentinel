@@ -1,6 +1,16 @@
 # Changelog
 
 
+## [2.1.4] - 2026-08-19
+
+### Added
+
+- **Report to Police** page restored in web dashboard — evidence pack viewer, complainant form (name, email, phone, address, national ID, narrative, financial loss, data affected, harm), consent checkboxes, Save Affidavit, Send Report (opens national portal), Verify Integrity.
+- **Safety** page restored — digital coercion defense explanation, "What You Should Still Do" steps, Hardened Mode toggle button (persists to DPAPI encrypted config).
+- **Tools** page restored — quick-access paths, system diagnostics (version, processes, IPC status, file sizes, pack count).
+- **Hardened Mode toggle** button on Safety page — enables/disables `RestrictivePortHardening` via `EncryptedConfigStore`. Shows fallback CLI command if permissions fail.
+
+
 ## [2.1.3] - 2026-08-19
 
 ### Added
