@@ -228,8 +228,8 @@ textarea.rp-input {{ font-family: inherit; }}
 <div class=""layout"">
 <aside class=""sidebar"">
     <div class=""sidebar-header"">
-        <div class=""logo"">S</div>
-        <div><h1>Sentinel</h1><div class=""version"" id=""version"">v2.1.2</div></div>
+        <img src=""/api/icon"" alt=""Sentinel"" style=""width:32px;height:32px;border-radius:8px"">
+        <div><h1>Sentinel</h1><div class=""version"" id=""version"">v2.1.4</div></div>
     </div>
     <nav class=""nav"">
         <div class=""nav-item active"" data-page=""overview"">

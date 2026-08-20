@@ -151,6 +151,10 @@ namespace Sentinel.Agent
                 {
                     await ServeHtml(response).ConfigureAwait(false);
                 }
+                else if (path == "/api/icon")
+                {
+                    await ServeIcon(response).ConfigureAwait(false);
+                }
                 else if (path.StartsWith("/api/"))
                 {
                     await HandleApi(path, method, request, response, ct).ConfigureAwait(false);
@@ -722,6 +726,32 @@ namespace Sentinel.Agent
             response.ContentLength64 = buffer.Length;
             await response.OutputStream.WriteAsync(buffer, 0, buffer.Length).ConfigureAwait(false);
             response.Close();
+        }
+
+        private async Task ServeIcon(HttpListenerResponse response)
+        {
+            try
+            {
+                var icoPath = Path.Combine(AppContext.BaseDirectory, "Sentinel.ico");
+                if (File.Exists(icoPath))
+                {
+                    response.ContentType = "image/x-icon";
+                    var bytes = File.ReadAllBytes(icoPath);
+                    response.ContentLength64 = bytes.Length;
+                    await response.OutputStream.WriteAsync(bytes, 0, bytes.Length).ConfigureAwait(false);
+                    response.Close();
+                }
+                else
+                {
+                    response.StatusCode = 404;
+                    response.Close();
+                }
+            }
+            catch
+            {
+                response.StatusCode = 500;
+                response.Close();
+            }
         }
 
         private static List<string> ReadLastLines(string filePath, int lineCount)
