@@ -1,6 +1,13 @@
 # Changelog
 
 
+## [2.1.6] - 2026-08-21
+
+### Added
+
+- **Remote Message (msg.exe) RPC Probe Detection** (extension to `RpcLateralMonitor`) — Detects `msg /server:` usage as an RPC access probe and social engineering vector. Added `msg` to suspicious lateral movement parent processes. If msg.exe successfully delivers a message to a remote host, it confirms ports 135/445 are open with valid credentials — the same channel used for WMI execution, PsExec, remote service install, and full lateral movement. Sentinel now flags this reconnaissance step before the real attack chain begins.
+
+
 ## [2.1.5] - 2026-08-21
 
 ### Added

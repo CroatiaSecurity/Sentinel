@@ -6,7 +6,7 @@ Sentinel is for **gamers, creators, and high-profile targets**. It hunts real at
 
 **You can browse and play.** Default mode must not break Chrome/Edge/Firefox, Microsoft Store, Xbox, Steam, Epic, DirectX/VC++ redists, Game Bar, or creator tools such as OBS Studio. Controllers, wheels, and HOTAS stay usable. Installing a game or a GPU/runtime redist is work, not an incident.
 
-**Current version: 2.1.5**
+**Current version: 2.1.6**
 
 ### Honest mission
 
@@ -52,6 +52,8 @@ Sentinel is effective against:
 - **Physical access attacks** — BadUSB/Rubber Ducky (logged on default; HID auto-disable only in Hardened / kiosk mode so Xbox and other controllers keep working), post-idle hardware change detection, new Bluetooth devices, rogue USB drives.
 
 - **Network attacks** — ARP spoofing, DNS poisoning, rogue Wi-Fi, unauthorized Cast/screen-share devices, C2 beaconing (statistical), DNS tunneling/exfiltration, phantom network devices. Threat-intel feeds are **observe + reactive isolate** by default (`ThreatIntelProactiveFirewall: false`); optional proactive FW block. Unauthorized RDP/remote sessions can be force-logged-off (`RemoteSessionGuard`).
+
+- **Lateral movement & RPC probes (v2.1.6)** — Outbound connections to ports 135/445/5985/5986 from script hosts, Office, and LOLBins. Command-line patterns for WMI, PsExec, remote SCM, remote registry, WinRM. Detects `msg.exe /server:` as an RPC access probe — if someone can pop a remote message box on your machine, they have the same RPC channel used for full lateral movement.
 
 - **Malicious shortcuts** — Real-time `.lnk` monitoring on Desktop/Start Menu/Taskbar/Startup (all user profiles). Quarantines UNC targets, `search-ms:`/`ms-msdt:` protocol abuse, and LOLBin+remote URL/UNC argument patterns (CVE-2024-21412 / T1566.002).
 
