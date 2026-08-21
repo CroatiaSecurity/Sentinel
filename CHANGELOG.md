@@ -13,6 +13,8 @@
 
 - **GPU Driver Trojanization Detection** (extension to `DriverLoadMonitor`) — Detects .sys files with known GPU driver names (nvlddmkm.sys, amdkmdag.sys, igdkmd64.sys, etc.) dropped in user-writable paths (Temp, Downloads, AppData). Legitimate GPU drivers are only installed via DriverStore. GPU driver filenames in staging paths indicate trojanized drivers for privilege escalation or hardware-level persistence → QuarantineAndKill at 0.88 confidence.
 
+- **Remote Message (msg.exe) Detection** (extension to `RpcLateralMonitor`) — Detects `msg /server:` usage as an RPC access probe and social engineering vector. Added `msg` to suspicious lateral movement parent processes — any outbound RPC/SMB connection from msg.exe is now flagged.
+
 
 ## [2.1.4] - 2026-08-19
 

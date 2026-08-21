@@ -49,7 +49,8 @@ namespace Sentinel.Core
             "powershell", "pwsh", "cmd", "wscript", "cscript", "mshta",
             "winword", "excel", "powerpnt", "outlook", "msaccess",
             "rundll32", "regsvr32", "msbuild", "installutil", "csc",
-            "wmic", "wmiprvse", "wmiadap"
+            "wmic", "wmiprvse", "wmiadap",
+            "msg", // v2.1.5: Remote message delivery — RPC access probe / social engineering vector
         };
 
         // Command-line patterns indicating explicit lateral movement intent
@@ -69,6 +70,7 @@ namespace Sentinel.Core
             (@"psexec\s+.*\\\\", "PsExec lateral movement"),
             (@"copy\s+.*\\\\.*\$", "Copy to admin share (C$/ADMIN$)"),
             (@"xcopy\s+.*\\\\.*\$", "Xcopy to admin share"),
+            (@"msg\s+.*(/server:|/SERVER:)", "Remote message delivery (msg /server:) — RPC access probe"),
         };
 
         // P/Invoke for GetExtendedTcpTable
