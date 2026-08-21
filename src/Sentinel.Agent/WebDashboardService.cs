@@ -107,6 +107,14 @@ namespace Sentinel.Agent
 
             try
             {
+                // v2.1.7 SECURITY: Reject non-localhost requests (defense-in-depth)
+                if (!IsLocalRequest(request))
+                {
+                    response.StatusCode = 403;
+                    response.Close();
+                    return;
+                }
+
                 var path = request.Url?.AbsolutePath ?? "/";
                 var method = request.HttpMethod;
 
@@ -134,10 +142,11 @@ namespace Sentinel.Agent
                     return;
                 }
 
-                // CORS headers for localhost
-                response.Headers.Add("Access-Control-Allow-Origin", "*");
+                // CORS headers — localhost only (never wildcard; prevents cross-origin attacks from malicious sites)
+                response.Headers.Add("Access-Control-Allow-Origin", "http://localhost:19845");
                 response.Headers.Add("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
                 response.Headers.Add("Access-Control-Allow-Headers", "Content-Type, X-CSRF-Token");
+                response.Headers.Add("Vary", "Origin");
 
                 if (method == "OPTIONS")
                 {
@@ -203,12 +212,22 @@ namespace Sentinel.Agent
                     break;
                 case "/api/scan":
                     if (method != "POST") { response.StatusCode = 405; response.Close(); return; }
+                    if (!ValidateCsrf(request, response)) return;
                     await HandleScan(response).ConfigureAwait(false);
                     break;
                 case "/api/scan/status":
                     await HandleScanStatus(response).ConfigureAwait(false);
                     break;
                 case "/api/csrf":
+                    // v2.1.7 SECURITY: CSRF token only served to same-origin requests with Referer check.
+                    // Token is already embedded in the HTML page; this endpoint is for SPA reloads only.
+                    var referer = request.Headers["Referer"] ?? "";
+                    if (!referer.StartsWith("http://localhost:19845", StringComparison.OrdinalIgnoreCase))
+                    {
+                        response.StatusCode = 403;
+                        await WriteJson(response, new { error = "forbidden" }).ConfigureAwait(false);
+                        return;
+                    }
                     await WriteJson(response, new { token = _csrfToken }).ConfigureAwait(false);
                     break;
                 case "/api/report/prefs":
@@ -216,6 +235,7 @@ namespace Sentinel.Agent
                     break;
                 case "/api/report/save":
                     if (method != "POST") { response.StatusCode = 405; response.Close(); return; }
+                    if (!ValidateCsrf(request, response)) return;
                     await HandleReportSave(request, response).ConfigureAwait(false);
                     break;
                 case "/api/report/verify":
@@ -226,6 +246,7 @@ namespace Sentinel.Agent
                     break;
                 case "/api/hardened/toggle":
                     if (method != "POST") { response.StatusCode = 405; response.Close(); return; }
+                    if (!ValidateCsrf(request, response)) return;
                     await HandleHardenedToggle(response).ConfigureAwait(false);
                     break;
                 case "/api/diagnostics":
@@ -239,6 +260,39 @@ namespace Sentinel.Agent
         }
 
         #region API Handlers
+
+        /// <summary>
+        /// v2.1.7 SECURITY: Validates CSRF token on state-changing (POST) requests.
+        /// Returns false and writes a 403 response if validation fails.
+        /// </summary>
+        private bool ValidateCsrf(HttpListenerRequest request, HttpListenerResponse response)
+        {
+            var token = request.Headers["X-CSRF-Token"];
+            if (string.IsNullOrEmpty(token) || !string.Equals(token, _csrfToken, StringComparison.Ordinal))
+            {
+                response.StatusCode = 403;
+                response.ContentType = "application/json";
+                var msg = Encoding.UTF8.GetBytes("{\"error\":\"csrf_validation_failed\"}");
+                response.ContentLength64 = msg.Length;
+                response.OutputStream.Write(msg, 0, msg.Length);
+                response.Close();
+                _logger.LogWarning("[WebDashboard] CSRF validation failed — possible cross-origin attack");
+                return false;
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// v2.1.7 SECURITY: Validates that the request originates from localhost.
+        /// Rejects requests from remote IPs (shouldn't happen with HttpListener on localhost,
+        /// but defense-in-depth against misconfigured proxies).
+        /// </summary>
+        private static bool IsLocalRequest(HttpListenerRequest request)
+        {
+            var remote = request.RemoteEndPoint?.Address;
+            if (remote == null) return false;
+            return IPAddress.IsLoopback(remote);
+        }
 
         private async Task HandleStatus(HttpListenerResponse response)
         {

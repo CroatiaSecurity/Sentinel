@@ -1,6 +1,19 @@
 # Changelog
 
 
+## [2.1.7] - 2026-08-21
+
+### Security Fix
+
+- **WebDashboardService CORS wildcard removed** — `Access-Control-Allow-Origin: *` replaced with `http://localhost:19845` only. Previously any website you visited could silently call the dashboard API (toggle Hardened Mode, trigger scans, save report data) via cross-origin requests.
+
+- **CSRF validation enforced on all POST endpoints** — `/api/scan`, `/api/report/save`, `/api/hardened/toggle` now require a valid `X-CSRF-Token` header. Previously the token was generated but never checked, making all state-changing endpoints vulnerable to cross-site request forgery.
+
+- **CSRF token endpoint hardened** — `/api/csrf` now validates the `Referer` header to ensure the request originates from `localhost:19845`. Previously any origin could fetch the token and use it for forged requests.
+
+- **Non-localhost request rejection** — All requests from non-loopback IPs are now rejected with 403 at the top of the request handler (defense-in-depth against misconfigured proxies or port forwarding).
+
+
 ## [2.1.6] - 2026-08-21
 
 ### Added
