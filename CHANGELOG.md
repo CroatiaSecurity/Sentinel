@@ -1,6 +1,19 @@
 # Changelog
 
 
+## [2.1.5] - 2026-08-21
+
+### Added
+
+- **GPU Process Anomaly Monitor** (`GpuProcessMonitor`) — New SystemIntegrity monitor detecting hardware acceleration exploitation and GPU sandbox escapes from browsers. Does NOT interfere with gaming, video playback, or GPU compute workloads.
+  - Detects child process spawning from browser GPU helpers (definitive sandbox escape indicator) → KillProcessTree
+  - Detects outbound network connections from GPU helper PIDs (post-escape C2/exfil) → KillProcessTree
+  - Detects suspicious DLL loads in GPU processes (post-exploitation tooling like AMSI, .NET CLR, credential vault libs) → LogOnly (needs corroboration)
+  - Periodic GPU driver version audit against known-vulnerable CVE ranges (NVIDIA, AMD, Intel) → Tier2/LogOnly informational alerts recommending driver updates
+
+- **GPU Driver Trojanization Detection** (extension to `DriverLoadMonitor`) — Detects .sys files with known GPU driver names (nvlddmkm.sys, amdkmdag.sys, igdkmd64.sys, etc.) dropped in user-writable paths (Temp, Downloads, AppData). Legitimate GPU drivers are only installed via DriverStore. GPU driver filenames in staging paths indicate trojanized drivers for privilege escalation or hardware-level persistence → QuarantineAndKill at 0.88 confidence.
+
+
 ## [2.1.4] - 2026-08-19
 
 ### Added

@@ -122,6 +122,32 @@ namespace Sentinel.Core
             "nbwdv.sys",              // Medusa ransomware EDR killer
         };
 
+        // v2.1.5: Known GPU driver filenames — if a .sys with these names appears from
+        // non-standard paths (not DriverStore, not manufacturer installer), it's likely
+        // a trojanized GPU driver used for privilege escalation or hardware-level persistence.
+        private static readonly HashSet<string> GpuDriverNames = new(StringComparer.OrdinalIgnoreCase)
+        {
+            // NVIDIA
+            "nvlddmkm.sys", "nvoclock.sys", "nvaudio.sys", "nvhda64v.sys",
+            "nvmoduletracker.sys", "nvpcf.sys",
+            // AMD
+            "amdkmdag.sys", "amdkmdap.sys", "atikmdag.sys", "atikmpag.sys",
+            "amdpsp.sys", "amd_ags.sys",
+            // Intel
+            "igdkmd64.sys", "igdkmd32.sys", "igdkmdn.sys",
+        };
+
+        // Legitimate GPU driver install paths — drivers should ONLY come from these locations
+        private static readonly string[] LegitimateGpuDriverPaths = new[]
+        {
+            @"C:\Windows\System32\drivers",
+            @"C:\Windows\System32\DriverStore",
+            @"C:\Program Files\NVIDIA Corporation",
+            @"C:\Program Files\AMD",
+            @"C:\Program Files\Intel",
+            @"C:\Windows\SysWOW64\drivers",
+        };
+
         // Paths where legitimate drivers reside — new .sys outside these are suspicious
         private static readonly string[] LegitimateDriverPaths = new[]
         {
@@ -153,6 +179,7 @@ namespace Sentinel.Core
                     await CheckEventLogForDriverInstallsAsync(ct);
                     await CheckRegistryForNewDriverServicesAsync(ct);
                     await CheckSuspiciousDriverFilesAsync(ct);
+                    await CheckSuspiciousGpuDriverDropAsync(ct);
                 }
                 catch (OperationCanceledException) { break; }
                 catch (Exception ex)
@@ -351,6 +378,90 @@ namespace Sentinel.Core
                                 ["SHA256"] = hash,
                                 ["KnownVulnerable"] = (isKnownVulnerable || hashMatch).ToString(),
                                 ["Technique"] = "T1068/BYOVD"
+                            }
+                        });
+                    }
+                }
+                catch { }
+            }
+        }
+
+        /// <summary>
+        /// v2.1.5: Detects .sys files claiming to be GPU drivers (nvlddmkm.sys, amdkmdag.sys, etc.)
+        /// but dropped from non-standard paths. Legitimate GPU drivers are installed exclusively via
+        /// DriverStore (Windows Update, vendor installer, GeForce Experience, AMD Software).
+        /// A GPU driver filename appearing in Temp, Downloads, or user-writable paths is a
+        /// trojanized driver — either for privilege escalation or hardware-level persistence.
+        /// </summary>
+        private async Task CheckSuspiciousGpuDriverDropAsync(CancellationToken ct)
+        {
+            var suspiciousPaths = new[]
+            {
+                Path.GetTempPath(),
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile) + @"\Downloads",
+                Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            };
+
+            foreach (var basePath in suspiciousPaths)
+            {
+                if (string.IsNullOrEmpty(basePath) || !Directory.Exists(basePath)) continue;
+
+                try
+                {
+                    // Look for recently created .sys files that match GPU driver names
+                    var sysFiles = Directory.EnumerateFiles(basePath, "*.sys", SearchOption.AllDirectories)
+                        .Where(f =>
+                        {
+                            try
+                            {
+                                var name = Path.GetFileName(f);
+                                return GpuDriverNames.Contains(name) &&
+                                       File.GetCreationTimeUtc(f) > DateTime.UtcNow.AddMinutes(-5);
+                            }
+                            catch { return false; }
+                        })
+                        .Take(5);
+
+                    foreach (var sysFile in sysFiles)
+                    {
+                        if (_alertedDrivers.Contains(sysFile)) continue;
+                        _alertedDrivers.Add(sysFile);
+
+                        var fileName = Path.GetFileName(sysFile);
+
+                        // Verify it's NOT in a legitimate GPU driver path
+                        bool isLegitPath = LegitimateGpuDriverPaths.Any(p =>
+                            sysFile.StartsWith(p, StringComparison.OrdinalIgnoreCase));
+                        if (isLegitPath) continue;
+
+                        await _detectionEngine.EmitAsync(new DetectionEvent
+                        {
+                            RuleName = "DriverLoadMonitor: Trojanized GPU Driver Dropped in User Path",
+                            Evidence = $"File '{fileName}' (a known GPU driver name) was created in non-standard path '{basePath}'. " +
+                                       $"Full path: '{sysFile}'. Legitimate GPU drivers are only installed via DriverStore.",
+                            Reasoning = "A file with the name of a known GPU kernel-mode driver was dropped in a user-writable " +
+                                        "directory. Legitimate GPU driver installations go through Windows DriverStore " +
+                                        "(via vendor installers, Windows Update, or GeForce Experience/AMD Software). " +
+                                        "A GPU driver filename in Temp/Downloads/AppData indicates either: " +
+                                        "(1) A trojanized GPU driver for kernel-level privilege escalation (replacing the real driver), " +
+                                        "(2) A BYOVD attack using an older vulnerable GPU driver version, or " +
+                                        "(3) Preparation for hardware-level persistence that survives OS reinstallation. " +
+                                        "This is a high-confidence indicator of an advanced attack targeting the GPU driver stack.",
+                            Confidence = 0.88,
+                            Tier = DetectionTier.Tier1Behavioral,
+                            AuthorizedResponse = ResponseAction.QuarantineAndKill,
+                            ProcessName = "SYSTEM",
+                            ProcessId = 0,
+                            SignalType = SignalType.SecurityEvasion,
+                            Metadata = new Dictionary<string, string>
+                            {
+                                ["DriverFile"] = sysFile,
+                                ["FileName"] = fileName,
+                                ["AttackVector"] = "GPU_DRIVER_TROJANIZATION",
+                                ["Technique"] = "T1068 (Exploitation for Privilege Escalation)",
+                                ["MITRE"] = "T1547.006 (Kernel Modules and Extensions)",
                             }
                         });
                     }
