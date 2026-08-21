@@ -6,7 +6,7 @@ Sentinel is for **gamers, creators, and high-profile targets**. It hunts real at
 
 **You can browse and play.** Default mode must not break Chrome/Edge/Firefox, Microsoft Store, Xbox, Steam, Epic, DirectX/VC++ redists, Game Bar, or creator tools such as OBS Studio. Controllers, wheels, and HOTAS stay usable. Installing a game or a GPU/runtime redist is work, not an incident.
 
-**Current version: 2.1.4**
+**Current version: 2.1.5**
 
 ### Honest mission
 
@@ -64,6 +64,8 @@ Sentinel is effective against:
 - **Container/WSL escape** — Detects lateral movement FROM WSL/Docker INTO the Windows host: filesystem writes to sensitive paths via /mnt/c/, WSL interop spawning security-sensitive Windows binaries, Docker container processes accessing host resources.
 
 - **BYOVD (driver-based EDR killers)** — Detects vulnerable driver staging (.sys drops in temp/user paths), service installation (Event 7045), and planted code-signing certificates. Automatically revokes non-public certs from TrustedPublisher/Root stores, kills the installer chain, and disables all driver services signed by the revoked cert. Covers 35+ known vulnerable drivers from the Microsoft WDBL and LOLDrivers project.
+
+- **GPU/Hardware acceleration exploitation (v2.1.5)** — Monitors browser GPU helper processes for sandbox escape indicators: child process spawning, outbound network connections, and post-exploitation DLL loads (AMSI, .NET CLR, credential vault). A GPU helper should never spawn processes or open external sockets — if it does, a WebGL/WebGPU exploit achieved sandbox escape and the tree gets killed. Also audits installed GPU driver versions (NVIDIA/AMD/Intel) against known-vulnerable CVE ranges and detects trojanized GPU drivers (.sys with GPU driver names in user-writable paths). Does NOT interfere with gaming, video playback, or GPU compute.
 
 - **Advanced evasion** — Indirect syscalls / Hell's Gate table detection (well-formed `syscall; ret` or copied ntdll stubs with 3+ distinct SSNs in non-image executable memory — not V8/Chromium JIT noise), process injection via unbacked RWX memory detection, named pipe C2 enumeration with known-bad pattern matching.
 
