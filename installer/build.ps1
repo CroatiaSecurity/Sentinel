@@ -113,6 +113,10 @@ Write-Host "Found Inno Setup at: $IsccPath" -ForegroundColor Green
 
 # 5. Compile installer
 Write-Host "Compiling installer with Inno Setup..." -ForegroundColor Yellow
+# Inno Setup 7 quirk: if the output exe already exists, icon embedding may be skipped.
+# Always delete the previous output before compiling.
+$PreviousInstaller = Join-Path $PSScriptRoot "SentinelSetup-$Version.exe"
+if (Test-Path $PreviousInstaller) { Remove-Item $PreviousInstaller -Force }
 & $IsccPath $SetupScript
 if ($LASTEXITCODE -ne 0) { throw "ISCC failed" }
 
