@@ -1,5 +1,5 @@
 /**
- * Sentinel — Threat Report Proxy Worker (v2.0.8)
+ * Sentinel — Threat Report Proxy Worker (v2.1.7)
  *
  * Receives threat reports from Sentinel agents and forwards them to
  * abuse.ch (MalwareBazaar, URLhaus) using server-side API keys.
@@ -56,12 +56,7 @@ function checkRateLimit(ip) {
 }
 
 function consumeNonce(nonce, ts) {
-  if (!nonce || typeof nonce !== 'string' || nonce.length < 16 || nonce.length > 64) {
-    return false;
-  }
-  // Hex-ish only
-  if (!/^[a-fA-F0-9]+$/.test(nonce)) return false;
-
+  // Format already validated by caller — just check replay and store
   const key = `${ts}:${nonce.toLowerCase()}`;
   if (usedNonces.has(key)) return false;
   usedNonces.set(key, ts + TIMESTAMP_WINDOW_SEC);
@@ -100,7 +95,7 @@ export default {
       return new Response(JSON.stringify({
         status: 'ok',
         service: 'sentinel-threat-proxy',
-        version: '2.0.8',
+        version: '2.1.8',
         timestamp: new Date().toISOString(),
         authRequired: true,
         nonceRequired: true,
@@ -124,9 +119,7 @@ export default {
       });
     }
 
-    const clientIp = request.headers.get('CF-Connecting-IP')
-      || request.headers.get('X-Forwarded-For')?.split(',')[0]?.trim()
-      || 'unknown';
+    const clientIp = request.headers.get('CF-Connecting-IP') || 'unknown';
     if (!checkRateLimit(clientIp)) {
       return new Response(JSON.stringify({ error: 'Rate limit exceeded' }), {
         status: 429,
@@ -156,9 +149,11 @@ export default {
       });
     }
 
-    if (!consumeNonce(nonce, timestampVal)) {
-      return new Response(JSON.stringify({ error: 'Unauthorized: Replay or invalid nonce' }), {
-        status: 401,
+    // v2.1.7 RT-2026-M1 FIX: Validate nonce FORMAT only here (not consume).
+    // Nonce is consumed AFTER HMAC verification to prevent DoS via pre-consumption.
+    if (!nonce || typeof nonce !== 'string' || nonce.length < 16 || nonce.length > 64 || !/^[a-fA-F0-9]+$/.test(nonce)) {
+      return new Response(JSON.stringify({ error: 'Bad Request: Invalid nonce format' }), {
+        status: 400,
         headers: { 'Content-Type': 'application/json', ...corsHeaders }
       });
     }
@@ -182,10 +177,28 @@ export default {
         });
       }
 
+      // v2.1.7 RT-2026-M1 FIX: Consume nonce AFTER successful HMAC verification.
+      // This prevents attackers from burning legitimate nonces with forged requests.
+      if (!consumeNonce(nonce, timestampVal)) {
+        return new Response(JSON.stringify({ error: 'Unauthorized: Replay detected' }), {
+          status: 401,
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+      }
+
       const body = JSON.parse(rawBody);
 
       if (!body.type || !body.value) {
         return new Response(JSON.stringify({ error: 'Missing type or value' }), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+      }
+
+      // v2.1.7 RT-2026-M4: Input validation per endpoint BEFORE forwarding to upstream APIs
+      const validationError = validateReportInput(url.pathname, body);
+      if (validationError) {
+        return new Response(JSON.stringify({ error: validationError }), {
           status: 400,
           headers: { 'Content-Type': 'application/json', ...corsHeaders }
         });
@@ -217,13 +230,79 @@ export default {
         headers: { 'Content-Type': 'application/json', ...corsHeaders }
       });
     } catch (err) {
-      return new Response(JSON.stringify({ error: 'Invalid request', detail: err.message }), {
+      // v2.1.7: Don't leak internal error details to clients
+      return new Response(JSON.stringify({ error: 'Invalid request' }), {
         status: 400,
         headers: { 'Content-Type': 'application/json', ...corsHeaders }
       });
     }
   }
 };
+
+// v2.1.7 RT-2026-M4: Input validation for report payloads before forwarding to upstream APIs.
+// Prevents authenticated clients from abusing the proxy to poison upstream threat intel databases.
+function validateReportInput(pathname, body) {
+  switch (pathname) {
+    case '/report/hash': {
+      const v = body.value;
+      // Must be a valid MD5 (32), SHA1 (40), or SHA-256 (64) hex hash
+      if (!/^[a-fA-F0-9]{32}$/.test(v) && !/^[a-fA-F0-9]{40}$/.test(v) && !/^[a-fA-F0-9]{64}$/.test(v)) {
+        return 'Invalid hash format: must be MD5 (32 hex), SHA-1 (40 hex), or SHA-256 (64 hex)';
+      }
+      if (body.comment && (typeof body.comment !== 'string' || body.comment.length > 512)) {
+        return 'Comment must be a string of 512 characters or fewer';
+      }
+      if (body.tags && (!Array.isArray(body.tags) || body.tags.length > 10 || body.tags.some(t => typeof t !== 'string' || t.length > 64))) {
+        return 'Tags must be an array of up to 10 strings, each 64 chars max';
+      }
+      return null;
+    }
+    case '/report/url': {
+      const v = body.value;
+      if (typeof v !== 'string' || v.length > 2048) {
+        return 'URL must be a string of 2048 characters or fewer';
+      }
+      // Must start with http:// or https://
+      if (!/^https?:\/\/.+/i.test(v)) {
+        return 'URL must use http:// or https:// scheme';
+      }
+      // Block private/internal IPs in URL
+      if (/^https?:\/\/(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|localhost|0\.0\.0\.0|\[::1\])/i.test(v)) {
+        return 'Cannot report private/internal URLs';
+      }
+      return null;
+    }
+    case '/report/ip': {
+      const v = body.value;
+      // IPv4 validation
+      const ipv4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(v);
+      if (ipv4) {
+        const octets = [parseInt(ipv4[1]), parseInt(ipv4[2]), parseInt(ipv4[3]), parseInt(ipv4[4])];
+        if (octets.some(o => o > 255)) return 'Invalid IPv4 address';
+        // Block RFC1918, loopback, link-local, multicast
+        if (octets[0] === 10 || octets[0] === 127 || octets[0] === 0) return 'Cannot report private/reserved IPs';
+        if (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) return 'Cannot report private IPs';
+        if (octets[0] === 192 && octets[1] === 168) return 'Cannot report private IPs';
+        if (octets[0] === 169 && octets[1] === 254) return 'Cannot report link-local IPs';
+        if (octets[0] >= 224) return 'Cannot report multicast/reserved IPs';
+        return null;
+      }
+      // Basic IPv6 check (colon-separated hex groups)
+      if (/^[a-fA-F0-9:]+$/.test(v) && v.includes(':') && v.length <= 45) {
+        if (v === '::1' || v.startsWith('fe80:') || v.startsWith('fc') || v.startsWith('fd')) {
+          return 'Cannot report private/link-local IPv6 addresses';
+        }
+        return null;
+      }
+      return 'Invalid IP address format (must be valid IPv4 or IPv6)';
+    }
+    case '/lookup/vt':
+      // Already validated in lookupVirusTotal — no extra check needed
+      return null;
+    default:
+      return null;
+  }
+}
 
 async function reportHash(body, env) {
   if (!env.MALWAREBAZAAR_KEY) {
@@ -349,7 +428,7 @@ async function lookupVirusTotal(body, env) {
       detectionRate: Math.round(detectionRate * 100) / 100
     };
   } catch (err) {
-    return { success: false, error: `VT lookup failed: ${err.message}` };
+    return { success: false, error: 'VT lookup failed' };
   }
 }
 

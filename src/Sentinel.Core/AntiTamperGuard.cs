@@ -57,6 +57,9 @@ namespace Sentinel.Core
         private string? _appsettingsHash;
         private bool _appsettingsTamperAlerted;
 
+        // v2.1.7 RT-2026-H3: SHA-256 hash of own binary at startup for replacement detection
+        private readonly string? _ownBinaryBaselineHash;
+
         // HARDENING: QueryPerformanceCounter as secondary time source.
         // DateTime/DateTimeOffset can be manipulated by usermode time adjustment (SetSystemTime).
         // QPC is monotonic and hardware-driven — immune to clock skew attacks.
@@ -124,6 +127,9 @@ namespace Sentinel.Core
 
             // v2.0.4: Capture initial encrypted config hash for integrity monitoring
             _appsettingsHash = TryHashEncryptedConfig();
+
+            // v2.1.7 RT-2026-H3: Capture SHA-256 hash of own binary at startup
+            _ownBinaryBaselineHash = TryHashOwnBinary();
         }
 
         public override Task StartAsync(CancellationToken cancellationToken)
@@ -263,9 +269,9 @@ namespace Sentinel.Core
         }
 
         /// <summary>
-        /// Checks if our own binary still exists on disk.
-        /// If it's been deleted while we're running, attacker is trying to
-        /// prevent restart after service stop/reboot.
+        /// v2.1.7 RT-2026-H3 FIX: Checks if our own binary still exists AND hasn't been replaced.
+        /// Uses SHA-256 hash comparison against the startup-time baseline hash.
+        /// If the binary is deleted or its hash changes, it's a tampering attempt.
         /// </summary>
         private async Task CheckBinaryIntegrity()
         {
@@ -286,6 +292,49 @@ namespace Sentinel.Core
                     ProcessName = "SYSTEM",
                     ProcessId = 0
                 });
+                return;
+            }
+
+            // v2.1.7: Hash-based binary replacement detection
+            try
+            {
+                if (_ownBinaryBaselineHash != null)
+                {
+                    using var stream = new FileStream(_ownExePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                    using var sha = System.Security.Cryptography.SHA256.Create();
+                    var currentHash = BitConverter.ToString(sha.ComputeHash(stream)).Replace("-", "").ToLowerInvariant();
+
+                    if (!string.Equals(currentHash, _ownBinaryBaselineHash, StringComparison.Ordinal))
+                    {
+                        await _detectionEngine.EmitAsync(new DetectionEvent
+                        {
+                            RuleName = "Anti-Tamper: Sentinel Binary Replaced",
+                            Evidence = $"Sentinel binary hash has changed since startup. " +
+                                       $"Path: {_ownExePath}. Expected: {_ownBinaryBaselineHash?.Substring(0, 16)}..., " +
+                                       $"Got: {currentHash.Substring(0, 16)}...",
+                            Reasoning = "The on-disk Sentinel service binary has been replaced while the service " +
+                                        "is still running in memory. An attacker has modified the binary so that " +
+                                        "on next restart, their malicious version runs as SYSTEM. This is a critical " +
+                                        "persistence mechanism — the attacker replaces the EDR with their own code.",
+                            Confidence = 0.99,
+                            Tier = DetectionTier.Tier1Behavioral,
+                            AuthorizedResponse = ResponseAction.LogOnly,
+                            ProcessName = "SYSTEM",
+                            ProcessId = 0,
+                            SignalType = SignalType.AntiTamper,
+                            Metadata = new System.Collections.Generic.Dictionary<string, string>
+                            {
+                                ["ExpectedHash"] = _ownBinaryBaselineHash ?? "unknown",
+                                ["ActualHash"] = currentHash,
+                                ["BinaryPath"] = _ownExePath
+                            }
+                        });
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "[AntiTamperGuard] Error hashing binary for integrity check");
             }
         }
 
@@ -393,6 +442,27 @@ namespace Sentinel.Core
             }
             catch
             {
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// v2.1.7 RT-2026-H3: Computes SHA-256 of the running Sentinel binary at startup.
+        /// Used as baseline for periodic integrity checks (detects binary replacement).
+        /// </summary>
+        private string? TryHashOwnBinary()
+        {
+            try
+            {
+                if (_ownExePath == null || !File.Exists(_ownExePath)) return null;
+                using var stream = new FileStream(_ownExePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                using var sha = System.Security.Cryptography.SHA256.Create();
+                var hash = sha.ComputeHash(stream);
+                return BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "[AntiTamperGuard] Failed to hash own binary at startup");
                 return null;
             }
         }

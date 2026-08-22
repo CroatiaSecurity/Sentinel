@@ -8,3 +8,11 @@ compatibility_date = "2024-01-01"
 
 [observability]
 enabled = true
+
+# v2.1.7 B6: Durable rate limiting (survives isolate recycling)
+# This backstops the in-memory per-isolate rate limiter which resets on cold starts.
+[[unsafe.bindings]]
+name = "RATE_LIMITER"
+type = "ratelimit"
+namespace_id = "0" # Auto-assigned by Cloudflare on deploy
+simple = { limit = 60, period = 60 }

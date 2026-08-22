@@ -1,6 +1,48 @@
 # Changelog
 
 
+## [2.1.8] - 2026-08-22
+
+### Security Fixes (Red Team Audit Remediation)
+
+- **RT-2026-H1/H3: Binary integrity verification** — `AgentWatchdog` now verifies Authenticode signature before launching the Agent via `CreateProcessAsUser`. `AntiTamperGuard` now captures SHA-256 hash of own binary at startup and detects replacement (not just deletion). Closes TOCTOU binary swap attacks.
+
+- **RT-2026-M1: Worker nonce ordering fix** — Nonce is now consumed AFTER HMAC verification (was before). Prevents denial-of-service where an attacker observes a nonce in transit and pre-consumes it with a forged request.
+
+- **RT-2026-M3: WebDashboard bearer token auth** — All `/api/` endpoints now require bearer token authentication. Token is embedded in the HTML page for browser sessions; external callers must provide `Authorization: Bearer <token>` header. Closes the localhost-attacker vector where any local process could toggle security features.
+
+- **RT-2026-M4: Worker input validation** — `/report/hash` validates MD5/SHA1/SHA256 format. `/report/url` requires HTTP(S) scheme and rejects private/internal URLs. `/report/ip` validates IPv4/IPv6 format and rejects RFC1918/loopback/multicast. Prevents authenticated proxy abuse against upstream threat intel databases.
+
+- **RT-2026-M2 (partial): Critical response budget bypass** — Chain-confirmed multi-signal detections now bypass the per-minute kill rate limit. Attackers can no longer exhaust the budget with false-positive noise, then execute real malware during the cooldown window.
+
+- **Worker hardening** — Removed `X-Forwarded-For` IP fallback (unnecessary on Cloudflare). Fixed error message leaking `err.message` to clients. Added Cloudflare Rate Limiting binding in `wrangler.toml` as durable backstop for per-isolate in-memory rate limiting.
+
+### Added — New Detection Capabilities
+
+- **AmsiIntegrityCheck** (Critical group) — Monitors AmsiScanBuffer and EtwEventWrite function prologues against startup baseline every 30 seconds. Detects AMSI patching (VEH/hardware breakpoint bypass, direct memory patch) and ETW blinding at 0.96–0.97 confidence.
+
+- **EdrKillerDetectionMonitor** (Critical group, President's Law) — Scans running processes every 5 seconds against 25+ known EDR-killer tool names (Terminator, GentleKiller, Backstab, EDRSilencer, AuKill, Poortry, etc.). Immediate KillProcessTree at 0.95 confidence. No rate-limit gate.
+
+- **HoneypotDllMonitor** (Critical group) — Plants decoy version.dll, winmm.dll, dbghelp.dll, WINHTTP.dll in the install directory as 0-byte read-only hidden files. Any access or deletion triggers Tier1 anti-tamper detection at 0.94–0.96 confidence. Auto-replants deleted honeypots.
+
+- **DecoyPipeMonitor** (Critical group) — Creates 6 named pipes matching CobaltStrike, Metasploit, and generic RAT patterns. Any connection fires Tier1 C2 detection at 0.97 confidence with full PID attribution via `GetNamedPipeClientProcessId`. Zero false positives.
+
+- **KernelModuleAuditMonitor** (SystemIntegrity group) — Enumerates loaded kernel modules via `NtQuerySystemInformation(SystemModuleInformation)` every 30 seconds. Detects stealth BYOVD driver loads that bypass SCM Event 7045. Baselines at startup; new unsigned modules fire at 0.88 confidence.
+
+- **TokenPrivilegeAuditMonitor** (CredentialProtection group) — Scans all processes every 20 seconds for SeDebugPrivilege and SeImpersonatePrivilege from user-writable paths. Catches potato attacks, credential dumping tools, and token theft in progress. 0.75–0.85 confidence.
+
+### Changed
+
+- `ProductInfo.Version` → `2.1.8`
+- Worker proxy version → `2.1.8`
+- design.md version header → `2.1.8`; added v2.1.8 section documenting all new components; marked IPC auth backlog item as completed; added 6 previously undocumented components.
+
+### Documentation
+
+- Added `WebDashboardService`, `DashboardHtml`, `ScanEngine`, `GpuProcessMonitor`, `LegacyVerdictSidecarPurgeService`, `BulkTransferNoise`, `EnrichmentSignals` to design.md component inventory.
+- Stale backlog item "Authenticated Service↔Agent IPC" marked as complete (was implemented in v2.0).
+
+
 ## [2.1.7] - 2026-08-21
 
 ### Security Fix

@@ -1,6 +1,6 @@
 # Sentinel — Design Document
 
-**Version: 2.0.4**
+**Version: 2.1.8**
 
 ---
 
@@ -41,7 +41,7 @@ Monitors → TelemetryFusionEngine → DetectionEngine → AdvancedResponseEngin
 | `OpsMetricsPublisher` | Writes `%ProgramData%\Sentinel\ops_metrics.json` |
 | `SelfPathGuard` | Hardlink-aware install self-exclusion |
 | `EncryptedConfigStore` | DPAPI-encrypted per-deployment config (`config.enc`); replaces plaintext appsettings.json |
-| `ProductInfo.Version` | `2.0.4` |
+| `ProductInfo.Version` | `2.1.8` |
 
 All components are wired via Microsoft.Extensions.DependencyInjection. No static mutable state anywhere.
 
@@ -721,13 +721,51 @@ Self-heal loops: `IPSecIntegrityGuard` (30s, rebuilds current profile), `AsrPoli
 
 ---
 
+## v2.1.8 Additions
+
+### New Components (previously undocumented)
+
+| Component | Location | Role |
+|-----------|----------|------|
+| `WebDashboardService` | Sentinel.Agent | Local HTTP dashboard (`http://localhost:19845`) replacing WinForms settings UI; CSRF-protected, bearer-token auth via IPC |
+| `DashboardHtml` | Sentinel.Agent | Static HTML/CSS/JS generator for the web dashboard |
+| `ScanEngine` | Sentinel.Core | On-demand file/directory scan engine; powers `/api/scan` from dashboard and `scan` IPC command |
+| `GpuProcessMonitor` | Sentinel.Core/Monitors | Detects crypto-mining via GPU compute usage patterns (non-gaming, non-video processes) |
+| `LegacyVerdictSidecarPurgeService` | Sentinel.Core | Cleanup service for deprecated verdict sidecar files from pre-ADS versions |
+| `BulkTransferNoise` | Sentinel.Core | Noise suppression for legitimate bulk transfer clients (torrent, P2P, aria2) |
+| `EnrichmentSignals` | Sentinel.Core | Cross-monitor enrichment signal types for ContextBus pub/sub |
+
+### Security Fixes (v2.1.7)
+
+| Fix | Description |
+|-----|-------------|
+| RT-2026-H1/H3 | Binary integrity hash verification before Agent launch (AgentWatchdog + self-restart + AntiTamperGuard) |
+| RT-2026-M1 | Worker: nonce consumed AFTER HMAC verification (prevents DoS via pre-consumption) |
+| RT-2026-M3 | WebDashboard: bearer token auth delivered via IPC (any-local-process abuse closed) |
+| RT-2026-M4 | Worker: input validation on /report/hash, /report/url, /report/ip before upstream forwarding |
+| RT-2026-M5 | Worker: removed X-Forwarded-For IP fallback, error message leak, updated to v2.1.7 |
+
+### New Detection Capabilities (v2.1.7)
+
+| Component | Category | Description |
+|-----------|----------|-------------|
+| `AmsiIntegrityCheck` | Anti-Tamper | Verifies AmsiScanBuffer/AmsiOpenSession prologues against startup baseline (detects VEH/breakpoint/patch AMSI bypass) |
+| `EdrKillerDetectionRule` | President's Law | Fires immediately on known EDR-killer tool process names/hashes (Terminator, GentleKiller, Backstab, etc.) |
+| `KernelModuleAuditMonitor` | SystemIntegrity | NtQuerySystemInformation(SystemModuleInformation) enumeration; detects stealth driver loads bypassing SCM events |
+| `TokenPrivilegeAuditMonitor` | CredentialProtection | Enumerates processes holding SeDebugPrivilege/SeImpersonate from non-admin paths (potato attacks, token theft) |
+| `HoneypotDllMonitor` | Anti-Tamper | Plants decoy `version.dll` in install directory; any load = DLL sideload attack targeting Sentinel |
+| `DecoyPipeMonitor` | Anti-Tamper | Creates secondary pipes with common C2 names; any connection = immediate Tier1 with process attribution |
+| Critical response budget | Response | Chain-confirmed multi-signal detections bypass per-minute rate limit (separate unlimited budget) |
+
+---
+
 ## Remaining Backlog
 
 - [x] **Agent-side monitor documentation** — Inventory complete as of 1.7.5 (includes 1.7.4 PS ports).
 - [x] **design.md ↔ code parity (1.8.1)** — ActiveResponse model, proxy auth, NetworkIsolate ARP, quarantine ACL, BYOVD neutralize, consultant sticky LogOnly.
 - [x] **NetworkIsolate ARP flush** — Restored as native P/Invoke (was shell `arp -d` in v5.9.0).
 - [ ] **BrowserCredentialTheftRule** — Never a removed type; optional standalone rule (monitor already covers).
-- [ ] **Authenticated Service↔Agent IPC** — Processes remain independent; no named-pipe auth yet.
+- [x] **Authenticated Service↔Agent IPC** — v2.0 HMAC-SHA256 auth with nonce replay prevention on named pipe (`ServiceAgentIpcHost`).
 - [ ] **Installer per-file ACL race** — Upgrade still broad `takeown`/`icacls` window.
 - [ ] **LSA/TPM third factor for entropy** — Cache/rule HMAC still MachineGuid + `.install_entropy`.
 - [ ] **ThreatIntelFeedBlocker PID attribution** — `IPGlobalProperties` lacks PID; connection hits currently alert without owning process kill.

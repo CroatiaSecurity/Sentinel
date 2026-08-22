@@ -83,9 +83,16 @@ namespace Sentinel.Core
         /// <summary>
         /// v1.6.0: Returns false when MaxKillsPerMinute budget is exhausted.
         /// NetworkIsolate is gated separately via TryConsumeIsolateBudget.
+        /// v2.1.7 B5: Chain-confirmed detections bypass the rate limit (separate unlimited budget).
         /// </summary>
-        private bool TryConsumeKillBudget()
+        private bool TryConsumeKillBudget(bool chainConfirmed = false)
         {
+            // v2.1.7: Chain-confirmed multi-signal detections bypass the per-minute rate limit.
+            // Rationale: An attacker cannot forge chain-confirmed events (requires multi-rule convergence
+            // on same PID within the correlation window). Rate-limiting was designed to prevent FP storms,
+            // not to hamper confirmed attack response.
+            if (chainConfirmed) return true;
+
             int limit = _config.MaxKillsPerMinute;
             if (limit <= 0) return true;
 
@@ -598,7 +605,8 @@ namespace Sentinel.Core
             else if (shouldQuarantineAndKill)
             {
                 // v1.6.0: rate-limit destructive responses
-                if (!TryConsumeKillBudget())
+                // v2.1.7 B5: Chain-confirmed detections bypass rate limit
+                if (!TryConsumeKillBudget(chainAuthorized))
                 {
                     stopwatch.Stop();
                     _metrics.RecordResponse(stopwatch.ElapsedMilliseconds);
@@ -813,7 +821,8 @@ namespace Sentinel.Core
             else if (shouldKill && detection.ProcessId > 4)
             {
                 // v1.6.0: rate-limit kill storms
-                if (!TryConsumeKillBudget())
+                // v2.1.7 B5: Chain-confirmed detections bypass rate limit
+                if (!TryConsumeKillBudget(chainAuthorized))
                 {
                     stopwatch.Stop();
                     _metrics.RecordResponse(stopwatch.ElapsedMilliseconds);

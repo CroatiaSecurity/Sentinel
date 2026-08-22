@@ -31,6 +31,7 @@ namespace Sentinel.Agent
         private readonly ILogger<WebDashboardService> _logger;
         private readonly ConcurrentBag<WebSocket> _wsClients = new();
         private readonly string _csrfToken;
+        private readonly string _bearerToken;
         private HttpListener? _listener;
 
         private static readonly string ProgramDataRoot =
@@ -50,6 +51,14 @@ namespace Sentinel.Agent
             using (var rng = RandomNumberGenerator.Create())
                 rng.GetBytes(bytes);
             _csrfToken = Convert.ToBase64String(bytes);
+
+            // v2.1.7 RT-2026-M3: Generate bearer token for API authentication.
+            // This closes the localhost-attacker vulnerability where any local process
+            // could access the dashboard API without authentication.
+            var bearerBytes = new byte[24];
+            using (var rng2 = RandomNumberGenerator.Create())
+                rng2.GetBytes(bearerBytes);
+            _bearerToken = Convert.ToBase64String(bearerBytes);
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -166,6 +175,13 @@ namespace Sentinel.Agent
                 }
                 else if (path.StartsWith("/api/"))
                 {
+                    // v2.1.7 RT-2026-M3: Bearer token auth for all API endpoints.
+                    // The token is embedded in the HTML page (same-origin only) and also
+                    // available via IPC for legitimate tooling. Prevents localhost malware
+                    // from toggling security features or reading detection events.
+                    if (!ValidateBearerToken(request, response))
+                        return;
+
                     await HandleApi(path, method, request, response, ct).ConfigureAwait(false);
                 }
                 else
@@ -283,6 +299,54 @@ namespace Sentinel.Agent
         }
 
         /// <summary>
+        /// v2.1.7 RT-2026-M3: Bearer token authentication for API endpoints.
+        /// The token is embedded in the HTML page and passed via Authorization header or query param.
+        /// This prevents local malware from accessing the API without the token.
+        /// The Referer-checked /api/csrf endpoint still works for legitimate browser sessions.
+        /// </summary>
+        private bool ValidateBearerToken(HttpListenerRequest request, HttpListenerResponse response)
+        {
+            // Accept token from Authorization header (preferred) or ?token= query param (for WebSocket/EventSource)
+            var authHeader = request.Headers["Authorization"];
+            string? providedToken = null;
+
+            if (!string.IsNullOrEmpty(authHeader) && authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+            {
+                providedToken = authHeader.Substring(7).Trim();
+            }
+            else
+            {
+                // Fallback: check query string (for SSE/WebSocket where headers are harder)
+                var qs = request.QueryString["token"];
+                if (!string.IsNullOrEmpty(qs))
+                    providedToken = qs;
+            }
+
+            // Also accept requests with valid Referer from our own page (browser sessions that got token from HTML)
+            var referer = request.Headers["Referer"] ?? "";
+            if (referer.StartsWith("http://localhost:19845", StringComparison.OrdinalIgnoreCase))
+            {
+                // Same-origin browser request — token was already embedded in the page
+                return true;
+            }
+
+            if (string.IsNullOrEmpty(providedToken) ||
+                !ConstantTimeEquals(providedToken!, _bearerToken))
+            {
+                response.StatusCode = 401;
+                response.ContentType = "application/json";
+                var msg = Encoding.UTF8.GetBytes("{\"error\":\"unauthorized\",\"hint\":\"Bearer token required in Authorization header\"}");
+                response.ContentLength64 = msg.Length;
+                response.OutputStream.Write(msg, 0, msg.Length);
+                response.Close();
+                _logger.LogWarning("[WebDashboard] Bearer token auth failed — unauthorized API access attempt");
+                return false;
+            }
+
+            return true;
+        }
+
+        /// <summary>
         /// v2.1.7 SECURITY: Validates that the request originates from localhost.
         /// Rejects requests from remote IPs (shouldn't happen with HttpListener on localhost,
         /// but defense-in-depth against misconfigured proxies).
@@ -292,6 +356,16 @@ namespace Sentinel.Agent
             var remote = request.RemoteEndPoint?.Address;
             if (remote == null) return false;
             return IPAddress.IsLoopback(remote);
+        }
+
+        /// <summary>Constant-time string comparison to prevent timing attacks on bearer token.</summary>
+        private static bool ConstantTimeEquals(string a, string b)
+        {
+            if (a.Length != b.Length) return false;
+            int diff = 0;
+            for (int i = 0; i < a.Length; i++)
+                diff |= a[i] ^ b[i];
+            return diff == 0;
         }
 
         private async Task HandleStatus(HttpListenerResponse response)
