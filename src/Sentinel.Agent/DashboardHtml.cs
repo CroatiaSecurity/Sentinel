@@ -520,6 +520,16 @@ document.querySelectorAll('.nav-item').forEach(item => {{
     }});
 }});
 
+// v2.1.9 SECURITY: HTML entity encoding to prevent stored XSS via detection event fields.
+// All user-controlled data (process names, rule names, file paths, evidence strings)
+// MUST be passed through esc() before interpolation into innerHTML templates.
+function esc(s) {{
+    if (s == null) return '';
+    var d = document.createElement('div');
+    d.appendChild(document.createTextNode(String(s)));
+    return d.innerHTML;
+}}
+
 // API helpers
 async function api(path, opts) {{
     try {{
@@ -588,7 +598,7 @@ function renderEvents(events, containerId) {{
         const iconClass = type === 'detection' ? 'detection' : type === 'response' ? 'response' : 'info';
         const icon = type === 'detection' ? '!' : type === 'response' ? '\u2713' : '\u2022';
         const timeStr = ts ? new Date(ts).toLocaleTimeString() : '';
-        return `<div class=""event-item""><div class=""event-icon ${{iconClass}}"">${{icon}}</div><div class=""event-body""><div class=""event-title"">${{title}}</div><div class=""event-detail"">${{detail}}</div></div><div class=""event-time"">${{timeStr}}</div></div>`;
+        return `<div class=""event-item""><div class=""event-icon ${{iconClass}}"">${{icon}}</div><div class=""event-body""><div class=""event-title"">${{esc(title)}}</div><div class=""event-detail"">${{esc(detail)}}</div></div><div class=""event-time"">${{esc(timeStr)}}</div></div>`;
     }}).join('');
 }}
 
@@ -678,7 +688,7 @@ async function loadOps() {{
             ['Product Version', ops.ProductVersion || ops.productVersion || '—'],
         ];
         grid.innerHTML = metrics.map(([label, value]) =>
-            `<div class=""metric""><div class=""metric-label"">${{label}}</div><div class=""metric-value"">${{value}}</div></div>`
+            `<div class=""metric""><div class=""metric-label"">${{esc(label)}}</div><div class=""metric-value"">${{esc(value)}}</div></div>`
         ).join('');
         document.getElementById('ov-rate').textContent = ops.EventsPerSecond || ops.eventsPerSecond || 0;
     }} else {{
@@ -695,7 +705,7 @@ async function loadQuarantine() {{
             const name = item.OriginalName || item.originalName || item.Name || 'Unknown';
             const path = item.OriginalPath || item.originalPath || '';
             const date = item.QuarantinedAt || item.quarantinedAt || '';
-            return `<div class=""quarantine-item""><div><div style=""font-weight:500"">${{name}}</div><div class=""q-path"">${{path}}</div></div><div class=""event-time"">${{date ? new Date(date).toLocaleDateString() : ''}}</div></div>`;
+            return `<div class=""quarantine-item""><div><div style=""font-weight:500"">${{esc(name)}}</div><div class=""q-path"">${{esc(path)}}</div></div><div class=""event-time"">${{date ? new Date(date).toLocaleDateString() : ''}}</div></div>`;
         }}).join('');
         document.getElementById('ov-quarantine').textContent = data.items.length;
     }} else {{
@@ -755,7 +765,7 @@ async function checkScanStatus() {{
             container.innerHTML = findings.sort((a,b) => (b.Severity||b.severity) - (a.Severity||a.severity)).map(f => {{
                 const sev = f.Severity || f.severity || 0;
                 const sevClass = sev >= 4 ? 'critical' : sev === 3 ? 'high' : sev === 2 ? 'medium' : 'low';
-                return `<div class=""finding""><div class=""finding-severity ${{sevClass}}""></div><div class=""finding-body""><div class=""finding-title"">${{f.Title || f.title}}</div><div class=""finding-desc"">${{f.Description || f.description}}</div></div></div>`;
+                return `<div class=""finding""><div class=""finding-severity ${{sevClass}}""></div><div class=""finding-body""><div class=""finding-title"">${{esc(f.Title || f.title)}}</div><div class=""finding-desc"">${{esc(f.Description || f.description)}}</div></div></div>`;
             }}).join('');
         }}
 
@@ -778,7 +788,7 @@ async function loadReportPacks() {{
             <div class=""finding"">
                 <div class=""finding-severity critical""></div>
                 <div class=""finding-body"">
-                    <div class=""finding-title"">${{p.name}}</div>
+                    <div class=""finding-title"">${{esc(p.name)}}</div>
                     <div class=""finding-desc"">${{p.fileCount}} files | Created: ${{new Date(p.created).toLocaleString()}} | Manifest: ${{p.hasManifest ? 'Sealed' : 'Missing'}}</div>
                 </div>
             </div>`).join('');

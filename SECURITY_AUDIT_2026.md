@@ -47,6 +47,12 @@ v2.0.8 remediates SPKI pinning correctness, TI proxy replay, install-dir kill pl
 | RT-2026-L6 | Low | Worker error handler leaks `err.message` to clients | Error detail removed from response |
 | RT-2026-L7 | Low | Worker X-Forwarded-For fallback for IP identification | Removed; CF-Connecting-IP only |
 
+### Findings FIXED in v2.1.9
+
+| ID | Severity | Finding | Fix |
+|----|----------|---------|-----|
+| RT-2026-XSS1 | **Medium** | Stored XSS in WebDashboard via unsanitized innerHTML interpolation of detection event fields (ProcessName, RuleName, Evidence, file paths). Attacker runs process with crafted name → logged to events.jsonl → rendered raw in dashboard → JS executes in localhost:19845 context → bypasses bearer auth via Referer, gains CSRF token, can toggle hardened mode off. | Added `esc()` HTML entity encoder; all user-controlled data in innerHTML templates now encoded (`&<>"'` → entities). Affected: `renderEvents()`, `loadOps()`, `loadQuarantine()`, scan findings, `loadReportPacks()`. |
+
 ### Findings MITIGATED by new detection capabilities in v2.1.8
 
 | Finding | Mitigation |

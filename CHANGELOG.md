@@ -1,6 +1,22 @@
 # Changelog
 
 
+## [2.1.9] - 2026-08-22
+
+### Security Fixes
+
+- **RT-2026-XSS1: Stored XSS in WebDashboard** — All `innerHTML` template interpolations in `DashboardHtml.cs` now pass user-controlled data through an `esc()` HTML entity encoder before rendering. Previously, detection event fields (`RuleName`, `ProcessName`, `Evidence`, file paths) were interpolated raw into the DOM, allowing an attacker who could trigger a detection event (e.g., by running a process with a crafted name containing `<script>` tags) to execute arbitrary JavaScript in the dashboard context on next view. This would bypass bearer token auth via the same-origin Referer shortcut and gain access to the CSRF token for state-changing API calls.
+
+  Affected renders: `renderEvents()`, `loadOps()`, `loadQuarantine()`, scan findings, `loadReportPacks()`.
+
+  Credit: ch0ic3
+
+### Changed
+
+- `ProductInfo.Version` → `2.1.9`
+- Installer version → `2.1.9`
+
+
 ## [2.1.8] - 2026-08-22
 
 ### Security Fixes (Red Team Audit Remediation)
