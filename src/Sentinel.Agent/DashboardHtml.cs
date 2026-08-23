@@ -6,7 +6,7 @@ namespace Sentinel.Agent
     /// </summary>
     public static class DashboardHtml
     {
-        public static string GetHtml(string csrfToken) => $@"<!DOCTYPE html>
+        public static string GetHtml() => $@"<!DOCTYPE html>
 <html lang=""en"">
 <head>
 <meta charset=""UTF-8"">
@@ -494,13 +494,36 @@ textarea.rp-input {{ font-family: inherit; }}
 </main>
 </div>
 <script>
-const CSRF = '{csrfToken}';
 const API = '';
+let CSRF = '';
 let ws = null;
 let eventBuffer = [];
 let chartData = new Array(60).fill(0);
 let chartIdx = 0;
 let scanPolling = null;
+
+// v2.2.0: token arrives only via tray launch URL (?token=), then lives in sessionStorage.
+// GET / does not embed secrets. Referer is never used as authentication.
+function getToken() {{
+    try {{
+        const params = new URLSearchParams(location.search);
+        const q = params.get('token');
+        if (q) {{
+            sessionStorage.setItem('sentinel_token', q);
+            params.delete('token');
+            const qs = params.toString();
+            history.replaceState({{}}, '', location.pathname + (qs ? '?' + qs : '') + location.hash);
+            return q;
+        }}
+        return sessionStorage.getItem('sentinel_token') || '';
+    }} catch (e) {{ return ''; }}
+}}
+const TOKEN = getToken();
+
+function authHeaders(extra) {{
+    const h = Object.assign({{ 'Authorization': 'Bearer ' + TOKEN }}, extra || {{}});
+    return h;
+}}
 
 // Navigation
 document.querySelectorAll('.nav-item').forEach(item => {{
@@ -530,12 +553,21 @@ function esc(s) {{
     return d.innerHTML;
 }}
 
-// API helpers
+// API helpers — always send bearer. CSRF is fetched on demand for POSTs.
 async function api(path, opts) {{
+    opts = opts || {{}};
+    opts.headers = authHeaders(opts.headers);
     try {{
         const res = await fetch(API + path, opts);
         return await res.json();
     }} catch(e) {{ return {{ ok: false, error: e.message }}; }}
+}}
+
+async function ensureCsrf() {{
+    if (CSRF) return CSRF;
+    const d = await api('/api/csrf');
+    CSRF = (d && d.token) ? d.token : '';
+    return CSRF;
 }}
 
 // Status
@@ -606,7 +638,7 @@ function renderEvents(events, containerId) {{
 let wsRetries = 0;
 function connectWs() {{
     try {{
-        ws = new WebSocket('ws://localhost:19845/ws/events');
+        ws = new WebSocket('ws://localhost:19845/ws/events?token=' + encodeURIComponent(TOKEN));
         ws.onopen = () => {{
             wsRetries = 0;
             document.getElementById('ev-list').innerHTML = '<div class=""empty-state"">Connected — waiting for events...</div>';
@@ -724,6 +756,7 @@ async function startScan() {{
     document.getElementById('sc-status').textContent = 'Running';
     document.getElementById('sc-status').className = 'card-value warning';
 
+    await ensureCsrf();
     await api('/api/scan', {{ method: 'POST', headers: {{ 'X-CSRF-Token': CSRF }} }});
 
     // Poll for results
@@ -830,6 +863,7 @@ async function saveAffidavit() {{
         DataAffected: document.getElementById('rp-data').value,
         OtherHarm: document.getElementById('rp-harm').value,
     }};
+    await ensureCsrf();
     const res = await api('/api/report/save', {{
         method: 'POST',
         headers: {{ 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF }},
@@ -925,6 +959,7 @@ async function toggleHardenedMode() {{
     if (!confirmed) return;
 
     btn.disabled = true;
+    await ensureCsrf();
     const res = await api('/api/hardened/toggle', {{
         method: 'POST',
         headers: {{ 'X-CSRF-Token': CSRF }}

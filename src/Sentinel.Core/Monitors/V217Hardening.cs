@@ -323,13 +323,12 @@ namespace Sentinel.Core.Monitors
                             RuleName = "EDR Killer Tool Detected",
                             Evidence = $"Process '{name}' (PID {proc.Id}) matches a known EDR-killer tool. " +
                                        $"Path: {imagePath ?? "unknown"}",
-                            Reasoning = "Known EDR-killer tools are designed to disable endpoint security " +
-                                        "by loading vulnerable drivers (BYOVD) to gain kernel access and " +
-                                        "terminate EDR processes. Detection before the driver load is critical. " +
-                                        "This is a President's Law rule — immediate response authorized.",
-                            Confidence = 0.95,
-                            Tier = DetectionTier.Tier1Behavioral,
-                            AuthorizedResponse = ResponseAction.KillProcessTree,
+                            Reasoning = "Process name matches a known EDR-killer tool. Names are trivial to " +
+                                        "change — this is observe fuel for correlation, not a kill by itself. " +
+                                        "A renamed copy will not match; behavioral BYOVD monitors cover the load.",
+                            Confidence = 0.70,
+                            Tier = DetectionTier.Tier2Indicator,
+                            AuthorizedResponse = ResponseAction.LogOnly,
                             ProcessName = name,
                             ProcessId = proc.Id,
                             SignalType = SignalType.SecurityEvasion,
@@ -337,8 +336,9 @@ namespace Sentinel.Core.Monitors
                             {
                                 ["Technique"] = "T1562.001",
                                 ["SubTechnique"] = "BYOVD/EDR-Kill",
-                                ["Category"] = "PresidentsLaw",
-                                ["ImagePath"] = imagePath ?? "unknown"
+                                ["Category"] = "NameMatchObserve",
+                                ["ImagePath"] = imagePath ?? "unknown",
+                                ["WeakObserveSeed"] = "true"
                             }
                         });
                     }
@@ -378,10 +378,14 @@ namespace Sentinel.Core.Monitors
         private FileSystemWatcher? _watcher;
         private string? _honeypotPath;
 
+        // v2.2.0: decoys live in a dedicated subdirectory so they cannot be
+        // LoadLibrary'd by Sentinel.Service / Agent (version.dll / winhttp.dll in the
+        // install dir is a self-sideload / self-DoS trap).
         private static readonly string[] HoneypotDllNames = new[]
         {
             "version.dll", "winmm.dll", "dbghelp.dll", "WINHTTP.dll"
         };
+        private const string HoneypotSubdir = "honeypot";
 
         public HoneypotDllMonitor(DetectionEngine detectionEngine, ILogger<HoneypotDllMonitor> logger)
         {
@@ -392,23 +396,25 @@ namespace Sentinel.Core.Monitors
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
             var installDir = AppContext.BaseDirectory;
+            var honeypotDir = Path.Combine(installDir, HoneypotSubdir);
+            try { Directory.CreateDirectory(honeypotDir); } catch { }
 
-            // Plant the honeypot DLLs
+            // Plant the honeypot DLLs in the dedicated folder (never the exe directory)
             foreach (var dllName in HoneypotDllNames)
             {
-                var path = Path.Combine(installDir, dllName);
+                var path = Path.Combine(honeypotDir, dllName);
                 PlantHoneypot(path);
             }
 
-            _honeypotPath = installDir;
+            _honeypotPath = honeypotDir;
 
             // Watch for any access to our honeypot files
             try
             {
-                _watcher = new FileSystemWatcher(installDir)
+                _watcher = new FileSystemWatcher(honeypotDir)
                 {
                     Filter = "*.dll",
-                    NotifyFilter = NotifyFilters.LastAccess | NotifyFilters.LastWrite |
+                    NotifyFilter = NotifyFilters.LastWrite |
                                    NotifyFilters.Size | NotifyFilters.FileName,
                     EnableRaisingEvents = true
                 };
@@ -416,7 +422,7 @@ namespace Sentinel.Core.Monitors
                 _watcher.Changed += OnHoneypotAccessed;
                 _watcher.Deleted += OnHoneypotDeleted;
 
-                _logger.LogInformation("[HoneypotDll] Planted decoy DLLs in {Dir} — monitoring for sideload attempts", installDir);
+                _logger.LogInformation("[HoneypotDll] Planted decoy DLLs in {Dir} — monitoring for sideload attempts", honeypotDir);
             }
             catch (Exception ex)
             {
@@ -434,7 +440,7 @@ namespace Sentinel.Core.Monitors
                     // Replant any deleted honeypots
                     foreach (var dllName in HoneypotDllNames)
                     {
-                        var path = Path.Combine(installDir, dllName);
+                        var path = Path.Combine(honeypotDir, dllName);
                         if (!File.Exists(path))
                             PlantHoneypot(path);
                     }
@@ -695,6 +701,43 @@ namespace Sentinel.Core.Monitors
             _baselineCaptured = true;
 
             _logger.LogInformation("[KernelModuleAudit] Baseline captured: {Count} kernel modules", _baselineModules.Count);
+
+            // v2.2.0: do not silently trust already-loaded BYOVD-capable drivers (RTCore64 / WinRing0 / …).
+            foreach (var mod in initial)
+            {
+                var fileName = Path.GetFileName(mod) ?? mod;
+                if (fileName.IndexOf("rtcore", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    fileName.IndexOf("winring0", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    fileName.IndexOf("dbutil", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    fileName.IndexOf("gdrv", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    fileName.IndexOf("capcom", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    fileName.IndexOf("iqvw64e", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    try
+                    {
+                        await _detectionEngine.EmitAsync(new DetectionEvent
+                        {
+                            RuleName = "BYOVD: Pre-existing Vulnerable Driver Present",
+                            Evidence = $"Kernel module '{fileName}' was already loaded at Sentinel start: {mod}",
+                            Reasoning = "A known BYOVD-capable driver is already resident. Sentinel cannot unload " +
+                                        "it from userland; this is logged so the operator can remove GPU/tuning " +
+                                        "utilities that ship RTCore64/WinRing0. New loads after start still alert.",
+                            Confidence = 0.80,
+                            Tier = DetectionTier.Tier2Indicator,
+                            AuthorizedResponse = ResponseAction.LogOnly,
+                            ProcessName = "SYSTEM",
+                            ProcessId = 0,
+                            SignalType = SignalType.SecurityEvasion,
+                            Metadata = new Dictionary<string, string>
+                            {
+                                ["Module"] = mod,
+                                ["PreExisting"] = "true"
+                            }
+                        });
+                    }
+                    catch { }
+                }
+            }
 
             while (!stoppingToken.IsCancellationRequested)
             {

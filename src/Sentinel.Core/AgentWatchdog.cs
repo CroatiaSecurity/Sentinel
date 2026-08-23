@@ -231,18 +231,40 @@ namespace Sentinel.Core
         // Process Detection
         // ═══════════════════════════════════════════════════════════════
 
-        private static bool IsAgentRunning()
+        private bool IsAgentRunning()
         {
+            Process[]? procs = null;
             try
             {
-                var procs = Process.GetProcessesByName(AgentProcessName);
-                var found = procs.Length > 0;
-                foreach (var p in procs) p.Dispose();
-                return found;
+                var installDir = Path.GetFullPath(AppContext.BaseDirectory).TrimEnd('\\') + '\\';
+                procs = Process.GetProcessesByName(AgentProcessName);
+                foreach (var p in procs)
+                {
+                    try
+                    {
+                        var path = p.MainModule?.FileName;
+                        if (string.IsNullOrEmpty(path)) continue;
+                        var full = Path.GetFullPath(path);
+                        if (full.StartsWith(installDir, StringComparison.OrdinalIgnoreCase))
+                            return true;
+                    }
+                    catch
+                    {
+                        // Access denied on MainModule — ignore this PID
+                    }
+                }
+                return false;
             }
             catch
             {
                 return false;
+            }
+            finally
+            {
+                if (procs != null)
+                {
+                    foreach (var p in procs) p.Dispose();
+                }
             }
         }
 
@@ -298,9 +320,11 @@ namespace Sentinel.Core
                 const uint CREATE_NO_WINDOW = 0x08000000;
                 const uint NORMAL_PRIORITY_CLASS = 0x00000020;
 
+                // v2.2.0: pass lpApplicationName so the image cannot be swapped via command-line
+                // search; command line remains the quoted path for argv[0].
                 bool created = CreateProcessAsUser(
                     userToken,
-                    null,
+                    agentPath,
                     commandLine,
                     IntPtr.Zero,
                     IntPtr.Zero,
@@ -369,25 +393,36 @@ namespace Sentinel.Core
         {
             try
             {
-                // Primary check: Authenticode signature verification
-                if (SecurityValidation.VerifyAuthenticodeSignature(agentPath))
-                    return true;
-
-                // Fallback: If unsigned build (dev scenario), verify the binary hash
-                // matches the hash recorded in the DPAPI config store at install time.
-                // In production, all binaries are signed so this path is rarely hit.
-                _logger.LogDebug("[AgentWatchdog] Agent binary is not Authenticode-signed — checking install hash");
-
-                // Accept unsigned only if the service binary is also unsigned (consistent dev build)
                 var servicePath = Process.GetCurrentProcess().MainModule?.FileName;
-                if (servicePath != null && !SecurityValidation.VerifyAuthenticodeSignature(servicePath))
+                bool agentSigned = SecurityValidation.VerifyAuthenticodeSignature(agentPath);
+                bool serviceSigned = !string.IsNullOrEmpty(servicePath) &&
+                                     SecurityValidation.VerifyAuthenticodeSignature(servicePath!);
+
+                if (agentSigned && serviceSigned)
                 {
-                    // Both unsigned = development build. Allow launch but warn.
-                    _logger.LogWarning("[AgentWatchdog] Both Service and Agent are unsigned — development mode. Allowing launch.");
-                    return true;
+                    // v2.2.0: any trusted publisher is not enough — Agent must match Service signer.
+                    if (SecurityValidation.VerifySameAuthenticodePublisher(agentPath, servicePath!))
+                        return true;
+                    _logger.LogError("[AgentWatchdog] Agent signer does not match Service signer — refusing launch");
+                    return false;
                 }
 
-                // Service is signed but agent is not — tampered
+                if (agentSigned && !serviceSigned)
+                {
+                    _logger.LogError("[AgentWatchdog] Service unsigned but Agent signed — refusing launch");
+                    return false;
+                }
+
+#if DEBUG
+                // Unsigned pair is allowed only in Debug builds (local dev).
+                if (!agentSigned && !serviceSigned)
+                {
+                    _logger.LogWarning("[AgentWatchdog] Both Service and Agent are unsigned — DEBUG build. Allowing launch.");
+                    return true;
+                }
+#endif
+
+                _logger.LogError("[AgentWatchdog] Agent binary failed integrity check (unsigned or publisher mismatch)");
                 return false;
             }
             catch (Exception ex)

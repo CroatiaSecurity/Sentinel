@@ -1,6 +1,6 @@
 # Sentinel — Threat Model
 
-**Version: 2.1.8**
+**Version: 2.2.0**
 
 This document assumes the attacker has read the source code.
 
@@ -8,11 +8,15 @@ This document assumes the attacker has read the source code.
 
 Work-first defaults: HID auto-disable is kiosk-only; Steam/Xbox/Store/DirectX/OBS are work surface; Hell's Gate and unmapped-thread scanners require a real stub table / compact shellcode page. Weak browse/play heuristics cannot complete a chain nuke. MitMDefense does not unlock arbitrary host mutation.
 
+### v2.2.0 — advertised controls actually run
+
+Dashboard bearer is no longer bypassed by a spoofed Referer. V217 monitors (AMSI integrity, honeypot DLLs in a dedicated folder, decoy pipes, kernel module audit, token privilege audit, EDR-killer **name observe**) are registered. Game-path reputation skip refuses user-profile trees. ChainTracer does not treat `Windows\Temp` as OS-critical. Hardened-mode LGPO no longer turns audit and password quality off.
+
 ### v2.1.8 — red team audit hardening + dirty tricks
 
-Security fixes: binary integrity verification before agent launch (Authenticode + SHA-256 baseline); AntiTamperGuard detects binary replacement (not just deletion); Worker nonce consumed after HMAC verification; WebDashboard bearer token auth; Worker input validation; chain-confirmed detections bypass kill rate limit.
+Security fixes: binary integrity verification before agent launch (Authenticode + SHA-256 baseline); AntiTamperGuard detects binary replacement (not just deletion); Worker nonce consumed after HMAC verification; WebDashboard bearer token auth (**completed in 2.2.0** — 2.1.8 Referer shortcut was not auth); Worker input validation; chain-confirmed detections bypass kill rate limit.
 
-New detection capabilities:
+New detection capabilities (code existed in 2.1.8; **wired in 2.2.0**):
 
 | Capability | Role | Bypass requires |
 |------------|------|-----------------|

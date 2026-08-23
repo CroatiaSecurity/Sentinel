@@ -179,7 +179,7 @@ namespace Sentinel.Core
                                             // runtime installers that Sentinel must never touch — observe only.
                                             // Consistent with DllUnloadEngine, AdvancedResponseEngine, and
                                             // IncidentResponseService which already skip these paths.
-                                            if (SecurityValidation.IsGameOrAntiCheatPath(imagePath) ||
+                                            if (SecurityValidation.ShouldSkipReputationForGamePath(imagePath) ||
                                                 InstallerHeuristics.IsDirectXOrRuntimeRedist(pt.ProcessName, imagePath))
                                                 return;
 

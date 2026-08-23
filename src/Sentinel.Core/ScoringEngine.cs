@@ -172,6 +172,8 @@ namespace Sentinel.Core
         public static bool IsPresidentsLawRule(string? ruleName)
         {
             var category = CategorizeDetection(ruleName);
+            // v2.2.0: DnsAnomaly / NetworkAnomaly are observe fuel, not President's Law.
+            // A DNS spike or ARP noise must not become un-allowlistable kill-grade.
             return category is DetectionCategory.CredentialDump
                 or DetectionCategory.SecurityEvasion
                 or DetectionCategory.Ransomware
@@ -180,8 +182,6 @@ namespace Sentinel.Core
                 or DetectionCategory.AntiTamper
                 or DetectionCategory.AttackOnUser
                 or DetectionCategory.PrivilegeEscalation
-                or DetectionCategory.DnsAnomaly
-                or DetectionCategory.NetworkAnomaly
                 or DetectionCategory.C2Beaconing;
         }
 

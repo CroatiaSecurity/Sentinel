@@ -38,12 +38,12 @@ const MAX_NONCE_ENTRIES = 4096;
 const usedNonces = new Map();
 const TIMESTAMP_WINDOW_SEC = 60;
 
-function checkRateLimit(ip) {
+function checkRateLimit(ip, limit = RATE_LIMIT_PER_MINUTE) {
   const now = Math.floor(Date.now() / 1000);
   const window = Math.floor(now / 60);
   const key = `${ip}:${window}`;
   const count = rateBuckets.get(key) || 0;
-  if (count >= RATE_LIMIT_PER_MINUTE) return false;
+  if (count >= limit) return false;
   rateBuckets.set(key, count + 1);
   if (rateBuckets.size > 5000) {
     for (const k of rateBuckets.keys()) {
@@ -120,7 +120,8 @@ export default {
     }
 
     const clientIp = request.headers.get('CF-Connecting-IP') || 'unknown';
-    if (!checkRateLimit(clientIp)) {
+    // Cheap unauthenticated flood guard (does not consume the authenticated budget).
+    if (!checkRateLimit('unauth:' + clientIp, 120)) {
       return new Response(JSON.stringify({ error: 'Rate limit exceeded' }), {
         status: 429,
         headers: { 'Content-Type': 'application/json', ...corsHeaders }
@@ -182,6 +183,26 @@ export default {
       if (!consumeNonce(nonce, timestampVal)) {
         return new Response(JSON.stringify({ error: 'Unauthorized: Replay detected' }), {
           status: 401,
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+      }
+
+      // v2.2.0: durable CF rate limit AFTER HMAC so unauth traffic cannot burn the quota.
+      try {
+        if (env.RATE_LIMITER && typeof env.RATE_LIMITER.limit === 'function') {
+          const rl = await env.RATE_LIMITER.limit({ key: clientIp });
+          if (rl && rl.success === false) {
+            return new Response(JSON.stringify({ error: 'Rate limit exceeded' }), {
+              status: 429,
+              headers: { 'Content-Type': 'application/json', ...corsHeaders }
+            });
+          }
+        }
+      } catch (_) { /* binding optional in local wrangler */ }
+
+      if (!checkRateLimit('auth:' + clientIp, RATE_LIMIT_PER_MINUTE)) {
+        return new Response(JSON.stringify({ error: 'Rate limit exceeded' }), {
+          status: 429,
           headers: { 'Content-Type': 'application/json', ...corsHeaders }
         });
       }
@@ -309,13 +330,11 @@ async function reportHash(body, env) {
     return { success: false, error: 'MalwareBazaar key not configured' };
   }
 
+  // Honest: MalwareBazaar ingest requires the sample bytes. This endpoint looks up
+  // the hash and, if known, adds a comment. It does not pretend to submit a new sample.
   const formData = new URLSearchParams();
-  formData.append('query', 'taginfo');
+  formData.append('query', 'get_info');
   formData.append('hash', body.value);
-  formData.append('comment', body.comment || 'Reported by Sentinel');
-  if (body.tags && body.tags.length > 0) {
-    formData.append('tag', body.tags.join(','));
-  }
 
   const response = await fetch('https://mb-api.abuse.ch/api/v1/', {
     method: 'POST',
@@ -324,7 +343,32 @@ async function reportHash(body, env) {
   });
 
   const text = await response.text();
-  return { success: response.ok, upstream: text.substring(0, 500) };
+  let known = false;
+  try {
+    const parsed = JSON.parse(text);
+    known = parsed && parsed.query_status === 'ok';
+  } catch (_) { /* non-JSON upstream */ }
+
+  if (known) {
+    const comment = new URLSearchParams();
+    comment.append('query', 'add_comment');
+    comment.append('hash', body.value);
+    comment.append('comment', body.comment || 'Reported by Sentinel');
+    await fetch('https://mb-api.abuse.ch/api/v1/', {
+      method: 'POST',
+      headers: { 'Auth-Key': env.MALWAREBAZAAR_KEY },
+      body: comment
+    });
+    return { success: true, action: 'commented_existing_sample', upstream: text.substring(0, 500) };
+  }
+
+  return {
+    success: true,
+    submitted: false,
+    action: 'lookup_only',
+    reason: 'MalwareBazaar requires the sample file to ingest a new hash',
+    upstream: text.substring(0, 500)
+  };
 }
 
 async function reportUrl(body, env) {

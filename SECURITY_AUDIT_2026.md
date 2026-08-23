@@ -1,9 +1,26 @@
-# Sentinel v2.0.8 — Security Audit (Normal / Red / Blue)
+# Sentinel — Security Audit (Normal / Red / Blue)
 
-**Date:** 2026-08-12 (updated 2026-08-22 with v2.1.8 remediations)  
+**Date:** 2026-08-12 (updated 2026-08-23 with v2.2.0 remediations)  
 **Scope:** Full source review of Sentinel.Core, Service, Agent, installer, Cloudflare Worker, and prior security docs.  
 **Audience:** Gaming desktops, creator workstations, high-profile personal targets.  
 **Method:** Manual adversarial + defensive review; fixes implemented in this release.
+
+## v2.2.0 — Honest remediations
+
+Items previously marked fixed that were **not** in force, now actually shipped:
+
+| ID | Severity | Finding | 2.2.0 fix |
+|----|----------|---------|-----------|
+| RT-2026-M3 | High | Bearer skipped on spoofed Referer; token never in HTML | Referer ignored; tray `?token=`; WS requires token |
+| RT-2026-V217 | High | Amsi/EDR-killer/honeypot/pipe/kernel/token monitors never registered | Registered in MonitorGroups |
+| RT-2026-HONEYPOT | High | 0-byte version.dll/winhttp.dll in install dir = self-sideload | Decoys in `honeypot\` only |
+| RT-2026-GAME | High | User-writable `steamapps\common` skipped reputation | Profile/staging paths cannot skip |
+| RT-2026-WINTEMP | High | `C:\Windows\` prefix skipped quarantine | System32/SysWOW64 only |
+| RT-2026-WATCH | High | Name-only agent liveness; unsigned-pair allow | Install-path match; publisher pin; Debug-only unsigned |
+| RT-2026-BYOVD | Medium | SYSTEM profile scan; PID 0; corrupt hash; silent RTCore baseline | User profiles; Event PID; hash removed; pre-existing logged |
+| RT-2026-LGPO | High | GSecurity.inf disabled passwords/audit/FIPS | Real baseline; FIPS not touched |
+| RT-2026-WORKER | Medium | RATE_LIMITER unused; MB `taginfo` fake-report | Called after HMAC; honest lookup |
+| RT-2026-CFG | Medium | ObserveUntilChain bindable from leftover JSON; HMAC comment-only | Forced true; SCFG2 HMAC envelope |
 
 ## Executive summary
 

@@ -22,7 +22,8 @@ namespace Sentinel.Core
     ///   2. Client proves possession via HMAC-SHA256 over timestamp|nonce|op|body.
     ///   3. 60-second timestamp window blocks replay.
     ///
-    /// Read-only ops only (ping / ops / health). No ActiveResponse toggle over IPC.
+    /// Ops: ping / ops / health (read-only) plus scan / scan_status (on-demand audit).
+    /// No ActiveResponse toggle over IPC.
     /// </summary>
     public static class ServiceAgentIpc
     {

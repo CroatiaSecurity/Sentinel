@@ -4,7 +4,8 @@
 
 | Version | Supported |
 |---------|-----------|
-| 2.1.x   | Yes (current: 2.1.2) |
+| 2.2.x   | Yes (current: 2.2.0) |
+| 2.1.x   | Security fixes only |
 | 1.9.x   | Security fixes only |
 | 1.8.x   | Security fixes only |
 | < 1.8   | No        |
@@ -66,7 +67,7 @@ The following are NOT in scope:
 - **Auth model:** HMAC-SHA256 over `timestamp|nonce|op|body` with a 32-byte random token stored at `%ProgramData%\Sentinel\Secure\.ipc_token`.
 - **Token ACL (v2.0.8):** SYSTEM full, Admins full, **Interactive Users read** (not all Authenticated Users). Secure directory itself is SYSTEM+Admins only.
 - **Replay protection:** 60-second timestamp window + server-side nonce map (v2.0.4+).
-- **Read-only commands only:** `ping`, `ops`, `health`. No ActiveResponse toggle over IPC.
+- **Commands:** `ping`, `ops`, `health` (read-only) plus `scan` / `scan_status` (on-demand audit). No ActiveResponse toggle over IPC.
 - **Pipe ACL:** SYSTEM + Authenticated Users (connect); authentication still required.
 - **v2.0.4:** Pipe name includes machine-unique suffix (anti-fingerprinting).
 - **v2.0.3:** Token file written atomically with pre-set ACL.

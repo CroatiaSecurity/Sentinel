@@ -1,6 +1,39 @@
 # Changelog
 
 
+## [2.2.0] - 2026-08-23
+
+Honest remediations from a full source red-team. Several items previously marked “fixed” in 2.1.8/2.1.9 were not actually in force. This release wires them, or tells the truth.
+
+### Security Fixes
+
+- **Dashboard auth is real now (RT-2026-M3, actually).** Referer is no longer accepted as proof of origin. The bearer token is **not** embedded in `GET /`. The tray opens `http://localhost:19845/?token=…`; JS stores it in `sessionStorage` and strips the query. `/api/*` and `/ws/events` require that token. CSRF is issued only to authenticated callers.
+- **V217 monitors now run.** `AmsiIntegrityCheck`, `HoneypotDllMonitor`, `EdrKillerDetectionMonitor`, `DecoyPipeMonitor`, `KernelModuleAuditMonitor`, and `TokenPrivilegeAuditMonitor` are registered in MonitorGroups. They were dead code in 2.1.8 despite being advertised.
+- **Honeypot DLLs no longer sit next to Sentinel.exe.** Decoys live in `honeypot\` so `version.dll` / `winhttp.dll` cannot sideload or DoS the service itself.
+- **EDR-killer names are observe fuel**, not President’s Law kills. Rename bypasses name lists; we stopped pretending otherwise.
+- **Game-path reputation skip no longer matches user-writable substrings.** `%AppData%\steamapps\common\` is not Steam. Reputation skip requires a game tree that is **not** under a user profile / Temp / Downloads / Desktop.
+- **ChainTracer no longer treats all of `C:\Windows\` as OS-critical.** System32/SysWOW64 only, case-insensitive. `Windows\Temp` can be quarantined.
+- **Agent watchdog** matches the install-dir image path (a dummy `Sentinel.Agent` in Temp no longer blinds relaunch), passes `lpApplicationName` to `CreateProcessAsUser`, pins Authenticode publisher to the Service binary, and refuses unsigned pairs in Release.
+- **DriverLoadMonitor** scans interactive user profiles (not SYSTEM’s LocalAppData), uses Event 7045 process id when `> 4`, widens the drop window, and no longer ships a corrupted EneIo64 hash. Pre-existing RTCore64/WinRing0 at start is **logged**, not silently trusted.
+- **BrowserC2Guard** scans each interactive user’s Chrome/Edge/Brave extension tree.
+- **GSecurity.inf (kiosk / Hardened Mode)** no longer sets password length 0, complexity off, all audit off, FIPS off, or Authenticode off. FIPS is left untouched. Password length 12 + complexity; logon/account/policy audit on.
+- **Worker:** `RATE_LIMITER` is actually called **after** HMAC. Unauth flood has a separate cheaper cap. MalwareBazaar `/report/hash` is an honest lookup + comment on known samples (ingest still needs the file).
+- **EncryptedConfigStore** writes an `SCFG2` HMAC envelope. Leftover `appsettings.json` cannot turn `ObserveUntilChain` off.
+- **FileVerdictAds** no longer grants Administrators FullControl on `%ProgramData%\Sentinel\Secure`.
+- **President’s Law** no longer includes DnsAnomaly / NetworkAnomaly.
+
+### Changed
+
+- `ProductInfo.Version` → `2.2.0`
+- Installer → `SentinelSetup-2.2.0`
+- IPC docs: `scan` / `scan_status` are real (on-demand audit), not “read-only ping/ops/health only”
+
+### Tests
+
+- `V220SecurityHardeningTests` — dashboard auth invariants, game-path skip, Windows\Temp quarantine, President’s Law scope, config HMAC envelope.
+- Full suite: **1795** tests passing.
+
+
 ## [2.1.9] - 2026-08-22
 
 ### Security Fixes

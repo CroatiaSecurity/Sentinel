@@ -10,6 +10,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Configuration;
 using Sentinel.Core;
+using Sentinel.Core.Monitors;
 using Sentinel.Core.Plugins;
 
 namespace Sentinel.Service
@@ -209,6 +210,10 @@ namespace Sentinel.Service
                     // appsettings.json is retained as optional fallback for migration/dev only.
                     var config = new SentinelConfig();
                     hostContext.Configuration.GetSection("Sentinel").Bind(config);
+                    // v2.2.0: leftover appsettings.json must not disable observe-until-chain.
+                    // Encrypted store can still set RestrictivePortHardening; ObserveUntilChain
+                    // stays the compiled default unless tests set it on the object directly.
+                    config.ObserveUntilChain = true;
 
                     var threatReportingConfig = new ThreatReportingConfig();
                     hostContext.Configuration.GetSection("ThreatReporting").Bind(threatReportingConfig);
@@ -397,6 +402,8 @@ namespace Sentinel.Service
                             sp.GetRequiredService<ConnectivityCanaryMonitor>(),
                             sp.GetRequiredService<EtwSessionGuard>(),
                             sp.GetRequiredService<EtwProviderTamperMonitor>(),
+                            sp.GetRequiredService<AmsiIntegrityCheck>(),
+                            sp.GetRequiredService<HoneypotDllMonitor>(),
                         };
                         return new MonitorGroup(
                             new MonitorGroupConfig
@@ -419,6 +426,8 @@ namespace Sentinel.Service
                     services.AddSingleton<ConnectivityCanaryMonitor>();
                     services.AddSingleton<EtwSessionGuard>();
                     services.AddSingleton<EtwProviderTamperMonitor>();
+                    services.AddSingleton<AmsiIntegrityCheck>();
+                    services.AddSingleton<HoneypotDllMonitor>();
                     services.AddSingleton<WfpIntegrityMonitor>();
                     services.AddSingleton<DriverLoadMonitor>();
 
@@ -457,6 +466,8 @@ namespace Sentinel.Service
                             sp.GetRequiredService<LpeScaffoldMonitor>(),
                             sp.GetRequiredService<InitialAccessMonitor>(),
                             sp.GetRequiredService<PersistenceSurfaceMonitor>(),
+                            sp.GetRequiredService<EdrKillerDetectionMonitor>(),
+                            sp.GetRequiredService<DecoyPipeMonitor>(),
                         };
                         return new MonitorGroup(
                             new MonitorGroupConfig
@@ -501,6 +512,8 @@ namespace Sentinel.Service
                     services.AddSingleton<LpeScaffoldMonitor>();
                     services.AddSingleton<InitialAccessMonitor>();
                     services.AddSingleton<PersistenceSurfaceMonitor>();
+                    services.AddSingleton<EdrKillerDetectionMonitor>();
+                    services.AddSingleton<DecoyPipeMonitor>();
 
                     // ── Group 3: Credential Protection ────────────────────────────────
                     // Starts after core detection (4s). Protects credentials and sessions.
@@ -516,6 +529,7 @@ namespace Sentinel.Service
                             sp.GetRequiredService<BuiltinAdminGuard>(),
                             sp.GetRequiredService<PasswordRotationGuard>(),
                             sp.GetRequiredService<RemoteSessionGuard>(),
+                            sp.GetRequiredService<TokenPrivilegeAuditMonitor>(),
                         };
                         return new MonitorGroup(
                             new MonitorGroupConfig
@@ -538,6 +552,7 @@ namespace Sentinel.Service
                     services.AddSingleton<BuiltinAdminGuard>();
                     services.AddSingleton<PasswordRotationGuard>();
                     services.AddSingleton<RemoteSessionGuard>();
+                    services.AddSingleton<TokenPrivilegeAuditMonitor>();
 
                     // ── Group 4: Network Integrity ────────────────────────────────────
                     // Starts after credential group (6s). Monitors network-layer attacks.
@@ -617,6 +632,7 @@ namespace Sentinel.Service
                             sp.GetRequiredService<DriverLoadMonitor>(),
                             sp.GetRequiredService<GpuProcessMonitor>(),
                             sp.GetRequiredService<WmiProviderIntegrityMonitor>(),
+                            sp.GetRequiredService<KernelModuleAuditMonitor>(),
                         };
                         return new MonitorGroup(
                             new MonitorGroupConfig
@@ -651,6 +667,7 @@ namespace Sentinel.Service
                     services.AddSingleton<AcousticThreatMonitor>();
                     services.AddSingleton<WmiProviderIntegrityMonitor>();
                     services.AddSingleton<GpuProcessMonitor>();
+                    services.AddSingleton<KernelModuleAuditMonitor>();
 
                     // ── Group 6: Peripheral & Environmental ───────────────────────────
                     // Starts late (30s). Monitors hardware peripherals and external media.

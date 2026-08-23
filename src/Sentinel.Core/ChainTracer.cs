@@ -113,11 +113,12 @@ namespace Sentinel.Core
             @"\windowsapps\",
         };
 
+        // v2.2.0: System32 / SysWOW64 only. The previous Windows\ prefix treated
+        // C:\Windows\Temp (and Tasks, Prefetch, …) as "OS critical" and skipped quarantine.
         private static readonly string[] SystemPaths = new[]
         {
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "System32") + @"\",
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "SysWOW64") + @"\",
-            Environment.GetFolderPath(Environment.SpecialFolder.Windows) + @"\",
         };
 
         public ChainTracer(
@@ -431,11 +432,24 @@ namespace Sentinel.Core
             await _eventLogger.LogEventAsync("chain_trace", evidence);
         }
 
-        private static bool IsSystemBinary(string? imagePath, string processName)
+        internal static bool IsSystemBinary(string? imagePath, string processName)
         {
-            // Never trust name alone — require path verification
+            // Never trust name alone — require path verification.
+            // v2.2.0: OrdinalIgnoreCase; never treat Windows\Temp as system.
             if (string.IsNullOrEmpty(imagePath)) return false;
-            return SystemPaths.Any(sp => imagePath!.StartsWith(sp));
+            try
+            {
+                var full = Path.GetFullPath(imagePath);
+                var win = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+                var winTemp = Path.Combine(win, "Temp") + Path.DirectorySeparatorChar;
+                if (full.StartsWith(winTemp, StringComparison.OrdinalIgnoreCase))
+                    return false;
+                return SystemPaths.Any(sp => full.StartsWith(sp, StringComparison.OrdinalIgnoreCase));
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         /// <summary>

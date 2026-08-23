@@ -184,7 +184,7 @@ namespace Sentinel.Agent
                 // Open the web dashboard in the default browser
                 Process.Start(new ProcessStartInfo
                 {
-                    FileName = WebDashboardService.DashboardUrl,
+                    FileName = WebDashboardService.DashboardLaunchUrl,
                     UseShellExecute = true
                 });
             }
@@ -196,7 +196,7 @@ namespace Sentinel.Agent
                     Process.Start(new ProcessStartInfo
                     {
                         FileName = "explorer.exe",
-                        Arguments = WebDashboardService.DashboardUrl,
+                        Arguments = WebDashboardService.DashboardLaunchUrl,
                         UseShellExecute = true
                     });
                 }

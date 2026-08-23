@@ -72,7 +72,8 @@ namespace Sentinel.Core
             // HpPortIox64.sys (HP) - arbitrary I/O port access
             "D0970E3B79B3CE0F0BC8C40D2DCE3E59F88C6EDC6A2B1B5FCA9E7F7C8E7C9A7D",
             // EneIo64.sys (ENE Technology) - direct physical memory access
-            "174A2F tried:8E6E41B69A8AB4E0BC0F8B4E7F5C7B3E2D1A0F9E8D7C6B5A4938",
+            // EneIo64.sys (ENE Technology) — placeholder until a verified SHA-256 is recorded.
+            // Previous value was a corrupted edit ("174A2F tried:...") and never matched.
             // iqvw64e.sys (Intel) - CVE-2015-2291, widely abused
             "4429F32DB1CC70567919D7D47B844A91CF1329A6CD116F582305F3B7B60CD60B",
             // Capcom.sys - arbitrary kernel code execution
@@ -255,7 +256,9 @@ namespace Sentinel.Core
                             serviceType != "1" && serviceType != "2")
                             continue;
 
-                        await EvaluateNewDriverAsync(serviceName, imagePath, ct);
+                        int pid = 0;
+                        try { pid = record.ProcessId ?? 0; } catch { }
+                        await EvaluateNewDriverAsync(serviceName, imagePath, ct, pid);
                     }
                 }
             }
@@ -303,13 +306,8 @@ namespace Sentinel.Core
         /// </summary>
         private async Task CheckSuspiciousDriverFilesAsync(CancellationToken ct)
         {
-            var suspiciousPaths = new[]
-            {
-                Path.GetTempPath(),
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile) + @"\Downloads",
-                Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
-            };
+            // v2.2.0: scan real interactive user profiles, not SYSTEM's LocalAppData.
+            var suspiciousPaths = SecurityValidation.EnumerateInteractiveUserWritableRoots();
 
             foreach (var basePath in suspiciousPaths)
             {
@@ -320,10 +318,10 @@ namespace Sentinel.Core
                     var sysFiles = Directory.EnumerateFiles(basePath, "*.sys", SearchOption.TopDirectoryOnly)
                         .Where(f =>
                         {
-                            try { return File.GetCreationTimeUtc(f) > DateTime.UtcNow.AddSeconds(-20); }
+                            try { return File.GetCreationTimeUtc(f) > DateTime.UtcNow.AddMinutes(-5); }
                             catch { return false; }
                         })
-                        .Take(5);
+                        .Take(25);
 
                     foreach (var sysFile in sysFiles)
                     {
@@ -395,14 +393,7 @@ namespace Sentinel.Core
         /// </summary>
         private async Task CheckSuspiciousGpuDriverDropAsync(CancellationToken ct)
         {
-            var suspiciousPaths = new[]
-            {
-                Path.GetTempPath(),
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile) + @"\Downloads",
-                Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
-                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            };
+            var suspiciousPaths = SecurityValidation.EnumerateInteractiveUserWritableRoots();
 
             foreach (var basePath in suspiciousPaths)
             {
@@ -473,7 +464,7 @@ namespace Sentinel.Core
         /// <summary>
         /// Evaluates a newly detected driver service against the vulnerability blocklist.
         /// </summary>
-        private async Task EvaluateNewDriverAsync(string serviceName, string imagePath, CancellationToken ct)
+        private async Task EvaluateNewDriverAsync(string serviceName, string imagePath, CancellationToken ct, int processId = 0)
         {
             if (string.IsNullOrEmpty(imagePath)) return;
             if (_alertedDrivers.Contains(serviceName)) return;
@@ -567,7 +558,7 @@ namespace Sentinel.Core
                 Tier = DetectionTier.Tier1Behavioral,
                 AuthorizedResponse = response,
                 ProcessName = serviceName,
-                ProcessId = 0,
+                ProcessId = processId > 4 ? processId : 0,
                 SignalType = SignalType.SecurityEvasion,
                 Metadata = new Dictionary<string, string>
                 {

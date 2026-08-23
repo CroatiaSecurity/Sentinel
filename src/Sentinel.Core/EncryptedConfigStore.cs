@@ -22,7 +22,8 @@ namespace Sentinel.Core
     /// Security properties:
     ///   - Machine-scope DPAPI: only processes on this host can decrypt
     ///   - SYSTEM + Admins ACL: standard users cannot read the ciphertext
-    ///   - Integrity HMAC: tamper detection (modified ciphertext = decryption failure)
+    ///   - Integrity HMAC: HMAC-SHA256 over ciphertext with a DPAPI-protected key (v2.2.0).
+    ///     Legacy blobs (no SCFG2 header) still decrypt via DPAPI alone.
     ///   - No plaintext config on disk: physical access attacker must break DPAPI
     ///
     /// To set secrets, use: Sentinel.Service.exe --set-config ProxySharedSecret=value
@@ -111,7 +112,7 @@ namespace Sentinel.Core
                 var cipherBytes = File.ReadAllBytes(_configPath);
                 if (cipherBytes.Length == 0) return;
 
-                var plainBytes = Unprotect(cipherBytes);
+                var plainBytes = UnwrapAndUnprotect(cipherBytes);
                 if (plainBytes == null || plainBytes.Length == 0)
                 {
                     _logger?.LogWarning("[EncryptedConfigStore] Failed to decrypt config.enc — using compiled defaults");
@@ -140,7 +141,7 @@ namespace Sentinel.Core
 
                 var json = JsonSerializer.Serialize(_overrides, new JsonSerializerOptions { WriteIndented = false });
                 var plainBytes = Encoding.UTF8.GetBytes(json);
-                var cipherBytes = Protect(plainBytes);
+                var cipherBytes = ProtectAndWrap(plainBytes);
                 if (cipherBytes == null)
                 {
                     _logger?.LogError("[EncryptedConfigStore] DPAPI encryption failed — config not saved");
@@ -148,7 +149,16 @@ namespace Sentinel.Core
                 }
 
                 File.WriteAllBytes(_configPath, cipherBytes);
-                LockFileAcl(_configPath);
+                // Production Secure\config.enc only — unit-test temp paths must stay readable.
+                try
+                {
+                    if (string.Equals(
+                            Path.GetFullPath(_configPath),
+                            Path.GetFullPath(DefaultConfigPath),
+                            StringComparison.OrdinalIgnoreCase))
+                        LockFileAcl(_configPath);
+                }
+                catch { }
                 return true;
             }
             catch (Exception ex)
@@ -234,6 +244,79 @@ namespace Sentinel.Core
                 return ConvertHex.ToHexString(Sha256Net48.HashData(bytes));
             }
             catch { return null; }
+        }
+
+        private static readonly byte[] Scfg2Magic = Encoding.ASCII.GetBytes("SCFG2");
+
+        /// <summary>
+        /// v2.2.0 envelope: SCFG2 | keyLen | DPAPI(hmacKey) | HMAC-SHA256(cipher) | DPAPI(json).
+        /// Legacy files (no magic) decrypt as raw DPAPI.
+        /// </summary>
+        private static byte[]? ProtectAndWrap(byte[] data)
+        {
+            var cipher = Protect(data);
+            if (cipher == null) return null;
+
+            var hmacKey = new byte[32];
+            using (var rng = RandomNumberGenerator.Create())
+                rng.GetBytes(hmacKey);
+
+            var wrappedKey = Protect(hmacKey);
+            if (wrappedKey == null) return null;
+
+            byte[] hmac;
+            using (var h = new HMACSHA256(hmacKey))
+                hmac = h.ComputeHash(cipher);
+
+            var envelope = new byte[Scfg2Magic.Length + 4 + wrappedKey.Length + 32 + cipher.Length];
+            Buffer.BlockCopy(Scfg2Magic, 0, envelope, 0, Scfg2Magic.Length);
+            var keyLen = BitConverter.GetBytes(wrappedKey.Length);
+            Buffer.BlockCopy(keyLen, 0, envelope, Scfg2Magic.Length, 4);
+            Buffer.BlockCopy(wrappedKey, 0, envelope, Scfg2Magic.Length + 4, wrappedKey.Length);
+            Buffer.BlockCopy(hmac, 0, envelope, Scfg2Magic.Length + 4 + wrappedKey.Length, 32);
+            Buffer.BlockCopy(cipher, 0, envelope, Scfg2Magic.Length + 4 + wrappedKey.Length + 32, cipher.Length);
+            return envelope;
+        }
+
+        private static byte[]? UnwrapAndUnprotect(byte[] data)
+        {
+            if (data.Length >= Scfg2Magic.Length + 4 + 32 && StartsWithMagic(data))
+            {
+                int keyLen = BitConverter.ToInt32(data, Scfg2Magic.Length);
+                if (keyLen < 16 || keyLen > 4096) return null;
+                int keyOffset = Scfg2Magic.Length + 4;
+                int hmacOffset = keyOffset + keyLen;
+                int cipherOffset = hmacOffset + 32;
+                if (cipherOffset >= data.Length) return null;
+
+                var wrappedKey = new byte[keyLen];
+                Buffer.BlockCopy(data, keyOffset, wrappedKey, 0, keyLen);
+                var expectedHmac = new byte[32];
+                Buffer.BlockCopy(data, hmacOffset, expectedHmac, 0, 32);
+                var cipher = new byte[data.Length - cipherOffset];
+                Buffer.BlockCopy(data, cipherOffset, cipher, 0, cipher.Length);
+
+                var hmacKey = Unprotect(wrappedKey);
+                if (hmacKey == null) return null;
+                byte[] actualHmac;
+                using (var h = new HMACSHA256(hmacKey))
+                    actualHmac = h.ComputeHash(cipher);
+                if (!SecurityValidation.SecureCompare(expectedHmac, actualHmac))
+                    return null;
+                return Unprotect(cipher);
+            }
+
+            // Legacy DPAPI-only blob
+            return Unprotect(data);
+        }
+
+        private static bool StartsWithMagic(byte[] data)
+        {
+            for (int i = 0; i < Scfg2Magic.Length; i++)
+            {
+                if (data[i] != Scfg2Magic[i]) return false;
+            }
+            return true;
         }
 
         private static byte[]? Protect(byte[] data)

@@ -1,6 +1,6 @@
 # Sentinel — Design Document
 
-**Version: 2.1.9**
+**Version: 2.2.0**
 
 ---
 
@@ -37,11 +37,11 @@ Monitors → TelemetryFusionEngine → DetectionEngine → AdvancedResponseEngin
 | `PluginRegistry` + interfaces | Extensibility surface for detectors / correlation / response |
 | `RulePackLoader` | RSA-SHA256 signed `*.pack.json` → `ICorrelationRule` plugins |
 | `EventGraph.GetProcessDiversity` | Graph fan-out boost for weighted score cards |
-| `ServiceAgentIpcHost` / `ServiceAgentIpcClient` | HMAC authenticated named pipe with nonce replay prevention (ops/health only) |
+| `ServiceAgentIpcHost` / `ServiceAgentIpcClient` | HMAC authenticated named pipe with nonce replay prevention (ops/health/scan) |
 | `OpsMetricsPublisher` | Writes `%ProgramData%\Sentinel\ops_metrics.json` |
 | `SelfPathGuard` | Hardlink-aware install self-exclusion |
 | `EncryptedConfigStore` | DPAPI-encrypted per-deployment config (`config.enc`); replaces plaintext appsettings.json |
-| `ProductInfo.Version` | `2.1.9` |
+| `ProductInfo.Version` | `2.2.0` |
 
 All components are wired via Microsoft.Extensions.DependencyInjection. No static mutable state anywhere.
 
@@ -727,7 +727,7 @@ Self-heal loops: `IPSecIntegrityGuard` (30s, rebuilds current profile), `AsrPoli
 
 | Component | Location | Role |
 |-----------|----------|------|
-| `WebDashboardService` | Sentinel.Agent | Local HTTP dashboard (`http://localhost:19845`) replacing WinForms settings UI; CSRF-protected, bearer-token auth via IPC |
+| `WebDashboardService` | Sentinel.Agent | Local HTTP dashboard (`http://localhost:19845`); CSRF + bearer from tray `?token=` (Referer is not auth) |
 | `DashboardHtml` | Sentinel.Agent | Static HTML/CSS/JS generator for the web dashboard |
 | `ScanEngine` | Sentinel.Core | On-demand file/directory scan engine; powers `/api/scan` from dashboard and `scan` IPC command |
 | `GpuProcessMonitor` | Sentinel.Core/Monitors | Detects crypto-mining via GPU compute usage patterns (non-gaming, non-video processes) |
@@ -741,7 +741,7 @@ Self-heal loops: `IPSecIntegrityGuard` (30s, rebuilds current profile), `AsrPoli
 |-----|-------------|
 | RT-2026-H1/H3 | Binary integrity hash verification before Agent launch (AgentWatchdog + self-restart + AntiTamperGuard) |
 | RT-2026-M1 | Worker: nonce consumed AFTER HMAC verification (prevents DoS via pre-consumption) |
-| RT-2026-M3 | WebDashboard: bearer token auth delivered via IPC (any-local-process abuse closed) |
+| RT-2026-M3 | WebDashboard: bearer from tray launch URL; Referer never grants access (closed in 2.2.0) |
 | RT-2026-M4 | Worker: input validation on /report/hash, /report/url, /report/ip before upstream forwarding |
 | RT-2026-M5 | Worker: removed X-Forwarded-For IP fallback, error message leak, updated to v2.1.7 |
 

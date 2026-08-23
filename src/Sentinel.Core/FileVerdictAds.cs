@@ -96,9 +96,10 @@ namespace Sentinel.Core
 
                 var adminsSid = new System.Security.Principal.SecurityIdentifier(
                     System.Security.Principal.WellKnownSidType.BuiltinAdministratorsSid, null);
+                // v2.2.0: Admins ReadAndExecute — do not reopen Secure for admin rewrite of HMAC keys.
                 security.AddAccessRule(new System.Security.AccessControl.FileSystemAccessRule(
                     adminsSid,
-                    System.Security.AccessControl.FileSystemRights.FullControl,
+                    System.Security.AccessControl.FileSystemRights.ReadAndExecute,
                     System.Security.AccessControl.InheritanceFlags.ContainerInherit | System.Security.AccessControl.InheritanceFlags.ObjectInherit,
                     System.Security.AccessControl.PropagationFlags.None,
                     System.Security.AccessControl.AccessControlType.Allow));

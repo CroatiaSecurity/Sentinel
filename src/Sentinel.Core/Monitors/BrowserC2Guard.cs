@@ -239,15 +239,17 @@ namespace Sentinel.Core
         /// </summary>
         private async Task ScanExtensionManifestsAsync(CancellationToken ct)
         {
-            var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            if (string.IsNullOrEmpty(localAppData)) return;
-
-            var browserExtPaths = new[]
+            // v2.2.0: scan each interactive user's LocalAppData, not SYSTEM's profile.
+            var browserExtPaths = new List<string>();
+            foreach (var root in SecurityValidation.EnumerateInteractiveUserWritableRoots())
             {
-                Path.Combine(localAppData, @"Google\Chrome\User Data\Default\Extensions"),
-                Path.Combine(localAppData, @"Microsoft\Edge\User Data\Default\Extensions"),
-                Path.Combine(localAppData, @"BraveSoftware\Brave-Browser\User Data\Default\Extensions"),
-            };
+                if (!root.EndsWith(@"AppData\Local", StringComparison.OrdinalIgnoreCase) &&
+                    !root.EndsWith(@"AppData\Local\", StringComparison.OrdinalIgnoreCase))
+                    continue;
+                browserExtPaths.Add(Path.Combine(root, @"Google\Chrome\User Data\Default\Extensions"));
+                browserExtPaths.Add(Path.Combine(root, @"Microsoft\Edge\User Data\Default\Extensions"));
+                browserExtPaths.Add(Path.Combine(root, @"BraveSoftware\Brave-Browser\User Data\Default\Extensions"));
+            }
 
             foreach (var extRoot in browserExtPaths)
             {

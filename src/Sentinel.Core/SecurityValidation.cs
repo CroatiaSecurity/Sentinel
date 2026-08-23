@@ -5,6 +5,7 @@ using System.IO;
 using System.Net;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography.X509Certificates;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
 
@@ -14,6 +15,50 @@ namespace Sentinel.Core
     {
         private static readonly Regex SafePathRegex = new(@"^[a-zA-Z]:\\[a-zA-Z0-9_\-\s\\\.%()\[\]]*$", RegexOptions.Compiled);
         private static readonly Regex SafeFileNameRegex = new(@"^[a-zA-Z0-9_\-\s\.]+\.[a-zA-Z0-9]+$", RegexOptions.Compiled);
+
+        /// <summary>
+        /// v2.2.0: Interactive user profile roots (LocalAppData, Roaming, Temp, Downloads, Desktop).
+        /// SYSTEM services must not scan Environment.SpecialFolder.LocalApplicationData — that is
+        /// the SYSTEM profile, not the logged-on user.
+        /// </summary>
+        public static List<string> EnumerateInteractiveUserWritableRoots()
+        {
+            var roots = new List<string>();
+            try
+            {
+                var systemRoot = Path.GetPathRoot(Environment.SystemDirectory) ?? @"C:\";
+                var usersDir = Path.Combine(systemRoot, "Users");
+                if (!Directory.Exists(usersDir))
+                    return roots;
+
+                foreach (var userDir in Directory.GetDirectories(usersDir))
+                {
+                    var name = Path.GetFileName(userDir);
+                    if (string.Equals(name, "Public", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(name, "Default", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(name, "Default User", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(name, "All Users", StringComparison.OrdinalIgnoreCase) ||
+                        name.StartsWith(".", StringComparison.Ordinal))
+                        continue;
+
+                    roots.Add(Path.Combine(userDir, "AppData", "Local"));
+                    roots.Add(Path.Combine(userDir, "AppData", "Roaming"));
+                    roots.Add(Path.Combine(userDir, "AppData", "Local", "Temp"));
+                    roots.Add(Path.Combine(userDir, "Downloads"));
+                    roots.Add(Path.Combine(userDir, "Desktop"));
+                }
+
+                var winTemp = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.Windows), "Temp");
+                if (!string.IsNullOrEmpty(winTemp))
+                    roots.Add(winTemp);
+            }
+            catch
+            {
+                // Best-effort
+            }
+            return roots;
+        }
 
         public static bool ValidatePath(string? path)
         {
@@ -346,6 +391,40 @@ namespace Sentinel.Core
         /// binaries (explorer.exe, powershell.exe, cmd.exe, etc.) using native
         /// CryptCATAdmin APIs — no PowerShell dependency, no PATH poisoning risk.
         ///
+        /// Returns the Authenticode simple name (CN) or null if unsigned / unreadable.
+        /// </summary>
+        public static string? TryGetAuthenticodePublisher(string filePath)
+        {
+            if (string.IsNullOrEmpty(filePath) || !File.Exists(filePath))
+                return null;
+            try
+            {
+#pragma warning disable SYSLIB0057
+                using var cert = new X509Certificate2(X509Certificate.CreateFromSignedFile(filePath));
+#pragma warning restore SYSLIB0057
+                var simple = cert.GetNameInfo(X509NameType.SimpleName, false);
+                if (!string.IsNullOrWhiteSpace(simple))
+                    return simple;
+                return string.IsNullOrWhiteSpace(cert.Subject) ? null : cert.Subject;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// True when both files are Authenticode-signed by the same publisher.
+        /// Used to pin Sentinel.Agent to the same signer as Sentinel.Service.
+        /// </summary>
+        public static bool VerifySameAuthenticodePublisher(string fileA, string fileB)
+        {
+            var a = TryGetAuthenticodePublisher(fileA);
+            var b = TryGetAuthenticodePublisher(fileB);
+            return !string.IsNullOrEmpty(a) && string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
         /// Returns true only if the signature is valid AND chains to a trusted root.
         /// </summary>
         public static bool VerifyAuthenticodeSignature(string filePath, Microsoft.Extensions.Logging.ILogger? logger = null)
@@ -650,10 +729,59 @@ namespace Sentinel.Core
             => true; // defenses stay on; game skip is path-based via CanInspect/IsGameOrAntiCheatPath
 
         /// <summary>
+        /// True when <paramref name="path"/> lives under a user profile, Temp, Downloads,
+        /// Desktop, Documents, or Public. Used to refuse reputation-skip / trust grants
+        /// for substring "game" matches (v2.2.0: `%AppData%\steamapps\common\` is not Steam).
+        /// </summary>
+        public static bool IsUserProfileOrStagingPath(string? path)
+        {
+            if (string.IsNullOrEmpty(path)) return false;
+            var lower = path!.ToLowerInvariant().Replace('/', '\\');
+
+            // Windows Store / Xbox packages are under Program Files\WindowsApps — not a user profile.
+            if (lower.Contains(@"\windowsapps\"))
+                return false;
+
+            if (lower.Contains(@"\temp\") ||
+                lower.Contains(@"\downloads\") ||
+                lower.Contains(@"\desktop\") ||
+                lower.Contains(@"\documents\") ||
+                lower.Contains(@"\appdata\"))
+                return true;
+
+            // C:\Users\<name>\... except the Public/Default folders we already caught via desktop/documents
+            var usersNeedle = @"\users\";
+            var idx = lower.IndexOf(usersNeedle, StringComparison.Ordinal);
+            if (idx >= 0)
+            {
+                var after = lower.Substring(idx + usersNeedle.Length);
+                // \Users\Public\... still staging; \Users\Default\ too.
+                return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// v2.2.0: Reputation / hash-skip for entertainment binaries. Requires a game-tree
+        /// fragment AND must not be under a user-writable staging path. Memory-inspection
+        /// skip may still use <see cref="IsGameOrAntiCheatPath"/> (Denuvo on D:\ is fine;
+        /// reputation skip is the trust grant).
+        /// </summary>
+        public static bool ShouldSkipReputationForGamePath(string? path)
+        {
+            if (string.IsNullOrEmpty(path)) return false;
+            if (IsUserProfileOrStagingPath(path)) return false;
+            return IsGameOrAntiCheatPath(path);
+        }
+
+        /// <summary>
         /// Identifies game / launcher / anti-cheat install trees so scanners can skip
         /// even QUERY-level work when unnecessary, and so response code can avoid
         /// collateral on interactive entertainment workloads.
         /// Path-substring only — never a sole basis for trust of unknown binaries.
+        /// v2.2.0: still rejects Temp/Downloads; reputation skip uses
+        /// <see cref="ShouldSkipReputationForGamePath"/> which also rejects user profiles.
         /// </summary>
         public static bool IsGameOrAntiCheatPath(string? path)
         {

@@ -26,6 +26,17 @@ namespace Sentinel.Agent
         public const int DefaultPort = 19845;
         public const string DashboardUrl = "http://localhost:19845/";
 
+        /// <summary>
+        /// v2.2.0: token is NOT embedded in GET /. Tray opens this URL; JS stores the
+        /// token in sessionStorage and strips it from the address bar.
+        /// </summary>
+        public static string? SessionToken { get; private set; }
+
+        public static string DashboardLaunchUrl =>
+            string.IsNullOrEmpty(SessionToken)
+                ? DashboardUrl
+                : DashboardUrl + "?token=" + Uri.EscapeDataString(SessionToken);
+
         private readonly QuarantineManager _quarantine;
         private readonly SentinelConfig _config;
         private readonly ILogger<WebDashboardService> _logger;
@@ -59,6 +70,7 @@ namespace Sentinel.Agent
             using (var rng2 = RandomNumberGenerator.Create())
                 rng2.GetBytes(bearerBytes);
             _bearerToken = Convert.ToBase64String(bearerBytes);
+            SessionToken = _bearerToken;
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -127,9 +139,11 @@ namespace Sentinel.Agent
                 var path = request.Url?.AbsolutePath ?? "/";
                 var method = request.HttpMethod;
 
-                // WebSocket upgrade
+                // WebSocket upgrade — v2.2.0: same bearer as /api (query ?token=).
                 if (request.IsWebSocketRequest && path == "/ws/events")
                 {
+                    if (!ValidateBearerToken(request, response))
+                        return;
                     try
                     {
                         await HandleWebSocket(context, ct).ConfigureAwait(false);
@@ -154,7 +168,7 @@ namespace Sentinel.Agent
                 // CORS headers — localhost only (never wildcard; prevents cross-origin attacks from malicious sites)
                 response.Headers.Add("Access-Control-Allow-Origin", "http://localhost:19845");
                 response.Headers.Add("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-                response.Headers.Add("Access-Control-Allow-Headers", "Content-Type, X-CSRF-Token");
+                response.Headers.Add("Access-Control-Allow-Headers", "Content-Type, X-CSRF-Token, Authorization");
                 response.Headers.Add("Vary", "Origin");
 
                 if (method == "OPTIONS")
@@ -175,10 +189,8 @@ namespace Sentinel.Agent
                 }
                 else if (path.StartsWith("/api/"))
                 {
-                    // v2.1.7 RT-2026-M3: Bearer token auth for all API endpoints.
-                    // The token is embedded in the HTML page (same-origin only) and also
-                    // available via IPC for legitimate tooling. Prevents localhost malware
-                    // from toggling security features or reading detection events.
+                    // v2.2.0: Bearer (header or ?token=) is the only authenticator.
+                    // Referer is ignored — it is client-controlled on HttpListener.
                     if (!ValidateBearerToken(request, response))
                         return;
 
@@ -235,15 +247,7 @@ namespace Sentinel.Agent
                     await HandleScanStatus(response).ConfigureAwait(false);
                     break;
                 case "/api/csrf":
-                    // v2.1.7 SECURITY: CSRF token only served to same-origin requests with Referer check.
-                    // Token is already embedded in the HTML page; this endpoint is for SPA reloads only.
-                    var referer = request.Headers["Referer"] ?? "";
-                    if (!referer.StartsWith("http://localhost:19845", StringComparison.OrdinalIgnoreCase))
-                    {
-                        response.StatusCode = 403;
-                        await WriteJson(response, new { error = "forbidden" }).ConfigureAwait(false);
-                        return;
-                    }
+                    // v2.2.0: CSRF is only issued to already-authenticated callers (bearer).
                     await WriteJson(response, new { token = _csrfToken }).ConfigureAwait(false);
                     break;
                 case "/api/report/prefs":
@@ -299,51 +303,25 @@ namespace Sentinel.Agent
         }
 
         /// <summary>
-        /// v2.1.7 RT-2026-M3: Bearer token authentication for API endpoints.
-        /// The token is embedded in the HTML page and passed via Authorization header or query param.
-        /// This prevents local malware from accessing the API without the token.
-        /// The Referer-checked /api/csrf endpoint still works for legitimate browser sessions.
+        /// v2.2.0: Bearer token authentication. Referer is never accepted as proof of origin.
+        /// Token comes from Authorization: Bearer or ?token= (WebSocket / tray launch URL).
         /// </summary>
         private bool ValidateBearerToken(HttpListenerRequest request, HttpListenerResponse response)
         {
-            // Accept token from Authorization header (preferred) or ?token= query param (for WebSocket/EventSource)
             var authHeader = request.Headers["Authorization"];
-            string? providedToken = null;
+            var queryToken = request.QueryString["token"];
 
-            if (!string.IsNullOrEmpty(authHeader) && authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
-            {
-                providedToken = authHeader.Substring(7).Trim();
-            }
-            else
-            {
-                // Fallback: check query string (for SSE/WebSocket where headers are harder)
-                var qs = request.QueryString["token"];
-                if (!string.IsNullOrEmpty(qs))
-                    providedToken = qs;
-            }
-
-            // Also accept requests with valid Referer from our own page (browser sessions that got token from HTML)
-            var referer = request.Headers["Referer"] ?? "";
-            if (referer.StartsWith("http://localhost:19845", StringComparison.OrdinalIgnoreCase))
-            {
-                // Same-origin browser request — token was already embedded in the page
+            if (LoopbackDashboardAuth.Authenticate(authHeader, queryToken, _bearerToken))
                 return true;
-            }
 
-            if (string.IsNullOrEmpty(providedToken) ||
-                !ConstantTimeEquals(providedToken!, _bearerToken))
-            {
-                response.StatusCode = 401;
-                response.ContentType = "application/json";
-                var msg = Encoding.UTF8.GetBytes("{\"error\":\"unauthorized\",\"hint\":\"Bearer token required in Authorization header\"}");
-                response.ContentLength64 = msg.Length;
-                response.OutputStream.Write(msg, 0, msg.Length);
-                response.Close();
-                _logger.LogWarning("[WebDashboard] Bearer token auth failed — unauthorized API access attempt");
-                return false;
-            }
-
-            return true;
+            response.StatusCode = 401;
+            response.ContentType = "application/json";
+            var msg = Encoding.UTF8.GetBytes("{\"error\":\"unauthorized\",\"hint\":\"Bearer token required. Open the dashboard from the Sentinel tray icon.\"}");
+            response.ContentLength64 = msg.Length;
+            response.OutputStream.Write(msg, 0, msg.Length);
+            response.Close();
+            _logger.LogWarning("[WebDashboard] Bearer token auth failed — unauthorized API access attempt");
+            return false;
         }
 
         /// <summary>
@@ -849,7 +827,7 @@ namespace Sentinel.Agent
             response.ContentType = "text/html; charset=utf-8";
             response.Headers.Add("X-Content-Type-Options", "nosniff");
             response.Headers.Add("X-Frame-Options", "DENY");
-            var html = DashboardHtml.GetHtml(_csrfToken);
+            var html = DashboardHtml.GetHtml();
             var buffer = Encoding.UTF8.GetBytes(html);
             response.ContentLength64 = buffer.Length;
             await response.OutputStream.WriteAsync(buffer, 0, buffer.Length).ConfigureAwait(false);
