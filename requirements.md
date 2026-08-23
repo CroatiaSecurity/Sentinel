@@ -1,6 +1,6 @@
 # Sentinel — Requirements
 
-**Version: 2.0.4**
+**Version: 2.2.0**
 
 ---
 
@@ -236,8 +236,8 @@ The user-session Agent must provide a Settings window (tray menu + double-click)
 ### FR-15: Service↔Agent IPC (v2.0)
 
 - `ServiceAgentIpcHost` named pipe `SentinelIpc-v2` with HMAC token authentication
-- Read-only ops commands: `ping`, `ops`, `health` — no ActiveResponse control over the pipe
-- HMAC token stored under `%ProgramData%\Sentinel\Secure\.ipc_token` (SYSTEM-only ACL)
+- Commands: `ping`, `ops`, `health` (read-only) plus `scan` / `scan_status` (on-demand audit). No ActiveResponse control over the pipe
+- HMAC token stored under `%ProgramData%\Sentinel\Secure\.ipc_token` (SYSTEM + Admins full; **Interactive Users read** — not all Authenticated Users)
 - Agent falls back to `ops_metrics.json` file when pipe is unavailable
 
 ### FR-16: Ops metrics (v2.0)
@@ -259,6 +259,22 @@ The user-session Agent must provide a Settings window (tray menu + double-click)
 - Default `Enabled: false` on clean installs
 - When enabled: `TlsCertificateMonitor` removes high-confidence planted roots immediately; `GhostProcessMonitor` kills invisible/empty-name PID → Cast without the normal 2-scan wait; `CastDeviceGuard` auto-blocks rogue Cast by IOC MAC prefix and known IPs; `NullSessionGuard` blocks FCM TCP 5228; `AdvancedResponseEngine` exempts MitmDefense actions from ObserveUntilChain demotion
 - Config fields: `Enabled`, `RemovePlantedCerts`, `BlockFcmPushChannel`, `AutoBlockRogueCast`, `RogueCastMacPrefixes`, `KnownRogueCastIps`
+
+### FR-19: Local dashboard authentication (v2.2.0)
+
+- Loopback HTTP dashboard on `http://localhost:19845/`
+- Bearer token is the only authenticator for `/api/*` and `/ws/events`
+- Token is issued via the tray launch URL (`?token=`), stored in `sessionStorage`, stripped from the address bar
+- `GET /` must **not** embed bearer or CSRF secrets
+- A client-controlled `Referer` header must never grant access
+- CSRF tokens are issued only to already-authenticated callers
+
+### FR-20: Game-path reputation skip (v2.2.0)
+
+- On-execute file reputation may skip known entertainment install trees
+- Skip MUST refuse user-profile / Temp / Downloads / Desktop / Documents paths (`ShouldSkipReputationForGamePath`)
+- Memory-inspect skip (`IsGameOrAntiCheatPath`) is not a reputation skip and is not a trust grant
+- A fake `steamapps\common` under `%AppData%` must still be reputation-scanned
 
 ---
 
@@ -325,3 +341,4 @@ The user-session Agent must provide a Settings window (tray menu + double-click)
 | 1.9.9 | Privacy service observe-only; bulk transfer / torrent = T2 observe, never Exfil terminal |
 | 2.0.0 | WeightedCorrelationEngine + score cards; MITRE ATT&CK mapping; plugin architecture + signed rule packs; ops metrics; Service↔Agent IPC; SelfPathGuard; EnforceActiveResponse default corrected to false |
 | 2.0.1 | MitmDefense suite requirements (FR-18); planted-cert / ghost-Cast / rogue-Cast / FCM opt-in defense |
+| 2.2.0 | FR-19 dashboard bearer (no Referer auth); FR-20 game-path reputation skip; V217 monitors registered; kiosk LGPO must not weaken the host |

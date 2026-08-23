@@ -87,6 +87,8 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 | `ConnectivityCanaryMonitor` | Verifies Sentinel can reach threat intel endpoints; detects EDRSilencer | 45s |
 | `EtwSessionGuard` | Checks UnifiedEtwSession IsActive + events/sec floor; auto-recreates | 3s |
 | `EtwProviderTamperMonitor` | Checks EtwEventWrite patches in critical processes; detects logman/wevtutil manipulation | 30s |
+| `AmsiIntegrityCheck` | **v2.2.0 registered.** AMSI/ETW function prologue vs startup baseline | 30s |
+| `HoneypotDllMonitor` | **v2.2.0 registered.** Decoy DLLs in `{install}\honeypot\` only (never next to Sentinel.exe) | FSW + 60s replant |
 
 #### Group 2: CoreDetection (2s start delay, max 5 restarts)
 
@@ -116,6 +118,11 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 | `LnkShortcutMonitor` | Real-time FileSystemWatcher on Desktop/Start Menu/Taskbar/Startup (all profiles); UNC/protocol/LOLBin remote launch | FSW + startup scan |
 | `AgenticProcessMonitor` | AI coding agents / MCP toolchains spawning shells, LOLBins, credential tools; burst recon patterns | 8s |
 | `PackageRuntimeMonitor` | Package-manager postinstall LOLBins, exe under package trees, AI agent config poison (CLAUDE.md/Cursor/MCP) | 10s + FSW |
+| `LpeScaffoldMonitor` | Potato-class tools and elevated staging PEs (Phase A) | periodic |
+| `InitialAccessMonitor` | Browser/Office → LOLBin, staging LOLBins | periodic |
+| `PersistenceSurfaceMonitor` | IFEO, accessibility, Winlogon, COM hijack | periodic |
+| `EdrKillerDetectionMonitor` | **v2.2.0 registered.** Known EDR-killer **process names** — LogOnly observe fuel (rename bypasses) | 5s |
+| `DecoyPipeMonitor` | **v2.2.0 registered.** Default CS/Metasploit pipe-name honeypots | continuous |
 
 #### Group 3: CredentialProtection (4s start delay, max 3 restarts)
 
@@ -129,6 +136,7 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 | `BuiltinAdminGuard` | Monitors built-in Administrator account (RID 500); disables if found active | 15s |
 | `PasswordRotationGuard` | Rotates local account passwords every 10 min; UAC=5; auto-logon via LSA secret | 10 min |
 | `RemoteSessionGuard` | WTSEnumerateSessions; force-logoff non-console remote sessions (RDP etc.); never session 0 / console | 5s |
+| `TokenPrivilegeAuditMonitor` | **v2.2.0 registered.** SeDebug/SeImpersonate from user-writable paths | 20s |
 
 #### Group 4: NetworkIntegrity (6s start delay, max 3 restarts)
 
@@ -175,7 +183,9 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 | `PseudoSandbox` | Lightweight behavioral sandbox via restricted Job Objects | on-demand |
 | `AcousticThreatMonitor` | Detects harmful audio frequencies via WASAPI loopback + Goertzel algorithm | continuous |
 | `WfpIntegrityMonitor` | Scans WFP filters for BLOCK rules targeting Sentinel/EDR processes | 30s |
-| `DriverLoadMonitor` | Monitors for BYOVD attacks via Event 7045, registry, .sys file creation; cert-tracing revokes planted signing certs | 15s |
+| `DriverLoadMonitor` | BYOVD via Event 7045 (PID when > 4), registry, **interactive user** .sys drops (not SYSTEM profile); cert-tracing | 15s |
+| `GpuProcessMonitor` | GPU helper sandbox-escape (child/net/post-ex DLL) + trojanized GPU .sys names | periodic |
+| `KernelModuleAuditMonitor` | **v2.2.0 registered.** NtQuerySystemInformation module list; logs pre-existing RTCore64/WinRing0 | 30s |
 
 #### Group 6: Peripheral (30s start delay, max 2 restarts)
 
@@ -219,7 +229,8 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 
 | Component | Mechanism | Notes |
 |-----------|-----------|-------|
-| `TrayIconService` | System tray NotifyIcon; context menu **Settings** opens Agent settings UI (Overview / Events / Report to Police / Quarantine). **No** `ShowBalloonTip` (WpnService removed by hardening deadlocks STA) | WinForms STA |
+| `TrayIconService` | System tray NotifyIcon; **Settings** opens `WebDashboardService.DashboardLaunchUrl` (`?token=`). **No** `ShowBalloonTip` | WinForms STA |
+| `WebDashboardService` | Loopback HTTP `http://localhost:19845/`. **v2.2.0:** bearer from tray query only; Referer never grants access; `/ws/events` requires token | localhost |
 | `AgentDashboardForm` | TrimKit-style dark sidebar Settings UI; affidavit editor + national portal open for evidence packs | WinForms STA |
 | `ScreenCaptureMonitor` | Detects DXGI desktop duplication + transparent overlay phishing windows | 15–25s |
 | `WebcamMicMonitor` | Detects background camera/mic access via DLL analysis (Media Foundation, WASAPI) | 20s |
@@ -721,6 +732,27 @@ Self-heal loops: `IPSecIntegrityGuard` (30s, rebuilds current profile), `AsrPoli
 
 ---
 
+## v2.2.0 Additions
+
+Honest remediations. Several 2.1.8 “fixes” were not in force until this version.
+
+| Item | Reality in 2.2.0 |
+|------|------------------|
+| Dashboard auth | `LoopbackDashboardAuth` — Authorization Bearer or `?token=`. Referer is ignored. Token is **not** in `GET /`. Tray opens `DashboardLaunchUrl`. |
+| V217 monitors | Registered in MonitorGroups (see inventory above). Dead code until 2.2.0. |
+| Honeypot DLLs | `{install}\honeypot\` only — never `version.dll` next to Sentinel.exe |
+| EDR-killer names | LogOnly observe fuel, not President's Law |
+| Game reputation skip | `ShouldSkipReputationForGamePath` — user profile / Temp / Desktop cannot skip |
+| ChainTracer | System32 / SysWOW64 only (`Windows\Temp` is quarantinable) |
+| AgentWatchdog | Install-dir image path; `lpApplicationName`; same Authenticode publisher; unsigned pair Debug-only |
+| DriverLoadMonitor | Interactive user profile roots; Event 7045 PID; pre-existing RTCore logged |
+| BrowserC2Guard | Per-user LocalAppData extension trees, not SYSTEM profile |
+| GSecurity.inf | Password length 12 + complexity; audit on; FIPS not touched |
+| Worker | `RATE_LIMITER.limit` after HMAC; MB `/report/hash` is lookup+comment |
+| EncryptedConfigStore | `SCFG2` HMAC envelope; leftover JSON cannot set `ObserveUntilChain=false` |
+| President's Law | No DnsAnomaly / NetworkAnomaly |
+| Tests | `V220SecurityHardeningTests` |
+
 ## v2.1.8 Additions
 
 ### New Components (previously undocumented)
@@ -750,10 +782,10 @@ Self-heal loops: `IPSecIntegrityGuard` (30s, rebuilds current profile), `AsrPoli
 | Component | Category | Description |
 |-----------|----------|-------------|
 | `AmsiIntegrityCheck` | Anti-Tamper | Verifies AmsiScanBuffer/AmsiOpenSession prologues against startup baseline (detects VEH/breakpoint/patch AMSI bypass) |
-| `EdrKillerDetectionRule` | President's Law | Fires immediately on known EDR-killer tool process names/hashes (Terminator, GentleKiller, Backstab, etc.) |
+| `EdrKillerDetectionMonitor` | Observe (v2.2.0) | Name-only LogOnly on known EDR-killer process names. Rename bypasses. Wired in 2.2.0. |
 | `KernelModuleAuditMonitor` | SystemIntegrity | NtQuerySystemInformation(SystemModuleInformation) enumeration; detects stealth driver loads bypassing SCM events |
 | `TokenPrivilegeAuditMonitor` | CredentialProtection | Enumerates processes holding SeDebugPrivilege/SeImpersonate from non-admin paths (potato attacks, token theft) |
-| `HoneypotDllMonitor` | Anti-Tamper | Plants decoy `version.dll` in install directory; any load = DLL sideload attack targeting Sentinel |
+| `HoneypotDllMonitor` | Anti-Tamper | Plants decoys in `{install}\honeypot\` (v2.2.0). Not next to Sentinel.exe. |
 | `DecoyPipeMonitor` | Anti-Tamper | Creates secondary pipes with common C2 names; any connection = immediate Tier1 with process attribution |
 | Critical response budget | Response | Chain-confirmed multi-signal detections bypass per-minute rate limit (separate unlimited budget) |
 

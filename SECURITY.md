@@ -60,7 +60,21 @@ The following are NOT in scope:
 - Social engineering of the machine operator
 - Vulnerabilities in third-party dependencies (report upstream, notify us)
 
-## Attack Surface (v2.0.8)
+## Attack Surface (v2.2.0)
+
+### Web Dashboard (`http://localhost:19845/`)
+
+- **Auth:** Bearer token from the tray launch URL (`?token=`). Header `Authorization: Bearer` or query `token`.
+- **Not auth:** `Referer`. Any local process can set it; it is ignored (`LoopbackDashboardAuth.RefererGrantsAccess` is always false).
+- **HTML:** `GET /` does not embed bearer or CSRF. CSRF is issued only at `/api/csrf` after bearer check.
+- **WebSocket:** `/ws/events` requires the same bearer (`?token=`).
+- **Open from the tray.** A bookmark of the origin without a token returns 401.
+
+### Worker (v2.2.0)
+
+- HMAC-SHA256 over `timestamp.nonce.path.body`; nonce consumed **after** verify.
+- Durable `RATE_LIMITER` binding is invoked **after** HMAC (unauth traffic cannot burn the authenticated quota). Separate cheaper unauth flood cap.
+- `POST /report/hash` is a MalwareBazaar **lookup** (+ comment if the sample is already known). It does not ingest a new sample without the file.
 
 ### Service-Agent IPC (`SentinelIpc-v2` named pipe)
 
@@ -106,6 +120,7 @@ The following are NOT in scope:
 
 See [CHANGELOG.md](CHANGELOG.md) for the full history of security fixes, including:
 
+- v2.2.0: Dashboard Referer bypass closed; V217 monitors registered; game-path skip; Windows\Temp quarantine; watchdog publisher pin; kiosk LGPO no longer weakens the host; Worker RATE_LIMITER after HMAC
 - v2.0.8: Deep red/blue audit — SPKI pinning, proxy nonces, IPC Interactive ACL, SafeKill plant fix, rulepack trust root lock, installer per-file unlock
 - v2.0.4: Full red team audit remediation (asymmetric rule pack signing, IPC nonce tracking, EncryptedConfigStore, cert pinning, FIPS enforcement removed)
 - v2.0.3: IPC token ACL race fix (atomic write with pre-set security descriptor)

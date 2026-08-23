@@ -21,10 +21,10 @@ New detection capabilities (code existed in 2.1.8; **wired in 2.2.0**):
 | Capability | Role | Bypass requires |
 |------------|------|-----------------|
 | AmsiIntegrityCheck | Detects AMSI/ETW function prologue patching | Kernel-level memory modification (BYOVD) |
-| EdrKillerDetectionMonitor | President's Law fire on 25+ known EDR-killer tools | Rename + recompile the tool (hash/name won't match) |
-| HoneypotDllMonitor | Decoy DLLs in install dir — any access = sideload attack | Not touching the install directory at all |
-| DecoyPipeMonitor | C2 honeypot named pipes (CobaltStrike/Metasploit patterns) | Using non-standard pipe names for C2 |
-| KernelModuleAuditMonitor | NtQuerySystemInformation detects stealth BYOVD loads | Already having kernel control to hide from NtQSI |
+| EdrKillerDetectionMonitor | **Name-only observe fuel** (LogOnly, not President's Law). Catches default tool names. | Rename the binary (always) |
+| HoneypotDllMonitor | Decoy DLLs in `{install}\honeypot\` (never next to Sentinel.exe) | Not touching that folder |
+| DecoyPipeMonitor | C2 honeypot named pipes (default CobaltStrike/Metasploit names) | Using non-standard pipe names for C2 |
+| KernelModuleAuditMonitor | NtQuerySystemInformation detects stealth BYOVD loads; logs pre-existing RTCore64/WinRing0 | Already having kernel control to hide from NtQSI |
 | TokenPrivilegeAuditMonitor | SeDebugPrivilege/SeImpersonate from user-writable paths | Running from a non-user-writable path (Program Files) |
 
 ### Phase A coverage expansion (v2.1.0)
@@ -128,7 +128,7 @@ Attacker wiping only Event Log does not erase JSONL packs. Attacker wiping JSONL
 
 ---
 
-## Monitor Coverage Summary (v2.1.8)
+## Monitor Coverage Summary (v2.2.0)
 
 See [design.md](design.md) for the full component inventory (all MonitorGroups + Agent). Key additions since v1.4.5:
 
@@ -155,12 +155,13 @@ See [design.md](design.md) for the full component inventory (all MonitorGroups +
 - **GpuProcessMonitor** (v2.1.5) — GPU sandbox escape + crypto-mining detection
 - **WebDashboardService** (v2.1.3) — Local web-based settings UI replacing WinForms
 - **ScanEngine** (v2.1.3) — On-demand comprehensive system security scan
-- **AmsiIntegrityCheck** (v2.1.8) — AMSI/ETW function prologue integrity monitoring
-- **EdrKillerDetectionMonitor** (v2.1.8) — Known EDR-killer tool detection (President's Law)
-- **HoneypotDllMonitor** (v2.1.8) — Decoy DLL tripwires in install directory
-- **DecoyPipeMonitor** (v2.1.8) — C2 honeypot named pipes (CobaltStrike/Metasploit)
-- **KernelModuleAuditMonitor** (v2.1.8) — NtQuerySystemInformation stealth driver detection
-- **TokenPrivilegeAuditMonitor** (v2.1.8) — Dangerous token privilege enumeration
+- **AmsiIntegrityCheck** (v2.1.8 code / **registered v2.2.0**) — AMSI/ETW function prologue integrity monitoring
+- **EdrKillerDetectionMonitor** (v2.2.0) — Known EDR-killer **process-name observe** (LogOnly; rename bypasses)
+- **HoneypotDllMonitor** (v2.2.0) — Decoy DLL tripwires in `{install}\honeypot\` (not the exe directory)
+- **DecoyPipeMonitor** (v2.2.0) — C2 honeypot named pipes (default CobaltStrike/Metasploit names)
+- **KernelModuleAuditMonitor** (v2.2.0) — NtQuerySystemInformation stealth driver detection; logs pre-existing BYOVD-capable modules
+- **TokenPrivilegeAuditMonitor** (v2.2.0) — Dangerous token privilege enumeration
+- **WebDashboardService** (v2.2.0) — Bearer from tray `?token=` only; Referer is not auth; `/ws/events` requires the token
 
 ### Group 1: Critical (Self-Protection)
 | Monitor | Purpose |
@@ -279,10 +280,11 @@ See [design.md](design.md) for the full component inventory (all MonitorGroups +
 
 **Residual risk:** MEDIUM. Sentinel wins the race in most scenarios because it monitors the prerequisites (priv esc, file drop, service creation, cert planting). If an attacker has admin, bypasses all prerequisite detections silently, uses an unknown driver not on the blocklist signed by a legitimate public CA (not a planted cert), AND loads it faster than the 15s poll — then the driver can suppress Sentinel. Remote alerting fires before suppression in most cases.
 
-**v2.1.8 additions:**
-- `KernelModuleAuditMonitor` detects driver loads via `NtQuerySystemInformation(SystemModuleInformation)` every 30s — catches stealth loads that bypass SCM Event 7045
-- `EdrKillerDetectionMonitor` fires immediately (President's Law) on 25+ known EDR-killer process names before they even load a driver
-- Chain-confirmed detections bypass kill rate limit — budget exhaustion no longer shields the attacker
+**v2.2.0 additions:**
+- `KernelModuleAuditMonitor` is **registered** and detects driver loads via `NtQuerySystemInformation` every 30s (LogOnly). Pre-existing RTCore64/WinRing0 at start is logged, not silently trusted.
+- `EdrKillerDetectionMonitor` is **registered** as name-only **observe fuel** (LogOnly). A rename still bypasses it; DriverLoadMonitor / kernel audit cover the load.
+- `DriverLoadMonitor` scans **interactive user profiles**, not SYSTEM’s LocalAppData. Event 7045 PID is used when `> 4`.
+- Chain-confirmed detections bypass kill rate limit — budget exhaustion no longer shields the attacker.
 
 ---
 
@@ -349,9 +351,9 @@ See [design.md](design.md) for the full component inventory (all MonitorGroups +
 - NTFS ACL lockdown on installation directory
 - Directory watcher deletes unauthorized files and kills writing processes
 - CIG audit mode prevents unsigned DLL loads
-- **v2.1.8:** `HoneypotDllMonitor` plants decoy `version.dll`, `winmm.dll`, `dbghelp.dll`, `WINHTTP.dll` in the install directory. Any access or deletion triggers Tier1 anti-tamper detection at 0.94–0.96 confidence. Attacker must first interact with these decoys to plant a real DLL.
+- **v2.2.0:** `HoneypotDllMonitor` plants decoy `version.dll`, `winmm.dll`, `dbghelp.dll`, `WINHTTP.dll` in `{install}\honeypot\` only. Planting those names next to `Sentinel.Service.exe` would be a self-sideload / self-DoS. Access or deletion of the decoy folder is LogOnly anti-tamper fuel.
 
-**Residual risk:** LOW if CIG is enforced. MEDIUM if CIG is audit-only. The honeypot DLLs provide an early tripwire even without CIG.
+**Residual risk:** LOW if CIG is enforced. MEDIUM if CIG is audit-only. The honeypot folder is an early tripwire for directory scanners; it is not a kill trigger.
 
 ---
 
@@ -490,19 +492,18 @@ See [design.md](design.md) for the full component inventory (all MonitorGroups +
 
 ---
 
-### B15: Evading honeypots and decoy detections (v2.1.8)
+### B15: Evading honeypots and decoy detections (v2.2.0)
 
-**Attack:** Attacker reads the source code (open-source assumption), identifies the decoy pipe names and honeypot DLL filenames, and avoids interacting with them.
+**Attack:** Attacker reads the source, identifies decoy pipe names and `{install}\honeypot\` filenames, and avoids them.
 
 **Mitigation:**
-- Honeypot DLLs protect specifically against untargeted DLL sideloading scanners (which probe every directory without checking for decoys)
-- Decoy pipe names target automated C2 frameworks using default configurations
-- These are defense-in-depth layers — NOT the primary detection mechanism. ETW, behavioral rules, and correlation engines remain the primary surface
-- A targeted attacker who avoids all honeypots still faces 80+ other monitors
+- Honeypot DLLs catch untargeted sideload scanners that probe every subdirectory
+- Decoy pipe names catch default C2 configs
+- These are defense-in-depth — NOT the primary detection mechanism
 
-**Residual risk:** LOW for targeted attackers (they'll just avoid). HIGH value against automated tools, commodity malware, and script kiddies who don't read source.
+**Residual risk:** LOW for targeted attackers (they'll just avoid). Useful against automated tools.
 
-**Honest assessment:** Honeypots detect lazy attackers. Skilled operators who read the source simply avoid the known pipe names and don't touch the install directory. The value is against the 95% of attacks that are automated.
+**Honest assessment:** Honeypots detect lazy attackers. Skilled operators who read the source skip the known pipes and the `honeypot\` folder. EDR-killer **process names** are the same class of control (rename bypasses).
 
 ---
 
@@ -587,7 +588,8 @@ Hard-to-bypass detections (require kernel access to evade):
 
 See CHANGELOG.md for full history. Key fixes:
 
-- **v2.1.8:** Red team audit hardening: binary integrity verification before agent launch (RT-2026-H1/H3); AntiTamperGuard SHA-256 binary replacement detection; Worker nonce-after-HMAC (RT-2026-M1); WebDashboard bearer token auth (RT-2026-M3); Worker input validation (RT-2026-M4); chain-confirmed budget bypass (RT-2026-M2); 6 new detection monitors (AmsiIntegrityCheck, EdrKillerDetection, HoneypotDll, DecoyPipe, KernelModuleAudit, TokenPrivilegeAudit).
+- **v2.2.0:** Dashboard bearer is actually required (Referer ignored; token not in GET /; WS authenticated). V217 monitors **registered**. Game-path reputation skip refuses user-profile trees. ChainTracer System32/SysWOW64 only. Watchdog publisher pin + install-path liveness. DriverLoadMonitor user-profile scan. Kiosk LGPO no longer disables audit/passwords/FIPS. Worker RATE_LIMITER after HMAC. Encrypted config HMAC envelope. President's Law no longer includes DnsAnomaly/NetworkAnomaly.
+- **v2.1.8:** Binary integrity before agent launch (RT-2026-H1/H3); AntiTamperGuard SHA-256 replacement detection; Worker nonce-after-HMAC (RT-2026-M1); Worker input validation (RT-2026-M4); chain-confirmed budget bypass (RT-2026-M2). Six monitors were **written** here and **wired in 2.2.0**. Dashboard “bearer auth” in 2.1.8 was a Referer shortcut (closed in 2.2.0).
 - **v1.7.6:** Removed opinionated forum.hr hosts block; added `ForumHrWatchMonitor` for non-browser C2/relay abuse of that site alone.
 - **v1.7.5:** ASR Block self-heal (`AsrPolicyGuard`), remote session force-logoff (`RemoteSessionGuard`), install-time credential/browser residual hardening. Documentation inventory parity with runtime registration.
 - **v1.7.4:** ThreatIntelFeedBlocker (Spamhaus/Feodo/ET), real-time `LnkShortcutMonitor`, Agent scareware/cursor/cookie ports.

@@ -1,4 +1,6 @@
-# Sentinel Rule Packs (v2.0.8)
+# Sentinel Rule Packs (v2.2.0)
+
+RSA-SHA256 signed packs. HMAC packs are rejected. External `rulepack_pubkey.xml` is ignored (embedded public key only).
 
 Signed correlation rule packs extend multi-signal detection **without recompiling** Sentinel.
 

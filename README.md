@@ -154,13 +154,15 @@ Full transparency in [THREAT_MODEL.md](THREAT_MODEL.md).
 
 9. **Plugins + rule packs (v2.0)** — `IDetector` / `ICorrelationRule` / `ITelemetryProvider` / `IResponsePlugin` via `PluginRegistry`. Signed disk packs under `%ProgramData%\Sentinel\rules\packs\` (see [docs/RULE_PACKS.md](docs/RULE_PACKS.md)).
 
-10. **Service↔Agent IPC (v2.0)** — Authenticated named pipe (`SentinelIpc-v2`) for live Ops/health. HMAC token under ProgramData; read-only commands only.
+10. **Service↔Agent IPC (v2.0)** — Authenticated named pipe (`SentinelIpc-v2`) for live Ops/health/scan. HMAC token under ProgramData.
+
+11. **Dashboard (v2.2.0)** — Open **from the tray**. Bearer token is in the launch URL, not in `GET /`. A bookmark of `http://localhost:19845/` without a token is 401.
 
 ---
 
 ## Test Suite
 
-**1795** automated tests (xUnit) on net48:
+**1800** automated tests (xUnit) on net48:
 - End-to-end integration tests (full pipeline: telemetry → detection → scoring → correlation → response)
 - Unit tests for all critical engines (Response, Correlation, ChainTracer, FileReputation, AntiTamper, Detection)
 - Monitor unit tests including LNK classification, threat-intel feed parsing, USB failed-enumeration, PS-ported guards, v1.7.5–1.7.6 features, auto incident evidence packs (v1.7.7/1.7.8)

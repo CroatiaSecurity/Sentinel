@@ -1,5 +1,7 @@
 # Sentinel v1.8.0 — Red Team / Blue Team Security Audit
 
+**Superseded for current posture:** see [SECURITY_AUDIT_2026.md](SECURITY_AUDIT_2026.md) (v2.2.0 remediations) and [CHANGELOG.md](CHANGELOG.md). This file is the v1.8.0 audit record.
+
 **Date:** 2026-07-30  
 **Scope:** Full source code review of Sentinel.Core, Sentinel.Service, Sentinel.Agent, installer, build pipeline, and configuration.  
 **Methodology:** Manual code audit with adversarial (red team) and defensive (blue team) perspective.

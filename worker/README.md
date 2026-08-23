@@ -2,7 +2,7 @@
 
 Cloudflare Worker that receives threat reports from Sentinel agents and forwards them to threat intelligence platforms (MalwareBazaar, URLhaus, AbuseIPDB, VirusTotal) using server-side API keys.
 
-**Version: 2.0.8** — authentication + nonce replay protection are mandatory.
+**Version: 2.2.0** — authentication + nonce replay protection are mandatory. Durable rate limit runs **after** HMAC. `/report/hash` is an honest MalwareBazaar lookup (sample ingest still requires the file).
 
 ## Auth model (v2.0.8)
 
@@ -22,7 +22,8 @@ Agents use certificate-pinned HTTPS to the Worker (true SPKI + rotation-safe pin
 ## Free Tier Limits
 
 - 100,000 requests/day (Cloudflare Workers free plan)
-- Worker enforces ~30 requests/IP/minute (in-memory; pair with CF Rate Limiting Rules in production)
+- Unauth flood cap ~120/IP/minute (in-memory, pre-HMAC)
+- Authenticated cap ~30/IP/minute (in-memory) plus `RATE_LIMITER` binding **after** HMAC (see `wrangler.toml`)
 
 ## Setup
 
@@ -53,7 +54,7 @@ If `ProxySharedSecret` is null/short, agents **skip** reporting and VT proxy loo
 
 ## API Endpoints
 
-- `POST /report/hash` — MalwareBazaar
+- `POST /report/hash` — MalwareBazaar **lookup** (+ comment if the hash is already known; does not upload a sample)
 - `POST /report/url` — URLhaus
 - `POST /report/ip` — AbuseIPDB
 - `POST /lookup/vt` — VirusTotal hash lookup

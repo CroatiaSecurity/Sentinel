@@ -1,7 +1,13 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
+using System.Reflection;
+using System.Text;
+using Microsoft.Extensions.Hosting;
 using Xunit;
 using Sentinel.Core;
+using Sentinel.Core.Monitors;
 
 namespace Sentinel.Tests
 {
@@ -113,6 +119,74 @@ namespace Sentinel.Tests
             {
                 try { Directory.Delete(dir, true); } catch { }
             }
+        }
+
+        [Fact]
+        public void HoneypotDlls_LiveInDedicatedSubdirectory()
+        {
+            Assert.Equal("honeypot", HoneypotDllMonitor.HoneypotSubdir);
+            Assert.False(string.Equals(HoneypotDllMonitor.HoneypotSubdir, ".", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain("..", HoneypotDllMonitor.HoneypotSubdir);
+        }
+
+        [Fact]
+        public void V217Monitors_AreBackgroundServices()
+        {
+            Assert.True(typeof(BackgroundService).IsAssignableFrom(typeof(AmsiIntegrityCheck)));
+            Assert.True(typeof(BackgroundService).IsAssignableFrom(typeof(HoneypotDllMonitor)));
+            Assert.True(typeof(BackgroundService).IsAssignableFrom(typeof(EdrKillerDetectionMonitor)));
+            Assert.True(typeof(BackgroundService).IsAssignableFrom(typeof(DecoyPipeMonitor)));
+            Assert.True(typeof(BackgroundService).IsAssignableFrom(typeof(KernelModuleAuditMonitor)));
+            Assert.True(typeof(BackgroundService).IsAssignableFrom(typeof(TokenPrivilegeAuditMonitor)));
+        }
+
+        [Fact]
+        public void GSecurityInf_DoesNotWeakenPasswordsOrAuditOrFips()
+        {
+            var asm = typeof(HardeningModule).Assembly;
+            string? inf = null;
+            foreach (var name in asm.GetManifestResourceNames())
+            {
+                if (!name.EndsWith("GSecurity.inf", StringComparison.OrdinalIgnoreCase))
+                    continue;
+                using var stream = asm.GetManifestResourceStream(name);
+                Assert.NotNull(stream);
+                using var ms = new MemoryStream();
+                stream!.CopyTo(ms);
+                var bytes = ms.ToArray();
+                inf = bytes.Length >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE
+                    ? Encoding.Unicode.GetString(bytes)
+                    : Encoding.UTF8.GetString(bytes);
+                break;
+            }
+
+            Assert.False(string.IsNullOrWhiteSpace(inf), "GSecurity.inf embedded resource missing");
+            Assert.DoesNotContain("MinimumPasswordLength = 0", inf);
+            Assert.Contains("MinimumPasswordLength = 12", inf);
+            Assert.DoesNotContain("PasswordComplexity = 0", inf);
+            Assert.Contains("AuditLogonEvents = 3", inf);
+            Assert.DoesNotContain(@"FIPSAlgorithmPolicy\Enabled=4,0", inf);
+        }
+
+        [Fact]
+        public void DriverHashBlocklist_HasNoCorruptTriedEntries()
+        {
+            var field = typeof(DriverLoadMonitor).GetField(
+                "VulnerableDriverHashes", BindingFlags.NonPublic | BindingFlags.Static);
+            Assert.NotNull(field);
+            var hashes = field!.GetValue(null) as HashSet<string>;
+            Assert.NotNull(hashes);
+            Assert.DoesNotContain(hashes!, h =>
+                h.IndexOf("tried", StringComparison.OrdinalIgnoreCase) >= 0);
+        }
+
+        [Fact]
+        public void UserProfilePath_IsNeverAReputationSkip()
+        {
+            Assert.True(SecurityValidation.IsUserProfileOrStagingPath(
+                @"C:\Users\Player\AppData\Roaming\steamapps\common\x.exe"));
+            Assert.False(SecurityValidation.IsUserProfileOrStagingPath(
+                @"C:\Program Files (x86)\Steam\steamapps\common\Game\game.exe"));
         }
     }
 }

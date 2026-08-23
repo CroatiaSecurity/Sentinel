@@ -27,11 +27,12 @@ Honest remediations from a full source red-team. Several items previously marked
 - `ProductInfo.Version` → `2.2.0`
 - Installer → `SentinelSetup-2.2.0`
 - IPC docs: `scan` / `scan_status` are real (on-demand audit), not “read-only ping/ops/health only”
+- Docs brought in line with runtime: `THREAT_MODEL.md`, `design.md`, `constraints.md`, `requirements.md`, `SECURITY.md`, `SECURITY_AUDIT.md`, `SECURITY_AUDIT_2026.md`, `architecture-council.md`, `worker/README.md`, `docs/VIRUSTOTAL.md`, `README.md`
 
 ### Tests
 
 - `V220SecurityHardeningTests` — dashboard auth invariants, game-path skip, Windows\Temp quarantine, President’s Law scope, config HMAC envelope.
-- Full suite: **1795** tests passing.
+- Full suite: **1800** tests passing.
 
 
 ## [2.1.9] - 2026-08-22

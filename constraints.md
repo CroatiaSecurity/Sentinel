@@ -1,6 +1,6 @@
 # Sentinel — Constraints
 
-**Version: 2.0.4**
+**Version: 2.2.0**
 
 ---
 
@@ -55,8 +55,12 @@
 | Constraint | Rationale |
 |-----------|-----------|
 | No placeholder/fake data in detection rules | If a hash list, IOC set, or signature database isn't real, remove it. False confidence is worse than no feature. |
-| No filename-based primary detection | Process names are trivially spoofed. Filename lists are metadata enrichment only, never detection triggers. |
+| No filename-based primary detection | Process names are trivially spoofed. Filename lists are metadata enrichment / observe fuel only, never a President's Law kill (v2.2.0: `EdrKillerDetectionMonitor` is LogOnly). |
 | No security theater features | If a feature doesn't work against an attacker who reads the source code, it must be removed or honestly documented as limited. |
+| Dashboard Referer is not auth (v2.2.0) | Localhost HTTP APIs and WebSockets authenticate with a bearer token issued via the tray launch URL. A client-controlled `Referer` header never grants access. Secrets are not embedded in `GET /`. |
+| No self-sideload decoys (v2.2.0) | Honeypot `version.dll` / `winhttp.dll` / `winmm.dll` MUST NOT be planted in the Sentinel exe directory. Decoys live in `{install}\honeypot\`. |
+| Game reputation skip is not a trust grant (v2.2.0) | `ShouldSkipReputationForGamePath` refuses user-profile / Temp / Downloads / Desktop trees. Memory-inspect skip (`IsGameOrAntiCheatPath`) is separate and is not a reputation skip. |
+| Kiosk LGPO must not weaken the host (v2.2.0) | `GSecurity.inf` must not set password length 0, complexity off, all audit off, or force FIPS off. |
 | Behavioral signals only for kill authority | President's Law rules must detect what processes DO (API calls, file operations, network behavior), not what they ARE (name, path, hash). |
 | Hash reputation via live API only | Static hash lists in source code are immediately visible to attackers and impossible to keep current. Use HashReputationService (3-API lookup) instead. |
 

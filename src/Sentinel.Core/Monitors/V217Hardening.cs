@@ -385,7 +385,7 @@ namespace Sentinel.Core.Monitors
         {
             "version.dll", "winmm.dll", "dbghelp.dll", "WINHTTP.dll"
         };
-        private const string HoneypotSubdir = "honeypot";
+        internal const string HoneypotSubdir = "honeypot";
 
         public HoneypotDllMonitor(DetectionEngine detectionEngine, ILogger<HoneypotDllMonitor> logger)
         {

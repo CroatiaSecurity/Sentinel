@@ -36,6 +36,9 @@ and most VT engines.
 6. **Game / anti-cheat memory policy** — no `PROCESS_VM_READ` on Steam/Epic/…
    trees or known titles (e.g. Football Manager); fail-closed when path is
    unresolved. This is a handle-open skip only, not a defense disable.
+   **v2.2.0:** on-execute *reputation* skip uses `ShouldSkipReputationForGamePath`
+   and refuses user-profile / Temp / Desktop trees (a fake
+   `%AppData%\steamapps\common\` is still scanned).
 
 ## What actually gets you near 0/70
 
