@@ -1,12 +1,16 @@
 # Sentinel — Threat Model
 
-**Version: 2.2.0**
+**Version: 2.2.1**
 
 This document assumes the attacker has read the source code.
 
 ### v2.1.2 — battle hackers, keep play/browse working
 
 Work-first defaults: HID auto-disable is kiosk-only; Steam/Xbox/Store/DirectX/OBS are work surface; Hell's Gate and unmapped-thread scanners require a real stub table / compact shellcode page. Weak browse/play heuristics cannot complete a chain nuke. MitMDefense does not unlock arbitrary host mutation.
+
+### v2.2.1 — tray opens a real browser
+
+Windows 11 with a broken `http` protocol association showed “We can't open this 'http' link” when Settings was clicked. The tray now launches Edge/Chrome/Firefox (or the UserChoice browser EXE) instead of ShellExecute on the URL.
 
 ### v2.2.0 — advertised controls actually run
 

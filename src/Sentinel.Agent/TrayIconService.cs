@@ -179,33 +179,21 @@ namespace Sentinel.Agent
 
         private void ShowDashboard(int? initialPage)
         {
-            try
-            {
-                // Open the web dashboard in the default browser
-                Process.Start(new ProcessStartInfo
-                {
-                    FileName = WebDashboardService.DashboardLaunchUrl,
-                    UseShellExecute = true
-                });
-            }
-            catch (Exception ex)
-            {
-                // Fallback: try opening with explorer
-                try
-                {
-                    Process.Start(new ProcessStartInfo
-                    {
-                        FileName = "explorer.exe",
-                        Arguments = WebDashboardService.DashboardLaunchUrl,
-                        UseShellExecute = true
-                    });
-                }
-                catch
-                {
-                    MessageBox.Show($"Failed to open dashboard: {ex.Message}", "Sentinel",
-                        MessageBoxButtons.OK, MessageBoxIcon.Error);
-                }
-            }
+            var url = WebDashboardService.DashboardLaunchUrl;
+
+            // v2.2.1: never ShellExecute the URL as a protocol. A broken http
+            // association shows "We can't open this 'http' link" and does not throw.
+            if (BrowserLauncher.TryOpen(url))
+                return;
+
+            try { Clipboard.SetText(url); } catch { }
+            MessageBox.Show(
+                "Couldn't find a browser to open the dashboard.\n\n" +
+                "The URL was copied to the clipboard — paste it into Edge or Chrome:\n\n" +
+                url,
+                "Sentinel",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
         }
 
         private static string ProgramDataRoot =>

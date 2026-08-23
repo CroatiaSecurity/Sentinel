@@ -1,6 +1,18 @@
 # Changelog
 
 
+## [2.2.1] - 2026-08-23
+
+### Fixed
+
+- **Tray Settings / dashboard open on Windows 11.** `Process.Start(http://…)` uses the `http` protocol association. When that association is empty or not a browser, Windows shows *“We can't open this 'http' link / Your device needs a new app to open this link”* **without throwing**, so the explorer fallback never ran. 2.2.1 launches Edge/Chrome/Firefox (or the UserChoice default browser executable) with the URL as an argument. If no browser is found, the token URL is copied to the clipboard.
+
+### Changed
+
+- `ProductInfo.Version` → `2.2.1`
+- Installer → `SentinelSetup-2.2.1`
+
+
 ## [2.2.0] - 2026-08-23
 
 Honest remediations from a full source red-team. Several items previously marked “fixed” in 2.1.8/2.1.9 were not actually in force. This release wires them, or tells the truth.
