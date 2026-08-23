@@ -1,6 +1,6 @@
 # Sentinel — Design Document
 
-**Version: 2.2.1**
+**Version: 2.2.2**
 
 ---
 
@@ -41,7 +41,7 @@ Monitors → TelemetryFusionEngine → DetectionEngine → AdvancedResponseEngin
 | `OpsMetricsPublisher` | Writes `%ProgramData%\Sentinel\ops_metrics.json` |
 | `SelfPathGuard` | Hardlink-aware install self-exclusion |
 | `EncryptedConfigStore` | DPAPI-encrypted per-deployment config (`config.enc`); replaces plaintext appsettings.json |
-| `ProductInfo.Version` | `2.2.1` |
+| `ProductInfo.Version` | `2.2.2` |
 
 All components are wired via Microsoft.Extensions.DependencyInjection. No static mutable state anywhere.
 
@@ -229,8 +229,9 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 
 | Component | Mechanism | Notes |
 |-----------|-----------|-------|
-| `TrayIconService` | System tray NotifyIcon; **Settings** opens `WebDashboardService.DashboardLaunchUrl` (`?token=`). **No** `ShowBalloonTip` | WinForms STA |
-| `WebDashboardService` | Loopback HTTP `http://localhost:19845/`. **v2.2.0:** bearer from tray query only; Referer never grants access; `/ws/events` requires token | localhost |
+| `TrayIconService` | System tray NotifyIcon; **Settings** / double-click opens native `AgentDashboardForm`. **No** `ShowBalloonTip` | WinForms STA |
+| `AgentDashboardForm` | Built-in dark Settings dashboard (Overview / Events / Report / Quarantine / Safety / Ops / Tools / About). **v2.2.2:** this is the Settings UI again — no browser | WinForms STA |
+| `WebDashboardService` | Loopback HTTP dashboard **not started** as of v2.2.2 (http protocol association was unusable on some hosts) | unused |
 | `AgentDashboardForm` | TrimKit-style dark sidebar Settings UI; affidavit editor + national portal open for evidence packs | WinForms STA |
 | `ScreenCaptureMonitor` | Detects DXGI desktop duplication + transparent overlay phishing windows | 15–25s |
 | `WebcamMicMonitor` | Detects background camera/mic access via DLL analysis (Media Foundation, WASAPI) | 20s |

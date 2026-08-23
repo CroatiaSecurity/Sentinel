@@ -6,7 +6,7 @@ Sentinel is for **gamers, creators, and high-profile targets**. It hunts real at
 
 **You can browse and play.** Default mode must not break Chrome/Edge/Firefox, Microsoft Store, Xbox, Steam, Epic, DirectX/VC++ redists, Game Bar, or creator tools such as OBS Studio. Controllers, wheels, and HOTAS stay usable. Installing a game or a GPU/runtime redist is work, not an incident.
 
-**Current version: 2.2.1**
+**Current version: 2.2.2**
 
 ### Honest mission
 
@@ -150,13 +150,13 @@ Full transparency in [THREAT_MODEL.md](THREAT_MODEL.md).
 
 7. **Reportable-grade evidence (v1.7.7/1.7.8)** — High-confidence attacks produce integrity-sealed packs under `%ProgramData%\Sentinel\IncidentReports\` (SHA-256 manifest + machine-bound HMAC, victim affidavit template, chain of custody, national cybercrime portal links, optional TI share). Sentinel prepares evidence for **you** to file; it does not auto-submit to police or INTERPOL.
 
-8. **Settings UI** — Tray **Settings** (double-click): Overview, Events, **Report to Police**, Quarantine, Safety, **Ops (v2.0 metrics)**, Tools, About. No ActiveResponse toggle in the agent (service-only).
+8. **Settings UI** — Tray **Settings** (double-click) opens the **built-in** dashboard (WinForms): Overview, Events, **Report to Police**, Quarantine, Safety, **Ops (v2.0 metrics)**, Tools, About. No browser. No ActiveResponse toggle in the agent (service-only).
 
 9. **Plugins + rule packs (v2.0)** — `IDetector` / `ICorrelationRule` / `ITelemetryProvider` / `IResponsePlugin` via `PluginRegistry`. Signed disk packs under `%ProgramData%\Sentinel\rules\packs\` (see [docs/RULE_PACKS.md](docs/RULE_PACKS.md)).
 
 10. **Service↔Agent IPC (v2.0)** — Authenticated named pipe (`SentinelIpc-v2`) for live Ops/health/scan. HMAC token under ProgramData.
 
-11. **Dashboard (v2.2.0)** — Open **from the tray**. Bearer token is in the launch URL, not in `GET /`. A bookmark of `http://localhost:19845/` without a token is 401.
+11. **Dashboard (v2.2.2)** — Built-in Settings window from the tray. The localhost web UI is not started.
 
 ---
 
@@ -172,7 +172,7 @@ Full transparency in [THREAT_MODEL.md](THREAT_MODEL.md).
 
 ## Installation
 
-Download **`SentinelSetup-2.2.1.exe`** from [GitHub Releases](https://github.com/CroatiaSecurity/Sentinel/releases) (or `releases/2.2.1/` after a local build) and run it as Administrator.
+Download **`SentinelSetup-2.2.2.exe`** from [GitHub Releases](https://github.com/CroatiaSecurity/Sentinel/releases) (or `releases/2.2.2/` after a local build) and run it as Administrator.
 
 If Setup fails with **Error 5 / temporary directory** while an older Sentinel is installed, that was ASR rule `c1db55ab` (fixed in 1.9.6+). Use elevated `installer\install-no-inno.ps1` or `fix-asr-for-setup.ps1`, then upgrade.
 

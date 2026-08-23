@@ -1,6 +1,6 @@
 # Sentinel — Threat Model
 
-**Version: 2.2.1**
+**Version: 2.2.2**
 
 This document assumes the attacker has read the source code.
 
@@ -8,9 +8,13 @@ This document assumes the attacker has read the source code.
 
 Work-first defaults: HID auto-disable is kiosk-only; Steam/Xbox/Store/DirectX/OBS are work surface; Hell's Gate and unmapped-thread scanners require a real stub table / compact shellcode page. Weak browse/play heuristics cannot complete a chain nuke. MitMDefense does not unlock arbitrary host mutation.
 
+### v2.2.2 — Settings is native again
+
+Tray Settings opens `AgentDashboardForm` (built-in WinForms). No browser, no `http://localhost`. The web dashboard listener is not started.
+
 ### v2.2.1 — tray opens a real browser
 
-Windows 11 with a broken `http` protocol association showed “We can't open this 'http' link” when Settings was clicked. The tray now launches Edge/Chrome/Firefox (or the UserChoice browser EXE) instead of ShellExecute on the URL.
+Windows 11 with a broken `http` protocol association showed “We can't open this 'http' link” when Settings was clicked. The tray launched Edge/Chrome/Firefox instead of ShellExecute on the URL. Superseded by v2.2.2 native Settings.
 
 ### v2.2.0 — advertised controls actually run
 

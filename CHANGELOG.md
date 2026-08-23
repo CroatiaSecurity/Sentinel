@@ -1,6 +1,16 @@
 # Changelog
 
 
+## [2.2.2] - 2026-08-23
+
+### Changed
+
+- **Settings is the built-in WinForms dashboard again.** Tray **Settings** / double-click opens `AgentDashboardForm` (Overview, Events, Report to Police, Quarantine, Safety, Ops, Tools, About). It no longer launches a browser or `http://localhost:19845`. That path showed *“We can't open this 'http' link”* on machines with no working `http` protocol association.
+- `WebDashboardService` is not started. The HTTP listener is unused.
+- `ProductInfo.Version` → `2.2.2`
+- Installer → `SentinelSetup-2.2.2`
+
+
 ## [2.2.1] - 2026-08-23
 
 ### Fixed

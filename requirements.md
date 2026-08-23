@@ -260,14 +260,12 @@ The user-session Agent must provide a Settings window (tray menu + double-click)
 - When enabled: `TlsCertificateMonitor` removes high-confidence planted roots immediately; `GhostProcessMonitor` kills invisible/empty-name PID → Cast without the normal 2-scan wait; `CastDeviceGuard` auto-blocks rogue Cast by IOC MAC prefix and known IPs; `NullSessionGuard` blocks FCM TCP 5228; `AdvancedResponseEngine` exempts MitmDefense actions from ObserveUntilChain demotion
 - Config fields: `Enabled`, `RemovePlantedCerts`, `BlockFcmPushChannel`, `AutoBlockRogueCast`, `RogueCastMacPrefixes`, `KnownRogueCastIps`
 
-### FR-19: Local dashboard authentication (v2.2.0)
+### FR-19: Settings dashboard (v2.2.2)
 
-- Loopback HTTP dashboard on `http://localhost:19845/`
-- Bearer token is the only authenticator for `/api/*` and `/ws/events`
-- Token is issued via the tray launch URL (`?token=`), stored in `sessionStorage`, stripped from the address bar
-- `GET /` must **not** embed bearer or CSRF secrets
-- A client-controlled `Referer` header must never grant access
-- CSRF tokens are issued only to already-authenticated callers
+- Tray **Settings** / double-click opens the **built-in** WinForms dashboard (`AgentDashboardForm`)
+- Do not open a browser or `http://` URL for Settings
+- The localhost web dashboard is not started
+- (v2.2.0 leftover, if HTTP UI is ever re-enabled: bearer-only, no Referer auth, no secrets in `GET /`)
 
 ### FR-20: Game-path reputation skip (v2.2.0)
 

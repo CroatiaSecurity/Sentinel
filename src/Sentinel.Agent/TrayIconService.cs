@@ -35,6 +35,7 @@ namespace Sentinel.Agent
         private readonly CancellationTokenSource _cts = new();
         private readonly string _version;
         private (string RuleName, string ProcessName, double Confidence, string Evidence)? _pendingDetection;
+        private AgentDashboardForm? _settingsForm;
 
         public TrayIconService(
             AutoIncidentReportingConfig reportConfig,
@@ -179,21 +180,30 @@ namespace Sentinel.Agent
 
         private void ShowDashboard(int? initialPage)
         {
-            var url = WebDashboardService.DashboardLaunchUrl;
+            // v2.2.2: native WinForms settings — never open a browser / http:// link.
+            if (_settingsForm == null || _settingsForm.IsDisposed)
+            {
+                _settingsForm = new AgentDashboardForm(_version, _reportConfig, _quarantine);
+                _settingsForm.FormClosed += (_, _) => _settingsForm = null;
+            }
 
-            // v2.2.1: never ShellExecute the URL as a protocol. A broken http
-            // association shows "We can't open this 'http' link" and does not throw.
-            if (BrowserLauncher.TryOpen(url))
-                return;
+            if (initialPage.HasValue)
+                _settingsForm.SelectPage(initialPage.Value);
 
-            try { Clipboard.SetText(url); } catch { }
-            MessageBox.Show(
-                "Couldn't find a browser to open the dashboard.\n\n" +
-                "The URL was copied to the clipboard — paste it into Edge or Chrome:\n\n" +
-                url,
-                "Sentinel",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Information);
+            if (_settingsForm.WindowState == FormWindowState.Minimized)
+                _settingsForm.WindowState = FormWindowState.Normal;
+
+            _settingsForm.Show();
+            try
+            {
+                ShowWindow(_settingsForm.Handle, SwRestore);
+                ShowWindow(_settingsForm.Handle, SwShow);
+                BringWindowToTop(_settingsForm.Handle);
+                SetForegroundWindow(_settingsForm.Handle);
+            }
+            catch { }
+            _settingsForm.Activate();
+            _settingsForm.BringToFront();
         }
 
         private static string ProgramDataRoot =>
@@ -282,6 +292,8 @@ namespace Sentinel.Agent
 
         public void Dispose()
         {
+            try { _settingsForm?.Dispose(); } catch { }
+            _settingsForm = null;
             _notifyIcon?.Dispose();
             _contextMenu?.Dispose();
             _cts.Dispose();

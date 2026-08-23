@@ -4,7 +4,7 @@
 
 | Version | Supported |
 |---------|-----------|
-| 2.2.x   | Yes (current: 2.2.1) |
+| 2.2.x   | Yes (current: 2.2.2) |
 | 2.1.x   | Security fixes only |
 | 1.9.x   | Security fixes only |
 | 1.8.x   | Security fixes only |
@@ -62,13 +62,10 @@ The following are NOT in scope:
 
 ## Attack Surface (v2.2.0)
 
-### Web Dashboard (`http://localhost:19845/`)
+### Settings UI (v2.2.2)
 
-- **Auth:** Bearer token from the tray launch URL (`?token=`). Header `Authorization: Bearer` or query `token`.
-- **Not auth:** `Referer`. Any local process can set it; it is ignored (`LoopbackDashboardAuth.RefererGrantsAccess` is always false).
-- **HTML:** `GET /` does not embed bearer or CSRF. CSRF is issued only at `/api/csrf` after bearer check.
-- **WebSocket:** `/ws/events` requires the same bearer (`?token=`).
-- **Open from the tray.** A bookmark of the origin without a token returns 401.
+- Tray **Settings** opens the in-process WinForms dashboard (`AgentDashboardForm`). No HTTP listener, no browser.
+- `WebDashboardService` (`http://localhost:19845`) is **not started**. If re-enabled later: bearer from `?token=` only; Referer is never auth.
 
 ### Worker (v2.2.0)
 

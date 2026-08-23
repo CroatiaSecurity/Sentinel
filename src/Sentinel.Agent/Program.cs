@@ -343,11 +343,10 @@ namespace Sentinel.Agent
                     services.AddTransient<IDetectionRule, ChromeRemoteDebuggingRule>();
                     services.AddSingleton<IDetectionRule, DynamicRulesEvaluator>();
 
-                    // Tray Icon
+                    // Tray Icon + native WinForms Settings (v2.2.2).
+                    // WebDashboardService stays in the tree but is not started — opening
+                    // http://localhost required a working http protocol handler.
                     services.AddHostedService<TrayIconService>();
-
-                    // Web Dashboard (replaces WinForms Settings)
-                    services.AddHostedService<WebDashboardService>();
 
                     // User-session monitors (require user desktop/registry hive)
                     services.AddHostedService<ScreenCaptureMonitor>();
