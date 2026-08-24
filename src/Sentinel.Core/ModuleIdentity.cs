@@ -90,19 +90,16 @@ namespace Sentinel.Core
             var p = Normalize(path);
             if (p.Length == 0) return false;
 
-            if (p.IndexOf(@"\windows\system32\", StringComparison.Ordinal) >= 0) return true;
-            if (p.IndexOf(@"\windows\syswow64\", StringComparison.Ordinal) >= 0) return true;
-            if (p.IndexOf(@"\windows\winsxs\", StringComparison.Ordinal) >= 0) return true;
-            if (p.IndexOf(@"\windows\servicing\", StringComparison.Ordinal) >= 0) return true;
-            if (p.IndexOf(@"\windows\system32\driverstore\", StringComparison.Ordinal) >= 0) return true;
-            if (p.StartsWith(WindowsRoot(), StringComparison.Ordinal))
+            // Whole OS tree except Windows\Temp (that is still a drop folder).
+            // NativeImages, Microsoft.NET, SystemApps, UUS were missed by the
+            // system32-only check and got FreeLibrary'd — CLR 80131506 / StartMenu loop.
+            var win = WindowsRoot();
+            if (p.Equals(win, StringComparison.Ordinal) ||
+                p.StartsWith(win + @"\", StringComparison.Ordinal))
             {
-                // C:\windows\explorer.exe, C:\windows\system32\*.dll
-                if (p.StartsWith(WindowsRoot() + @"\system32", StringComparison.Ordinal)) return true;
-                if (p.StartsWith(WindowsRoot() + @"\syswow64", StringComparison.Ordinal)) return true;
-                if (p.StartsWith(WindowsRoot() + @"\winsxs", StringComparison.Ordinal)) return true;
-                if (p.StartsWith(WindowsRoot() + @"\servicing", StringComparison.Ordinal)) return true;
-                if (p.StartsWith(WindowsRoot() + @"\system32\driverstore", StringComparison.Ordinal)) return true;
+                if (ContainsDir(p, @"\windows\temp\") || ContainsDir(p, @"\windows\tmp\"))
+                    return false;
+                return true;
             }
 
             if (ContainsDir(p, @"\microsoft\edgewebview\")) return true;
@@ -110,6 +107,7 @@ namespace Sentinel.Core
             if (ContainsDir(p, @"\microsoft\edgecore\")) return true;
             if (ContainsDir(p, @"\microsoft\edgeupdate\")) return true;
             if (ContainsDir(p, @"\microsoft shared\")) return true;
+            if (ContainsDir(p, @"\windowsapps\")) return true;
             if (ContainsDir(p, @"\webview2userdata\")) return true;
             if (ContainsDir(p, @"\ebwebview\")) return true;
             if (ContainsDir(p, @"\dotnet\")) return true;

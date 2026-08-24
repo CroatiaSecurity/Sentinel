@@ -13,6 +13,11 @@ namespace Sentinel.Tests
         [InlineData(@"C:\Windows\System32\kernel32.dll")]
         [InlineData(@"C:\Windows\SysWOW64\ntdll.dll")]
         [InlineData(@"C:\Windows\System32\DriverStore\FileRepository\nv_dispi.inf_amd64\nvldumd.dll")]
+        [InlineData(@"C:\Windows\Microsoft.NET\Framework64\v4.0.30319\clr.dll")]
+        [InlineData(@"C:\Windows\assembly\NativeImages_v4.0.30319_64\System.Windows.Form\System.Windows.Forms.ni.dll")]
+        [InlineData(@"C:\Windows\SystemApps\MicrosoftWindows.Client.Photon_cw5n1h2txyewy\Microsoft.UI.Xaml.dll")]
+        [InlineData(@"C:\Windows\uus\AMD64\uusbrain.dll")]
+        [InlineData(@"C:\Program Files\WindowsApps\Microsoft.WindowsStore_8wekyb3d8bbwe\WinStore.App.exe")]
         [InlineData(@"C:\Program Files\Microsoft\EdgeWebView\Application\151.0.4129.101\msedge.dll")]
         [InlineData(@"C:\Users\Admin\AppData\Roaming\Ceprkac\WebView2UserData\EBWebView\WidevineCdm\widevine.dll")]
         [InlineData(@"C:\Program Files\NVIDIA Corporation\nvapi64.dll")]
@@ -20,6 +25,16 @@ namespace Sentinel.Tests
         {
             var v = ModuleIdentity.Evaluate(Chrome, module, _ => false);
             Assert.True(v.Allowed, v.Reason + " for " + module);
+        }
+
+        [Fact]
+        public void WindowsTemp_Sideload_IsDenied()
+        {
+            var v = ModuleIdentity.Evaluate(
+                Svchost,
+                @"C:\Windows\Temp\version.dll",
+                _ => false);
+            Assert.False(v.Allowed);
         }
 
         [Fact]

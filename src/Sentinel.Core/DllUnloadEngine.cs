@@ -336,7 +336,11 @@ namespace Sentinel.Core
                     }
                 }
 
-                if (!allUnloaded || hostileLoaded.Count == 0)
+                // Kill the host only for a user-writable drop we could not unmap.
+                // Failed FreeLibrary of a misclassified OS DLL must not kill
+                // Ceprkac / StartMenu / svchost (2.2.5 did that: CLR 80131506).
+                bool dropPlant = hostileLoaded.Any(h => ModuleIdentity.IsUserWritableDrop(h.Path));
+                if (dropPlant && !allUnloaded)
                 {
                     try { HardeningModule.SafeKillProcessTree(processId); }
                     catch
@@ -360,6 +364,12 @@ namespace Sentinel.Core
                     result.UnloadedDlls.Add(dllPath);
                 }
 
+                foreach (var (path, _) in hostileLoaded)
+                {
+                    if (!result.UnloadedDlls.Contains(path, StringComparer.OrdinalIgnoreCase))
+                        result.UnloadedDlls.Add(path);
+                }
+
                 result.Success = result.UnloadedDlls.Count > 0;
                 if (result.Success)
                 {
@@ -368,7 +378,7 @@ namespace Sentinel.Core
                         RuleName = "DLL Injection: Foreign Module Unloaded",
                         Evidence = $"Process '{name}' (PID {processId}) loaded hostile DLL(s): " +
                                    string.Join(", ", result.UnloadedDlls) +
-                                   $". FreeLibraryAPC={allUnloaded && hostileLoaded.Count > 0}; host killed if needed.",
+                                   $". FreeLibraryAPC={allUnloaded && hostileLoaded.Count > 0}; hostKilled={dropPlant && !allUnloaded}.",
                         Reasoning = "Proven behavior: a mapped module failed path+signer identity " +
                                     "(foreign folder, user-writable drop, or sideload plant). Unloaded immediately (T1055 / T1574.001).",
                         Confidence = 0.90,

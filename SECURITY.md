@@ -4,7 +4,7 @@
 
 | Version | Supported |
 |---------|-----------|
-| 2.2.x   | Yes (current: 2.2.5) |
+| 2.2.x   | Yes (current: 2.2.6) |
 | 2.1.x   | Security fixes only |
 | 1.9.x   | Security fixes only |
 | 1.8.x   | Security fixes only |
@@ -117,6 +117,7 @@ The following are NOT in scope:
 
 See [CHANGELOG.md](CHANGELOG.md) for the full history of security fixes, including:
 
+- v2.2.6: Do not FreeLibrary NativeImages/SystemApps or kill the host when APC fails on OS DLLs; .NET JIT RWX is not ALLOCVM_REMOTE (Ceprkac CLR 80131506)
 - v2.2.5: Module identity (`ModuleIdentity` + `DllUnloadEngine`) unloads foreign mapped PEs immediately; module count is not injection; MZ/compact unbacked RWX execute-strip
 - v2.2.4: Generic CVE-class sensors (kernel-EoP loaders, MSI/winget, MOTW/ClickFix, unionfs); CveShield Windows OS KEV match; missed Patch Tuesday toast; V217 types in Sentinel.Core
 - v2.2.3: Lazarus Dream Job campaign pack (CVE-2026-68820 userland); KEV UBR toast; LegacyHive hive-load; Cloud Files / ShieldBreak sync-root watch

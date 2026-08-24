@@ -213,26 +213,30 @@ namespace Sentinel.Core
                         var rwx = FindUnbackedRwx(h, proc.Id);
                         if (rwx.Count == 0) continue;
 
-                        // Named-file inject: identity unload. Reflective PE (MZ in private RWX):
-                        // strip execute now. JIT (no MZ, large regions) is not a hit.
+                        // .NET / Chromium JIT is private RWX without an MZ. 2.2.5 treated
+                        // that as ALLOCVM_REMOTE, ran DllUnloadEngine, and Ceprkac died
+                        // with CLR 80131506 at the same timestamp as the event.
+                        var mzRegions = new List<(long Address, long Size)>();
+                        foreach (var region in rwx)
+                        {
+                            if (NativeProcessMemory.LooksLikeMzPe(proc.Id, new IntPtr(region.Address)))
+                                mzRegions.Add(region);
+                        }
+                        if (mzRegions.Count == 0)
+                        {
+                            proc.Dispose();
+                            continue;
+                        }
+
                         if (_dllUnload != null)
                             await _dllUnload.CheckAndUnloadAsync(proc.Id, name);
 
                         int stripped = 0;
-                        foreach (var region in rwx)
+                        foreach (var region in mzRegions)
                         {
                             var start = new IntPtr(region.Address);
-                            bool mz = NativeProcessMemory.LooksLikeMzPe(proc.Id, start);
-                            bool compact = region.Size > 0 && region.Size <= 16 * 1024;
-                            if (!mz && !compact) continue;
                             if (NativeProcessMemory.TryStripExecute(proc.Id, start, new IntPtr(region.Size)))
                                 stripped++;
-                        }
-
-                        if (stripped == 0 && rwx.All(r => r.Size > 16 * 1024))
-                        {
-                            proc.Dispose();
-                            continue;
                         }
 
                         _alertedPids[proc.Id] = DateTimeOffset.UtcNow;

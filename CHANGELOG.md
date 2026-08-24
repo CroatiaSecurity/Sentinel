@@ -1,6 +1,16 @@
 # Changelog
 
 
+## [2.2.6] - 2026-08-24
+
+Hotfix: 2.2.5 FreeLibrary'd OS/.NET modules and killed the host when APC failed. Ceprkac died with CLR 80131506 at the same UTC second as `ALLOCVM_REMOTE` (21 JIT regions, stripped-execute=0). StartMenu/ShellHost looped on `Windows\SystemApps`.
+
+### Fixed
+
+- **`ModuleIdentity` keep-tree** is all of `C:\Windows` except `Windows\Temp`, plus WindowsApps. NativeImages, Microsoft.NET, SystemApps, UUS are no longer "foreign".
+- **`DllUnloadEngine`** kills the host only if a **user-writable drop** could not be unmapped. Failed FreeLibrary of an OS DLL does not kill Ceprkac/StartMenu/svchost. Always logs the DLL list.
+- **`EtwThreatIntelMonitor`** ignores private RWX with no MZ (CLR/V8 JIT). Does not run DllUnloadEngine or strip execute on those regions.
+
 ## [2.2.5] - 2026-08-24
 
 Module identity is the EDR backbone again. Kiro left a 45-second *count* and a sideload-name allowlist. A remote inject of `C:\Evil\helper.dll` never matched `version.dll` and was logged as "module count +3".
