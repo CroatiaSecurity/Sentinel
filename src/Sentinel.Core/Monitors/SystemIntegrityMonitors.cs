@@ -1067,6 +1067,7 @@ namespace Sentinel.Core
         private readonly ToastService? _toast;
         private DateTime _lastPostureAlert = DateTime.MinValue;
         private DateTime _lastKevAlert = DateTime.MinValue;
+        private DateTime _lastMissedPtAlert = DateTime.MinValue;
 
         public WindowsUpdateIntegrityMonitor(
             DetectionEngine de,
@@ -1093,6 +1094,7 @@ namespace Sentinel.Core
                     await CheckAuPolicyAsync().ConfigureAwait(false);
                     await CheckPostureStaleAsync().ConfigureAwait(false);
                     await CheckKevPatchAsync().ConfigureAwait(false);
+                    await CheckMissedPatchTuesdayAsync().ConfigureAwait(false);
 
                     await Task.Delay(TimeSpan.FromMinutes(10), ct).ConfigureAwait(false);
                 }
@@ -1271,6 +1273,60 @@ namespace Sentinel.Core
                     _toast?.ShowCriticalToast(
                         "Sentinel: Windows KEV unpatched",
                         "CVE-2026-68820 (afd.sys) is exploited in the wild. Install this month's Windows Update and reboot.");
+                }
+                catch { }
+            }
+            catch { }
+        }
+
+        private async Task CheckMissedPatchTuesdayAsync()
+        {
+            if (DateTime.UtcNow - _lastMissedPtAlert < TimeSpan.FromHours(24))
+                return;
+
+            try
+            {
+                DateTime? lastInstall = null;
+                using var wu = Registry.LocalMachine.OpenSubKey(
+                    @"SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\Results\Install");
+                var lastInstallStr = wu?.GetValue("LastSuccessTime") as string;
+                if (!string.IsNullOrEmpty(lastInstallStr) && DateTime.TryParse(lastInstallStr, out var dt))
+                    lastInstall = dt;
+
+                var now = DateTime.Now;
+                if (!CveCoverageHeuristics.MissedLatestPatchTuesday(lastInstall, now))
+                    return;
+
+                var pt = CveCoverageHeuristics.MostRecentPatchTuesday(now);
+                _lastMissedPtAlert = DateTime.UtcNow;
+                await _detectionEngine.EmitAsync(new DetectionEvent
+                {
+                    RuleName = "Patch Posture: Missed Patch Tuesday",
+                    Evidence = lastInstall.HasValue
+                        ? $"Last successful Windows Update install {lastInstall.Value:yyyy-MM-dd} is before Patch Tuesday {pt:yyyy-MM-dd}."
+                        : $"No LastSuccessTime; Patch Tuesday {pt:yyyy-MM-dd} has passed the 7-day grace window.",
+                    Reasoning =
+                        "Host has not applied the latest monthly cumulative update. New CVEs (kernel EoP, installer EoP, " +
+                        "browser RCE) require OS patches Sentinel cannot apply. LogOnly + toast — never force-patches.",
+                    Confidence = lastInstall.HasValue ? 0.86 : 0.70,
+                    Tier = DetectionTier.Tier2Indicator,
+                    AuthorizedResponse = ResponseAction.LogOnly,
+                    ProcessName = "SYSTEM",
+                    ProcessId = 0,
+                    SignalType = SignalType.AntiTamper,
+                    Metadata = new Dictionary<string, string>
+                    {
+                        ["Posture"] = "MissedPatchTuesday",
+                        ["PatchTuesday"] = pt.ToString("yyyy-MM-dd"),
+                        ["LastInstall"] = lastInstall?.ToString("yyyy-MM-dd") ?? "",
+                    }
+                }).ConfigureAwait(false);
+
+                try
+                {
+                    _toast?.ShowCriticalToast(
+                        "Sentinel: Windows Update overdue",
+                        "This PC missed the latest Patch Tuesday. Install Windows Updates and reboot — Sentinel cannot patch kernel bugs.");
                 }
                 catch { }
             }

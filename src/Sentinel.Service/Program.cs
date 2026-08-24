@@ -9,8 +9,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Configuration;
-using Sentinel.Core;
-using Sentinel.Core.Monitors;
+using Sentinel.Core;            // all monitor classes (folder Monitors/ is layout only)
 using Sentinel.Core.Plugins;
 
 namespace Sentinel.Service
@@ -181,6 +180,16 @@ namespace Sentinel.Service
                 security.AddAccessRule(new FileSystemAccessRule(
                     adminsSid,
                     FileSystemRights.FullControl,
+                    InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+                    PropagationFlags.None,
+                    AccessControlType.Allow));
+
+                // Interactive users must be able to open Data Folder / logs from the tray.
+                // UAC-filtered Admin tokens are not BUILTIN\Administrators.
+                var interactiveSid = new SecurityIdentifier(WellKnownSidType.InteractiveSid, null);
+                security.AddAccessRule(new FileSystemAccessRule(
+                    interactiveSid,
+                    FileSystemRights.ReadAndExecute,
                     InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
                     PropagationFlags.None,
                     AccessControlType.Allow));
@@ -469,6 +478,9 @@ namespace Sentinel.Service
                             sp.GetRequiredService<DreamJobCampaignMonitor>(),
                             sp.GetRequiredService<EdrKillerDetectionMonitor>(),
                             sp.GetRequiredService<DecoyPipeMonitor>(),
+                            sp.GetRequiredService<CveClassCoverageMonitor>(),
+                            sp.GetRequiredService<MotwBypassMonitor>(),
+                            sp.GetRequiredService<ContainerIsolationTamperMonitor>(),
                         };
                         return new MonitorGroup(
                             new MonitorGroupConfig
@@ -516,6 +528,9 @@ namespace Sentinel.Service
                     services.AddSingleton<DreamJobCampaignMonitor>();
                     services.AddSingleton<EdrKillerDetectionMonitor>();
                     services.AddSingleton<DecoyPipeMonitor>();
+                    services.AddSingleton<CveClassCoverageMonitor>();
+                    services.AddSingleton<MotwBypassMonitor>();
+                    services.AddSingleton<ContainerIsolationTamperMonitor>();
 
                     // ── Group 3: Credential Protection ────────────────────────────────
                     // Starts after core detection (4s). Protects credentials and sessions.

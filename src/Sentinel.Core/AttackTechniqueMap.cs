@@ -84,6 +84,16 @@ namespace Sentinel.Core
             ("LegacyHive", new[] { "T1068", "T1574.005" }),
             ("Cloud Files", new[] { "T1562.001", "T1574" }),
             ("KEV unpatched", new[] { "T1190" }),
+            ("Kernel Exploit Loader", new[] { "T1068" }),
+            ("Installer EoP", new[] { "T1068", "T1548.002" }),
+            ("AlwaysInstallElevated", new[] { "T1548.002" }),
+            ("Package Manager EoP", new[] { "T1068", "T1195" }),
+            ("Mark-of-the-Web", new[] { "T1553.005", "T1204.002" }),
+            ("Disk Image in Delivery", new[] { "T1553.005", "T1204.002" }),
+            ("ClickFix Encoded", new[] { "T1204", "T1059.001" }),
+            ("VS Code Encoded", new[] { "T1059.001", "T1218" }),
+            ("Isolation Filter Driver", new[] { "T1068", "T1611" }),
+            ("Missed Patch Tuesday", new[] { "T1190" }),
         };
 
         /// <summary>

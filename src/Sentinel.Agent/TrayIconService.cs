@@ -223,12 +223,7 @@ namespace Sentinel.Agent
                 }
 
                 // net48: ProcessStartInfo.ArgumentList is not available
-                Process.Start(new ProcessStartInfo
-                {
-                    FileName = "explorer.exe",
-                    UseShellExecute = true,
-                    Arguments = qDir
-                });
+                AgentDashboardForm.OpenFolder(qDir);
             }
             catch (Exception ex)
             {
@@ -265,29 +260,7 @@ namespace Sentinel.Agent
 
         private void OnOpenDataFolder(object? sender, EventArgs e)
         {
-            try
-            {
-                var root = ProgramDataRoot;
-                if (!Directory.Exists(root))
-                {
-                    MessageBox.Show(
-                        "Sentinel data folder does not exist yet. It is created when the service starts.",
-                        "Sentinel", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    return;
-                }
-
-                // net48: ProcessStartInfo.ArgumentList is not available
-                Process.Start(new ProcessStartInfo
-                {
-                    FileName = "explorer.exe",
-                    UseShellExecute = true,
-                    Arguments = root
-                });
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Failed to open data folder: {ex.Message}");
-            }
+            AgentDashboardForm.OpenFolder(ProgramDataRoot);
         }
 
         public void Dispose()

@@ -1,6 +1,6 @@
 # Sentinel — Constraints
 
-**Version: 2.2.3**
+**Version: 2.2.4**
 
 ---
 
@@ -59,6 +59,8 @@
 | No security theater features | If a feature doesn't work against an attacker who reads the source code, it must be removed or honestly documented as limited. |
 | Settings is native (v2.2.2) | Tray Settings opens `AgentDashboardForm`. Do not ShellExecute `http://` for Settings. The localhost web dashboard is not started. |
 | Kernel CVEs are OS patches (v2.2.3) | Do not claim to patch `afd.sys` / Cloud Files Mini Filter / User Profile Service. Hunt the userland campaign and toast KEV posture. Do not disable OneDrive or WinSock. |
+| Generic CVE-class, not one detector per CVE (v2.2.4) | New Patch Tuesday bugs are covered by exploit-host / MOTW / installer / KEV-match sensors. Do not add a named campaign pack as the only coverage for a kernel EoP. |
+| Monitor types live in `Sentinel.Core` (v2.2.4) | The `Monitors/` folder is layout. Do not put runtime monitor classes in `Sentinel.Core.Monitors` (that hid V217 types behind a second using). |
 | Dashboard Referer is not auth (v2.2.0) | If the HTTP dashboard is ever re-enabled: authenticate with a bearer token. A client-controlled `Referer` header never grants access. Secrets are not embedded in `GET /`. |
 | No self-sideload decoys (v2.2.0) | Honeypot `version.dll` / `winhttp.dll` / `winmm.dll` MUST NOT be planted in the Sentinel exe directory. Decoys live in `{install}\honeypot\`. |
 | Game reputation skip is not a trust grant (v2.2.0) | `ShouldSkipReputationForGamePath` refuses user-profile / Temp / Downloads / Desktop trees. Memory-inspect skip (`IsGameOrAntiCheatPath`) is separate and is not a reputation skip. |

@@ -36,10 +36,15 @@ namespace Sentinel.Core
         {
             _logger = logger;
             _config = config;
-            _iocScanner = iocScanner;
+            _iocScanner = iocScanner; // retained: ctor/DI surface; 2.2.4 no longer writes synthetic PoC salts
             _eventLogger = eventLogger;
             _toastService = toastService;
             _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+            try
+            {
+                _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("Sentinel/" + ProductInfo.Version);
+            }
+            catch { }
             _rulesDirectory = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "rules");
         }
 
@@ -114,69 +119,65 @@ namespace Sentinel.Core
 
             // 3. Match and Deploy Hardening
             int matchCount = 0;
+            int osMatchCount = 0;
+            int ruleDeployCount = 0;
             foreach (var vuln in vulnerabilities)
             {
                 if (cancellationToken.IsCancellationRequested) break;
 
-                bool isMatch = false;
-                string matchType = string.Empty;
-                string matchedAsset = string.Empty;
+                var host = CveCoverageHeuristics.ClassifyKevForWorkstation(
+                    vuln.CveId, vuln.VendorProject, vuln.Product, installedApps, runningProcesses);
 
-                // Match by running process name
-                if (!string.IsNullOrWhiteSpace(vuln.Product))
+                if (!host.Matched)
+                    continue;
+
+                matchCount++;
+                if (host.MatchType == "WorkstationOs")
+                    osMatchCount++;
+
+                _logger.LogWarning("CVE Shield MATCH: Local asset '{Asset}' matches vulnerability {CveId} ({Vendor} - {Product}, {MatchType}).",
+                    host.MatchedAsset, vuln.CveId, vuln.VendorProject, vuln.Product, host.MatchType);
+
+                if (host.DeployProcessRules)
                 {
-                    var matchedProc = runningProcesses.FirstOrDefault(p => p.Equals(vuln.Product));
-                    if (matchedProc != null)
-                    {
-                        isMatch = true;
-                        matchType = "RunningProcess";
-                        matchedAsset = matchedProc;
-                    }
+                    DeployDynamicExploitRules(vuln, host.MatchedAsset);
+                    ruleDeployCount++;
                 }
 
-                // Match by installed software display name
-                if (!isMatch && !string.IsNullOrWhiteSpace(vuln.Product))
+                await _eventLogger.LogEventAsync("cve_shield_match", new
                 {
-                    var matchedApp = installedApps.FirstOrDefault(app => app.Contains(vuln.Product) ||
-                                                                        (vuln.VendorProject != null && app.Contains(vuln.VendorProject)));
-                    if (matchedApp != null)
-                    {
-                        isMatch = true;
-                        matchType = "InstalledSoftware";
-                        matchedAsset = matchedApp;
-                    }
-                }
+                    CveId = vuln.CveId,
+                    Vendor = vuln.VendorProject,
+                    Product = vuln.Product,
+                    MatchType = host.MatchType,
+                    MatchedAsset = host.MatchedAsset,
+                    VulnClass = CveCoverageHeuristics.VulnerabilityClass(vuln.VulnerabilityName, vuln.ShortDescription),
+                    DeployedProcessRules = host.DeployProcessRules,
+                    Timestamp = DateTime.UtcNow
+                }, cancellationToken);
 
-                if (isMatch)
+                // Toast only for a specific local app/process — not every Windows OS KEV
+                if (host.MatchType != "WorkstationOs")
                 {
-                    matchCount++;
-                    _logger.LogWarning("CVE Shield MATCH: Local asset '{Asset}' matches vulnerability {CveId} ({Vendor} - {Product}). Deploying shields...",
-                        matchedAsset, vuln.CveId, vuln.VendorProject, vuln.Product);
-
-                    // A. Deploy Dynamic Rules (if not already deployed)
-                    DeployDynamicExploitRules(vuln, matchedAsset);
-
-                    // B. Deploy Associated Exploits Hashing
-                    DeployPoCHashBlock(vuln);
-
-                    // C. Log matching event
-                    await _eventLogger.LogEventAsync("cve_shield_match", new
-                    {
-                        CveId = vuln.CveId,
-                        Vendor = vuln.VendorProject,
-                        Product = vuln.Product,
-                        MatchType = matchType,
-                        MatchedAsset = matchedAsset,
-                        Timestamp = DateTime.UtcNow
-                    }, cancellationToken);
-
-                    // D. User Notification
-                    _toastService.ShowToast("CVE Shield Protection Deployed", 
+                    _toastService.ShowToast("CVE Shield Protection Deployed",
                         $"Shielded system against {vuln.CveId} affecting local asset '{vuln.Product}'.");
                 }
             }
 
-            _logger.LogInformation("CVE Shield cycle completed. Matched and shielded {Count} vulnerabilities.", matchCount);
+            if (osMatchCount > 0)
+            {
+                await _eventLogger.LogEventAsync("cve_shield_os_summary", new
+                {
+                    WindowsKevCount = osMatchCount,
+                    TotalMatched = matchCount,
+                    ProcessRulesDeployed = ruleDeployCount,
+                    Timestamp = DateTime.UtcNow
+                }, cancellationToken);
+            }
+
+            _logger.LogInformation(
+                "CVE Shield cycle completed. Matched {Count} KEV entries ({Os} Windows OS-class, {Rules} process-rule deploys).",
+                matchCount, osMatchCount, ruleDeployCount);
         }
 
         private async Task<List<CisaVulnerability>> FetchVulnerabilityFeedAsync(CancellationToken cancellationToken)
@@ -204,7 +205,10 @@ namespace Sentinel.Core
                 {
                     _logger.LogInformation("CVE Shield: Fetching feed from URL: {Url}", _config.CveShield.FeedUrl);
                     var catalog = await _httpClient.GetFromJsonAsync<CisaKevCatalog>(_config.CveShield.FeedUrl, cancellationToken);
-                    return catalog?.Vulnerabilities ?? new List<CisaVulnerability>();
+                    var list = catalog?.Vulnerabilities ?? new List<CisaVulnerability>();
+                    if (list.Count > 0)
+                        TryCacheKev(catalog!);
+                    return list;
                 }
                 catch (Exception ex)
                 {
@@ -212,84 +216,104 @@ namespace Sentinel.Core
                 }
             }
 
-            // Final fallback: Load empty or simulated feed
+            var cached = TryLoadCachedKev();
+            if (cached.Count > 0)
+            {
+                _logger.LogInformation("CVE Shield: Using cached KEV catalog ({Count} entries).", cached.Count);
+                return cached;
+            }
+
             return new List<CisaVulnerability>();
+        }
+
+        private static string KevCachePath()
+        {
+            var dir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                "Sentinel");
+            return Path.Combine(dir, "kev_cache.json");
+        }
+
+        private void TryCacheKev(CisaKevCatalog catalog)
+        {
+            try
+            {
+                var path = KevCachePath();
+                var dir = Path.GetDirectoryName(path);
+                if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+                    Directory.CreateDirectory(dir);
+                var json = JsonSerializer.Serialize(catalog);
+                File.WriteAllText(path, json);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "CVE Shield: failed to cache KEV catalog");
+            }
+        }
+
+        private List<CisaVulnerability> TryLoadCachedKev()
+        {
+            try
+            {
+                var path = KevCachePath();
+                if (!File.Exists(path)) return new List<CisaVulnerability>();
+                var json = File.ReadAllText(path);
+                var catalog = JsonSerializer.Deserialize<CisaKevCatalog>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                return catalog?.Vulnerabilities ?? new List<CisaVulnerability>();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "CVE Shield: failed to load cached KEV catalog");
+                return new List<CisaVulnerability>();
+            }
         }
 
         private void DeployDynamicExploitRules(CisaVulnerability vuln, string assetName)
         {
-            // Generate rules for common RCE attempts on matched product processes
-            // e.g. blocking shell spawns from the vulnerable process
-            var vulnerableProcessName = vuln.Product;
-            if (string.IsNullOrWhiteSpace(vulnerableProcessName)) return;
-
-            // Normalize process name (remove extension if present)
-            if (vulnerableProcessName.EndsWith(".exe"))
-            {
-                vulnerableProcessName = Path.GetFileNameWithoutExtension(vulnerableProcessName);
-            }
+            var parents = CveCoverageHeuristics.ProcessRuleParentsForProduct(vuln.Product, assetName);
+            if (parents.Count == 0) return;
 
             var shellInterpreters = new[] { "cmd.exe", "powershell", "whoami", "certutil", "nltest" };
-            foreach (var interpreter in shellInterpreters)
+            foreach (var parent in parents)
             {
-                var ruleName = $"CVE-Shield-{vuln.CveId}-{interpreter}";
-                if (_deployedRuleNames.Contains(ruleName)) continue;
-
-                var ruleFile = Path.Combine(_rulesDirectory, $"{ruleName}.json");
-                try
+                foreach (var interpreter in shellInterpreters)
                 {
-                    var ruleDef = new DynamicRuleDefinition
+                    var ruleName = $"CVE-Shield-{vuln.CveId}-{parent}-{interpreter}";
+                    if (_deployedRuleNames.Contains(ruleName)) continue;
+
+                    var ruleFile = Path.Combine(_rulesDirectory, $"{ruleName}.json");
+                    try
                     {
-                        Name = ruleName,
-                        EventType = "ProcessTelemetry",
-                        Confidence = 0.90,
-                        Tier = "Tier1Behavioral",
-                        ResponseAction = _config.ActiveResponse ? "KillProcessTree" : "LogOnly",
-                        SignalType = "SuspiciousProcess",
-                        Evidence = $"Exploitation attempt of {vuln.CveId} detected: process '{vulnerableProcessName}' spawned suspicious utility '{interpreter}' (CommandLine: {{CommandLine}})",
-                        Reasoning = $"Proactive CVE Shield deployed rule to block command execution originating from the vulnerable process '{vulnerableProcessName}' associated with {vuln.CveId}.",
-                        Conditions = new List<DynamicCondition>
+                        var ruleDef = new DynamicRuleDefinition
                         {
-                            new() { Field = "ParentProcessName", Operator = "Equals", Value = vulnerableProcessName },
-                            new() { Field = "CommandLine", Operator = "Contains", Value = interpreter }
-                        }
-                    };
+                            Name = ruleName,
+                            EventType = "ProcessTelemetry",
+                            Confidence = 0.90,
+                            Tier = "Tier2Indicator",
+                            ResponseAction = "LogOnly",
+                            SignalType = "SuspiciousProcess",
+                            Evidence = $"Exploitation attempt of {vuln.CveId} detected: process '{parent}' spawned suspicious utility '{interpreter}' (CommandLine: {{CommandLine}})",
+                            Reasoning = $"CVE Shield rule: command execution originating from '{parent}' associated with {vuln.CveId}. Observe-until-chain — not a President's Law kill.",
+                            Conditions = new List<DynamicCondition>
+                            {
+                                new() { Field = "ParentProcessName", Operator = "Equals", Value = parent },
+                                new() { Field = "CommandLine", Operator = "Contains", Value = interpreter }
+                            }
+                        };
 
-                    var options = new JsonSerializerOptions { WriteIndented = true, PropertyNameCaseInsensitive = true };
-                    var json = JsonSerializer.Serialize(ruleDef, options);
-                    File.WriteAllText(ruleFile, json);
+                        var options = new JsonSerializerOptions { WriteIndented = true, PropertyNameCaseInsensitive = true };
+                        var json = JsonSerializer.Serialize(ruleDef, options);
+                        File.WriteAllText(ruleFile, json);
 
-                    _deployedRuleNames.Add(ruleName);
-                    _logger.LogInformation("CVE Shield: Deployed dynamic rule: {File}", ruleFile);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Failed to deploy dynamic rule {RuleName}", ruleName);
+                        _deployedRuleNames.Add(ruleName);
+                        _logger.LogInformation("CVE Shield: Deployed dynamic rule: {File}", ruleFile);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Failed to deploy dynamic rule {RuleName}", ruleName);
+                    }
                 }
             }
-        }
-
-        private void DeployPoCHashBlock(CisaVulnerability vuln)
-        {
-            // Simulate/mock or fetch PoC executable hashes related to the CVE
-            // In a real-world setting, this would query a threat intelligence endpoint or extract hashes from public PoC commits.
-            // For now, we will associate a test/demo hash for the matched CVE to demonstrate block functionality.
-            var dummyHash = GeneratePoCHashForCve(vuln.CveId);
-            if (!string.IsNullOrEmpty(dummyHash))
-            {
-                var hashes = new[] { dummyHash };
-                _iocScanner.AddHashes(hashes);
-                _logger.LogInformation("CVE Shield: Registered PoC file hash block for {CveId}: {Hash}", vuln.CveId, dummyHash);
-            }
-        }
-
-        private static string GeneratePoCHashForCve(string cveId)
-        {
-            // Generate a deterministic hash for testing/verification purposes
-            using var sha256 = System.Security.Cryptography.SHA256.Create();
-            var bytes = System.Text.Encoding.UTF8.GetBytes(cveId + "-poc-salt");
-            var hashBytes = sha256.ComputeHash(bytes);
-            return string.Concat(hashBytes.Select(b => b.ToString("x2")));
         }
 
         private List<string> GetInstalledApplications()
@@ -408,5 +432,14 @@ namespace Sentinel.Core
 
         [JsonPropertyName("shortDescription")]
         public string ShortDescription { get; set; } = string.Empty;
+
+        [JsonPropertyName("dateAdded")]
+        public string DateAdded { get; set; } = string.Empty;
+
+        [JsonPropertyName("knownRansomwareCampaignUse")]
+        public string KnownRansomwareCampaignUse { get; set; } = string.Empty;
+
+        [JsonPropertyName("requiredAction")]
+        public string RequiredAction { get; set; } = string.Empty;
     }
 }

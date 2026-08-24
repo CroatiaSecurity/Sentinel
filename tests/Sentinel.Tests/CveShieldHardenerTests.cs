@@ -69,38 +69,27 @@ namespace Sentinel.Tests
             // Act
             await hardener.RunShieldingCycleAsync(CancellationToken.None);
 
-            // Assert
-            // 1. Verify dynamic rules were written to the rules directory
-            var cmdRuleFile = Path.Combine(_rulesDir, "CVE-Shield-CVE-2026-9999-cmd.exe.json");
-            var psRuleFile = Path.Combine(_rulesDir, "CVE-Shield-CVE-2026-9999-powershell.json");
-            
+            // Assert — rules are named CVE-Shield-{cve}-{parent}-{interpreter}.json
+            var cmdRuleFile = Path.Combine(_rulesDir, "CVE-Shield-CVE-2026-9999-dotnet-cmd.exe.json");
+            var psRuleFile = Path.Combine(_rulesDir, "CVE-Shield-CVE-2026-9999-dotnet-powershell.json");
+
             Assert.True(File.Exists(cmdRuleFile), $"Expected rule file not found: {cmdRuleFile}");
             Assert.True(File.Exists(psRuleFile), $"Expected rule file not found: {psRuleFile}");
 
-            // 2. Verify PoC hash was added to IoCScanner
-            // Determinsitic hash generated for "CVE-2026-9999" is 1544c8c7c980997193b22cf331d279cf04b11fcfcdfae9c0cae6cf4a40d5e1cf
-            // Let's compute it deterministically
+            // Synthetic PoC salts are not registered (no fake hash theater)
             using var sha256 = System.Security.Cryptography.SHA256.Create();
             var bytes = System.Text.Encoding.UTF8.GetBytes("CVE-2026-9999-poc-salt");
             var hashBytes = sha256.ComputeHash(bytes);
-            var expectedHash = string.Concat(System.Linq.Enumerable.Select(hashBytes, b => b.ToString("x2")));
+            var dummyHash = string.Concat(System.Linq.Enumerable.Select(hashBytes, b => b.ToString("x2")));
+            Assert.False(iocScanner.IsKnownBadHash(dummyHash), "CVE Shield must not register synthetic PoC salts.");
 
-            Assert.True(iocScanner.IsKnownBadHash(expectedHash), "PoC hash not registered in IoCScanner.");
-
-            // 3. Verify event was logged to jsonl
             Assert.True(File.Exists(_logPath), "Log file was not created.");
-            await eventLogger.DisposeAsync(); // Release lock on sentinel.log
+            await eventLogger.DisposeAsync();
             var logs = File.ReadAllText(_logPath);
             Assert.Contains("cve_shield_match", logs);
             Assert.Contains("CVE-2026-9999", logs);
 
-            // Clean up rule files created by this test
-            try { File.Delete(cmdRuleFile); } catch { }
-            try { File.Delete(psRuleFile); } catch { }
-            foreach (var interpreter in new[] { "whoami", "certutil", "nltest" })
-            {
-                try { File.Delete(Path.Combine(_rulesDir, $"CVE-Shield-CVE-2026-9999-{interpreter}.json")); } catch { }
-            }
+            CleanupShieldRules("CVE-2026-9999");
         }
 
         [Fact]
@@ -148,6 +137,103 @@ namespace Sentinel.Tests
             var hashBytes = sha256.ComputeHash(bytes);
             var expectedHash = string.Concat(System.Linq.Enumerable.Select(hashBytes, b => b.ToString("x2")));
             Assert.False(iocScanner.IsKnownBadHash(expectedHash), "PoC hash should not be registered.");
+        }
+
+        [Fact]
+        public async Task RunShieldingCycle_WindowsOsKev_LogsMatch_DoesNotDeployProcessRules()
+        {
+            var config = new SentinelConfig();
+            config.CveShield.Enabled = true;
+            config.CveShield.CustomFeedPath = _feedPath;
+
+            var mockCatalog = new CisaKevCatalog
+            {
+                Vulnerabilities = new System.Collections.Generic.List<CisaVulnerability>
+                {
+                    new()
+                    {
+                        CveId = "CVE-2026-61348",
+                        VendorProject = "Microsoft",
+                        Product = "Windows Ancillary Function Driver for WinSock",
+                        VulnerabilityName = "Windows Ancillary Function Driver for WinSock Elevation of Privilege Vulnerability",
+                        ShortDescription = "Local EoP in afd.sys"
+                    }
+                }
+            };
+            File.WriteAllText(_feedPath, JsonSerializer.Serialize(mockCatalog));
+
+            var cache = new SecureCacheStore(_tempTestDir);
+            var iocScanner = new IoCScanner(cache);
+            var eventLogger = new JsonlEventLogger(_logPath);
+            var hardener = new CveShieldHardener(
+                NullLogger<CveShieldHardener>.Instance, config, iocScanner, eventLogger,
+                new ToastService(NullLogger<ToastService>.Instance));
+
+            await hardener.RunShieldingCycleAsync(CancellationToken.None);
+
+            await eventLogger.DisposeAsync();
+            var logs = File.ReadAllText(_logPath);
+            Assert.Contains("cve_shield_match", logs);
+            Assert.Contains("CVE-2026-61348", logs);
+            Assert.Contains("WorkstationOs", logs);
+            Assert.Contains("cve_shield_os_summary", logs);
+
+            Assert.False(File.Exists(Path.Combine(_rulesDir, "CVE-Shield-CVE-2026-61348-Windows-cmd.exe.json")));
+            CleanupShieldRules("CVE-2026-61348");
+        }
+
+        [Fact]
+        public async Task RunShieldingCycle_SharePointAbsent_DoesNotMatchWorkstation()
+        {
+            var config = new SentinelConfig();
+            config.CveShield.Enabled = true;
+            config.CveShield.CustomFeedPath = _feedPath;
+
+            var mockCatalog = new CisaKevCatalog
+            {
+                Vulnerabilities = new System.Collections.Generic.List<CisaVulnerability>
+                {
+                    new()
+                    {
+                        CveId = "CVE-2026-50522",
+                        VendorProject = "Microsoft",
+                        Product = "SharePoint Server",
+                        VulnerabilityName = "Microsoft SharePoint Remote Code Execution Vulnerability",
+                        ShortDescription = "Unauthenticated RCE"
+                    }
+                }
+            };
+            File.WriteAllText(_feedPath, JsonSerializer.Serialize(mockCatalog));
+
+            var cache = new SecureCacheStore(_tempTestDir);
+            var iocScanner = new IoCScanner(cache);
+            var eventLogger = new JsonlEventLogger(_logPath);
+            var hardener = new CveShieldHardener(
+                NullLogger<CveShieldHardener>.Instance, config, iocScanner, eventLogger,
+                new ToastService(NullLogger<ToastService>.Instance));
+
+            await hardener.RunShieldingCycleAsync(CancellationToken.None);
+            await eventLogger.DisposeAsync();
+
+            if (File.Exists(_logPath))
+            {
+                var logs = File.ReadAllText(_logPath);
+                Assert.DoesNotContain("cve_shield_match", logs);
+            }
+            CleanupShieldRules("CVE-2026-50522");
+        }
+
+        private void CleanupShieldRules(string cveId)
+        {
+            try
+            {
+                if (!Directory.Exists(_rulesDir)) return;
+                foreach (var f in Directory.GetFiles(_rulesDir, $"CVE-Shield-{cveId}-*.json"))
+                {
+                    try { File.Delete(f); } catch { }
+                }
+            }
+            catch { }
         }
 
         public void Dispose()

@@ -1,5 +1,7 @@
 using System;
 using System.IO;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.Threading.Tasks;
 using Xunit;
 using Sentinel.Core;
@@ -33,6 +35,20 @@ namespace Sentinel.Tests
         public void Constructor_CreatesQuarantineDirectory()
         {
             Assert.True(Directory.Exists(_quarantineDir));
+        }
+
+        [Fact]
+        public void InteractiveBrowseRule_IsThisFolderOnly_NotFileInherit()
+        {
+            var rule = QuarantineManager.InteractiveBrowseRule();
+            var interactive = new SecurityIdentifier(WellKnownSidType.InteractiveSid, null);
+            Assert.Equal(interactive, rule.IdentityReference);
+            Assert.Equal(AccessControlType.Allow, rule.AccessControlType);
+            Assert.Equal(InheritanceFlags.None, rule.InheritanceFlags);
+            Assert.True((rule.FileSystemRights & FileSystemRights.ListDirectory) != 0);
+            Assert.True((rule.FileSystemRights & FileSystemRights.Traverse) != 0);
+            // Must not be a generic file-read ACE that would inherit onto DPAPI blobs
+            Assert.Equal(PropagationFlags.None, rule.PropagationFlags);
         }
 
         [Fact]

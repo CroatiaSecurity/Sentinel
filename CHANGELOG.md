@@ -1,6 +1,34 @@
 # Changelog
 
 
+## [2.2.4] - 2026-08-24
+
+Generic CVE-class coverage so the next Patch Tuesday does not require a named campaign pack. Sentinel still cannot patch kernel races. It now hunts the *userland shape* of new EoP/RCE/SFB bugs, matches Windows OS-class KEV entries, and toasts when the latest Patch Tuesday CU is missing.
+
+### Added
+
+- **`CveClassCoverageMonitor`** — one process pass for kernel-EoP loaders (AFD/WinSock class including CVE-2026-61348 / CVE-2026-70307, not just Dream Job names), MSI repair from staging (CVE-2026-61925), winget/ms-appinstaller (CVE-2026-68821), VS Code encoded shells (CVE-2026-58650 / CVE-2026-70335), ClickFix explorer→encoded PowerShell, MIDI service image hijack (CVE-2026-62688), mstsc→LOLBin (CVE-2026-62824), Cross Device Service spawn (CVE-2026-66804). Filename matches are Tier2 LogOnly observe fuel.
+- **`MotwBypassMonitor`** — PE in Downloads/Desktop/Temp missing Zone.Identifier; ISO/VHD; VSIX; .rdp; AppInstaller packages. Game ISOs stay LogOnly.
+- **`ContainerIsolationTamperMonitor`** — unionfs.sys / wcifs / bindflt dropped in user-writable paths (CVE-2026-72971); AlwaysInstallElevated re-enabled.
+- **Generic Patch Tuesday posture** — `WindowsUpdateIntegrityMonitor` toasts if last CU is before the latest second Tuesday (7-day grace). Complements the CVE-2026-68820 UBR check.
+- Composites: **Kernel Exploit Loader Chain** (0.94), **Installer / Package Manager EoP Chain** (0.92), **MOTW Bypass Execution Chain** (0.91), **VS Code Workspace Abuse Chain** (0.91).
+
+### Fixed
+
+- **Settings / tray "Open Quarantine" insufficient permissions.** Production quarantine ACL was SYSTEM + Administrators only. Explorer and the tray Agent run with a UAC-filtered token that is **not** BUILTIN\\Administrators, so Windows showed "insufficient permissions." Interactive users now get this-folder-only List/Traverse (sample blobs stay SYSTEM/Admin). Folder open uses ShellExecute on the path instead of `explorer.exe` + unquoted arguments. Data folder root gets the same Interactive browse ACE.
+
+### Changed
+
+- **CVE Shield** matches Windows OS-class KEV (WorkstationOs) instead of requiring a process named "Windows". Server roles (SharePoint/Exchange/DNS Server) match only if installed. Process-spawn rules are LogOnly observe-until-chain. Synthetic PoC salt hashes are gone (security theater). KEV catalog is cached under ProgramData.
+- `V217Hardening.cs` namespace is `Sentinel.Core` like every other monitor file (folder `Monitors/` is layout only — not a second type universe).
+- `ProductInfo.Version` → `2.2.4`
+- Installer → `SentinelSetup-2.2.4`
+
+### Tests
+
+- `CveCoverageExpansionTests` — exploit-name/IOCTL/ClickFix/MOTW/Patch Tuesday/KEV match/composites.
+- `CveShieldHardenerTests` — Windows OS KEV logs without process rules; SharePoint absent does not match; no dummy hashes.
+
 ## [2.2.3] - 2026-08-24
 
 August 2026 Patch Tuesday userland coverage. Sentinel still cannot patch kernel races (`afd.sys`). It now hunts the Lazarus campaign around the exploited zero-day, tells you when the KEV CU is missing, and watches LegacyHive + Cloud Files / ShieldBreak primitives.

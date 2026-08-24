@@ -463,6 +463,58 @@ namespace Sentinel.Core
                 return;
             }
 
+            // v2.2.4: generic CVE-class chains (not a named campaign)
+            var hasKernelExploitLoader = currentSignals.Any(s =>
+                s.RuleName.Contains("Kernel Exploit Loader") ||
+                s.RuleName.Contains("Isolation Filter Driver"));
+            if (hasKernelExploitLoader && (hasTokenTheft || hasLpeScaffold || hasUacOrPotato || hasPrivEsc))
+            {
+                await EmitCompositeAsync(pid, "Kernel Exploit Loader Chain", 0.94,
+                    "Kernel-EoP loader or isolation-filter staging correlated with token/LPE.",
+                    "Userland exploit-host pattern for AFD/WinSock/unionfs-class elevation. Stops the loader; does not patch the kernel race.");
+                return;
+            }
+
+            var hasInstallerEop = currentSignals.Any(s =>
+                s.RuleName.Contains("Installer EoP") ||
+                s.RuleName.Contains("AlwaysInstallElevated") ||
+                s.RuleName.Contains("Package Manager EoP"));
+            if (hasInstallerEop && (hasLpeScaffold || hasTokenTheft || hasUacOrPotato || hasPrivEsc))
+            {
+                await EmitCompositeAsync(pid, "Installer / Package Manager EoP Chain", 0.92,
+                    "MSI repair/winget/AlwaysInstallElevated correlated with token or LPE.",
+                    "Windows Installer / Package Manager elevation class (CVE-2026-61925 / CVE-2026-68821) plus an escalation leg.");
+                return;
+            }
+
+            var hasMotwDelivery = currentSignals.Any(s =>
+                s.RuleName.Contains("Mark-of-the-Web") ||
+                s.RuleName.Contains("Disk Image in Delivery") ||
+                s.RuleName.Contains("AppInstaller Package") ||
+                s.RuleName.Contains("ClickFix Encoded"));
+            if (hasMotwDelivery &&
+                (hasInitialAccess || types.Contains(SignalType.NetworkC2) || types.Contains(SignalType.ReverseShell) ||
+                 currentSignals.Any(s => s.RuleName.Contains("Script") || s.RuleName.Contains("Encoded"))))
+            {
+                await EmitCompositeAsync(pid, "MOTW Bypass Execution Chain", 0.91,
+                    "MOTW-strip / ISO / ClickFix delivery correlated with LOLBin, script, or C2.",
+                    "Initial-access delivery that bypasses Mark-of-the-Web plus execution or callback.");
+                return;
+            }
+
+            var hasVsCodeAbuse = currentSignals.Any(s =>
+                s.RuleName.Contains("VS Code Encoded") ||
+                s.RuleName.Contains("VSIX in Delivery"));
+            if (hasVsCodeAbuse &&
+                (types.Contains(SignalType.NetworkC2) || types.Contains(SignalType.ReverseShell) ||
+                 hasInitialAccess || currentSignals.Any(s => s.RuleName.Contains("Script"))))
+            {
+                await EmitCompositeAsync(pid, "VS Code Workspace Abuse Chain", 0.91,
+                    "VS Code / Copilot encoded shell or sideloaded VSIX correlated with script or C2.",
+                    "Editor security-feature-bypass class (CVE-2026-58650 / CVE-2026-70335) plus corroborating execution.");
+                return;
+            }
+
             // v1.9.4: Digital coercion toolkit (platform-agnostic)
             // Covert surveillance + remote/network channel (stalkerware / coercive control PC)
             var hasSurveillance = currentSignals.Any(CoercionAbusePolicy.IsSurveillanceRule);

@@ -6,7 +6,7 @@ Sentinel is for **gamers, creators, and high-profile targets**. It hunts real at
 
 **You can browse and play.** Default mode must not break Chrome/Edge/Firefox, Microsoft Store, Xbox, Steam, Epic, DirectX/VC++ redists, Game Bar, or creator tools such as OBS Studio. Controllers, wheels, and HOTAS stay usable. Installing a game or a GPU/runtime redist is work, not an incident.
 
-**Current version: 2.2.3**
+**Current version: 2.2.4**
 
 ### Honest mission
 
@@ -68,6 +68,7 @@ Sentinel is effective against:
 - **BYOVD (driver-based EDR killers)** — Detects vulnerable driver staging (.sys drops in temp/user paths), service installation (Event 7045), and planted code-signing certificates. Automatically revokes non-public certs from TrustedPublisher/Root stores, kills the installer chain, and disables all driver services signed by the revoked cert. Covers 35+ known vulnerable drivers from the Microsoft WDBL and LOLDrivers project.
 
 - **August 2026 exploited Windows bugs (v2.2.3, userland)** — Lazarus **Operation Dream Job** around CVE-2026-68820 (`afd.sys`): trojanized PDF viewers (`SecurityPDF`), `libmupdf.dll` sideload, FudModule names, published C2. **Does not patch the kernel race** — toast if Win11 UBR is below 9168 (`KB5121003`). Also: LegacyHive (CVE-2026-62832) another-user hive load; Cloud Files / ShieldBreak (CVE-2026-62713) unknown CfApi sync roots. OneDrive stays usable.
+- **Generic CVE-class coverage (v2.2.4)** — does not wait for a named campaign. Kernel-EoP loaders (AFD siblings, isolation FS `unionfs.sys`), MSI/winget EoP, MOTW-strip / ISO / ClickFix delivery, VS Code encoded shells, RDP-client LOLBin spawn. CISA KEV Windows OS entries match this workstation. Toast if the latest Patch Tuesday CU is missing. Still cannot patch the kernel. Tray/Settings **Open Quarantine** works under UAC (folder browse only; encrypted samples stay SYSTEM/Admin).
 
 - **GPU/Hardware acceleration exploitation (v2.1.5)** — Monitors browser GPU helper processes for sandbox escape indicators: child process spawning, outbound network connections, and post-exploitation DLL loads (AMSI, .NET CLR, credential vault). A GPU helper should never spawn processes or open external sockets — if it does, a WebGL/WebGPU exploit achieved sandbox escape and the tree gets killed. Also audits installed GPU driver versions (NVIDIA/AMD/Intel) against known-vulnerable CVE ranges and detects trojanized GPU drivers (.sys with GPU driver names in user-writable paths). Does NOT interfere with gaming, video playback, or GPU compute.
 
@@ -174,7 +175,7 @@ Full transparency in [THREAT_MODEL.md](THREAT_MODEL.md).
 
 ## Installation
 
-Download **`SentinelSetup-2.2.3.exe`** from [GitHub Releases](https://github.com/CroatiaSecurity/Sentinel/releases) (or `releases/2.2.3/` after a local build) and run it as Administrator.
+Download **`SentinelSetup-2.2.4.exe`** from [GitHub Releases](https://github.com/CroatiaSecurity/Sentinel/releases) (or `releases/2.2.4/` after a local build) and run it as Administrator.
 
 If Setup fails with **Error 5 / temporary directory** while an older Sentinel is installed, that was ASR rule `c1db55ab` (fixed in 1.9.6+). Use elevated `installer\install-no-inno.ps1` or `fix-asr-for-setup.ps1`, then upgrade.
 

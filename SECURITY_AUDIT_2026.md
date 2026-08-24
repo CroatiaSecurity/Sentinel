@@ -1,9 +1,18 @@
 # Sentinel — Security Audit (Normal / Red / Blue)
 
-**Date:** 2026-08-12 (updated 2026-08-24 with v2.2.3 August CVE coverage)  
+**Date:** 2026-08-12 (updated 2026-08-24 with v2.2.4 generic CVE-class coverage)  
 **Scope:** Full source review of Sentinel.Core, Service, Agent, installer, Cloudflare Worker, and prior security docs.  
 **Audience:** Gaming desktops, creator workstations, high-profile personal targets.  
 **Method:** Manual adversarial + defensive review; fixes implemented in this release.
+
+## v2.2.4 — generic CVE-class + quarantine browse
+
+| Item | Honest limit |
+|------|----------------|
+| New Patch Tuesday CVEs | Hunt userland shape (exploit host, MOTW, MSI/winget, VS Code, unionfs). Not a kernel patch. |
+| CISA KEV | Windows OS-class matches this workstation. Server roles only if installed. No fake PoC hashes. |
+| Quarantine Explorer | Interactive this-folder-only List/Traverse. Sample blobs stay SYSTEM/Admin. |
+| Namespace | All monitor types are `Sentinel.Core`. `Monitors/` is layout. |
 
 ## v2.2.3 — August 2026 Patch Tuesday (userland)
 

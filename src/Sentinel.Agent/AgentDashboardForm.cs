@@ -1854,7 +1854,7 @@ namespace Sentinel.Agent
             }
         }
 
-        private static void OpenFolder(string path)
+        internal static void OpenFolder(string path)
         {
             try
             {
@@ -1866,14 +1866,22 @@ namespace Sentinel.Agent
                         "Sentinel", MessageBoxButtons.OK, MessageBoxIcon.Information);
                     return;
                 }
+                // Shell-execute the folder. explorer.exe + unquoted Arguments is treated as a
+                // search by some Windows builds and hits UAC "insufficient permissions" on
+                // SYSTEM+Admins trees that Interactive can still browse.
                 Process.Start(new ProcessStartInfo
                 {
-                    FileName = "explorer.exe",
+                    FileName = path,
                     UseShellExecute = true,
-                    Arguments = path
+                    Verb = "open"
                 });
             }
-            catch { }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    $"Could not open folder:\n{path}\n\n{ex.Message}",
+                    "Sentinel", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
         }
 
         private static void OpenUrl(string url)

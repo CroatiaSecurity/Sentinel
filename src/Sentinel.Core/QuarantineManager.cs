@@ -70,7 +70,11 @@ namespace Sentinel.Core
         }
 
         /// <summary>
-        /// SYSTEM + Admins full control; Users no access. Prevents sample theft / meta plant.
+        /// SYSTEM + Admins full control on the folder and blobs.
+        /// Interactive users: this-folder-only List/Traverse so Explorer and the tray Agent
+        /// can open the directory. No ObjectInherit — sample bytes stay unreadable (UAC-filtered
+        /// Admin tokens are not BUILTIN\Administrators, which is why SYSTEM+Admins-only
+        /// made Settings → Open Folder say "insufficient permissions").
         /// Only applied to production %ProgramData%\Sentinel\Quarantine.
         /// </summary>
         public static void SecureQuarantineDirectory(string dirPath)
@@ -97,9 +101,26 @@ namespace Sentinel.Core
                     InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
                     PropagationFlags.None, AccessControlType.Allow));
 
+                security.AddAccessRule(InteractiveBrowseRule());
+
                 dirInfo.SetAccessControl(security);
             }
             catch { }
+        }
+
+        /// <summary>
+        /// Explorer / tray Agent browse: ListDirectory + Traverse on the folder object only.
+        /// Files do not inherit this ACE (no sample theft; DPAPI blobs stay SYSTEM/Admin).
+        /// </summary>
+        public static FileSystemAccessRule InteractiveBrowseRule()
+        {
+            var interactiveSid = new SecurityIdentifier(WellKnownSidType.InteractiveSid, null);
+            return new FileSystemAccessRule(
+                interactiveSid,
+                FileSystemRights.ReadAndExecute,
+                InheritanceFlags.None,
+                PropagationFlags.None,
+                AccessControlType.Allow);
         }
 
         /// <summary>

@@ -1,12 +1,16 @@
 # Sentinel — Threat Model
 
-**Version: 2.2.3**
+**Version: 2.2.4**
 
 This document assumes the attacker has read the source code.
 
 ### v2.1.2 — battle hackers, keep play/browse working
 
 Work-first defaults: HID auto-disable is kiosk-only; Steam/Xbox/Store/DirectX/OBS are work surface; Hell's Gate and unmapped-thread scanners require a real stub table / compact shellcode page. Weak browse/play heuristics cannot complete a chain nuke. MitMDefense does not unlock arbitrary host mutation.
+
+### v2.2.4 — generic CVE-class (userland)
+
+Named campaigns lag. New sensors hunt exploit-host / MOTW / MSI / winget / VS Code / isolation-FS *shape* so the next AFD sibling does not require a new Dream Job pack. CISA KEV Windows OS entries match this workstation. Missed Patch Tuesday is LogOnly + toast. Kernel races still need the OS CU.
 
 ### v2.2.3 — August 2026 CVEs (userland, honest about the kernel)
 

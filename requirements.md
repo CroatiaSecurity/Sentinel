@@ -1,6 +1,6 @@
 # Sentinel — Requirements
 
-**Version: 2.2.3**
+**Version: 2.2.4**
 
 ---
 
@@ -66,6 +66,8 @@ The system must detect the following behavioral threats:
 | T1-24 | Lazarus Dream Job (CVE-2026-68820 campaign) | SecurityPDF / FudModule names, libmupdf sideload in staging, Temp\\new.exe from PDF parent, published C2; does **not** patch afd.sys |
 | T1-25 | LegacyHive (CVE-2026-62832) | Another user's HKU hive loaded while not logged on; hive-path reparse; custom HKU names |
 | T1-26 | Cloud Files / ShieldBreak (CVE-2026-62713) | Unknown CfApi sync roots; Cloud Files placeholders in staging; OneDrive exempt |
+| T1-27 | Generic kernel-EoP / isolation-FS loaders | Staging unsigned PE matching exploit/CVE/Device\\Afd shape; unionfs/wcifs drops (not afd.sys patch) |
+| T1-28 | Installer / Package Manager EoP | msiexec MSI from staging; ms-appinstaller / winget HTTP source; AlwaysInstallElevated |
 
 ### FR-3: Tier 2 Detection Rules
 
@@ -80,6 +82,9 @@ The system must detect the following indicators (log only):
 | T2-05 | Optional OS service outbound activity (DiagTrack, whesvc, etc.) — observe-only, never stop/kill/isolate |
 | T2-06 | Bulk transfer / torrent client traffic volume spikes — observe-only, never classified as Exfil terminal |
 | T2-07 | KEV patch posture (CVE-2026-68820): Win11 UBR below 9168 or last CU before 2026-08-11 — LogOnly + toast, never force-patch |
+| T2-08 | Missed Patch Tuesday: last CU before the latest second Tuesday after 7-day grace — LogOnly + toast, never force-patch |
+| T2-09 | MOTW-strip PE / ISO / VSIX / .rdp / AppInstaller in Downloads — LogOnly (game ISOs never a kill seed) |
+| T2-10 | ClickFix encoded Run, VS Code encoded shell, RDP client LOLBin spawn — LogOnly observe fuel |
 
 ### FR-4: Composite Detections
 
@@ -111,6 +116,10 @@ The system must implement two correlation engines that fire composite detections
 | C-20 | Lazarus Dream Job Chain | 0.95 |
 | C-21 | LegacyHive Privilege Escalation Chain | 0.92 |
 | C-22 | Cloud Files Hydration Tamper Chain | 0.91 |
+| C-23 | Kernel Exploit Loader Chain | 0.94 |
+| C-24 | Installer / Package Manager EoP Chain | 0.92 |
+| C-25 | MOTW Bypass Execution Chain | 0.91 |
+| C-26 | VS Code Workspace Abuse Chain | 0.91 |
 
 **WeightedCorrelationEngine (v2.0)** — explainable score cards:
 
@@ -348,3 +357,4 @@ The user-session Agent must provide a Settings window (tray menu + double-click)
 | 2.0.1 | MitmDefense suite requirements (FR-18); planted-cert / ghost-Cast / rogue-Cast / FCM opt-in defense |
 | 2.2.0 | FR-19 dashboard bearer (no Referer auth); FR-20 game-path reputation skip; V217 monitors registered; kiosk LGPO must not weaken the host |
 | 2.2.3 | T1-24 Dream Job; T1-25 LegacyHive; T1-26 Cloud Files/ShieldBreak; KEV UBR toast; C-20–C-22 |
+| 2.2.4 | T1-27/T1-28 generic CVE-class; T2-08–T2-10 MOTW/ClickFix/Patch Tuesday; C-23–C-26; CveShield Windows OS KEV |

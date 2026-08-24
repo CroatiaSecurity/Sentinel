@@ -1,6 +1,6 @@
 # Sentinel — Design Document
 
-**Version: 2.2.3**
+**Version: 2.2.4**
 
 ---
 
@@ -41,7 +41,7 @@ Monitors → TelemetryFusionEngine → DetectionEngine → AdvancedResponseEngin
 | `OpsMetricsPublisher` | Writes `%ProgramData%\Sentinel\ops_metrics.json` |
 | `SelfPathGuard` | Hardlink-aware install self-exclusion |
 | `EncryptedConfigStore` | DPAPI-encrypted per-deployment config (`config.enc`); replaces plaintext appsettings.json |
-| `ProductInfo.Version` | `2.2.3` |
+| `ProductInfo.Version` | `2.2.4` |
 
 All components are wired via Microsoft.Extensions.DependencyInjection. No static mutable state anywhere.
 
@@ -124,6 +124,9 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 | `DreamJobCampaignMonitor` | **v2.2.3.** Lazarus Dream Job: SecurityPDF / FudModule / libmupdf sideload / Temp\\new.exe / C2 IOCs (not afd.sys) | 15s |
 | `EdrKillerDetectionMonitor` | **v2.2.0 registered.** Known EDR-killer **process names** — LogOnly observe fuel (rename bypasses) | 5s |
 | `DecoyPipeMonitor` | **v2.2.0 registered.** Default CS/Metasploit pipe-name honeypots | continuous |
+| `CveClassCoverageMonitor` | **v2.2.4.** Generic kernel-EoP / MSI / winget / VS Code / ClickFix / MIDI / RDP-client userland shape | 18s |
+| `MotwBypassMonitor` | **v2.2.4.** MOTW-strip PE, ISO/VHD, VSIX, .rdp, AppInstaller in Downloads/Desktop/Temp | 40s |
+| `ContainerIsolationTamperMonitor` | **v2.2.4.** unionfs/wcifs/bindflt staging (CVE-2026-72971); AlwaysInstallElevated | 30s |
 
 #### Group 3: CredentialProtection (4s start delay, max 3 restarts)
 
@@ -165,7 +168,7 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 |-----------|-----------|----------|
 | `FirewallIntegrityMonitor` | Polls firewall profiles via netsh advfirewall; detects disable/bulk rules | 60s |
 | `SecureBootIntegrityMonitor` | Checks Secure Boot, test signing, kernel debug via registry+bcdedit | 5min |
-| `WindowsUpdateIntegrityMonitor` | WU service + AU policy + stale installs + **v2.2.3 KEV UBR (CVE-2026-68820 / KB5121003)** | 10min |
+| `WindowsUpdateIntegrityMonitor` | WU service + AU policy + stale installs + **v2.2.3 KEV UBR (CVE-2026-68820 / KB5121003)** + **v2.2.4 missed Patch Tuesday** | 10min |
 | `ScheduledTaskMonitor` | Polls scheduled tasks via schtasks; multi-indicator suspicious task analysis | 60s |
 | `CriticalServiceGuard` | Monitors 15 critical services for crash storms via SCM events (7034/7031) | 10s |
 | `RegistryMonitor` | WMI-based monitoring of Run keys, Services, CLSID COM hijacking | continuous |
@@ -293,7 +296,7 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 | `JsonlEventLogger` | JSONL output to events.jsonl. Thread-safe, rate-limited, size-rotated, self-healing. |
 | `SecureCacheStore` | DPAPI machine-scope encryption + HMAC integrity for persisted cache files. |
 | `HashReputationService` | Two-tier caching (memory + DPAPI disk). 3-API lookup: CIRCL, MalwareBazaar, VT proxy. |
-| `QuarantineManager` | DPAPI machine-scope quarantine under `%ProgramData%\Sentinel\Quarantine`. Production path: SYSTEM+Admins ACL (Users denied). Max 128 MB/file. Restore path-validated (no OS-critical write). Agent never creates the folder. |
+| `QuarantineManager` | DPAPI machine-scope quarantine under `%ProgramData%\Sentinel\Quarantine`. Production path: SYSTEM+Admins FullControl (inherit) + Interactive this-folder-only List/Traverse (UAC-safe Explorer). Sample blobs stay unreadable to Users. Max 128 MB/file. Restore path-validated (no OS-critical write). Agent never creates the folder. |
 | `SignerTrustService` | Centralized Authenticode verification (WinVerifyTrust + catalog fallback). Trusted publisher cache. |
 | `AllowlistService` | User/dev/gaming/publisher allowlists. President's Law rules never suppressed. |
 | `SecurityValidation` | Input validation, Authenticode (embedded + catalog), process image path, OS-critical paths, private IP classification, constant-time `SecureCompare`. |
@@ -395,7 +398,7 @@ Emitted as Tier1 `DetectionEvent`s directly via `EmitAsync`. Requires signals fr
 | `NetworkIsolate` | Tier1: firewall block of **public** C2 IP (COM `INetFwPolicy2`); DNS flush (`DnsFlushResolverCache`); ARP entry purge (`DeleteIpNetEntry`). Skips private/LAN/link-local/multicast/CDN resolvers. Rate-limited (`MaxNetworkIsolatesPerMinute`, default 10). |
 | `KillProcess` | Tier1 with kill authority, confidence gate, via ChainTracer / direct kill; budgets (`MaxKillsPerMinute`, default 15) |
 | `KillProcessTree` | Same as above but walks and kills entire process tree |
-| `Quarantine` | DPAPI-encrypted file quarantine to `%ProgramData%\Sentinel\Quarantine` (≤128 MB; OS-critical paths refused) |
+| `Quarantine` | DPAPI-encrypted file quarantine to `%ProgramData%\Sentinel\Quarantine` (≤128 MB; OS-critical paths refused; Interactive browse-only on the folder) |
 | `QuarantineAndKill` | Kill process + quarantine binary + place lock file |
 | `RemoveRegistryEntry` | Removes malicious autorun/service/COM entries |
 | `DismountVolume` | Dismounts ISO/VHD/SUBST drives hosting threats |
@@ -735,6 +738,21 @@ Self-heal loops: `IPSecIntegrityGuard` (30s, rebuilds current profile), `AsrPoli
 | Weak user-activity heuristics (shell+port, Downloads net, SeImpersonate alone, rclone, unusual subnet) | **LogOnly** at emit + `AdvancedResponseEngine.IsObserveOnlyUserActivityHeuristic` safety net |
 
 ---
+
+## v2.2.4 Additions
+
+Generic CVE-class coverage. Does not patch kernel races. Folder `Monitors/` is file layout; types live in `namespace Sentinel.Core`.
+
+| Item | Reality in 2.2.4 |
+|------|------------------|
+| Kernel EoP loaders | `CveClassCoverageMonitor` — exploit/CVE/Device\\Afd shape from staging. Composite `Kernel Exploit Loader Chain` |
+| Installer / winget | MSI from staging; ms-appinstaller; AlwaysInstallElevated. Composite `Installer / Package Manager EoP Chain` |
+| MOTW / ISO / ClickFix | Delivery-folder sensors; game ISOs LogOnly. Composite `MOTW Bypass Execution Chain` |
+| VS Code SFB | Encoded shell from Code/Cursor. Composite `VS Code Workspace Abuse Chain` |
+| unionfs | User-writable isolation-filter .sys (CVE-2026-72971) |
+| CveShield | Windows OS-class KEV matches WorkstationOs; no synthetic PoC hashes |
+| Patch Tuesday | Toast if last CU is before the latest second Tuesday (7-day grace) |
+| Namespace | `V217Hardening.cs` is `Sentinel.Core` — there is no second monitor type universe |
 
 ## v2.2.3 Additions
 

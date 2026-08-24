@@ -74,6 +74,7 @@ namespace Sentinel.Core
                 "SeImpersonate", "DuplicateToken", "MakeToken", "GodPotato", "PrintSpoofer",
                 "Potato", "JuicyPotato", "RoguePotato", "SharpEfsPotato",
                 "FudModule", "LegacyHive",
+                "Kernel Exploit Loader", "Installer EoP", "AlwaysInstallElevated",
             }),
             ("ReverseShell", new[]
             {
@@ -166,6 +167,16 @@ namespace Sentinel.Core
             "Junction/Symlink",
             "LPE Scaffold: Privilege Escalation Tool",
             "Unmapped Thread Start Address",
+            "CVE Class: Kernel Exploit Loader",
+            "CVE Class: PE Missing Mark-of-the-Web",
+            "CVE Class: Disk Image in Delivery",
+            "CVE Class: AppInstaller Package",
+            "CVE Class: VSIX in Delivery",
+            "CVE Class: RDP File in Delivery",
+            "CVE Class: ClickFix Encoded",
+            "CVE Class: Package Manager EoP",
+            "CVE Class: VS Code Encoded",
+            "Patch Posture: Missed Patch Tuesday",
             // Surveillance: composite fuel for coercion toolkit; never sole chain seed
             "Screen Capture",
             "DXGI Desktop Duplication",
@@ -217,6 +228,11 @@ namespace Sentinel.Core
             // v2.0 — signed disk rule packs
             "Rule Pack:",
             "[COMPOSITE]",
+            // v2.2.4 — generic CVE-class chains
+            "Kernel Exploit Loader Chain",
+            "Installer / Package Manager EoP Chain",
+            "MOTW Bypass Execution Chain",
+            "VS Code Workspace Abuse Chain",
         };
 
         public static bool IsDllUnloadExempt(DetectionEvent? detection)

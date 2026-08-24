@@ -344,7 +344,7 @@ namespace Sentinel.Core
             if (ContainsAny(r, "Injection", "Unbacked RWX", "Hollowing", "RWX")) return "Injection";
             if (ContainsAny(r, "Hell's Gate", "Syscall", "Unbacked")) return "Memory";
             if (ContainsAny(r, "Persistence", "Scheduled Task", "Run Key", "Autorun", "WMI Subscription")) return "Persistence";
-            if (ContainsAny(r, "Privilege", "UAC Bypass", "Elevated Process", "LegacyHive", "FudModule", "Dream Job")) return "PrivilegeEscalation";
+            if (ContainsAny(r, "Privilege", "UAC Bypass", "Elevated Process", "LegacyHive", "FudModule", "Dream Job", "Kernel Exploit Loader", "Installer EoP", "AlwaysInstallElevated", "Package Manager EoP")) return "PrivilegeEscalation";
             if (ContainsAny(r, "AMSI", "ETW", "Evasion", "Tamper", "Cloud Files", "ShieldBreak")) return "Evasion";
             if (ContainsAny(r, "Lateral", "PsExec", "WinRM", "DCOM", "SMB Admin")) return "Lateral";
             if (ContainsAny(r, "Screen Capture", "Webcam", "Desktop Duplication", "Surveillance", "Stalkerware")) return "Surveillance";

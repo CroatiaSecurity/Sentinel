@@ -13,7 +13,7 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
-namespace Sentinel.Core.Monitors
+namespace Sentinel.Core
 {
     // ══════════════════════════════════════════════════════════════════════════════
     // v2.1.7 HARDENING MONITORS
