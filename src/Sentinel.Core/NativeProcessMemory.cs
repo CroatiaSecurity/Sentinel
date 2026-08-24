@@ -14,6 +14,7 @@ namespace Sentinel.Core
         public const uint AccessQuery = 0x0400;
         public const uint AccessQueryLimited = 0x1000;
         public const uint AccessVmRead = 0x0010;
+        public const uint AccessVmOp = 0x0008;
         public const uint AccessThreadCtx = 0x0010;
         public const uint StateCommit = 0x1000;
         public const uint TypeImage = 0x1000000;
@@ -57,6 +58,7 @@ namespace Sentinel.Core
 
         private delegate IntPtr DOpen(uint access, bool inherit, int pid);
         private delegate bool DRead(IntPtr h, IntPtr addr, byte[] buf, int size, out int read);
+        private delegate bool DProtect(IntPtr h, IntPtr addr, UIntPtr size, uint neu, out uint old);
         private delegate int DQuery(IntPtr h, IntPtr addr, out MEMORY_BASIC_INFORMATION mbi, int length);
         private delegate IntPtr DOpenThr(uint access, bool inherit, uint tid);
         private delegate uint DQueue(IntPtr pfn, IntPtr thr, IntPtr data);
@@ -82,6 +84,7 @@ namespace Sentinel.Core
 
         private static readonly Lazy<DOpen?> FnOpen = new(() => Resolve<DOpen>("kernel32.dll", J("Open", "Process")));
         private static readonly Lazy<DRead?> FnRead = new(() => Resolve<DRead>("kernel32.dll", J("ReadProcess", "Memory")));
+        private static readonly Lazy<DProtect?> FnProtect = new(() => Resolve<DProtect>("kernel32.dll", J("VirtualProtect", "Ex")));
         private static readonly Lazy<DQuery?> FnQuery = new(() => Resolve<DQuery>("kernel32.dll", J("VirtualQuery", "Ex")));
         private static readonly Lazy<DOpenThr?> FnThr = new(() => Resolve<DOpenThr>("kernel32.dll", J("Open", "Thread")));
         private static readonly Lazy<DQueue?> FnQueue = new(() => Resolve<DQueue>("kernel32.dll", J("QueueUser", "APC")));
@@ -136,6 +139,41 @@ namespace Sentinel.Core
 
         public static bool IsExecutableProtection(uint protect) =>
             protect is ProtX or ProtRX or ProtRWX or ProtXwc;
+
+        /// <summary>
+        /// Strip execute from a remote region (reflective PE / shellcode).
+        /// Games are refused by CanInspect. Does not unmap — PAGE_READONLY.
+        /// </summary>
+        public static bool TryStripExecute(int processId, IntPtr address, IntPtr size)
+        {
+            if (!CanInspect(processId) || address == IntPtr.Zero || size == IntPtr.Zero)
+                return false;
+            var fn = FnProtect.Value;
+            if (fn == null) return false;
+            IntPtr h = OpenRemoteHandle(AccessQuery | AccessVmOp | AccessVmRead, processId);
+            if (h == IntPtr.Zero) return false;
+            try
+            {
+                return fn(h, address, (UIntPtr)(ulong)size.ToInt64(), 0x02 /* PAGE_READONLY */, out _);
+            }
+            catch { return false; }
+            finally { CloseHandle(h); }
+        }
+
+        public static bool LooksLikeMzPe(int processId, IntPtr address)
+        {
+            if (!CanInspect(processId) || address == IntPtr.Zero) return false;
+            var buf = new byte[2];
+            IntPtr h = OpenRemoteHandle(AccessQuery | AccessVmRead, processId);
+            if (h == IntPtr.Zero) return false;
+            try
+            {
+                if (!CopyRemote(h, address, buf, out int n) || n < 2) return false;
+                return buf[0] == (byte)'M' && buf[1] == (byte)'Z';
+            }
+            catch { return false; }
+            finally { CloseHandle(h); }
+        }
 
         public static bool TryQueueFreeLibrary(int processId, IntPtr moduleBase)
         {

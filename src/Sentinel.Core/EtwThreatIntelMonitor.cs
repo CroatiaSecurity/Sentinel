@@ -28,6 +28,7 @@ namespace Sentinel.Core
         private readonly TelemetryFusionEngine _fusionEngine;
         private readonly ILogger<EtwThreatIntelMonitor> _logger;
         private readonly ContextBus? _contextBus;
+        private readonly DllUnloadEngine? _dllUnload;
         private CancellationTokenSource? _cts;
         private Task? _monitorTask;
 
@@ -39,12 +40,14 @@ namespace Sentinel.Core
             DetectionEngine detectionEngine,
             TelemetryFusionEngine fusionEngine,
             ILogger<EtwThreatIntelMonitor> logger,
-            ContextBus? contextBus = null)
+            ContextBus? contextBus = null,
+            DllUnloadEngine? dllUnloadEngine = null)
         {
             _detectionEngine = detectionEngine;
             _fusionEngine = fusionEngine;
             _logger = logger;
             _contextBus = contextBus;
+            _dllUnload = dllUnloadEngine;
         }
 
         public Task StartAsync(CancellationToken ct)
@@ -210,16 +213,41 @@ namespace Sentinel.Core
                         var rwx = FindUnbackedRwx(h, proc.Id);
                         if (rwx.Count == 0) continue;
 
+                        // Named-file inject: identity unload. Reflective PE (MZ in private RWX):
+                        // strip execute now. JIT (no MZ, large regions) is not a hit.
+                        if (_dllUnload != null)
+                            await _dllUnload.CheckAndUnloadAsync(proc.Id, name);
+
+                        int stripped = 0;
+                        foreach (var region in rwx)
+                        {
+                            var start = new IntPtr(region.Address);
+                            bool mz = NativeProcessMemory.LooksLikeMzPe(proc.Id, start);
+                            bool compact = region.Size > 0 && region.Size <= 16 * 1024;
+                            if (!mz && !compact) continue;
+                            if (NativeProcessMemory.TryStripExecute(proc.Id, start, new IntPtr(region.Size)))
+                                stripped++;
+                        }
+
+                        if (stripped == 0 && rwx.All(r => r.Size > 16 * 1024))
+                        {
+                            proc.Dispose();
+                            continue;
+                        }
+
                         _alertedPids[proc.Id] = DateTimeOffset.UtcNow;
                         await _detectionEngine.EmitAsync(new DetectionEvent
                         {
                             RuleName = "Threat Intel: Remote Memory Injection (ALLOCVM_REMOTE + PROTECTVM_REMOTE)",
                             Evidence = $"Process '{name}' (PID {proc.Id}) has {rwx.Count} unbacked RWX region(s), " +
-                                       $"total {rwx.Sum(r => r.Size):N0} bytes.",
-                            Reasoning = "Unbacked RWX memory in a high-value process indicates remote injection (T1055).",
-                            Confidence = 0.88,
+                                       $"total {rwx.Sum(r => r.Size):N0} bytes; stripped-execute={stripped}.",
+                            Reasoning = "Unbacked RWX with MZ or compact shellcode size is remote injection (T1055). " +
+                                        "Execute bit stripped immediately; named foreign modules unloaded.",
+                            Confidence = stripped > 0 ? 0.92 : 0.88,
                             Tier = DetectionTier.Tier1Behavioral,
-                            AuthorizedResponse = ResponseAction.KillProcessTree,
+                            AuthorizedResponse = stripped > 0
+                                ? ResponseAction.LogOnly
+                                : ResponseAction.KillProcessTree,
                             ProcessName = name,
                             ProcessId = proc.Id,
                             SignalType = SignalType.ProcessInjection,
@@ -227,6 +255,7 @@ namespace Sentinel.Core
                             {
                                 ["RwxRegionCount"] = rwx.Count.ToString(),
                                 ["TotalRwxSize"] = rwx.Sum(r => r.Size).ToString(),
+                                ["StrippedExecute"] = stripped.ToString(),
                                 ["ImagePath"] = imagePath ?? ""
                             }
                         });
@@ -317,7 +346,9 @@ namespace Sentinel.Core
                 "svchost", "explorer", "RuntimeBroker", "dllhost",
                 "spoolsv", "searchindexer", "taskhostw", "sihost",
                 "lsass", "csrss", "winlogon", "wininit", "services",
-                "conhost", "wmiprvse", "smartscreen", "backgroundTaskHost"
+                "conhost", "wmiprvse", "smartscreen", "backgroundTaskHost",
+                "ceprkac", "msedgewebview2", "msedge", "chrome", "firefox",
+                "brave", "discord"
             };
             return targets.Contains(processName);
         }

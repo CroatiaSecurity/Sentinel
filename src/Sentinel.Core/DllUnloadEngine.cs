@@ -11,18 +11,13 @@ using Microsoft.Extensions.Logging;
 namespace Sentinel.Core
 {
     /// <summary>
-    /// DLL sideload defense — observe-first, full capability.
+    /// DLL identity defense — unload on map, not on count.
     ///
-    /// Detection (always on, system-wide + per-process):
-    /// - Disk plants of system-DLL names outside System32
-    /// - Loaded modules from Temp or hostile plants next to the image
-    /// APIs via <see cref="NativeProcessMemory"/>; games skipped for handle safety only.
-    ///
-    /// Response (touch/kill/quarantine/FreeLibrary) ONLY when:
-    /// - <see cref="UnloadInjectedDllAsync"/> is called after Tier1 proven-malicious path, OR
-    /// - Scan finds a process that has <b>actually loaded</b> a hostile Temp/plant DLL
-    ///   (behavior: loading the plant — not "file exists on disk alone").
-    /// Disk-only plants with no loader → Tier2 LogOnly (observe).
+    /// Every mapped module is run through <see cref="ModuleIdentity"/>. Foreign
+    /// path / user-writable drop / unsigned sideload plant → FreeLibrary APC now
+    /// (constraint: DLL unloaders may remediate without a chain).
+    /// Disk-only plants with no loader → Tier2 LogOnly.
+    /// Games skipped for handle safety only. Never FreeLibrary lsass/csrss/DISM/NTLite.
     ///
     /// SECURITY NOTE (v2.0.4 MED-3): Remote DLL unloading uses QueueUserAPC with FreeLibrary.
     /// Known risks:
@@ -46,10 +41,14 @@ namespace Sentinel.Core
 
         private const int MaxRemediationsPerMinute = 20;
 
+        /// <summary>
+        /// Hosts where FreeLibrary is a boot-loop or self-kill. Identity still
+        /// applies to explorer/svchost — those are inject targets.
+        /// </summary>
         private static readonly HashSet<string> ProtectedProcessNames = new(StringComparer.OrdinalIgnoreCase)
         {
-            "system", "smss", "csrss", "wininit", "services", "lsass", "svchost",
-            "explorer", "dwm", "winlogon", "MsMpEng", "NisSrv",
+            "system", "smss", "csrss", "wininit", "services", "lsass",
+            "dwm", "winlogon", "MsMpEng", "NisSrv",
             "Sentinel.Service", "Sentinel.Agent",
             // OS servicing / imaging — NEVER FreeLibrary/quarantine (NTLite, DISM, Setup)
             "DismHost", "Dism", "TrustedInstaller", "TiWorker", "NTLite",
@@ -61,21 +60,7 @@ namespace Sentinel.Core
         /// Paths used by legitimate offline/online servicing (NTLite scratch, CBS, WinSxS, DISM).
         /// Modules here are not "Temp sideload plants".
         /// </summary>
-        private static bool IsOsServicingPath(string? path)
-        {
-            if (string.IsNullOrEmpty(path)) return false;
-            var p = path;
-            // Case-insensitive contains without allocating ToLower on hot path
-            if (p!.IndexOf(@"\NLTmpScratch\", StringComparison.OrdinalIgnoreCase) >= 0) return true;
-            if (p.IndexOf(@"\NLTmpS\", StringComparison.OrdinalIgnoreCase) >= 0) return true;
-            if (p.IndexOf(@"\WinSxS\", StringComparison.OrdinalIgnoreCase) >= 0) return true;
-            if (p.IndexOf(@"\Servicing\", StringComparison.OrdinalIgnoreCase) >= 0) return true;
-            if (p.IndexOf(@"\CbsTemp\", StringComparison.OrdinalIgnoreCase) >= 0) return true;
-            if (p.IndexOf(@"\Windows\System32\Dism\", StringComparison.OrdinalIgnoreCase) >= 0) return true;
-            if (p.IndexOf(@"\Windows\SysWOW64\Dism\", StringComparison.OrdinalIgnoreCase) >= 0) return true;
-            if (p.IndexOf(@"\Microsoft\Windows\Servicing\", StringComparison.OrdinalIgnoreCase) >= 0) return true;
-            return false;
-        }
+        private static bool IsOsServicingPath(string? path) => ModuleIdentity.IsOsServicingPath(path);
 
         private static bool IsOsServicingProcess(string processName, string? imagePath)
         {
@@ -256,12 +241,12 @@ namespace Sentinel.Core
                     return result;
 
                 var procDir = Path.GetDirectoryName(imagePath);
-                if (string.IsNullOrEmpty(procDir) || IsWindowsSystemDirectory(procDir))
-                    return result;
-                if (IsOsServicingPath(procDir) || IsOsServicingPath(imagePath))
+                if (ModuleIdentity.IsOsServicingPath(procDir) || ModuleIdentity.IsOsServicingPath(imagePath))
                     return result;
 
-                var hostileDisk = FindHostileSideloadDlls(procDir);
+                var hostileDisk = string.IsNullOrEmpty(procDir)
+                    ? new List<string>()
+                    : FindHostileSideloadDlls(procDir!);
                 var hostileLoaded = new List<(string Path, IntPtr Base)>();
 
                 if (NativeProcessMemory.CanInspect(processId, imagePath))
@@ -269,33 +254,14 @@ namespace Sentinel.Core
                     foreach (var mod in NativeProcessMemory.EnumModules(processId))
                     {
                         if (string.IsNullOrEmpty(mod.Path)) continue;
-                        if (mod.Path.IndexOf(@"\Windows\", StringComparison.OrdinalIgnoreCase) >= 0) continue;
-                        if (IsOsServicingPath(mod.Path)) continue;
-
-                        // Main EXE listed as a module under Temp is NOT a sideload plant
                         if (string.Equals(mod.Path, imagePath, StringComparison.OrdinalIgnoreCase))
                             continue;
 
-                        bool fromTemp = mod.Path.IndexOf(@"\Temp\", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                                        mod.Path.IndexOf(@"\AppData\Local\Temp\", StringComparison.OrdinalIgnoreCase) >= 0;
-                        var modDir = Path.GetDirectoryName(mod.Path) ?? "";
-                        bool plantNameInAppDir = modDir.Equals(procDir, StringComparison.OrdinalIgnoreCase) &&
-                                                 SideloadTargets.Contains(mod.Name);
+                        var verdict = ModuleIdentity.Evaluate(
+                            imagePath, mod.Path, IsMicrosoftFamilySigned);
+                        if (verdict.Allowed) continue;
 
-                        // CRITICAL: only classic sideload *target names* from Temp are hostile.
-                        // Old logic treated ANY module under Temp as hostile → FreeLibrary/kill on
-                        // DismHost + DismCorePS.dll + friends when NTLite runs DISM from NLTmpScratch.
-                        bool tempSideloadTarget = fromTemp &&
-                                                  SideloadTargets.Contains(mod.Name) &&
-                                                  File.Exists(mod.Path) &&
-                                                  IsHostileSideloadDll(mod.Path);
-
-                        bool appDirPlant = plantNameInAppDir &&
-                                           File.Exists(mod.Path) &&
-                                           IsHostileSideloadDll(mod.Path);
-
-                        if (tempSideloadTarget || appDirPlant)
-                            hostileLoaded.Add((mod.Path, mod.Base));
+                        hostileLoaded.Add((mod.Path, mod.Base));
                     }
                 }
 
@@ -399,11 +365,12 @@ namespace Sentinel.Core
                 {
                     await _detectionEngine.EmitAsync(new DetectionEvent
                     {
-                        RuleName = "DLL Sideloading: Proven Load — Unloaded + Quarantined",
+                        RuleName = "DLL Injection: Foreign Module Unloaded",
                         Evidence = $"Process '{name}' (PID {processId}) loaded hostile DLL(s): " +
-                                   string.Join(", ", result.UnloadedDlls.Select(Path.GetFileName)) +
+                                   string.Join(", ", result.UnloadedDlls) +
                                    $". FreeLibraryAPC={allUnloaded && hostileLoaded.Count > 0}; host killed if needed.",
-                        Reasoning = "Proven behavior: process loaded a Temp or non-Microsoft system-named DLL from its app directory (T1574.001).",
+                        Reasoning = "Proven behavior: a mapped module failed path+signer identity " +
+                                    "(foreign folder, user-writable drop, or sideload plant). Unloaded immediately (T1055 / T1574.001).",
                         Confidence = 0.90,
                         Tier = DetectionTier.Tier1Behavioral,
                         AuthorizedResponse = ResponseAction.LogOnly, // already acted
@@ -448,26 +415,23 @@ namespace Sentinel.Core
         {
             try
             {
-                var lower = dllPath.ToLowerInvariant();
-                if (lower.Contains(@"\temp\") ||
-                    lower.Contains(@"\downloads\") ||
-                    lower.Contains(@"\appdata\local\temp\"))
+                if (ModuleIdentity.IsUserWritableDrop(dllPath))
                     return true;
-
-                if (!_signerTrust.IsSignedFile(dllPath))
-                    return true;
-
-                var signer = _signerTrust.GetSignerName(dllPath) ?? "";
-                if (signer.Contains("Microsoft") ||
-                    signer.Contains("Windows"))
-                    return false;
-
-                return true;
+                return !IsMicrosoftFamilySigned(dllPath);
             }
             catch
             {
                 return true;
             }
+        }
+
+        private bool IsMicrosoftFamilySigned(string path)
+        {
+            if (string.IsNullOrEmpty(path)) return false;
+            if (!_signerTrust.IsSignedFile(path)) return false;
+            var signer = _signerTrust.GetSignerName(path) ?? "";
+            return signer.IndexOf("Microsoft", StringComparison.OrdinalIgnoreCase) >= 0
+                   || signer.IndexOf("Windows", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
         private List<int> FindProcessIdsFromDirectory(string directory)

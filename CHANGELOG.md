@@ -1,6 +1,21 @@
 # Changelog
 
 
+## [2.2.5] - 2026-08-24
+
+Module identity is the EDR backbone again. Kiro left a 45-second *count* and a sideload-name allowlist. A remote inject of `C:\Evil\helper.dll` never matched `version.dll` and was logged as "module count +3".
+
+### Changed
+
+- **`ModuleIdentity`** — path tree + Microsoft signature. Allowed: OS keep trees (Windows, Edge WebView, GPU, .NET, WebView2 user-data), the process image, the process directory except unsigned sideload *names*, Microsoft-signed Program Files. Denied: Temp/Downloads/Desktop/AppData overlays, random folders, Microsoft-signed copies planted outside Program Files.
+- **`DllUnloadEngine`** — unloads every mapped module that fails identity, not only `version.dll` / `winmm.dll` in Temp. `explorer` / `svchost` are scanned (inject targets). Still never FreeLibrary `csrss` / `lsass` / `wininit` / DISM / NTLite.
+- **`MemoryBehaviorAnalyzer`** — 5s identity scan. The "Module Count Growth" rule is gone; Chromium loading 40 Edge DLLs is not injection.
+- **`EtwThreatIntelMonitor`** — Ceprkac / WebView2 / browsers are high-value. Unbacked RWX with an MZ header or compact shellcode has execute stripped (`VirtualProtectEx` PAGE_READONLY) and named foreign modules unloaded. Large non-MZ JIT regions are ignored.
+
+### Tests
+
+- `ModuleIdentityTests` — keep trees, app-dir plants, `C:\Evil\helper.dll`, Temp drops, NTLite scratch, GPU ICD names.
+
 ## [2.2.4] - 2026-08-24
 
 Generic CVE-class coverage so the next Patch Tuesday does not require a named campaign pack. Sentinel still cannot patch kernel races. It now hunts the *userland shape* of new EoP/RCE/SFB bugs, matches Windows OS-class KEV entries, and toasts when the latest Patch Tuesday CU is missing.

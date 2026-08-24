@@ -1,6 +1,6 @@
 # Sentinel — Design Document
 
-**Version: 2.2.4**
+**Version: 2.2.5**
 
 ---
 
@@ -41,7 +41,7 @@ Monitors → TelemetryFusionEngine → DetectionEngine → AdvancedResponseEngin
 | `OpsMetricsPublisher` | Writes `%ProgramData%\Sentinel\ops_metrics.json` |
 | `SelfPathGuard` | Hardlink-aware install self-exclusion |
 | `EncryptedConfigStore` | DPAPI-encrypted per-deployment config (`config.enc`); replaces plaintext appsettings.json |
-| `ProductInfo.Version` | `2.2.4` |
+| `ProductInfo.Version` | `2.2.5` |
 
 All components are wired via Microsoft.Extensions.DependencyInjection. No static mutable state anywhere.
 
@@ -224,7 +224,7 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 | `NetworkMonitor` | GetExtendedTcpTable/UdpTable P/Invoke, IPv4+IPv6 | Singleton |
 | `LsassDumpCanaryMonitor` | Scans system-wide process handles for unauthorized lsass.exe read access | 30s |
 | `RouteTableMonitor` | GetIpForwardTable P/Invoke; detects route injection, default route hijack | 15s |
-| `MemoryBehaviorAnalyzer` | Process.Modules enumeration + module count tracking; process hollowing and DLL sideloading detection | 90s |
+| `MemoryBehaviorAnalyzer` | Module identity (path+signer) every 5s; foreign modules unloaded via DllUnloadEngine; hollowing observe | 5s |
 | `TokenIntegrityMonitor` | GetTokenInformation(TokenIntegrityLevel); detects Medium→High without UAC | 45s |
 | `CredentialCanaryMonitor` | Plants/monitors honeypot credentials in Windows Credential Manager | periodic |
 | `LocalServerMonitor` | Detects suspicious processes listening on localhost (mounted ISO/VHD origins) | 20s |
@@ -264,7 +264,7 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 | `ResponsePolicy` | Observe-until-chain classifier: terminal outcomes, benign System32 redistributable noise, multi-signal PID buffers, silent-observe gates. |
 | `TelemetryFusionEngine` | Correlates raw telemetry across all sources into per-process event chains. Produces `FusedTelemetryContext` with behavioral metrics. |
 | `EventGraph` | In-memory graph of processes, files, and network endpoints with temporal/causal edges. Supports incident timeline queries. |
-| `MemoryBehaviorAnalyzer` | Scans process modules every 90s via .NET Process.Modules. Detects process hollowing (missing MainModule), DLL injection (module count growth ≥3), and DLL sideloading via DllUnloadEngine. |
+| `MemoryBehaviorAnalyzer` | Scans mapped modules every 5s. `ModuleIdentity` allow/deny (keep trees, app dir, Microsoft-signed Program Files). Foreign modules are unloaded immediately via DllUnloadEngine. Count growth is not a signal. Missing image path remains Tier2 observe. |
 | `ProcessAncestryCache` | `CreateToolhelp32Snapshot` refreshed every 5s (WMI fallback for Server Core/IoT). Provides parent name resolution. |
 | `BehavioralCorrelationEngine` | Time-windowed (60s) multi-signal correlator. Fires composite `DetectionEvent`s via `IDetectionEngine.EmitAsync`. |
 | `BeaconingDetector` | Statistical C2 beacon detection. Tracks inter-connection intervals. Fires when CV < 0.40 with 5+ observations. Multi-factor Authenticode trust verification. |

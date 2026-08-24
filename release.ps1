@@ -1,20 +1,17 @@
 $env:PATH = "C:\Program Files\Git\cmd;C:\Program Files\Git\bin;" + $env:PATH
 $gh = "C:\Program Files\GitHub CLI\gh.exe"
-$installer = "installer\SentinelSetup-2.2.4.exe"
+$installer = "installer\SentinelSetup-2.2.5.exe"
 
 $notes = @"
-Generic CVE-class coverage plus a quarantine Explorer ACL fix. Sentinel does not patch kernel races. It hunts the userland shape of new EoP/RCE bugs, matches Windows OS-class CISA KEV entries, and tells you when the latest Patch Tuesday CU is missing.
+Module identity is the EDR backbone again. Foreign mapped modules are unloaded immediately (path + Microsoft signature), not logged as 'module count +3'.
 
-## Detection (v2.2.4)
+## Module identity (v2.2.5)
 
-- Kernel-EoP loaders (AFD/WinSock class, not just Dream Job names), MSI repair from staging, winget/ms-appinstaller, VS Code encoded shells, ClickFix explorer paste, isolation-filter driver drops (unionfs), MOTW-strip PEs.
-- CISA KEV: Windows OS vulnerabilities now match this workstation (no process named 'Windows' required). SharePoint/Exchange only if installed. No fake PoC hashes.
-- Patch Tuesday posture: toast if last cumulative update is older than the latest second Tuesday (7-day grace).
-- Named Dream Job / LegacyHive / Cloud Files coverage from 2.2.3 remains.
-
-## Fixes
-
-- Settings / tray Open Quarantine no longer hits 'insufficient permissions'. Interactive users can browse the folder; encrypted samples stay SYSTEM/Admin. Restart the Sentinel service once so the ACL is rewritten.
+- Every mapped PE is allow/deny checked every 5 seconds: OS keep trees, process directory, Microsoft-signed Program Files.
+- Denied and unloaded now: Temp/Downloads/Desktop drops, unsigned sideload plants (version.dll next to the exe), random folders (C:\Evil\helper.dll).
+- explorer and svchost are scanned (inject targets). Never FreeLibrary lsass/csrss/wininit/DISM/NTLite.
+- Unbacked RWX with an MZ header or compact shellcode has execute stripped. Large non-MZ JIT regions are ignored.
+- Chromium loading 40 Edge DLLs is not treated as injection.
 
 ## Installation
 Requires .NET Framework 4.8. Run as Administrator.
@@ -22,7 +19,7 @@ Open Settings from the Sentinel tray icon (built-in window, no browser).
 "@
 
 if (Test-Path $gh) {
-    & $gh release create v2.2.4 $installer --title "Sentinel 2.2.4" --notes $notes
+    & $gh release create v2.2.5 $installer --title "Sentinel 2.2.5" --notes $notes -R CroatiaSecurity/Sentinel
 } else {
-    Write-Host "gh.exe not found - installer is at $installer and releases\2.2.4\"
+    Write-Host "gh.exe not found - installer is at $installer and releases\2.2.5\"
 }
