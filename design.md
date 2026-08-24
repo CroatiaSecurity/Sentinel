@@ -739,6 +739,17 @@ Self-heal loops: `IPSecIntegrityGuard` (30s, rebuilds current profile), `AsrPoli
 
 ---
 
+## v2.2.5 Additions
+
+Module identity is the PE-map backbone. Count is not a signal.
+
+| Item | Reality in 2.2.5 |
+|------|------------------|
+| `ModuleIdentity` | Path tree + Microsoft signature allow/deny. Keep: Windows/Edge WebView/GPU/.NET/WebView2 user-data, process image, app dir except unsigned sideload names, Microsoft-signed Program Files |
+| `DllUnloadEngine` | Unloads every mapped module that fails identity (not only `version.dll` in Temp). explorer/svchost scanned. Never FreeLibrary lsass/csrss/wininit/DISM/NTLite |
+| `MemoryBehaviorAnalyzer` | 5s identity scan. "Module Count Growth" removed |
+| `EtwThreatIntelMonitor` | Ceprkac/WebView2/browsers high-value. MZ or compact unbacked RWX → strip execute. Large non-MZ JIT ignored |
+
 ## v2.2.4 Additions
 
 Generic CVE-class coverage. Does not patch kernel races. Folder `Monitors/` is file layout; types live in `namespace Sentinel.Core`.

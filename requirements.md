@@ -1,6 +1,6 @@
 # Sentinel — Requirements
 
-**Version: 2.2.4**
+**Version: 2.2.5**
 
 ---
 
@@ -358,3 +358,4 @@ The user-session Agent must provide a Settings window (tray menu + double-click)
 | 2.2.0 | FR-19 dashboard bearer (no Referer auth); FR-20 game-path reputation skip; V217 monitors registered; kiosk LGPO must not weaken the host |
 | 2.2.3 | T1-24 Dream Job; T1-25 LegacyHive; T1-26 Cloud Files/ShieldBreak; KEV UBR toast; C-20–C-22 |
 | 2.2.4 | T1-27/T1-28 generic CVE-class; T2-08–T2-10 MOTW/ClickFix/Patch Tuesday; C-23–C-26; CveShield Windows OS KEV |
+| 2.2.5 | Module identity unload: foreign mapped PE FreeLibrary-APC immediately; count is not a signal; MZ/compact unbacked RWX execute-strip |

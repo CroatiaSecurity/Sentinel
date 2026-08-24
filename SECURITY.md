@@ -117,6 +117,7 @@ The following are NOT in scope:
 
 See [CHANGELOG.md](CHANGELOG.md) for the full history of security fixes, including:
 
+- v2.2.5: Module identity (`ModuleIdentity` + `DllUnloadEngine`) unloads foreign mapped PEs immediately; module count is not injection; MZ/compact unbacked RWX execute-strip
 - v2.2.4: Generic CVE-class sensors (kernel-EoP loaders, MSI/winget, MOTW/ClickFix, unionfs); CveShield Windows OS KEV match; missed Patch Tuesday toast; V217 types in Sentinel.Core
 - v2.2.3: Lazarus Dream Job campaign pack (CVE-2026-68820 userland); KEV UBR toast; LegacyHive hive-load; Cloud Files / ShieldBreak sync-root watch
 - v2.2.0: Dashboard Referer bypass closed; V217 monitors registered; game-path skip; Windows\Temp quarantine; watchdog publisher pin; kiosk LGPO no longer weakens the host; Worker RATE_LIMITER after HMAC
