@@ -73,6 +73,7 @@ namespace Sentinel.Core
                 "Token Theft", "Token Stealing", "SYSTEM Token", "Impersonat",
                 "SeImpersonate", "DuplicateToken", "MakeToken", "GodPotato", "PrintSpoofer",
                 "Potato", "JuicyPotato", "RoguePotato", "SharpEfsPotato",
+                "FudModule", "LegacyHive",
             }),
             ("ReverseShell", new[]
             {
@@ -91,6 +92,7 @@ namespace Sentinel.Core
                 "Command-and-Control", "Command and Control", "NetworkC2",
                 "Injected C2", "Confirmed C2", "Covert C2", "C2 Channel",
                 "Periodic Callback", "Statistical Beacon",
+                "Lazarus Dream Job", "Dream Job: C2",
             }),
         };
 

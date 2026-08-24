@@ -1,6 +1,6 @@
 # Sentinel — Design Document
 
-**Version: 2.2.2**
+**Version: 2.2.3**
 
 ---
 
@@ -41,7 +41,7 @@ Monitors → TelemetryFusionEngine → DetectionEngine → AdvancedResponseEngin
 | `OpsMetricsPublisher` | Writes `%ProgramData%\Sentinel\ops_metrics.json` |
 | `SelfPathGuard` | Hardlink-aware install self-exclusion |
 | `EncryptedConfigStore` | DPAPI-encrypted per-deployment config (`config.enc`); replaces plaintext appsettings.json |
-| `ProductInfo.Version` | `2.2.2` |
+| `ProductInfo.Version` | `2.2.3` |
 
 All components are wired via Microsoft.Extensions.DependencyInjection. No static mutable state anywhere.
 
@@ -121,6 +121,7 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 | `LpeScaffoldMonitor` | Potato-class tools and elevated staging PEs (Phase A) | periodic |
 | `InitialAccessMonitor` | Browser/Office → LOLBin, staging LOLBins | periodic |
 | `PersistenceSurfaceMonitor` | IFEO, accessibility, Winlogon, COM hijack | periodic |
+| `DreamJobCampaignMonitor` | **v2.2.3.** Lazarus Dream Job: SecurityPDF / FudModule / libmupdf sideload / Temp\\new.exe / C2 IOCs (not afd.sys) | 15s |
 | `EdrKillerDetectionMonitor` | **v2.2.0 registered.** Known EDR-killer **process names** — LogOnly observe fuel (rename bypasses) | 5s |
 | `DecoyPipeMonitor` | **v2.2.0 registered.** Default CS/Metasploit pipe-name honeypots | continuous |
 
@@ -164,7 +165,7 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 |-----------|-----------|----------|
 | `FirewallIntegrityMonitor` | Polls firewall profiles via netsh advfirewall; detects disable/bulk rules | 60s |
 | `SecureBootIntegrityMonitor` | Checks Secure Boot, test signing, kernel debug via registry+bcdedit | 5min |
-| `WindowsUpdateIntegrityMonitor` | Monitors WU/BITS services and auto-update registry | 2min |
+| `WindowsUpdateIntegrityMonitor` | WU service + AU policy + stale installs + **v2.2.3 KEV UBR (CVE-2026-68820 / KB5121003)** | 10min |
 | `ScheduledTaskMonitor` | Polls scheduled tasks via schtasks; multi-indicator suspicious task analysis | 60s |
 | `CriticalServiceGuard` | Monitors 15 critical services for crash storms via SCM events (7034/7031) | 10s |
 | `RegistryMonitor` | WMI-based monitoring of Run keys, Services, CLSID COM hijacking | continuous |
@@ -186,6 +187,8 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 | `DriverLoadMonitor` | BYOVD via Event 7045 (PID when > 4), registry, **interactive user** .sys drops (not SYSTEM profile); cert-tracing | 15s |
 | `GpuProcessMonitor` | GPU helper sandbox-escape (child/net/post-ex DLL) + trojanized GPU .sys names | periodic |
 | `KernelModuleAuditMonitor` | **v2.2.0 registered.** NtQuerySystemInformation module list; logs pre-existing RTCore64/WinRing0 | 30s |
+| `LegacyHiveMonitor` | **v2.2.3.** HKU hive loaded for a user who is not logged on (CVE-2026-62832); custom HKU names | 20s |
+| `CloudFilesHydrationMonitor` | **v2.2.3.** Unknown CfApi sync roots + Cloud Files placeholders in staging (ShieldBreak / CVE-2026-62713). Does not disable OneDrive | 30s |
 
 #### Group 6: Peripheral (30s start delay, max 2 restarts)
 
@@ -230,7 +233,7 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 | Component | Mechanism | Notes |
 |-----------|-----------|-------|
 | `TrayIconService` | System tray NotifyIcon; **Settings** / double-click opens native `AgentDashboardForm`. **No** `ShowBalloonTip` | WinForms STA |
-| `AgentDashboardForm` | Built-in dark Settings dashboard (Overview / Events / Report / Quarantine / Safety / Ops / Tools / About). **v2.2.2:** this is the Settings UI again — no browser | WinForms STA |
+| `AgentDashboardForm` | Built-in dark Settings dashboard (Overview / Events / Report / Quarantine / Safety / Ops / Tools / About). **v2.2.2+:** this is the Settings UI — no browser | WinForms STA |
 | `WebDashboardService` | Loopback HTTP dashboard **not started** as of v2.2.2 (http protocol association was unusable on some hosts) | unused |
 | `AgentDashboardForm` | TrimKit-style dark sidebar Settings UI; affidavit editor + national portal open for evidence packs | WinForms STA |
 | `ScreenCaptureMonitor` | Detects DXGI desktop duplication + transparent overlay phishing windows | 15–25s |
@@ -730,6 +733,20 @@ Self-heal loops: `IPSecIntegrityGuard` (30s, rebuilds current profile), `AsrPoli
 |-------|----------|
 | Confirmed attack (LSASS, ransomware, injection, BYOVD, SYSTEM token, composites) | Authorized kill/quarantine/isolate when `ActiveResponse` |
 | Weak user-activity heuristics (shell+port, Downloads net, SeImpersonate alone, rclone, unusual subnet) | **LogOnly** at emit + `AdvancedResponseEngine.IsObserveOnlyUserActivityHeuristic` safety net |
+
+---
+
+## v2.2.3 Additions
+
+August 2026 Patch Tuesday userland coverage. Does not patch kernel races.
+
+| Item | Reality in 2.2.3 |
+|------|------------------|
+| Dream Job | `DreamJobCampaignMonitor` + campaign/IOC rules + SHA-256 seed. Composite `Lazarus Dream Job Chain` |
+| KEV posture | Win11 26100/26200 UBR below 9168 → LogOnly + critical toast. Never auto-patch |
+| LegacyHive | Loaded HKU for a user who is not logged on; hive-path reparse. Composite with token/UAC |
+| Cloud Files / ShieldBreak | Unknown CfApi sync roots; staging placeholders. OneDrive placeholders are not junction kills |
+| `IoCScanner.AddHashes` | Union; CveShield dummy salts no longer wipe campaign hashes |
 
 ---
 

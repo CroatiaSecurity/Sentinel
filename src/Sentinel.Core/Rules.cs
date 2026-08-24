@@ -509,6 +509,8 @@ namespace Sentinel.Core
             "windowsupdate.exe", "windowsdefender.exe",
             "chrome_update.exe", "firefox_update.exe",
             "system32.exe", "kernel32.exe",
+            // Lazarus Operation Dream Job (Aug 2026) — distinctive names only
+            "securitypdf.exe", "afd4eop12_x64.dll",
         };
 
         // Known C2 domain substrings
@@ -517,6 +519,7 @@ namespace Sentinel.Core
             "pastebin.com/raw", "hastebin.com/raw",
             "discord.com/api/webhooks", "telegram-bot",
             ".onion.", ".tor2web.",
+            "envell.xyz", "enveil.online", "uxtramine.org",
         };
 
         public DetectionEvent? Evaluate(FusedTelemetryContext context)

@@ -1064,9 +1064,19 @@ namespace Sentinel.Core
     {
         private readonly DetectionEngine _detectionEngine;
         private readonly ILogger<WindowsUpdateIntegrityMonitor> _logger;
+        private readonly ToastService? _toast;
         private DateTime _lastPostureAlert = DateTime.MinValue;
+        private DateTime _lastKevAlert = DateTime.MinValue;
 
-        public WindowsUpdateIntegrityMonitor(DetectionEngine de, ILogger<WindowsUpdateIntegrityMonitor> l) { _detectionEngine = de; _logger = l; }
+        public WindowsUpdateIntegrityMonitor(
+            DetectionEngine de,
+            ILogger<WindowsUpdateIntegrityMonitor> l,
+            ToastService? toast = null)
+        {
+            _detectionEngine = de;
+            _logger = l;
+            _toast = toast;
+        }
 
         protected override async Task ExecuteAsync(CancellationToken ct)
         {
@@ -1082,6 +1092,7 @@ namespace Sentinel.Core
                     await CheckWuServiceDisabledAsync().ConfigureAwait(false);
                     await CheckAuPolicyAsync().ConfigureAwait(false);
                     await CheckPostureStaleAsync().ConfigureAwait(false);
+                    await CheckKevPatchAsync().ConfigureAwait(false);
 
                     await Task.Delay(TimeSpan.FromMinutes(10), ct).ConfigureAwait(false);
                 }
@@ -1205,6 +1216,63 @@ namespace Sentinel.Core
                     SignalType = SignalType.AntiTamper,
                     Metadata = new Dictionary<string, string> { ["Posture"] = "UpdatesStale" }
                 }).ConfigureAwait(false);
+            }
+            catch { }
+        }
+
+        private async Task CheckKevPatchAsync()
+        {
+            if (DateTime.UtcNow - _lastKevAlert < TimeSpan.FromHours(24))
+                return;
+
+            try
+            {
+                using var cv = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows NT\CurrentVersion");
+                var buildStr = cv?.GetValue("CurrentBuild") as string ?? cv?.GetValue("CurrentBuildNumber") as string;
+                var ubrObj = cv?.GetValue("UBR");
+                int.TryParse(buildStr, out var build);
+                var ubr = ubrObj is int ui ? ui : (int.TryParse(ubrObj?.ToString(), out var up) ? up : 0);
+
+                DateTime? lastInstall = null;
+                using var wu = Registry.LocalMachine.OpenSubKey(
+                    @"SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\Results\Install");
+                var lastInstallStr = wu?.GetValue("LastSuccessTime") as string;
+                if (!string.IsNullOrEmpty(lastInstallStr) && DateTime.TryParse(lastInstallStr, out var dt))
+                    lastInstall = dt;
+
+                var eval = August2026CveHeuristics.EvaluateKevAfdPatch(build, ubr, lastInstall);
+                if (!eval.Unpatched) return;
+
+                _lastKevAlert = DateTime.UtcNow;
+                await _detectionEngine.EmitAsync(new DetectionEvent
+                {
+                    RuleName = "Patch Posture: KEV unpatched (CVE-2026-68820)",
+                    Evidence = eval.Detail,
+                    Reasoning =
+                        "CISA KEV: CVE-2026-68820 (afd.sys WinSock LPE, exploited by Lazarus). " +
+                        "Sentinel cannot patch the kernel race. Install KB5121003 (Win11 build UBR 9168+) and reboot. " +
+                        "LogOnly + toast — never force-patches.",
+                    Confidence = eval.HighConfidence ? 0.90 : 0.72,
+                    Tier = DetectionTier.Tier2Indicator,
+                    AuthorizedResponse = ResponseAction.LogOnly,
+                    ProcessName = "SYSTEM",
+                    ProcessId = 0,
+                    SignalType = SignalType.AntiTamper,
+                    Metadata = new Dictionary<string, string>
+                    {
+                        ["Posture"] = "KevUnpatched",
+                        ["CVE"] = eval.CveId,
+                        ["KB"] = August2026CveHeuristics.August2026KbWin11,
+                    }
+                }).ConfigureAwait(false);
+
+                try
+                {
+                    _toast?.ShowCriticalToast(
+                        "Sentinel: Windows KEV unpatched",
+                        "CVE-2026-68820 (afd.sys) is exploited in the wild. Install this month's Windows Update and reboot.");
+                }
+                catch { }
             }
             catch { }
         }

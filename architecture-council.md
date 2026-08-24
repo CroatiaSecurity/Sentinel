@@ -1,8 +1,8 @@
 # Sentinel — Council of Elders Architecture
 
-**Status:** Historical architecture rationale. **Runtime inventory and versions are authoritative in `design.md` (v2.2.0).** This document explains the President/Council mental model; do not treat monitor tables here as the live registration list.
+**Status:** Historical architecture rationale. **Runtime inventory and versions are authoritative in `design.md` (v2.2.3).** This document explains the President/Council mental model; do not treat monitor tables here as the live registration list.
 
-**Last updated note:** v2.2.0 — Header aligned; live component inventory lives only in `design.md`. EDR-killer process names are **not** President's Law (LogOnly observe fuel).
+**Last updated note:** v2.2.3 — Dream Job / KEV / LegacyHive / Cloud Files live in `design.md`. EDR-killer process names are **not** President's Law (LogOnly observe fuel).
 
 ---
 

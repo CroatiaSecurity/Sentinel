@@ -42,6 +42,22 @@ namespace Sentinel.Core
         {
             _hashIoCs.Clear();
             foreach (var h in hashes) _hashIoCs.Add(h);
+            Persist();
+        }
+
+        /// <summary>Union hashes into the set without wiping campaign / feed IOCs already loaded.</summary>
+        public void AddHashes(IEnumerable<string> hashes)
+        {
+            foreach (var h in hashes)
+            {
+                if (!string.IsNullOrWhiteSpace(h))
+                    _hashIoCs.Add(h.Trim());
+            }
+            Persist();
+        }
+
+        private void Persist()
+        {
             try
             {
                 _cacheStore.Save("ioc", "hashes", string.Join("\n", _hashIoCs));

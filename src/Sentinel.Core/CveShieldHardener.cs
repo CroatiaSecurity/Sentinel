@@ -278,7 +278,7 @@ namespace Sentinel.Core
             if (!string.IsNullOrEmpty(dummyHash))
             {
                 var hashes = new[] { dummyHash };
-                _iocScanner.UpdateHashes(hashes);
+                _iocScanner.AddHashes(hashes);
                 _logger.LogInformation("CVE Shield: Registered PoC file hash block for {CveId}: {Hash}", vuln.CveId, dummyHash);
             }
         }

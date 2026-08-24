@@ -1,6 +1,40 @@
 # Changelog
 
 
+## [2.2.3] - 2026-08-24
+
+August 2026 Patch Tuesday userland coverage. Sentinel still cannot patch kernel races (`afd.sys`). It now hunts the Lazarus campaign around the exploited zero-day, tells you when the KEV CU is missing, and watches LegacyHive + Cloud Files / ShieldBreak primitives.
+
+### Added
+
+- **Lazarus Operation Dream Job campaign pack (CVE-2026-68820)**
+  - `DreamJobCampaignMonitor` — SecurityPDF / FudModule (`Afd4Eop12`) names, `libmupdf.dll` sideload from Temp/Downloads, `%TEMP%\new.exe` from a PDF-viewer parent, published C2 domains/IPs, Smart App Control `VerifiedAndReputablePolicyState=0` (weak observe).
+  - `CampaignDetectionRule` + `CampaignIocRule` entries for distinctive filenames and `envell.xyz` / `enveil.online` / `uxtramine.org`.
+  - Check Point SHA-256 IOCs seeded into `IoCScanner` via `AddHashes` (does not wipe other hashes).
+  - Composite **`Lazarus Dream Job Chain`** (0.95) — two Dream Job legs or Dream Job + C2/injection/LPE/token.
+- **KEV patch posture (CVE-2026-68820)**
+  - `WindowsUpdateIntegrityMonitor` checks Win11 24H2/25H2 `CurrentBuild`+`UBR` against **9168** (`KB5121003`). Other SKUs: last successful install before 2026-08-11 is a softer signal.
+  - LogOnly detection **`Patch Posture: KEV unpatched (CVE-2026-68820)`** + critical toast (24h). Never force-patches. Reboot still required for the CU.
+- **LegacyHive (CVE-2026-62832)**
+  - `LegacyHiveMonitor` — HKU hive loaded for a user who is not logged on (two-scan confirm), custom-named HKU keys, skip well-known/service SIDs. Fail closed if session enumeration is empty.
+  - FileActivityMonitor: reparse onto `NTUSER.DAT` / `UsrClass.dat` → `LegacyHive: Reparse targeting user hive` (LogOnly).
+  - Composite **`LegacyHive Privilege Escalation Chain`** (0.92) with token/UAC/LPE.
+- **Cloud Files / ShieldBreak (CVE-2026-62713)**
+  - `CloudFilesHydrationMonitor` — new CfApi sync roots that are not OneDrive/Dropbox/iCloud/SharePoint/WorkFolders; Cloud Files placeholders in Downloads/Desktop/Temp outside those folders.
+  - FileActivityMonitor: OneDrive/Dropbox placeholder reparses are **not** treated as junction kills; unauthorized cloud reparses are LogOnly.
+  - Composite **`Cloud Files Hydration Tamper Chain`** (0.91) with LPE / system-path write. Does not disable OneDrive.
+
+### Changed
+
+- `IoCScanner.AddHashes` unions indicators. `CveShieldHardener` uses it so dummy PoC salts no longer wipe campaign hashes.
+- `ProductInfo.Version` → `2.2.3`
+- Installer → `SentinelSetup-2.2.3`
+
+### Tests
+
+- `August2026CveTests` — filename/sideload/domain/hash heuristics, KEV UBR matrix, LegacyHive SID rules, Cloud Files sync-root classification, campaign rules, composites, `AddHashes`.
+
+
 ## [2.2.2] - 2026-08-23
 
 ### Changed

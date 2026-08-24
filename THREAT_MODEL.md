@@ -1,12 +1,25 @@
 # Sentinel — Threat Model
 
-**Version: 2.2.2**
+**Version: 2.2.3**
 
 This document assumes the attacker has read the source code.
 
 ### v2.1.2 — battle hackers, keep play/browse working
 
 Work-first defaults: HID auto-disable is kiosk-only; Steam/Xbox/Store/DirectX/OBS are work surface; Hell's Gate and unmapped-thread scanners require a real stub table / compact shellcode page. Weak browse/play heuristics cannot complete a chain nuke. MitMDefense does not unlock arbitrary host mutation.
+
+### v2.2.3 — August 2026 CVEs (userland, honest about the kernel)
+
+Does **not** patch `afd.sys` (CVE-2026-68820). Coverage is the Lazarus Operation Dream Job chain around that bug, KEV patch toast, LegacyHive hive-load, and Cloud Files / ShieldBreak hydration.
+
+| Capability | Role | Not a substitute for |
+|------------|------|----------------------|
+| DreamJobCampaignMonitor | SecurityPDF, libmupdf sideload, FudModule names, Troy C2 IOCs | KB5121003 / UBR 9168 |
+| KEV posture toast | Win11 26100/26200 UBR below 9168 (LogOnly + toast) | Installing the cumulative update + reboot |
+| LegacyHiveMonitor | Another user's hive loaded / custom HKU (CVE-2026-62832) | The User Profile Service patch |
+| CloudFilesHydrationMonitor | Unknown CfApi sync roots; placeholders in staging (CVE-2026-62713 / ShieldBreak) | Cloud Files Mini Filter patch; does not disable OneDrive |
+
+Composites: `Lazarus Dream Job Chain`, `LegacyHive Privilege Escalation Chain`, `Cloud Files Hydration Tamper Chain`.
 
 ### v2.2.2 — Settings is native again
 
@@ -44,7 +57,7 @@ Additional **userland** sensors for campaigns that use local privilege escalatio
 | LpeScaffoldMonitor | Potato-class tools, elevated staging PEs | Kernel LPE patches (e.g. afd.sys CVE) |
 | InitialAccessMonitor | Browser/Office → LOLBin, staging LOLBins | Email/web content filtering |
 | PersistenceSurfaceMonitor | IFEO, accessibility, Winlogon, COM hijack | Full registry integrity product |
-| WU posture | Disabled AU / stale updates (LogOnly) | Installing the cumulative update |
+| WU posture | Disabled AU / stale updates / **KEV UBR** (LogOnly + toast) | Installing the cumulative update |
 
 Composites: `LPE Campaign Scaffold`, `Initial Access Execution Chain`, `Persistence + Abuse Channel` (chain-confirmed with corroboration).
 

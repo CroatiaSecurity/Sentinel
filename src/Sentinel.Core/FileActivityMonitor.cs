@@ -258,31 +258,56 @@ namespace Sentinel.Core
             {
                 try
                 {
-                    if (Directory.Exists(e.FullPath))
+                    if (Directory.Exists(e.FullPath) || File.Exists(e.FullPath))
                     {
                         var attrs = File.GetAttributes(e.FullPath);
                         if ((attrs & FileAttributes.ReparsePoint) != 0)
                         {
                             var reparseCreator = GetProcessUsingFile(e.FullPath);
-                            // Allow TrustedInstaller/DISM reparse points (Windows component store uses them)
-                            if (!IsTrustedSystemWriter(reparseCreator.pid, reparseCreator.name, e.FullPath))
+                            var cloud = August2026CveHeuristics.IsCloudPlaceholderAttributes((int)attrs);
+                            var hive = August2026CveHeuristics.IsHiveFilePath(e.FullPath);
+                            var knownSync = August2026CveHeuristics.IsKnownCloudSyncClient(reparseCreator.name)
+                                            || August2026CveHeuristics.IsKnownCloudSyncFolder(e.FullPath);
+
+                            // OneDrive/Dropbox hydration placeholders are not junction attacks.
+                            if (cloud && knownSync)
                             {
+                                // skip junction kill
+                            }
+                            // Allow TrustedInstaller/DISM reparse points (Windows component store uses them)
+                            else if (!IsTrustedSystemWriter(reparseCreator.pid, reparseCreator.name, e.FullPath))
+                            {
+                                var rule = hive
+                                    ? "LegacyHive: Reparse targeting user hive"
+                                    : cloud
+                                        ? "Cloud Files: Unauthorized placeholder reparse"
+                                        : "File Integrity: Junction/Symlink Created in Monitored Path";
+                                var conf = hive ? 0.88 : (cloud ? 0.80 : 0.85);
+                                var action = (cloud || hive) ? ResponseAction.LogOnly : ResponseAction.KillProcessTree;
                                 _ = _detectionEngine.EmitAsync(new DetectionEvent
                                 {
-                                    RuleName = "File Integrity: Junction/Symlink Created in Monitored Path",
-                                    Evidence = $"Reparse point (junction/symlink) created at '{e.FullPath}' by process '{reparseCreator.name}' (PID {reparseCreator.pid})",
-                                    Reasoning = "A directory junction or symbolic link was created within a monitored path. " +
-                                                "Attackers use junctions to redirect monitored directories to attacker-controlled locations, " +
-                                                "bypass file monitoring exclusions, or exploit TOCTOU vulnerabilities in privilege escalation attacks.",
-                                    Confidence = 0.85,
+                                    RuleName = rule,
+                                    Evidence = $"Reparse point created at '{e.FullPath}' by process '{reparseCreator.name}' (PID {reparseCreator.pid})" +
+                                               (hive ? " (NTUSER/UsrClass hive path)" : cloud ? " (Cloud Files placeholder)" : ""),
+                                    Reasoning = hive
+                                        ? "A junction/symlink onto NTUSER.DAT or UsrClass.dat is the CVE-2026-62832 (LegacyHive) link-following primitive."
+                                        : cloud
+                                            ? "A Cloud Files placeholder reparse outside OneDrive is the ShieldBreak / CVE-2026-62713 hydration TOCTOU primitive. LogOnly unless chained."
+                                            : "A directory junction or symbolic link was created within a monitored path. " +
+                                              "Attackers use junctions to redirect monitored directories to attacker-controlled locations, " +
+                                              "bypass file monitoring exclusions, or exploit TOCTOU vulnerabilities in privilege escalation attacks.",
+                                    Confidence = conf,
                                     Tier = DetectionTier.Tier1Behavioral,
-                                    AuthorizedResponse = ResponseAction.KillProcessTree,
+                                    AuthorizedResponse = action,
                                     ProcessName = reparseCreator.name,
                                     ProcessId = reparseCreator.pid,
+                                    SignalType = hive || cloud ? SignalType.SecurityEvasion : SignalType.Generic,
                                     Metadata = new Dictionary<string, string>
                                     {
                                         ["Path"] = e.FullPath,
-                                        ["Operation"] = "ReparsePointCreated"
+                                        ["Operation"] = "ReparsePointCreated",
+                                        ["CVE"] = hive ? August2026CveHeuristics.CveLegacyHive
+                                            : cloud ? August2026CveHeuristics.CveCloudFiles : "",
                                     }
                                 });
                             }

@@ -404,7 +404,66 @@ namespace Sentinel.Core
                 return;
             }
 
-            // â•â•â• v1.9.4: Digital coercion toolkit (platform-agnostic) â•â•â•
+            // v2.2.3 August 2026 CVEs: Lazarus Dream Job / LegacyHive / Cloud Files
+            var hasDreamJob = currentSignals.Any(s =>
+                s.RuleName.Contains("Dream Job") ||
+                s.RuleName.Contains("Lazarus") ||
+                s.RuleName.Contains("SecurityPDF") ||
+                s.RuleName.Contains("FudModule") ||
+                s.RuleName.Contains("MuPDF sideload"));
+            bool IsDreamJobRule(DetectionEvent s) =>
+                s.RuleName.Contains("Dream Job") ||
+                s.RuleName.Contains("Lazarus") ||
+                s.RuleName.Contains("SecurityPDF") ||
+                s.RuleName.Contains("FudModule") ||
+                s.RuleName.Contains("MuPDF sideload");
+            var dreamJobDistinct = currentSignals
+                .Where(IsDreamJobRule)
+                .Select(s => s.RuleName)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Count();
+            var hasDreamJobCorroboration =
+                dreamJobDistinct >= 2 ||
+                currentSignals.Any(s => !IsDreamJobRule(s) &&
+                    (s.SignalType == SignalType.NetworkC2 ||
+                     s.SignalType == SignalType.ProcessInjection ||
+                     s.SignalType == SignalType.ReverseShell)) ||
+                hasLpeScaffold || hasTokenTheft || hasUacOrPotato;
+            if (hasDreamJob && hasDreamJobCorroboration)
+            {
+                await EmitCompositeAsync(pid, "Lazarus Dream Job Chain", 0.95,
+                    "Operation Dream Job loader/sideload/C2 correlated with LPE, injection, token, or network.",
+                    "Lazarus userland chain around CVE-2026-68820 (SecurityPDF / libmupdf sideload / FudModule / Troy C2). " +
+                    "Stops the campaign; does not patch afd.sys — install KB5121003.");
+                return;
+            }
+
+            var hasLegacyHive = currentSignals.Any(s => s.RuleName.Contains("LegacyHive"));
+            if (hasLegacyHive && (hasPrivEsc || hasTokenTheft || hasUacOrPotato || hasLpeScaffold))
+            {
+                await EmitCompositeAsync(pid, "LegacyHive Privilege Escalation Chain", 0.92,
+                    "Another user's registry hive loaded (CVE-2026-62832) correlated with token/UAC/LPE.",
+                    "LegacyHive: User Profile Service / custom HKU load plus escalation tooling.");
+                return;
+            }
+
+            var hasCloudFiles = currentSignals.Any(s =>
+                s.RuleName.Contains("Cloud Files:") ||
+                s.RuleName.Contains("ShieldBreak"));
+            var hasSystemWrite = currentSignals.Any(s =>
+                s.RuleName.IndexOf("System32", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                s.RuleName.IndexOf("Defender", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                s.RuleName.IndexOf("File Integrity", StringComparison.OrdinalIgnoreCase) >= 0);
+            if (hasCloudFiles && (hasPrivEsc || hasSystemWrite || hasLpeScaffold || hasUacOrPotato))
+            {
+                await EmitCompositeAsync(pid, "Cloud Files Hydration Tamper Chain", 0.91,
+                    "Unauthorized CfApi sync root or Cloud Files placeholder correlated with tamper/escalation.",
+                    "ShieldBreak / CVE-2026-62713 class: Cloud Files hydration TOCTOU plus a system-path or LPE leg. " +
+                    "Does not disable OneDrive.");
+                return;
+            }
+
+            // v1.9.4: Digital coercion toolkit (platform-agnostic)
             // Covert surveillance + remote/network channel (stalkerware / coercive control PC)
             var hasSurveillance = currentSignals.Any(CoercionAbusePolicy.IsSurveillanceRule);
             var hasRemoteLeg = currentSignals.Any(CoercionAbusePolicy.IsRemoteControlRule) ||

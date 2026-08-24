@@ -64,6 +64,25 @@ namespace Sentinel.Core
                 CommandLinePatterns = new[] { @"tab.exe.*-s", @"tab.exe.*-i" },
                 ModulePatterns = new[] { @"[a-z]{8}64.dll", @"[a-z]{8}32.dll" },
                 MitreTechniques = new[] { "T1003", "T1055", "T1056", "T1071" }
+            },
+            ["LazarusDreamJob"] = new CampaignIndicators
+            {
+                CampaignName = "Lazarus Operation Dream Job",
+                Description = "DPRK Lazarus Dream Job: trojanized PDF viewer / FudModule CVE-2026-68820 loader (does not patch afd.sys)",
+                FileNames = new[]
+                {
+                    "SecurityPDF.exe", "SecurityPDF",
+                    "Afd4Eop12_x64.dll", "Afd4Eop12_x64",
+                    "OneScreenCapture64.dll", "OneScreenCapture64",
+                },
+                ProcessPatterns = new[] { "SecurityPDF", "Afd4Eop12" },
+                CommandLinePatterns = new[]
+                {
+                    @"envell\.xyz", @"enveil\.online", @"uxtramine\.org",
+                    @"enable_god_mode", @"Afd4Eop12",
+                    @"135\.181\.67\.203", @"135\.181\.185\.158",
+                },
+                MitreTechniques = new[] { "T1204.002", "T1574.002", "T1068", "T1071", "T1055" }
             }
         };
 

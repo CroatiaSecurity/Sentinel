@@ -1,9 +1,17 @@
 # Sentinel — Security Audit (Normal / Red / Blue)
 
-**Date:** 2026-08-12 (updated 2026-08-23 with v2.2.0 remediations)  
+**Date:** 2026-08-12 (updated 2026-08-24 with v2.2.3 August CVE coverage)  
 **Scope:** Full source review of Sentinel.Core, Service, Agent, installer, Cloudflare Worker, and prior security docs.  
 **Audience:** Gaming desktops, creator workstations, high-profile personal targets.  
 **Method:** Manual adversarial + defensive review; fixes implemented in this release.
+
+## v2.2.3 — August 2026 Patch Tuesday (userland)
+
+| Item | Honest limit |
+|------|----------------|
+| CVE-2026-68820 afd.sys | Cannot patch the race. Dream Job campaign pack + KEV UBR toast (KB5121003). |
+| CVE-2026-62832 LegacyHive | Hive-load / custom HKU / hive reparse. Not a ProfSvc patch. |
+| CVE-2026-62713 / ShieldBreak | Unknown CfApi sync roots + staging placeholders. OneDrive not disabled. |
 
 ## v2.2.0 — Honest remediations
 

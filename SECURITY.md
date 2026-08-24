@@ -4,7 +4,7 @@
 
 | Version | Supported |
 |---------|-----------|
-| 2.2.x   | Yes (current: 2.2.2) |
+| 2.2.x   | Yes (current: 2.2.3) |
 | 2.1.x   | Security fixes only |
 | 1.9.x   | Security fixes only |
 | 1.8.x   | Security fixes only |
@@ -117,6 +117,7 @@ The following are NOT in scope:
 
 See [CHANGELOG.md](CHANGELOG.md) for the full history of security fixes, including:
 
+- v2.2.3: Lazarus Dream Job campaign pack (CVE-2026-68820 userland); KEV UBR toast; LegacyHive hive-load; Cloud Files / ShieldBreak sync-root watch
 - v2.2.0: Dashboard Referer bypass closed; V217 monitors registered; game-path skip; Windows\Temp quarantine; watchdog publisher pin; kiosk LGPO no longer weakens the host; Worker RATE_LIMITER after HMAC
 - v2.0.8: Deep red/blue audit — SPKI pinning, proxy nonces, IPC Interactive ACL, SafeKill plant fix, rulepack trust root lock, installer per-file unlock
 - v2.0.4: Full red team audit remediation (asymmetric rule pack signing, IPC nonce tracking, EncryptedConfigStore, cert pinning, FIPS enforcement removed)

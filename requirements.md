@@ -1,6 +1,6 @@
 # Sentinel — Requirements
 
-**Version: 2.2.0**
+**Version: 2.2.3**
 
 ---
 
@@ -63,6 +63,9 @@ The system must detect the following behavioral threats:
 | T1-21 | Package supply-chain runtime | Package managers spawning LOLBins; executables under package trees; AI agent config poison (CLAUDE.md, .cursorrules, MCP configs) |
 | T1-22 | Indirect syscall / Hell's Gate | Non-image executable memory containing a well-formed stub table: `mov r10,rcx; mov eax,SSN; syscall; ret` or a copied ntdll SharedUserData prologue, with 3+ distinct SSNs (loose JIT `0F 05` bytes are not a hit) |
 | T1-23 | MitM attack chain | Planted self-signed root cert removal, ghost process → rogue Cast kill, FCM Send-Tab-to-Self block, rogue Cast firewall block (when `MitmDefense.Enabled`) |
+| T1-24 | Lazarus Dream Job (CVE-2026-68820 campaign) | SecurityPDF / FudModule names, libmupdf sideload in staging, Temp\\new.exe from PDF parent, published C2; does **not** patch afd.sys |
+| T1-25 | LegacyHive (CVE-2026-62832) | Another user's HKU hive loaded while not logged on; hive-path reparse; custom HKU names |
+| T1-26 | Cloud Files / ShieldBreak (CVE-2026-62713) | Unknown CfApi sync roots; Cloud Files placeholders in staging; OneDrive exempt |
 
 ### FR-3: Tier 2 Detection Rules
 
@@ -76,6 +79,7 @@ The system must detect the following indicators (log only):
 | T2-04 | Dynamic rules (`DynamicRulesEvaluator`) and consultant JSONL signals (sticky LogOnly; never kill) |
 | T2-05 | Optional OS service outbound activity (DiagTrack, whesvc, etc.) — observe-only, never stop/kill/isolate |
 | T2-06 | Bulk transfer / torrent client traffic volume spikes — observe-only, never classified as Exfil terminal |
+| T2-07 | KEV patch posture (CVE-2026-68820): Win11 UBR below 9168 or last CU before 2026-08-11 — LogOnly + toast, never force-patch |
 
 ### FR-4: Composite Detections
 
@@ -104,6 +108,9 @@ The system must implement two correlation engines that fire composite detections
 | C-17 | Remote Control Abuse Toolkit | 0.93 |
 | C-18 | Session Theft + Abuse Channel | 0.95 |
 | C-19 | Stalkerware Persistence Chain | 0.92 |
+| C-20 | Lazarus Dream Job Chain | 0.95 |
+| C-21 | LegacyHive Privilege Escalation Chain | 0.92 |
+| C-22 | Cloud Files Hydration Tamper Chain | 0.91 |
 
 **WeightedCorrelationEngine (v2.0)** — explainable score cards:
 
@@ -340,3 +347,4 @@ The user-session Agent must provide a Settings window (tray menu + double-click)
 | 2.0.0 | WeightedCorrelationEngine + score cards; MITRE ATT&CK mapping; plugin architecture + signed rule packs; ops metrics; Service↔Agent IPC; SelfPathGuard; EnforceActiveResponse default corrected to false |
 | 2.0.1 | MitmDefense suite requirements (FR-18); planted-cert / ghost-Cast / rogue-Cast / FCM opt-in defense |
 | 2.2.0 | FR-19 dashboard bearer (no Referer auth); FR-20 game-path reputation skip; V217 monitors registered; kiosk LGPO must not weaken the host |
+| 2.2.3 | T1-24 Dream Job; T1-25 LegacyHive; T1-26 Cloud Files/ShieldBreak; KEV UBR toast; C-20–C-22 |

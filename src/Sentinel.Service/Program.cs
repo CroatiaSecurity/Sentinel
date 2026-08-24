@@ -466,6 +466,7 @@ namespace Sentinel.Service
                             sp.GetRequiredService<LpeScaffoldMonitor>(),
                             sp.GetRequiredService<InitialAccessMonitor>(),
                             sp.GetRequiredService<PersistenceSurfaceMonitor>(),
+                            sp.GetRequiredService<DreamJobCampaignMonitor>(),
                             sp.GetRequiredService<EdrKillerDetectionMonitor>(),
                             sp.GetRequiredService<DecoyPipeMonitor>(),
                         };
@@ -512,6 +513,7 @@ namespace Sentinel.Service
                     services.AddSingleton<LpeScaffoldMonitor>();
                     services.AddSingleton<InitialAccessMonitor>();
                     services.AddSingleton<PersistenceSurfaceMonitor>();
+                    services.AddSingleton<DreamJobCampaignMonitor>();
                     services.AddSingleton<EdrKillerDetectionMonitor>();
                     services.AddSingleton<DecoyPipeMonitor>();
 
@@ -633,6 +635,8 @@ namespace Sentinel.Service
                             sp.GetRequiredService<GpuProcessMonitor>(),
                             sp.GetRequiredService<WmiProviderIntegrityMonitor>(),
                             sp.GetRequiredService<KernelModuleAuditMonitor>(),
+                            sp.GetRequiredService<LegacyHiveMonitor>(),
+                            sp.GetRequiredService<CloudFilesHydrationMonitor>(),
                         };
                         return new MonitorGroup(
                             new MonitorGroupConfig
@@ -668,6 +672,8 @@ namespace Sentinel.Service
                     services.AddSingleton<WmiProviderIntegrityMonitor>();
                     services.AddSingleton<GpuProcessMonitor>();
                     services.AddSingleton<KernelModuleAuditMonitor>();
+                    services.AddSingleton<LegacyHiveMonitor>();
+                    services.AddSingleton<CloudFilesHydrationMonitor>();
 
                     // ── Group 6: Peripheral & Environmental ───────────────────────────
                     // Starts late (30s). Monitors hardware peripherals and external media.

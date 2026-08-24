@@ -20,7 +20,7 @@ namespace Sentinel.Tests
         [Fact]
         public void ProductInfo_Version_Is220()
         {
-            Assert.Equal("2.2.2", ProductInfo.Version);
+            Assert.Equal("2.2.3", ProductInfo.Version);
         }
 
         [Fact]

@@ -76,6 +76,14 @@ namespace Sentinel.Core
             ("File Reputation", new[] { "T1204.002" }),
             ("Malicious Binary", new[] { "T1204.002" }),
             ("Weighted Correlation", new[] { "TA0002", "TA0011" }),
+            ("Dream Job", new[] { "T1204.002", "T1574.002", "T1068", "T1071" }),
+            ("Lazarus", new[] { "T1204.002", "T1068", "T1071" }),
+            ("FudModule", new[] { "T1068", "T1562.001" }),
+            ("SecurityPDF", new[] { "T1204.002", "T1574.002" }),
+            ("MuPDF sideload", new[] { "T1574.002" }),
+            ("LegacyHive", new[] { "T1068", "T1574.005" }),
+            ("Cloud Files", new[] { "T1562.001", "T1574" }),
+            ("KEV unpatched", new[] { "T1190" }),
         };
 
         /// <summary>
