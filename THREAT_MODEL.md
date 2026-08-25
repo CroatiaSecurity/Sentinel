@@ -1,12 +1,12 @@
 # Sentinel — Threat Model
 
-**Version: 2.2.6**
+**Version: 2.2.7**
 
 This document assumes the attacker has read the source code.
 
 ### v2.2.5 — module identity, not count
 
-A remote inject is a mapped PE that does not belong. `ModuleIdentity` allow/deny (keep trees, process directory, Microsoft-signed Program Files) and `DllUnloadEngine` FreeLibrary-APC immediately. Module *count* is not a signal (Chromium loading Edge DLLs is not injection). Unbacked RWX with an MZ header or compact shellcode has execute stripped; large non-MZ JIT is ignored. Never FreeLibrary lsass/csrss/wininit/DISM/NTLite.
+A remote inject is a mapped PE that does not belong. `ModuleIdentity` allow/deny and `DllUnloadEngine` FreeLibrary-APC immediately (permanent Tier1). Hijack-name plants (`dbghelp.dll` next to Chrome **or** a Steam game) are quarantined **on drop** so search order cannot bind them. Module *count* is not a signal. Games are not VM_READ (Denuvo) — in-memory inject into a live game is a residual gap. Never FreeLibrary lsass/csrss/wininit/DISM/NTLite.
 
 ### v2.1.2 — battle hackers, keep play/browse working
 

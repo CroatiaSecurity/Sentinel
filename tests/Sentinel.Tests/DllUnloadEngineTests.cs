@@ -174,6 +174,48 @@ namespace Sentinel.Tests
         // DllUnloadResult model
         // ═══════════════════════════════════════════════════════════════
 
+        [Theory]
+        [InlineData(@"C:\Program Files\App\dbghelp.dll")]
+        [InlineData(@"C:\Program Files\Ceprkac\version.dll")]
+        [InlineData(@"C:\Users\Admin\AppData\Local\Temp\winmm.dll")]
+        [InlineData(@"C:\Users\Admin\Downloads\winhttp.dll")]
+        [InlineData(@"D:\SteamLibrary\steamapps\common\Grand Theft Auto V\dbghelp.dll")]
+        [InlineData(@"C:\Program Files (x86)\Steam\steamapps\common\Star Trek Online\version.dll")]
+        public void IsHijackPlantPath_ReturnsTrue_ForHijackNameOutsideOsTree(string path)
+        {
+            Assert.True(DllUnloadEngine.IsHijackPlantPath(path));
+        }
+
+        [Theory]
+        [InlineData(@"C:\Windows\System32\dbghelp.dll")]
+        [InlineData(@"C:\Windows\SysWOW64\version.dll")]
+        [InlineData(@"C:\Windows\WinSxS\x86_something\winmm.dll")]
+        public void IsHijackPlantPath_ReturnsFalse_ForOsCopy(string path)
+        {
+            Assert.False(DllUnloadEngine.IsHijackPlantPath(path));
+        }
+
+        [Fact]
+        public void IsHijackPlantPath_ReturnsFalse_ForHoneypotFolder()
+        {
+            Assert.False(DllUnloadEngine.IsHijackPlantPath(
+                @"C:\Program Files\Sentinel\honeypot\dbghelp.dll"));
+        }
+
+        [Fact]
+        public void IsHijackPlantPath_ReturnsFalse_ForNtLiteScratch()
+        {
+            Assert.False(DllUnloadEngine.IsHijackPlantPath(
+                @"C:\Users\Admin\AppData\Local\Temp\NLTmpScratch\dbghelp.dll"));
+        }
+
+        [Fact]
+        public void IsHijackPlantPath_ReturnsFalse_ForChromeElf()
+        {
+            Assert.False(DllUnloadEngine.IsHijackPlantPath(
+                @"C:\Program Files\Google\Chrome\Application\chrome_elf.dll"));
+        }
+
         [Fact]
         public void DllUnloadResult_DefaultValues_AreEmpty()
         {

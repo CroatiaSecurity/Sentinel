@@ -48,6 +48,7 @@ namespace Sentinel.Core
             "Injected Module",
             "Hostile Module",
             "Proven Load",
+            "Foreign Module Unloaded",
         };
 
         /// <summary>
@@ -254,17 +255,46 @@ namespace Sentinel.Core
         }
 
         /// <summary>
+        /// Standing product law: system-wide module identity unload already remediates
+        /// in <c>DllUnloadEngine</c>. The detection must remain Tier1 forever — never
+        /// demoted by observe-until-chain or kill-grade filtering.
+        /// </summary>
+        public static bool IsPermanentModuleIdentityUnload(DetectionEvent? detection)
+        {
+            if (detection == null) return false;
+
+            if (detection.Metadata != null &&
+                detection.Metadata.TryGetValue("PermanentRule", out var flag) &&
+                string.Equals(flag, "ModuleIdentityUnload", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            var r = detection.RuleName ?? "";
+            return r.IndexOf("Foreign Module Unloaded", StringComparison.OrdinalIgnoreCase) >= 0
+                   || r.IndexOf("Hijack-Name Plant Quarantined", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        /// <summary>
         /// Standing tier law: Tier1 only when the act is kill-grade and confident enough —
         /// token theft, credential dump, reverse shell, C2 beaconing — or a multi-signal
         /// composite / chain-confirmed detection that proves one of those.
         /// All other signals become Tier2 + LogOnly (still feed correlation).
-        /// DLL-unload exempt detections keep their response path but are not auto-promoted.
+        /// Module-identity unload remediations are a permanent Tier1 exception (already acted;
+        /// do not promote to kill). Other DLL-unload-exempt observe plants stay observe-only.
         /// </summary>
         public static void ApplyTierLaw(DetectionEvent detection, double minConfidence = DefaultMinTier1Confidence)
         {
             if (detection == null) return;
 
             detection.Metadata ??= new Dictionary<string, string>();
+
+            // Permanent: foreign mapped PE already unloaded. Never demote. Never kill-promote.
+            if (IsPermanentModuleIdentityUnload(detection))
+            {
+                detection.Tier = DetectionTier.Tier1Behavioral;
+                detection.Metadata["TierLaw"] = "ModuleIdentityUnload";
+                detection.Metadata["PermanentRule"] = "ModuleIdentityUnload";
+                return;
+            }
 
             // Multi-signal composites already encode independent proof → keep Tier1 kill intent.
             if (IsNukeComposite(detection))

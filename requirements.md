@@ -1,6 +1,6 @@
 # Sentinel — Requirements
 
-**Version: 2.2.6**
+**Version: 2.2.7**
 
 ---
 
@@ -301,7 +301,7 @@ The user-session Agent must provide a Settings window (tray menu + double-click)
 - Never quarantine OS-critical / WRP paths
 - Never NetworkIsolate private/LAN addresses
 - Weak single-signal heuristics (shell+port, Downloads network, SeImpersonate alone, bulk-transfer tools, System32 redistributable writes) must be LogOnly — never kill seeds
-- DLL unloaders (`DllUnloadEngine`) exempt from observe-until-chain and may remediate proven hostile loads immediately
+- DLL unloaders (`DllUnloadEngine`) exempt from observe-until-chain: FreeLibrary on identity failure; quarantine hijack-name plants on drop (file only, never kill the host from that path)
 
 ### NFR-2: Reliability
 - Monitors must fail independently — one monitor failure must not crash the service
@@ -360,3 +360,4 @@ The user-session Agent must provide a Settings window (tray menu + double-click)
 | 2.2.4 | T1-27/T1-28 generic CVE-class; T2-08–T2-10 MOTW/ClickFix/Patch Tuesday; C-23–C-26; CveShield Windows OS KEV |
 | 2.2.5 | Module identity unload: foreign mapped PE FreeLibrary-APC immediately; count is not a signal; MZ/compact unbacked RWX execute-strip |
 | 2.2.6 | Keep all of Windows except Temp; never kill host unless a user-writable drop failed to unmap; JIT RWX (no MZ) is not ALLOCVM_REMOTE |
+| 2.2.7 | Module identity unload is permanent Tier1; hijack-name plants quarantined on drop (file only); no config flag may disable |

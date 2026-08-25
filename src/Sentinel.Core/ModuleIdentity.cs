@@ -5,9 +5,9 @@ namespace Sentinel.Core
 {
     /// <summary>
     /// Identity of a mapped PE: path tree + Microsoft signature.
-    /// Count is not identity. A new module is allowed only if it belongs to the
-    /// process image, the OS/runtime keep trees, or is Microsoft-signed from
-    /// Program Files — never from Temp/Downloads/Desktop/random folders.
+    /// Count is not identity (Chromium loading Edge DLLs is not injection).
+    /// Hijack names (dbghelp, version, winmm, …) next to the exe are plants even
+    /// when Microsoft-signed — DLL search order loads the local copy first.
     /// </summary>
     public static class ModuleIdentity
     {
@@ -62,8 +62,11 @@ namespace Sentinel.Core
 
             if (underApp)
             {
-                if (DllUnloadEngine.IsSideloadTargetFileName(mod) &&
-                    !MicrosoftSigned(mod, isMicrosoftSigned))
+                // Known hijack names must come from the OS keep-tree (already
+                // allowed above). A real Microsoft dbghelp.dll copied next to
+                // the exe is still a search-order hijack. Do not use module
+                // count; do not unload every unsigned app DLL (games, plugins).
+                if (DllUnloadEngine.IsSideloadTargetFileName(mod))
                     return Deny("sideload-plant-in-appdir");
                 return Allow("app-directory");
             }

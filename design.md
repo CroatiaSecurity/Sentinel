@@ -1,6 +1,6 @@
 # Sentinel — Design Document
 
-**Version: 2.2.6**
+**Version: 2.2.7**
 
 ---
 
@@ -41,7 +41,7 @@ Monitors → TelemetryFusionEngine → DetectionEngine → AdvancedResponseEngin
 | `OpsMetricsPublisher` | Writes `%ProgramData%\Sentinel\ops_metrics.json` |
 | `SelfPathGuard` | Hardlink-aware install self-exclusion |
 | `EncryptedConfigStore` | DPAPI-encrypted per-deployment config (`config.enc`); replaces plaintext appsettings.json |
-| `ProductInfo.Version` | `2.2.6` |
+| `ProductInfo.Version` | `2.2.7` |
 
 All components are wired via Microsoft.Extensions.DependencyInjection. No static mutable state anywhere.
 
@@ -264,13 +264,13 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 | `ResponsePolicy` | Observe-until-chain classifier: terminal outcomes, benign System32 redistributable noise, multi-signal PID buffers, silent-observe gates. |
 | `TelemetryFusionEngine` | Correlates raw telemetry across all sources into per-process event chains. Produces `FusedTelemetryContext` with behavioral metrics. |
 | `EventGraph` | In-memory graph of processes, files, and network endpoints with temporal/causal edges. Supports incident timeline queries. |
-| `MemoryBehaviorAnalyzer` | Scans mapped modules every 5s. `ModuleIdentity` allow/deny (keep trees, app dir, Microsoft-signed Program Files). Foreign modules are unloaded immediately via DllUnloadEngine. Count growth is not a signal. Missing image path remains Tier2 observe. |
+| `MemoryBehaviorAnalyzer` | Scans mapped modules every 5s (permanent). `ModuleIdentity` allow/deny. Foreign modules unloaded immediately via DllUnloadEngine; detection stays Tier1. Count growth is not a signal. Missing image path remains Tier2 observe. |
 | `ProcessAncestryCache` | `CreateToolhelp32Snapshot` refreshed every 5s (WMI fallback for Server Core/IoT). Provides parent name resolution. |
 | `BehavioralCorrelationEngine` | Time-windowed (60s) multi-signal correlator. Fires composite `DetectionEvent`s via `IDetectionEngine.EmitAsync`. |
 | `BeaconingDetector` | Statistical C2 beacon detection. Tracks inter-connection intervals. Fires when CV < 0.40 with 5+ observations. Multi-factor Authenticode trust verification. |
 | `ScoringEngine` | Weighted multi-factor threat scoring with source weights, category base scores, corroboration bonuses. |
 | `FileReputationEngine` | Composite file trust scoring (0-100) aggregating CIRCL, MalwareBazaar, VirusTotal (via proxy), static PE analysis, signer trust. |
-| `DllUnloadEngine` | Detects DLL sideloading; unloads malicious DLLs via QueueUserAPC+FreeLibrary or kills host process. |
+| `DllUnloadEngine` | Unloads mapped modules that fail identity. Hijack-name plants quarantined on drop (file only, including steamapps). Never FreeLibrary lsass/csrss/wininit/DISM/NTLite. No VM_READ on games. |
 | `ChainTracer` | Attack chain walker: kills non-critical processes in chain, quarantines binaries, removes persistence. |
 | `IncidentResponseService` | Automated incident resolution: persistence removal, quarantine orchestration. Integrates with ChainTracer. |
 | `IsolationResponseEngine` | Handles threats from isolated environments: ISO dismount, Docker stop+rm+rmi, Hyper-V/VM stop. |
@@ -415,7 +415,7 @@ Emitted as Tier1 `DetectionEvent`s directly via `EmitAsync`. Requires signals fr
 | `Sentinel:ChainConfirmWindowSeconds` (default **300**) | Rolling correlation window |
 | `Sentinel:SilentObserve` (default **true**) | No toasts / auto evidence packs until chain-confirmed; chain-confirmed nukes always pack + critical toast (v1.9.3) |
 | `Sentinel:EnforceActiveResponse` (default **false**) | When true, `AntiTamperGuard` force-re-enables ActiveResponse if flipped off |
-| DLL unload exemption | `DllUnloadEngine` FreeLibrary/quarantine on proven hostile load may act immediately |
+| DLL unload exemption | `DllUnloadEngine` FreeLibrary on mapped identity failure and quarantine of hijack-name disk plants may act immediately (never kill the host on disk plant) |
 | CLI `--active-response` | Optional force-enable at process start (legacy) |
 | Central gate | `ResponsePolicy` + `AdvancedResponseEngine`; composites tagged `ChainConfirmed=true` |
 
@@ -746,7 +746,7 @@ Module identity is the PE-map backbone. Count is not a signal.
 | Item | Reality in 2.2.5 |
 |------|------------------|
 | `ModuleIdentity` | Path tree + Microsoft signature allow/deny. Keep: Windows/Edge WebView/GPU/.NET/WebView2 user-data, process image, app dir except unsigned sideload names, Microsoft-signed Program Files |
-| `DllUnloadEngine` | Unloads every mapped module that fails identity (not only `version.dll` in Temp). explorer/svchost scanned. Never FreeLibrary lsass/csrss/wininit/DISM/NTLite |
+| `DllUnloadEngine` | Unloads mapped modules that fail identity. Hijack-name plants quarantined on drop (file only). explorer/svchost scanned. Never FreeLibrary lsass/csrss/wininit/DISM/NTLite |
 | `MemoryBehaviorAnalyzer` | 5s identity scan. "Module Count Growth" removed |
 | `EtwThreatIntelMonitor` | Ceprkac/WebView2/browsers high-value. MZ or compact unbacked RWX → strip execute. Large non-MZ JIT ignored |
 

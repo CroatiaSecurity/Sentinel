@@ -1,6 +1,24 @@
 # Changelog
 
 
+## [2.2.7] - 2026-08-25
+
+Module identity unload is standing product law. The 5-second system-wide scan was already unloading foreign mapped PEs; `ApplyTierLaw` was demoting the detection to Tier2. It now stays permanent Tier1 (LogOnly — already unloaded). There is no config flag to turn this off.
+
+### Changed
+
+- **`ResponsePolicy.ApplyTierLaw`** — `DLL Injection: Foreign Module Unloaded` and `DLL Sideloading: Hijack-Name Plant Quarantined` stay Tier1. Never demote.
+- **`ProductPosture.ModuleIdentityUnloadAlwaysOn`** — constant `true`. No `Enable`/`Disable` config switch may be added.
+- **`DllUnloadEngine`** — emit metadata `PermanentRule=ModuleIdentityUnload`. Stale comment claiming unload waited for chain confirmation is gone.
+- **Hijack names next to the exe** (`dbghelp.dll`, `version.dll`, `winmm.dll`, …) are plants even when Microsoft-signed. DLL search order loads the local copy first; signature does not make it the OS module. The real `System32` copy stays keep-tree.
+- **Hijack-name plants are quarantined on drop** (file only). No process kill (0.5.3). No same-name 0-byte stub (that would still win search order). Re-drops are caught again. Game folders are included for *disk* quarantine; Sentinel still does not `VM_READ` a running game (Denuvo). Not module-count (2.2.5). Not “every unsigned DLL” (plugins, catalog-signed System32).
+
+### Tests
+
+- `ModuleIdentityUnloadPermanentTests` — Tier1 lock, no config disable switch, Service DI registration, `C:\Evil\helper.dll` still denied.
+- `ModuleIdentityTests` — signed `dbghelp.dll` next to the exe is denied; `System32\dbghelp.dll` is keep-tree.
+- `DllUnloadEngineTests` — `IsHijackPlantPath` true for app dir, Temp, Downloads, and steamapps GTA/STO; false for System32, WinSxS, honeypot, NTLite scratch, `chrome_elf.dll`.
+
 ## [2.2.6] - 2026-08-24
 
 Hotfix: 2.2.5 FreeLibrary'd OS/.NET modules and killed the host when APC failed. Ceprkac died with CLR 80131506 at the same UTC second as `ALLOCVM_REMOTE` (21 JIT regions, stripped-execute=0). StartMenu/ShellHost looped on `Windows\SystemApps`.

@@ -20,8 +20,9 @@ namespace Sentinel.Core
     /// <item>Detect + log to events.jsonl</item>
     /// <item>Destructive response only after multi-signal chain confirmation
     ///       (<see cref="ResponsePolicy"/> / ObserveUntilChain)</item>
-    /// <item>Proven hostile DLL unload only for classic sideload targets — never OS servicing
-    ///       (DismHost/NTLite/TrustedInstaller) or arbitrary Temp modules</item>
+    /// <item>Module identity unload is always on. Foreign mapped PEs are FreeLibrary'd.
+    ///       Hijack-name plants are quarantined on drop (file only, never kill the host).
+    ///       Games are not VM_READ. Never OS servicing. No config flag may disable this.</item>
     /// <item>Undo our own prior lockdown leftovers (<see cref="HardeningModule.ReleaseUserWorkSurface"/>)</item>
     /// </list>
     ///
@@ -31,6 +32,14 @@ namespace Sentinel.Core
     /// </summary>
     public static class ProductPosture
     {
+        /// <summary>
+        /// Standing law: <c>MemoryBehaviorAnalyzer</c> + <c>ModuleIdentity</c> +
+        /// <c>DllUnloadEngine</c> scan every process and unload foreign mapped PEs
+        /// immediately. There is no config switch. Games/anti-cheat are skipped only
+        /// for handle safety (Denuvo). OS servicing / lsass / csrss are never FreeLibrary'd.
+        /// </summary>
+        public const bool ModuleIdentityUnloadAlwaysOn = true;
+
         /// <summary>
         /// True only when the operator opted into kiosk / restrictive lockdown.
         /// Default false = observe-only host surface.

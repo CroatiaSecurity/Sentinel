@@ -46,7 +46,7 @@ namespace Sentinel.Tests
         }
 
         [Fact]
-        public void AppDirectory_OwnDll_IsAllowed()
+        public void AppDirectory_OwnDll_Unsigned_IsStillAllowed()
         {
             var v = ModuleIdentity.Evaluate(
                 Chrome,
@@ -67,14 +67,30 @@ namespace Sentinel.Tests
             Assert.Equal("sideload-plant-in-appdir", v.Reason);
         }
 
-        [Fact]
-        public void AppDirectory_SideloadName_MicrosoftSigned_IsAllowed()
+        [Theory]
+        [InlineData("dbghelp.dll")]
+        [InlineData("version.dll")]
+        [InlineData("winmm.dll")]
+        [InlineData("winhttp.dll")]
+        public void AppDirectory_HijackName_IsDenied_EvenIfMicrosoftSigned(string file)
         {
             var v = ModuleIdentity.Evaluate(
                 Ceprkac,
-                @"C:\Program Files\Ceprkac\version.dll",
+                @"C:\Program Files\Ceprkac\" + file,
                 _ => true);
-            Assert.True(v.Allowed);
+            Assert.False(v.Allowed);
+            Assert.Equal("sideload-plant-in-appdir", v.Reason);
+        }
+
+        [Fact]
+        public void System32_Dbghelp_IsKeepTree_EvenForThirdPartyProcess()
+        {
+            var v = ModuleIdentity.Evaluate(
+                Chrome,
+                @"C:\Windows\System32\dbghelp.dll",
+                _ => false);
+            Assert.True(v.Allowed, v.Reason);
+            Assert.Equal("keep-tree", v.Reason);
         }
 
         [Fact]

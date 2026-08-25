@@ -292,6 +292,44 @@ namespace Sentinel.Tests
         }
 
         [Fact]
+        public void Hijack_Name_Plant_Quarantined_Stays_Tier1_After_ApplyTierLaw()
+        {
+            var d = new DetectionEvent
+            {
+                RuleName = "DLL Sideloading: Hijack-Name Plant Quarantined",
+                ProcessId = 0,
+                ProcessName = "dropper",
+                Confidence = 0.90,
+                Tier = DetectionTier.Tier1Behavioral,
+                AuthorizedResponse = ResponseAction.LogOnly,
+            };
+
+            ResponsePolicy.ApplyTierLaw(d);
+            Assert.Equal(DetectionTier.Tier1Behavioral, d.Tier);
+            Assert.Equal(ResponseAction.LogOnly, d.AuthorizedResponse);
+            Assert.True(ResponsePolicy.IsPermanentModuleIdentityUnload(d));
+        }
+
+        [Fact]
+        public void Foreign_Module_Unloaded_Stays_Tier1_After_ApplyTierLaw()
+        {
+            var d = new DetectionEvent
+            {
+                RuleName = "DLL Injection: Foreign Module Unloaded",
+                ProcessId = 55,
+                ProcessName = "host.exe",
+                Confidence = 0.90,
+                Tier = DetectionTier.Tier1Behavioral,
+                AuthorizedResponse = ResponseAction.LogOnly,
+            };
+
+            ResponsePolicy.ApplyTierLaw(d);
+            Assert.Equal(DetectionTier.Tier1Behavioral, d.Tier);
+            Assert.Equal(ResponseAction.LogOnly, d.AuthorizedResponse);
+            Assert.True(ResponsePolicy.IsPermanentModuleIdentityUnload(d));
+        }
+
+        [Fact]
         public void Inline_Host_Mutation_Blocked_While_Observing()
         {
             Assert.False(ResponsePolicy.MayPerformInlineHostMutation(ObserveConfig()));

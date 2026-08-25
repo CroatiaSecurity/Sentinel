@@ -4,7 +4,7 @@
 
 | Version | Supported |
 |---------|-----------|
-| 2.2.x   | Yes (current: 2.2.6) |
+| 2.2.x   | Yes (current: 2.2.7) |
 | 2.1.x   | Security fixes only |
 | 1.9.x   | Security fixes only |
 | 1.8.x   | Security fixes only |
@@ -117,6 +117,7 @@ The following are NOT in scope:
 
 See [CHANGELOG.md](CHANGELOG.md) for the full history of security fixes, including:
 
+- v2.2.7: Module identity unload is permanent Tier1; hijack-name plants (`dbghelp`/`version`/…) quarantined on drop (file only, including game folders); no VM_READ on live games; no config disable switch
 - v2.2.6: Do not FreeLibrary NativeImages/SystemApps or kill the host when APC fails on OS DLLs; .NET JIT RWX is not ALLOCVM_REMOTE (Ceprkac CLR 80131506)
 - v2.2.5: Module identity (`ModuleIdentity` + `DllUnloadEngine`) unloads foreign mapped PEs immediately; module count is not injection; MZ/compact unbacked RWX execute-strip
 - v2.2.4: Generic CVE-class sensors (kernel-EoP loaders, MSI/winget, MOTW/ClickFix, unionfs); CveShield Windows OS KEV match; missed Patch Tuesday toast; V217 types in Sentinel.Core

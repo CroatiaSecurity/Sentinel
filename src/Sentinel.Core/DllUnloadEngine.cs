@@ -16,7 +16,8 @@ namespace Sentinel.Core
     /// Every mapped module is run through <see cref="ModuleIdentity"/>. Foreign
     /// path / user-writable drop / unsigned sideload plant → FreeLibrary APC now
     /// (constraint: DLL unloaders may remediate without a chain).
-    /// Disk-only plants with no loader → Tier2 LogOnly.
+    /// Hijack-name plants on disk (dbghelp/version/winmm/…) are quarantined so
+    /// the loader cannot bind them. Never kill a process from a disk plant (0.5.3).
     /// Games skipped for handle safety only. Never FreeLibrary lsass/csrss/DISM/NTLite.
     ///
     /// SECURITY NOTE (v2.0.4 MED-3): Remote DLL unloading uses QueueUserAPC with FreeLibrary.
@@ -24,8 +25,10 @@ namespace Sentinel.Core
     ///   1. Can crash target processes if the DLL has active threads, hooks, or DllMain callbacks
     ///   2. Uses the same APC injection technique that Sentinel detects in other processes
     ///   3. EDR-aware malware can fingerprint this behavior to identify Sentinel's presence
-    /// Mitigation: Unload is only attempted for proven-hostile DLLs after Tier1 chain confirmation.
-    /// A graceful unload failure does NOT prevent subsequent quarantine+kill of the host process.
+    /// Mitigation: Unload is attempted only for modules that fail <see cref="ModuleIdentity"/>
+    /// (foreign path / user-writable drop / unsigned sideload plant). This path is permanent
+    /// product law and is not gated on ObserveUntilChain. A graceful FreeLibrary failure does
+    /// not kill the host unless the module is a user-writable drop.
     /// </summary>
     public sealed class DllUnloadEngine : IDisposable
     {
@@ -105,8 +108,8 @@ namespace Sentinel.Core
 
         /// <summary>
         /// Per-process scan used by timers. Observe-first:
-        /// - Disk plant only → emit Tier2 LogOnly (no touch).
-        /// - Process has loaded hostile Temp/plant module → proven load behavior → remediate.
+        /// - Hijack-name disk plant → quarantine the file (no process kill).
+        /// - Process has loaded a hostile module → proven load → FreeLibrary.
         /// </summary>
         public Task<DllUnloadResult> CheckAndUnloadAsync(int processId, string processName)
             => ScanProcessAsync(processId, processName, allowRemediateOnProvenLoad: true);
@@ -129,67 +132,47 @@ namespace Sentinel.Core
         }
 
         /// <summary>
-        /// File drop of sideload-target name outside System32 — observe unless a process
-        /// is already loading it (then remediate that host).
+        /// Hijack-name plant on disk (dbghelp/version/winmm/… outside the OS tree).
+        /// Quarantine the file so the loader cannot bind it on next start. Never
+        /// kill a process from this path (0.5.3 cascade). If a host already mapped
+        /// it, ScanProcessAsync still FreeLibrary's.
         /// </summary>
         public async Task<DllUnloadResult> OnSideloadDllDroppedAsync(string dllPath, int writerPid = 0, string? writerName = null)
         {
             var result = new DllUnloadResult { ProcessId = writerPid, ProcessName = writerName ?? "" };
             if (string.IsNullOrEmpty(dllPath) || !File.Exists(dllPath)) return result;
+            if (!IsHijackPlantPath(dllPath)) return result;
 
             try
             {
                 var fileName = Path.GetFileName(dllPath);
-                if (!SideloadTargets.Contains(fileName)) return result;
+                var dir = Path.GetDirectoryName(dllPath) ?? "";
 
-                var dir = Path.GetDirectoryName(dllPath);
-                if (string.IsNullOrEmpty(dir) || IsWindowsSystemDirectory(dir)) return result;
-                if (SecurityValidation.IsGameOrAntiCheatPath(dllPath)) return result;
-                if (!IsHostileSideloadDll(dllPath)) return result;
-
-                // Is any process running from this directory already? That is load risk.
                 var hosts = FindProcessIdsFromDirectory(dir);
-                if (hosts.Count > 0)
+                foreach (var pid in hosts)
                 {
-                    // Behavior: plant present AND host process from same dir → scan/remediate hosts
-                    foreach (var pid in hosts)
+                    var r = await ScanProcessAsync(pid, "", allowRemediateOnProvenLoad: true);
+                    if (r.Success)
                     {
-                        var r = await ScanProcessAsync(pid, "", allowRemediateOnProvenLoad: true);
-                        if (r.Success)
-                        {
-                            result.Success = true;
-                            result.UnloadedDlls.AddRange(r.UnloadedDlls);
-                            result.ProcessId = pid;
-                        }
+                        result.Success = true;
+                        result.UnloadedDlls.AddRange(r.UnloadedDlls);
+                        result.ProcessId = pid;
                     }
-                    return result;
                 }
 
-                // Disk plant only — observe, do not touch
                 var alertKey = $"plant:{dllPath.ToLowerInvariant()}";
-                if (_alertHistory.ContainsKey(alertKey)) return result;
+                if (_alertHistory.ContainsKey(alertKey) && result.Success)
+                    return result;
                 _alertHistory[alertKey] = DateTimeOffset.UtcNow;
 
-                await _detectionEngine.EmitAsync(new DetectionEvent
-                {
-                    RuleName = "DLL Sideloading: System-DLL Plant Observed (Disk)",
-                    Evidence = $"Hostile sideload-target '{fileName}' written to '{dllPath}' " +
-                               $"(writer='{writerName}' PID {writerPid}). No host process loading it yet — LogOnly.",
-                    Reasoning = "Observe-first: a plant on disk is a strong staging signal but not proof of execution. " +
-                                "Remediation fires when a process loads the plant or a Tier1 chain implicates the host.",
-                    Confidence = 0.72,
-                    Tier = DetectionTier.Tier2Indicator,
-                    AuthorizedResponse = ResponseAction.LogOnly,
-                    ProcessName = writerName ?? "unknown",
-                    ProcessId = writerPid,
-                    SignalType = SignalType.ProcessInjection,
-                    Metadata = new Dictionary<string, string>
-                    {
-                        ["DllPath"] = dllPath,
-                        ["Directory"] = dir,
-                        ["Phase"] = "Observe"
-                    }
-                });
+                if (!TryConsumeRateLimit())
+                    return result;
+
+                await RemediateDroppedDll(dllPath, writerName ?? "", writerPid);
+                result.UnloadedDlls.Add(dllPath);
+                result.Success = true;
+
+                await EmitHijackPlantQuarantinedAsync(dllPath, fileName, dir, writerPid, writerName);
             }
             catch (Exception ex)
             {
@@ -203,6 +186,43 @@ namespace Sentinel.Core
         {
             if (string.IsNullOrEmpty(pathOrName)) return false;
             return SideloadTargets.Contains(Path.GetFileName(pathOrName));
+        }
+
+        /// <summary>
+        /// True when <paramref name="dllPath"/> is a search-order hijack plant:
+        /// known target name, not the OS copy, not games, not DISM/NTLite scratch,
+        /// not Sentinel's own honeypot folder.
+        /// </summary>
+        public static bool IsHijackPlantPath(string? dllPath)
+        {
+            if (string.IsNullOrEmpty(dllPath) || !IsSideloadTargetFileName(dllPath))
+                return false;
+            try
+            {
+                var dir = Path.GetDirectoryName(dllPath);
+                if (string.IsNullOrEmpty(dir) || IsWindowsSystemDirectory(dir))
+                    return false;
+                // Disk quarantine does not OpenProcess. Game/anti-cheat skip is
+                // handle safety (Denuvo VM_READ) only — not a pass for dbghelp
+                // sitting in steamapps next to the exe.
+                if (ModuleIdentity.IsOsServicingPath(dllPath))
+                    return false;
+                if (IsSentinelHoneypotPath(dllPath!))
+                    return false;
+                if (ModuleIdentity.IsKeepTree(dllPath) && !ModuleIdentity.IsUserWritableDrop(dllPath))
+                    return false;
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool IsSentinelHoneypotPath(string path)
+        {
+            var n = ModuleIdentity.Normalize(path);
+            return n.IndexOf(@"\" + HoneypotDllMonitor.HoneypotSubdir + @"\", StringComparison.Ordinal) >= 0;
         }
 
         /// <param name="allowRemediateOnProvenLoad">
@@ -268,42 +288,39 @@ namespace Sentinel.Core
                 // Proven malicious behavior: process loaded hostile DLL(s)
                 bool provenLoad = hostileLoaded.Count > 0;
 
-                // Disk plants with no load → observe only
+                // Disk plant not yet mapped: quarantine the file so the loader cannot
+                // bind it. Do not kill the host (0.5.3).
                 if (!provenLoad && hostileDisk.Count > 0 && !forceRemediate)
                 {
-                    var key = $"disk:{processId}:{string.Join("|", hostileDisk.Select(Path.GetFileName))}";
-                    if (!_alertHistory.ContainsKey(key))
+                    foreach (var plant in hostileDisk)
                     {
-                        _alertHistory[key] = DateTimeOffset.UtcNow;
-                        await _detectionEngine.EmitAsync(new DetectionEvent
-                        {
-                            RuleName = "DLL Sideloading: Plant Next to Image (Observe)",
-                            Evidence = $"Process '{name}' (PID {processId}) image dir has hostile plant(s): " +
-                                       string.Join(", ", hostileDisk.Select(Path.GetFileName)) +
-                                       " — not loaded yet; LogOnly.",
-                            Reasoning = "Observe-first: co-located system-DLL names are staging. " +
-                                        "Remediation waits until the process loads them or a Tier1 chain proves malice.",
-                            Confidence = 0.70,
-                            Tier = DetectionTier.Tier2Indicator,
-                            AuthorizedResponse = ResponseAction.LogOnly,
-                            ProcessName = name!,
-                            ProcessId = processId,
-                            SignalType = SignalType.ProcessInjection,
-                            Metadata = new Dictionary<string, string>
-                            {
-                                ["ImagePath"] = imagePath!,
-                                ["Plants"] = string.Join(";", hostileDisk),
-                                ["Phase"] = "Observe"
-                            }
-                        });
+                        if (!IsHijackPlantPath(plant)) continue;
+                        var rkey = $"diskq:{plant.ToLowerInvariant()}";
+                        if (_remediationHistory.ContainsKey(rkey)) continue;
+                        if (!TryConsumeRateLimit()) break;
+                        _remediationHistory[rkey] = DateTimeOffset.UtcNow;
+                        await RemediateDroppedDll(plant, name!, processId);
+                        result.UnloadedDlls.Add(plant);
+                        result.Success = true;
                     }
+
+                    if (result.Success)
+                    {
+                        await EmitHijackPlantQuarantinedAsync(
+                            result.UnloadedDlls[0],
+                            Path.GetFileName(result.UnloadedDlls[0]),
+                            procDir ?? "",
+                            processId,
+                            name);
+                    }
+
                     return result;
                 }
 
                 if (!provenLoad && !forceRemediate)
                     return result;
 
-                // —— Proven: remediate (FreeLibrary → kill host → quarantine) ——
+                // Proven: remediate (FreeLibrary → kill host only for user-writable drop → quarantine)
                 if (!allowRemediateOnProvenLoad && !forceRemediate)
                     return result;
 
@@ -391,7 +408,9 @@ namespace Sentinel.Core
                         {
                             ["ImagePath"] = imagePath!,
                             ["SideloadedDlls"] = string.Join(";", result.UnloadedDlls),
-                            ["Phase"] = "Remediate"
+                            ["Phase"] = "Remediate",
+                            ["DllUnloadExempt"] = "true",
+                            ["PermanentRule"] = "ModuleIdentityUnload"
                         }
                     });
                 }
@@ -403,6 +422,34 @@ namespace Sentinel.Core
                 _logger.LogDebug(ex, "[DllUnloadEngine] ScanProcess failed for PID {Pid}", processId);
                 return result;
             }
+        }
+
+        private async Task EmitHijackPlantQuarantinedAsync(
+            string dllPath, string? fileName, string dir, int writerPid, string? writerName)
+        {
+            await _detectionEngine.EmitAsync(new DetectionEvent
+            {
+                RuleName = "DLL Sideloading: Hijack-Name Plant Quarantined",
+                Evidence = $"Hostile sideload-target '{fileName}' written to '{dllPath}' " +
+                           $"(writer='{writerName}' PID {writerPid}). File quarantined; no process killed.",
+                Reasoning = "Search-order hijack: a local dbghelp/version/winmm copy is loaded " +
+                            "before System32, including a real Microsoft-signed copy. Quarantining " +
+                            "the file (not the host) is the prevention; FreeLibrary is cleanup if already mapped.",
+                Confidence = 0.90,
+                Tier = DetectionTier.Tier1Behavioral,
+                AuthorizedResponse = ResponseAction.LogOnly,
+                ProcessName = writerName ?? "unknown",
+                ProcessId = writerPid,
+                SignalType = SignalType.ProcessInjection,
+                Metadata = new Dictionary<string, string>
+                {
+                    ["DllPath"] = dllPath,
+                    ["Directory"] = dir,
+                    ["Phase"] = "Remediate",
+                    ["DllUnloadExempt"] = "true",
+                    ["PermanentRule"] = "ModuleIdentityUnload"
+                }
+            });
         }
 
         private List<string> FindHostileSideloadDlls(string directory)
@@ -421,19 +468,7 @@ namespace Sentinel.Core
             return found;
         }
 
-        private bool IsHostileSideloadDll(string dllPath)
-        {
-            try
-            {
-                if (ModuleIdentity.IsUserWritableDrop(dllPath))
-                    return true;
-                return !IsMicrosoftFamilySigned(dllPath);
-            }
-            catch
-            {
-                return true;
-            }
-        }
+        private bool IsHostileSideloadDll(string dllPath) => IsHijackPlantPath(dllPath);
 
         private bool IsMicrosoftFamilySigned(string path)
         {
@@ -479,14 +514,19 @@ namespace Sentinel.Core
                 if (File.Exists(dllPath))
                     await _quarantineManager.QuarantineFileAtomicAsync(dllPath, forceQuarantineSigned: true);
 
-                try
+                // Do not put a same-name stub back. Search order would bind the
+                // stub instead of System32. Re-drops are caught by FileActivityMonitor.
+                if (!IsSideloadTargetFileName(dllPath))
                 {
-                    if (!File.Exists(dllPath))
-                        await System.IO.FileNet48.WriteAllBytesAsync(dllPath, Array.Empty<byte>());
-                    File.SetAttributes(dllPath,
-                        FileAttributes.ReadOnly | FileAttributes.Hidden | FileAttributes.System);
+                    try
+                    {
+                        if (!File.Exists(dllPath))
+                            await System.IO.FileNet48.WriteAllBytesAsync(dllPath, Array.Empty<byte>());
+                        File.SetAttributes(dllPath,
+                            FileAttributes.ReadOnly | FileAttributes.Hidden | FileAttributes.System);
+                    }
+                    catch { }
                 }
-                catch { }
 
                 _logger.LogInformation(
                     "[DllUnloadEngine] Quarantined '{Dll}' (host {Name} PID {Pid})",

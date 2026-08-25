@@ -21,6 +21,7 @@ namespace Sentinel.Tests
             Assert.False(c.ThreatIntelProactiveFirewall);
             Assert.False(c.BlockFcmPushChannel);
             Assert.False(ProductPosture.AllowsProactiveHostLockdown(c));
+            Assert.True(ProductPosture.ModuleIdentityUnloadAlwaysOn);
         }
 
         [Fact]
