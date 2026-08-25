@@ -1,9 +1,19 @@
 # Sentinel — Security Audit (Normal / Red / Blue)
 
-**Date:** 2026-08-12 (updated 2026-08-24 with v2.2.4 generic CVE-class coverage)  
+**Date:** 2026-08-12 (updated 2026-08-25 with v2.2.8 WMI triple + policy rewrite)  
 **Scope:** Full source review of Sentinel.Core, Service, Agent, installer, Cloudflare Worker, and prior security docs.  
 **Audience:** Gaming desktops, creator workstations, high-profile personal targets.  
 **Method:** Manual adversarial + defensive review; fixes implemented in this release.
+
+## v2.2.8 — WMI triple + policy rewrite
+
+| Item | Honest limit |
+|------|----------------|
+| WMI persistence | Filter + consumer + binding in `root\subscription` and `root\default`. Name-only consumers are observe fuel. |
+| Hostile consumers | CommandLine/ActiveScript with LOLBin or user-writable payload is a `WmiPersistence` terminal. Objects are not auto-deleted. |
+| Policy overwrite | `SOFTWARE\Policies` hive fingerprint attributed to WmiPrvSE / wmiadap / scrcons. Group Policy (svchost/gpsvc) is not a kill seed. |
+| WMI-Activity ETW | Events 5859–5861 when the provider enables. Poll remains the fallback. |
+| wmiadap modules | Same unsigned non-system DLL walk as WmiPrvSE. |
 
 ## v2.2.4 — generic CVE-class + quarantine browse
 

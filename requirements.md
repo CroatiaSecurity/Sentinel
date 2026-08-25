@@ -1,6 +1,6 @@
 # Sentinel — Requirements
 
-**Version: 2.2.7**
+**Version: 2.2.8**
 
 ---
 
@@ -68,6 +68,7 @@ The system must detect the following behavioral threats:
 | T1-26 | Cloud Files / ShieldBreak (CVE-2026-62713) | Unknown CfApi sync roots; Cloud Files placeholders in staging; OneDrive exempt |
 | T1-27 | Generic kernel-EoP / isolation-FS loaders | Staging unsigned PE matching exploit/CVE/Device\\Afd shape; unionfs/wcifs drops (not afd.sys patch) |
 | T1-28 | Installer / Package Manager EoP | msiexec MSI from staging; ms-appinstaller / winget HTTP source; AlwaysInstallElevated |
+| T1-29 | WMI persistence + policy rewrite | Filter/consumer/binding triple; hostile CommandLine/ActiveScript consumers; WmiPrvSE/wmiadap module walk; StdRegProv Policies hive attribution; WMI-Activity ETW 5859–5861 |
 
 ### FR-3: Tier 2 Detection Rules
 
@@ -120,6 +121,7 @@ The system must implement two correlation engines that fire composite detections
 | C-24 | Installer / Package Manager EoP Chain | 0.92 |
 | C-25 | MOTW Bypass Execution Chain | 0.91 |
 | C-26 | VS Code Workspace Abuse Chain | 0.91 |
+| C-27 | WMI Persistence + Policy Rewrite | 0.94 |
 
 **WeightedCorrelationEngine (v2.0)** — explainable score cards:
 
@@ -143,6 +145,7 @@ The system must implement two correlation engines that fire composite detections
 | Hash reputation | CIRCL + MalwareBazaar + optional VT proxy | Unknown (fail closed for Safe) |
 | Windows Event Log trail | Application log / source Sentinel (IDs 1000–1500) | Self-disables gracefully on stripped Windows |
 | PE / URL ML scoring | Offline FastTree models (`MlModels/pe_model.zip`, `url_model.zip`) | Skipped if models absent; soft signal only |
+| WMI-Activity ETW | Microsoft-Windows-WMI-Activity events 5859–5861 (permanent consumer / binding) | `WmiPersistenceMonitor` 30s poll of filter/consumer/binding |
 
 ### FR-6: Response Actions
 
@@ -361,3 +364,4 @@ The user-session Agent must provide a Settings window (tray menu + double-click)
 | 2.2.5 | Module identity unload: foreign mapped PE FreeLibrary-APC immediately; count is not a signal; MZ/compact unbacked RWX execute-strip |
 | 2.2.6 | Keep all of Windows except Temp; never kill host unless a user-writable drop failed to unmap; JIT RWX (no MZ) is not ALLOCVM_REMOTE |
 | 2.2.7 | Module identity unload is permanent Tier1; hijack-name plants quarantined on drop (file only); no config flag may disable |
+| 2.2.8 | T1-29 WMI triple + policy rewrite; C-27; WMI-Activity ETW provider #10; wmiadap module walk |

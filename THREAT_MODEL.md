@@ -1,8 +1,12 @@
 # Sentinel — Threat Model
 
-**Version: 2.2.7**
+**Version: 2.2.8**
 
 This document assumes the attacker has read the source code.
+
+### v2.2.8 — WMI triple + policy rewrite
+
+Permanent WMI persistence is `__EventFilter` + EventConsumer + `__FilterToConsumerBinding`, not a consumer name. `WmiPersistenceMonitor` snapshots that triple in `root\subscription` and `root\default`. Hostile CommandLine/ActiveScript consumers are a `WmiPersistence` terminal. `WmiPolicyRewriteMonitor` attributes `SOFTWARE\Policies` hive changes to WmiPrvSE / wmiadap / scrcons (StdRegProv). WMI-Activity ETW 5859–5861 is the fast path. `wmiadap.exe` is module-scanned like WmiPrvSE. Name-only new consumers stay observe fuel.
 
 ### v2.2.5 — module identity, not count
 

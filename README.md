@@ -6,7 +6,7 @@ Sentinel is for **gamers, creators, and high-profile targets**. It hunts real at
 
 **You can browse and play.** Default mode must not break Chrome/Edge/Firefox, Microsoft Store, Xbox, Steam, Epic, DirectX/VC++ redists, Game Bar, or creator tools such as OBS Studio. Controllers, wheels, and HOTAS stay usable. Installing a game or a GPU/runtime redist is work, not an incident.
 
-**Current version: 2.2.7**
+**Current version: 2.2.8**
 
 ### Honest mission
 
@@ -62,6 +62,7 @@ Sentinel is effective against:
 - **Package supply-chain runtime (v1.8.2)** — Package managers spawning LOLBins, binaries under `node_modules`/site-packages, and AI instruction-file poison (`CLAUDE.md`, Cursor/MCP configs).
 
 - **Persistence mechanisms** — Scheduled tasks, WMI subscriptions, registry run keys, DLL sideloading, boot config tampering, PrintNightmare-class spooler exploitation (driver DLL planting + child process detection).
+- **WMI stay-behind + policy overwrite (v2.2.8)** — Snapshots the real T1546.003 triple (`__EventFilter` + EventConsumer + `__FilterToConsumerBinding`) in `root\subscription` and `root\default`, not consumer names. Hostile CommandLine/ActiveScript consumers are a persistence terminal. Walks loaded modules in **WmiPrvSE and wmiadap**. Attributes `SOFTWARE\Policies` hive writes to those hosts (StdRegProv). WMI-Activity ETW 5859–5861 is the fast path.
 
 - **Container/WSL escape** — Detects lateral movement FROM WSL/Docker INTO the Windows host: filesystem writes to sensitive paths via /mnt/c/, WSL interop spawning security-sensitive Windows binaries, Docker container processes accessing host resources.
 
@@ -138,7 +139,7 @@ Full transparency in [THREAT_MODEL.md](THREAT_MODEL.md).
 
 ## How it works
 
-1. **Unified ETW Session** — A single real-time kernel trace session subscribes to 9 Windows providers (Kernel-Process, Kernel-File, Kernel-Registry, DNS-Client, Threat-Intelligence, PowerShell, Firewall, TaskScheduler, Kernel-Network). Detection latency is ~50ms — fast enough to catch droppers that execute and exit in under a second.
+1. **Unified ETW Session** — A single real-time kernel trace session subscribes to 10 Windows providers (Kernel-Process, Kernel-File, Kernel-Registry, DNS-Client, Threat-Intelligence, PowerShell, Firewall, TaskScheduler, Kernel-Network, WMI-Activity). Detection latency is ~50ms — fast enough to catch droppers that execute and exit in under a second.
 
 2. **Monitors** — 80+ background monitors consume ETW telemetry and perform additional analysis (behavioral baselines, statistical beaconing detection, memory scanning, hardware state checks, certificate integrity). Monitors that previously polled every 5-30 seconds now react instantly via ETW events.
 
@@ -176,7 +177,7 @@ Full transparency in [THREAT_MODEL.md](THREAT_MODEL.md).
 
 ## Installation
 
-Download **`SentinelSetup-2.2.7.exe`** from [GitHub Releases](https://github.com/CroatiaSecurity/Sentinel/releases) (or `releases/2.2.7/` after a local build) and run it as Administrator.
+Download **`SentinelSetup-2.2.8.exe`** from [GitHub Releases](https://github.com/CroatiaSecurity/Sentinel/releases) (or `releases/2.2.8/` after a local build) and run it as Administrator.
 
 If Setup fails with **Error 5 / temporary directory** while an older Sentinel is installed, that was ASR rule `c1db55ab` (fixed in 1.9.6+). Use elevated `installer\install-no-inno.ps1` or `fix-asr-for-setup.ps1`, then upgrade.
 

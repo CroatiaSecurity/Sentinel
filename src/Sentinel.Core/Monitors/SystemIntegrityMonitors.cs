@@ -1336,7 +1336,10 @@ namespace Sentinel.Core
 
 
     // ──────────────────────────────────────────────
-    // WMI Persistence Monitor — detects WMI event subscriptions
+    // WMI Persistence Monitor — filter + consumer + binding (T1546.003)
+    // v2.2.8: names alone are spoofable. Snapshot the triple across
+    // root\subscription and root\default. Hostile CommandLine / ActiveScript
+    // consumers are a persistence terminal, not LogOnly wallpaper.
     // ──────────────────────────────────────────────
     public sealed class WmiPersistenceMonitor : BackgroundService
     {
@@ -1348,7 +1351,7 @@ namespace Sentinel.Core
 
         protected override async Task ExecuteAsync(CancellationToken ct)
         {
-            _logger.LogInformation("[WmiPersistenceMonitor] Started");
+            _logger.LogInformation("[WmiPersistenceMonitor] Started — filter/consumer/binding triple");
             SnapshotSubscriptions(_baselineSubscriptions);
 
             while (!ct.IsCancellationRequested)
@@ -1360,14 +1363,36 @@ namespace Sentinel.Core
                     SnapshotSubscriptions(current);
                     foreach (var sub in current.Except(_baselineSubscriptions))
                     {
+                        bool hostile = WmiPersistenceSignals.LooksHostile(sub);
+                        int pid = WmiPersistenceSignals.TryGetLiveWmiHostPid();
+                        if (hostile)
+                            WmiPersistenceSignals.MarkHostileObserved();
+
                         await _detectionEngine.EmitAsync(new DetectionEvent
                         {
-                            RuleName = "Persistence: New WMI Event Subscription",
-                            Evidence = $"New WMI event subscription detected: '{sub}'",
-                            Reasoning = "A new WMI event subscription was created, which is a common persistence and living-off-the-land technique.",
-                            Confidence = 0.75, Tier = DetectionTier.Tier1Behavioral,
+                            RuleName = hostile
+                                ? "WMI Persistence: Hostile Event Subscription"
+                                : "Persistence: New WMI Event Subscription",
+                            Evidence = hostile
+                                ? $"Hostile WMI persistence object: '{sub}'"
+                                : $"New WMI event subscription detected: '{sub}'",
+                            Reasoning = hostile
+                                ? "A WMI __EventFilter / EventConsumer / __FilterToConsumerBinding was created " +
+                                  "whose command or script executes a LOLBin or user-writable payload (T1546.003). " +
+                                  "WmiPrvSE.exe / scrcons.exe will run it as SYSTEM with no autorun entry."
+                                : "A new WMI event subscription was created. Name-only consumers without an executable " +
+                                  "command are observe fuel; the filter+consumer+binding triple is the implant.",
+                            Confidence = hostile ? 0.92 : 0.75,
+                            Tier = hostile ? DetectionTier.Tier1Behavioral : DetectionTier.Tier2Indicator,
                             AuthorizedResponse = ResponseAction.LogOnly,
-                            ProcessName = "SYSTEM", ProcessId = 0
+                            ProcessName = pid > 4 ? "WmiPrvSE.exe" : "SYSTEM",
+                            ProcessId = pid,
+                            SignalType = SignalType.SecurityEvasion,
+                            Metadata = new Dictionary<string, string>
+                            {
+                                { "WmiSnapshotKey", sub },
+                                { "HostileConsumer", hostile ? "true" : "false" },
+                            }
                         });
                         _baselineSubscriptions.Add(sub);
                     }
@@ -1377,16 +1402,226 @@ namespace Sentinel.Core
             }
         }
 
-        private static void SnapshotSubscriptions(HashSet<string> target)
+        internal static void SnapshotSubscriptions(HashSet<string> target)
+        {
+            foreach (var ns in WmiPersistenceSignals.SubscriptionNamespaces)
+            {
+                SnapshotClass(target, ns, "__EventFilter", "filter",
+                    o => Combine(o, "Name", "Query"));
+                SnapshotClass(target, ns, "CommandLineEventConsumer", "cmdConsumer",
+                    o => Combine(o, "Name", "CommandLineTemplate", "ExecutablePath"));
+                SnapshotClass(target, ns, "ActiveScriptEventConsumer", "scriptConsumer",
+                    o => Combine(o, "Name", "ScriptText", "ScriptingEngine"));
+                SnapshotClass(target, ns, "__EventConsumer", "consumer",
+                    o => Combine(o, "Name", "__CLASS"));
+                SnapshotClass(target, ns, "__FilterToConsumerBinding", "binding",
+                    o => Combine(o, "Filter", "Consumer"));
+            }
+        }
+
+        private static void SnapshotClass(
+            HashSet<string> target, string ns, string className, string kind,
+            Func<ManagementBaseObject, string> detail)
         {
             try
             {
-                using var searcher = new ManagementObjectSearcher("root\\subscription",
-                    "SELECT * FROM __EventConsumer");
+                using var searcher = new ManagementObjectSearcher(ns, "SELECT * FROM " + className);
+                searcher.Options.Timeout = TimeSpan.FromSeconds(8);
                 foreach (ManagementObject obj in searcher.Get())
                 {
-                    var name = obj["Name"]?.ToString() ?? obj.GetHashCode().ToString();
-                    target.Add(name);
+                    try
+                    {
+                        var name = obj["Name"]?.ToString()
+                                   ?? obj["Filter"]?.ToString()
+                                   ?? obj.GetHashCode().ToString();
+                        target.Add(WmiPersistenceSignals.SnapshotKey(kind, ns, name, detail(obj)));
+                    }
+                    catch { }
+                    finally { obj.Dispose(); }
+                }
+            }
+            catch { }
+        }
+
+        private static string Combine(ManagementBaseObject obj, params string[] props)
+        {
+            var parts = new List<string>(props.Length);
+            foreach (var p in props)
+            {
+                try
+                {
+                    var v = obj[p]?.ToString();
+                    if (!string.IsNullOrWhiteSpace(v))
+                        parts.Add(v!);
+                }
+                catch { }
+            }
+            return string.Join(" ", parts);
+        }
+    }
+
+
+    // ──────────────────────────────────────────────
+    // WMI Policy Rewrite Monitor — StdRegProv / provider-host policy overwrite
+    // v2.2.8: user Policies hives rewritten via WMI have no autorun. Correlate
+    // Kernel-Registry writes from WmiPrvSE/wmiadap/scrcons with HKLM/HKU Policies trees.
+    // ──────────────────────────────────────────────
+    public sealed class WmiPolicyRewriteMonitor : BackgroundService
+    {
+        private readonly DetectionEngine _detectionEngine;
+        private readonly ILogger<WmiPolicyRewriteMonitor> _logger;
+        private string _baselineFingerprint = "";
+        private DateTime _lastEmitUtc = DateTime.MinValue;
+
+        public WmiPolicyRewriteMonitor(DetectionEngine de, ILogger<WmiPolicyRewriteMonitor> l)
+        {
+            _detectionEngine = de;
+            _logger = l;
+        }
+
+        protected override async Task ExecuteAsync(CancellationToken ct)
+        {
+            _logger.LogInformation("[WmiPolicyRewriteMonitor] Started — HKLM/HKU Policies attribution");
+            _baselineFingerprint = FingerprintPolicyHives();
+
+            while (!ct.IsCancellationRequested)
+            {
+                try
+                {
+                    await Task.Delay(15000, ct);
+                    var current = FingerprintPolicyHives();
+                    if (string.Equals(current, _baselineFingerprint, StringComparison.Ordinal))
+                        continue;
+
+                    _baselineFingerprint = current;
+                    await OnPolicyHiveChangedAsync(ct);
+                }
+                catch (OperationCanceledException) { break; }
+                catch (Exception ex) { _logger.LogDebug(ex, "[WmiPolicyRewriteMonitor] Error"); }
+            }
+        }
+
+        private async Task OnPolicyHiveChangedAsync(CancellationToken ct)
+        {
+            if (DateTime.UtcNow - _lastEmitUtc < TimeSpan.FromSeconds(20))
+                return;
+
+            bool wmiHint = WmiHostRegistryHint.TryGetRecent(TimeSpan.FromSeconds(8), out var hintPid, out var hintName);
+            bool recentHostile = WmiPersistenceSignals.HostileObservedRecently(TimeSpan.FromMinutes(5));
+            if (!wmiHint && !recentHostile)
+                return;
+
+            if (WmiPersistenceSignals.IsSentinelSelfProcess(hintName))
+                return;
+
+            int pid = hintPid;
+            string procName = string.IsNullOrEmpty(hintName) ? "WmiPrvSE.exe" : hintName;
+            if (pid <= 4)
+                pid = WmiPersistenceSignals.TryGetLiveWmiHostPid();
+
+            bool chain = wmiHint && recentHostile;
+            if (chain)
+                WmiPersistenceSignals.MarkHostileObserved();
+
+            _lastEmitUtc = DateTime.UtcNow;
+            await _detectionEngine.EmitAsync(new DetectionEvent
+            {
+                RuleName = chain
+                    ? "WMI Persistence + Policy Rewrite"
+                    : "WMI Policy Rewrite: Provider Host Wrote Policies",
+                Evidence = $"SOFTWARE\\Policies / CurrentVersion\\Policies hive changed. " +
+                           $"WriterHint='{procName}' PID={pid} WmiHostRegistryRecent={wmiHint} " +
+                           $"HostileSubscriptionRecent={recentHostile}",
+                Reasoning = "WMI StdRegProv (hosted in WmiPrvSE.exe / wmiadap.exe / scrcons.exe) can silently " +
+                            "overwrite user and machine policy without a .reg file or gpupdate. Combined with a " +
+                            "WMI event subscription this is fileless stay-behind plus policy capture.",
+                Confidence = chain ? 0.94 : 0.88,
+                Tier = DetectionTier.Tier1Behavioral,
+                AuthorizedResponse = ResponseAction.LogOnly,
+                ProcessName = procName,
+                ProcessId = pid,
+                SignalType = SignalType.SecurityEvasion,
+                Metadata = new Dictionary<string, string>
+                {
+                    { "WmiHostHint", wmiHint ? "true" : "false" },
+                    { "HostileSubscriptionRecent", recentHostile ? "true" : "false" },
+                }
+            });
+        }
+
+        /// <summary>
+        /// Compact fingerprint of policy hives (HKLM + interactive HKU SIDs). Bounded.
+        /// </summary>
+        internal static string FingerprintPolicyHives()
+        {
+            var sb = new StringBuilder(2048);
+            AppendKeyFingerprint(sb, Registry.LocalMachine, @"SOFTWARE\Policies");
+            AppendKeyFingerprint(sb, Registry.LocalMachine, @"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies");
+            try
+            {
+                using var users = Registry.Users;
+                if (users != null)
+                {
+                    int sidCount = 0;
+                    foreach (var sid in users.GetSubKeyNames())
+                    {
+                        if (sidCount >= 8) break;
+                        if (sid == null || !sid.StartsWith("S-1-", StringComparison.OrdinalIgnoreCase))
+                            continue;
+                        if (sid.IndexOf("_Classes", StringComparison.OrdinalIgnoreCase) >= 0)
+                            continue;
+                        sidCount++;
+                        AppendKeyFingerprint(sb, users, sid + @"\SOFTWARE\Policies");
+                        AppendKeyFingerprint(sb, users, sid + @"\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies");
+                    }
+                }
+            }
+            catch { }
+
+            return sb.ToString();
+        }
+
+        private static void AppendKeyFingerprint(StringBuilder sb, RegistryKey hive, string path)
+        {
+            try
+            {
+                using var key = hive.OpenSubKey(path, false);
+                if (key == null) return;
+                sb.Append(path).Append('=');
+                AppendValuesLimited(sb, key, depth: 0);
+                sb.Append(';');
+            }
+            catch { }
+        }
+
+        private static void AppendValuesLimited(StringBuilder sb, RegistryKey key, int depth)
+        {
+            if (depth > 3 || sb.Length > 16000) return;
+            try
+            {
+                foreach (var name in key.GetValueNames())
+                {
+                    var v = key.GetValue(name);
+                    sb.Append(name).Append(':').Append(v).Append('|');
+                }
+            }
+            catch { }
+
+            if (depth >= 2) return;
+            try
+            {
+                int n = 0;
+                foreach (var sub in key.GetSubKeyNames())
+                {
+                    if (n++ >= 24 || sb.Length > 16000) break;
+                    try
+                    {
+                        using var child = key.OpenSubKey(sub, false);
+                        if (child == null) continue;
+                        sb.Append(sub).Append('/');
+                        AppendValuesLimited(sb, child, depth + 1);
+                    }
+                    catch { }
                 }
             }
             catch { }
@@ -2665,8 +2900,9 @@ namespace Sentinel.Core
                         await ScanForSuspiciousProvidersAsync(newProviders, isBaseline: false, ct);
                     }
 
-                    // Scan WmiPrvSE.exe loaded modules
+                    // Scan WmiPrvSE.exe + wmiadap.exe loaded modules
                     await ScanWmiPrvSeModulesAsync(ct);
+                    await ScanWmiHostModulesAsync("wmiadap", "wmiadap.exe", ct);
 
                     // Check MOF auto-recovery
                     await CheckMofAutoRecoveryAsync(ct);
@@ -2920,11 +3156,18 @@ namespace Sentinel.Core
         /// registered provider paths (Program Files). Non-system DLLs indicate injection
         /// or a malicious provider that sideloaded additional components.
         /// </summary>
-        private async Task ScanWmiPrvSeModulesAsync(CancellationToken ct)
+        private Task ScanWmiPrvSeModulesAsync(CancellationToken ct)
+            => ScanWmiHostModulesAsync("WmiPrvSE", "WmiPrvSE.exe", ct);
+
+        /// <summary>
+        /// v2.2.8: same module walk for WMI Performance Adapter (wmiadap.exe).
+        /// Policy overwrite and provider abuse also execute from this host.
+        /// </summary>
+        private async Task ScanWmiHostModulesAsync(string processName, string displayName, CancellationToken ct)
         {
             try
             {
-                var wmiProcs = Process.GetProcessesByName("WmiPrvSE");
+                var wmiProcs = Process.GetProcessesByName(processName);
                 foreach (var proc in wmiProcs)
                 {
                     try
@@ -2944,26 +3187,28 @@ namespace Sentinel.Core
                                 // Skip known Program Files paths (legitimate third-party providers)
                                 if (IsInProgramFiles(modulePath)) continue;
 
-                                // Non-system DLL loaded in WmiPrvSE — suspicious
                                 bool isSigned = SecurityValidation.VerifyAuthenticodeSignature(modulePath);
                                 if (!isSigned)
                                 {
+                                    var ruleHost = displayName.Equals("WmiPrvSE.exe", StringComparison.OrdinalIgnoreCase)
+                                        ? "WmiPrvSE"
+                                        : displayName;
                                     await _detectionEngine.EmitAsync(new DetectionEvent
                                     {
-                                        RuleName = "WMI Provider Integrity: Suspicious Module in WmiPrvSE",
-                                        Evidence = $"Unsigned non-system DLL loaded in WmiPrvSE.exe (PID {proc.Id}): '{modulePath}'",
-                                        Reasoning = "WmiPrvSE.exe has loaded an unsigned DLL from a non-system path. " +
+                                        RuleName = "WMI Provider Integrity: Suspicious Module in " + ruleHost,
+                                        Evidence = $"Unsigned non-system DLL loaded in {displayName} (PID {proc.Id}): '{modulePath}'",
+                                        Reasoning = displayName + " has loaded an unsigned DLL from a non-system path. " +
                                                     "This process hosts WMI providers and should only load system DLLs and " +
                                                     "registered provider binaries. An unsigned module may indicate a " +
-                                                    "malicious WMI provider or DLL injection into the WMI host.",
+                                                    "malicious WMI provider, StdRegProv policy rewrite helper, or DLL injection.",
                                         Confidence = 0.85,
                                         Tier = DetectionTier.Tier1Behavioral,
                                         AuthorizedResponse = ResponseAction.LogOnly,
-                                        ProcessName = "WmiPrvSE.exe",
+                                        ProcessName = displayName,
                                         ProcessId = proc.Id
                                     });
-                                    _logger.LogWarning("[WmiProviderIntegrityMonitor] Unsigned module in WmiPrvSE PID {Pid}: {Path}",
-                                        proc.Id, modulePath);
+                                    _logger.LogWarning("[WmiProviderIntegrityMonitor] Unsigned module in {Host} PID {Pid}: {Path}",
+                                        displayName, proc.Id, modulePath);
                                 }
                             }
                             catch { } // Module access may fail for protected modules
@@ -2975,7 +3220,7 @@ namespace Sentinel.Core
             }
             catch (Exception ex)
             {
-                _logger.LogDebug(ex, "[WmiProviderIntegrityMonitor] Error scanning WmiPrvSE modules");
+                _logger.LogDebug(ex, "[WmiProviderIntegrityMonitor] Error scanning {Host} modules", displayName);
             }
         }
 

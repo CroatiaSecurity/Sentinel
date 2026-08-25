@@ -20,7 +20,7 @@ namespace Sentinel.Core
     /// 
     /// Architecture:
     ///   - StartAsync() creates the "SentinelUnifiedTrace" session via StartTraceW
-    ///   - Enables 9 providers via EnableTraceEx2
+    ///   - Enables 10 providers via EnableTraceEx2
     ///   - A dedicated background thread calls OpenTrace + ProcessTrace (blocking)
     ///   - Event callbacks dispatch to registered handlers by provider GUID
     ///   - StopAsync() calls ControlTrace(STOP) and waits for the processing thread to exit
@@ -99,6 +99,8 @@ namespace Sentinel.Core
             public static readonly Guid Firewall = new("D1BC9AFF-2ABF-4D71-9146-ECB2A986EB85");
             public static readonly Guid TaskScheduler = new("DE7B24EA-73C8-4A09-985D-5BDADCFA9017");
             public static readonly Guid KernelNetwork = new("7DD42A49-5329-4832-8DFD-43D979153A88");
+            // Microsoft-Windows-WMI-Activity — filter/consumer/binding create (5859–5861)
+            public static readonly Guid WmiActivity = new("1418EF04-B0B4-4623-BF7B-2DE461B4F4CB");
         }
 
         #region Native P/Invoke
@@ -334,6 +336,7 @@ namespace Sentinel.Core
                 EnableProvider(Providers.Firewall);
                 EnableProvider(Providers.TaskScheduler);
                 EnableProvider(Providers.KernelNetwork);
+                EnableProvider(Providers.WmiActivity);
 
                 // Start the processing thread
                 _stopping = false;
@@ -346,7 +349,7 @@ namespace Sentinel.Core
                 _processingThread.Start();
 
                 IsActive = true;
-                _logger.LogInformation("[UnifiedEtwSession] Real-time processing started. 9 providers enabled.");
+                _logger.LogInformation("[UnifiedEtwSession] Real-time processing started. 10 providers enabled.");
             }
             catch (Exception ex)
             {

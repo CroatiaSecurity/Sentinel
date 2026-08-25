@@ -30,6 +30,7 @@ namespace Sentinel.Core
             "TokenTheft",
             "ReverseShell",
             "C2Beacon",
+            "WmiPersistence",
         };
 
         /// <summary>Minimum confidence for a kill-grade family to stay Tier1 (default 0.85).</summary>
@@ -95,6 +96,17 @@ namespace Sentinel.Core
                 "Injected C2", "Confirmed C2", "Covert C2", "C2 Channel",
                 "Periodic Callback", "Statistical Beacon",
                 "Lazarus Dream Job", "Dream Job: C2",
+            }),
+            // v2.2.8 — executable WMI consumers / policy rewrite via provider host
+            ("WmiPersistence", new[]
+            {
+                "Hostile Event Subscription",
+                "CommandLineEventConsumer",
+                "ActiveScriptEventConsumer",
+                "FilterToConsumerBinding",
+                "WMI Policy Rewrite",
+                "WMI-Activity: Permanent",
+                "WMI Persistence + Policy Rewrite",
             }),
         };
 
@@ -234,6 +246,7 @@ namespace Sentinel.Core
             "Installer / Package Manager EoP Chain",
             "MOTW Bypass Execution Chain",
             "VS Code Workspace Abuse Chain",
+            "WMI Persistence + Policy Rewrite",
         };
 
         public static bool IsDllUnloadExempt(DetectionEvent? detection)

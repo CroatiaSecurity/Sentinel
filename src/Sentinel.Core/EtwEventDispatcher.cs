@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -99,6 +100,7 @@ namespace Sentinel.Core
             session.RegisterHandler(UnifiedEtwSession.Providers.Firewall, OnFirewallEvent);
             session.RegisterHandler(UnifiedEtwSession.Providers.TaskScheduler, OnTaskSchedulerEvent);
             session.RegisterHandler(UnifiedEtwSession.Providers.KernelNetwork, OnKernelNetworkEvent);
+            session.RegisterHandler(UnifiedEtwSession.Providers.WmiActivity, OnWmiActivityEvent);
         }
 
         // ═══════════════════════════════════════════════════════════════
@@ -231,6 +233,8 @@ namespace Sentinel.Core
             {
                 try { processName = Process.GetProcessById(pid).ProcessName; } catch { return; }
             }
+
+            WmiHostRegistryHint.Record(pid, processName);
 
             string opType = evt.EventId switch
             {
@@ -475,6 +479,70 @@ namespace Sentinel.Core
                 }
                 catch { }
             }
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // WMI-Activity (Microsoft-Windows-WMI-Activity) — v2.2.8
+        // Event 5859 temporary consumer, 5860/5861 permanent consumer / binding.
+        // ═══════════════════════════════════════════════════════════════
+
+        private const ushort WmiTempConsumer = 5859;
+        private const ushort WmiPermConsumer = 5860;
+        private const ushort WmiPermBinding = 5861;
+
+        private void OnWmiActivityEvent(EtwRawEvent evt)
+        {
+            if (evt.EventId != WmiTempConsumer && evt.EventId != WmiPermConsumer &&
+                evt.EventId != WmiPermBinding)
+                return;
+
+            string payload = "";
+            if (evt.UserData != IntPtr.Zero && evt.UserDataLength >= 4)
+                payload = TryExtractUnicodeString(evt.UserData, 0, evt.UserDataLength) ?? "";
+
+            int pid = evt.ProcessId;
+            if (pid <= 4)
+                pid = WmiPersistenceSignals.TryGetLiveWmiHostPid();
+
+            string processName = "WmiPrvSE.exe";
+            try
+            {
+                if (pid > 4)
+                    processName = Process.GetProcessById(pid).ProcessName;
+            }
+            catch { }
+
+            bool permanent = evt.EventId == WmiPermConsumer || evt.EventId == WmiPermBinding;
+            bool hostile = WmiPersistenceSignals.LooksHostile(payload);
+            if (hostile)
+                WmiPersistenceSignals.MarkHostileObserved();
+
+            var detection = new DetectionEvent
+            {
+                RuleName = permanent
+                    ? (hostile
+                        ? "WMI Persistence: Hostile Event Subscription"
+                        : "WMI-Activity: Permanent Consumer")
+                    : "WMI-Activity: Temporary Consumer",
+                Evidence = $"WMI-Activity Event {evt.EventId} PID={pid} payload='{(payload.Length > 200 ? payload.Substring(0, 200) : payload)}'",
+                Reasoning = permanent
+                    ? "Microsoft-Windows-WMI-Activity reported a permanent event consumer or filter-to-consumer binding (T1546.003). Polling WmiPersistenceMonitor is the fallback; this is the ~50ms path."
+                    : "Temporary WMI event consumer registered. Observe fuel unless the payload is an executable LOLBin.",
+                Confidence = hostile ? 0.92 : (permanent ? 0.78 : 0.55),
+                Tier = hostile ? DetectionTier.Tier1Behavioral : DetectionTier.Tier2Indicator,
+                AuthorizedResponse = ResponseAction.LogOnly,
+                ProcessName = processName,
+                ProcessId = pid,
+                SignalType = SignalType.SecurityEvasion,
+                Metadata = new Dictionary<string, string>
+                {
+                    { "WmiActivityEventId", evt.EventId.ToString() },
+                    { "HostileConsumer", hostile ? "true" : "false" },
+                }
+            };
+
+            try { _ = _detectionEngine.EmitAsync(detection); }
+            catch { }
         }
 
         // ═══════════════════════════════════════════════════════════════

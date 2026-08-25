@@ -386,6 +386,21 @@ namespace Sentinel.Core
                 return;
             }
 
+            // v2.2.8 — WMI subscription + policy hive rewrite (StdRegProv / provider host)
+            var hasWmiPersist = currentSignals.Any(s =>
+                s.RuleName.Contains("Hostile Event Subscription") ||
+                s.RuleName.Contains("WMI-Activity: Permanent") ||
+                s.RuleName.Contains("WMI Persistence:"));
+            var hasWmiPolicy = currentSignals.Any(s =>
+                s.RuleName.Contains("WMI Policy Rewrite"));
+            if (hasWmiPersist && hasWmiPolicy)
+            {
+                await EmitCompositeAsync(pid, "WMI Persistence + Policy Rewrite", 0.94,
+                    "WMI filter/consumer/binding correlated with SOFTWARE\\Policies hive write from a WMI host.",
+                    "Fileless stay-behind (T1546.003) plus StdRegProv policy overwrite from WmiPrvSE/wmiadap/scrcons.");
+                return;
+            }
+
             // Persistence surface + remote/network
             var hasPersistSurface = currentSignals.Any(s =>
                 s.RuleName.Contains("Persistence:") ||

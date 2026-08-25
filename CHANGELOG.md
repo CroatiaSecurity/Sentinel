@@ -1,6 +1,29 @@
 # Changelog
 
 
+## [2.2.8] - 2026-08-25
+
+WMI is a first-class persistence and policy-overwrite surface again. Consumer *names* are not the implant.
+
+### Added
+
+- **`WmiPersistenceMonitor`** snapshots the real T1546.003 triple: `__EventFilter`, `CommandLineEventConsumer`, `ActiveScriptEventConsumer`, `__EventConsumer`, `__FilterToConsumerBinding` in `root\subscription` **and** `root\default`. Keys include query/command/script, not just `Name`. Hostile LOLBin/user-writable consumers emit `WMI Persistence: Hostile Event Subscription` (0.92, `WmiPersistence` terminal).
+- **`WmiPolicyRewriteMonitor`** fingerprints HKLM + interactive HKU `SOFTWARE\Policies` / `CurrentVersion\Policies`. Emits when the hive changes and a WMI host (`WmiPrvSE` / `wmiadap` / `scrcons`) just wrote the registry, or a hostile subscription was seen in the last 5 minutes.
+- **WMI-Activity ETW** (`{1418EF04-B0B4-4623-BF7B-2DE461B4F4CB}`) is provider #10 on `UnifiedEtwSession`. Events 5859–5861 are the ~50ms path; the poller remains the fallback.
+- Composite **`WMI Persistence + Policy Rewrite`** (0.94) when both legs land on the same PID.
+- `WmiProviderIntegrityMonitor` walks loaded modules in **`wmiadap.exe`** as well as `WmiPrvSE.exe`.
+
+### Changed
+
+- `ResponsePolicy` kill-grade families include `WmiPersistence`. Name-only new consumers stay observe fuel (0.75). Executable consumers are a terminal leg under observe-until-chain.
+- Kernel-Registry ETW records the last WMI-host writer (`WmiHostRegistryHint`) so policy-tree changes can be attributed without a key path in the payload.
+- `ProductInfo.Version` → `2.2.8`
+- Installer → `SentinelSetup-2.2.8`
+
+### Tests
+
+- `V228WmiHardeningTests` — hostile vs name-only classification, snapshot keys, terminal/composite law, WMI-Activity GUID, policy fingerprint stability, host-hint recording.
+
 ## [2.2.7] - 2026-08-25
 
 Module identity unload is standing product law. The 5-second system-wide scan was already unloading foreign mapped PEs; `ApplyTierLaw` was demoting the detection to Tier2. It now stays permanent Tier1 (LogOnly — already unloaded). There is no config flag to turn this off.

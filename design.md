@@ -1,6 +1,6 @@
 # Sentinel — Design Document
 
-**Version: 2.2.7**
+**Version: 2.2.8**
 
 ---
 
@@ -41,7 +41,7 @@ Monitors → TelemetryFusionEngine → DetectionEngine → AdvancedResponseEngin
 | `OpsMetricsPublisher` | Writes `%ProgramData%\Sentinel\ops_metrics.json` |
 | `SelfPathGuard` | Hardlink-aware install self-exclusion |
 | `EncryptedConfigStore` | DPAPI-encrypted per-deployment config (`config.enc`); replaces plaintext appsettings.json |
-| `ProductInfo.Version` | `2.2.7` |
+| `ProductInfo.Version` | `2.2.8` |
 
 All components are wired via Microsoft.Extensions.DependencyInjection. No static mutable state anywhere.
 
@@ -172,8 +172,9 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 | `ScheduledTaskMonitor` | Polls scheduled tasks via schtasks; multi-indicator suspicious task analysis | 60s |
 | `CriticalServiceGuard` | Monitors 15 critical services for crash storms via SCM events (7034/7031) | 10s |
 | `RegistryMonitor` | WMI-based monitoring of Run keys, Services, CLSID COM hijacking | continuous |
-| `WmiPersistenceMonitor` | Periodic scan for __EventFilter/__EventConsumer persistence (T1546.003) | 5min |
-| `WmiProviderIntegrityMonitor` | Enumerates __Win32Provider objects; validates Authenticode on provider DLLs | 5min |
+| `WmiPersistenceMonitor` | **v2.2.8.** Filter + consumer + binding triple (`root\subscription` and `root\default`); hostile LOLBin consumers are a persistence terminal | 30s |
+| `WmiPolicyRewriteMonitor` | **v2.2.8.** HKLM/HKU Policies hive fingerprint; attribute writes to WmiPrvSE/wmiadap/scrcons | 15s |
+| `WmiProviderIntegrityMonitor` | Enumerates __Win32Provider objects; Authenticode on provider DLLs; module walk of **WmiPrvSE + wmiadap** | 5min |
 | `WorkFoldersExfilMonitor` | Detects unauthorized Work Folders activation; active response: kills service | 15s |
 | `PrivacyServiceOutboundMonitor` | **Observe-only:** optional OS services (DiagTrack, whesvc, …) running + public remotes; never stop/kill/isolate | 15s |
 | `ServiceProcessMap` | Service name ↔ PID map (shared `svchost` attribution for privacy observe) | on demand |
@@ -473,6 +474,7 @@ Single real-time ETW trace session replacing per-monitor polling:
 │   7. Microsoft-Windows-Firewall           -> FirewallTelemetry       │
 │   8. Microsoft-Windows-TaskScheduler      -> TaskSchedulerTelemetry  │
 │   9. Microsoft-Windows-Kernel-Network     -> NetworkTelemetry        │
+│  10. Microsoft-Windows-WMI-Activity       -> WMI persistence (5861)  │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 

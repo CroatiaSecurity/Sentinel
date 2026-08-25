@@ -634,6 +634,7 @@ namespace Sentinel.Service
                             sp.GetRequiredService<CriticalServiceGuard>(),
                             sp.GetRequiredService<RegistryMonitor>(),
                             sp.GetRequiredService<WmiPersistenceMonitor>(),
+                            sp.GetRequiredService<WmiPolicyRewriteMonitor>(),
                             sp.GetRequiredService<WorkFoldersExfilMonitor>(),
                             sp.GetRequiredService<PrivacyServiceOutboundMonitor>(),
                             sp.GetRequiredService<TlsCertificateMonitor>(),
@@ -673,6 +674,7 @@ namespace Sentinel.Service
                     services.AddSingleton<CriticalServiceGuard>();
                     services.AddSingleton<RegistryMonitor>();
                     services.AddSingleton<WmiPersistenceMonitor>();
+                    services.AddSingleton<WmiPolicyRewriteMonitor>();
                     services.AddSingleton<WorkFoldersExfilMonitor>();
                     services.AddSingleton<ServiceProcessMap>();
                     services.AddSingleton<PrivacyServiceOutboundMonitor>();
