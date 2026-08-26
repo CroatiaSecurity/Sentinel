@@ -426,7 +426,10 @@ namespace Sentinel.Agent
                     try
                     {
                         var json = File.ReadAllText(metricsFile);
-                        var buffer = Encoding.UTF8.GetBytes(json);
+                        // Wrap in {ok, ops} envelope to match IPC response format
+                        var wrapped = $"{{\"ok\":true,\"ops\":{json}}}";
+                        response.ContentType = "application/json";
+                        var buffer = Encoding.UTF8.GetBytes(wrapped);
                         response.ContentLength64 = buffer.Length;
                         await response.OutputStream.WriteAsync(buffer, 0, buffer.Length).ConfigureAwait(false);
                         response.Close();
@@ -836,7 +839,8 @@ namespace Sentinel.Agent
             response.ContentType = "text/html; charset=utf-8";
             response.Headers.Add("X-Content-Type-Options", "nosniff");
             response.Headers.Add("X-Frame-Options", "DENY");
-            var html = DashboardHtml.GetHtml();
+            response.Headers.Add("Cache-Control", "no-store");
+            var html = DashboardHtml.GetHtml(_bearerToken);
             var buffer = Encoding.UTF8.GetBytes(html);
             response.ContentLength64 = buffer.Length;
             await response.OutputStream.WriteAsync(buffer, 0, buffer.Length).ConfigureAwait(false);

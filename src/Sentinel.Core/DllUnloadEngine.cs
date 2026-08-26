@@ -244,7 +244,11 @@ namespace Sentinel.Core
             {
                 var imagePath = SecurityValidation.GetProcessImagePath(processId);
                 if (string.IsNullOrEmpty(imagePath)) return result;
-                if (SecurityValidation.IsGameOrAntiCheatPath(imagePath))
+
+                // v2.3.1: AlwaysOn Game Protection — never FreeLibrary game processes.
+                // Centralizes the game skip through AlwaysOnPolicies so future changes
+                // to game detection logic propagate here automatically.
+                if (!AlwaysOnPolicies.MayUnloadDllsFrom(processId, imagePath))
                     return result;
 
                 var name = string.IsNullOrEmpty(processName)
@@ -410,7 +414,8 @@ namespace Sentinel.Core
                             ["SideloadedDlls"] = string.Join(";", result.UnloadedDlls),
                             ["Phase"] = "Remediate",
                             ["DllUnloadExempt"] = "true",
-                            ["PermanentRule"] = "ModuleIdentityUnload"
+                            ["PermanentRule"] = "ModuleIdentityUnload",
+                            ["AlwaysOnPolicy"] = "DllUnload"
                         }
                     });
                 }
@@ -447,7 +452,8 @@ namespace Sentinel.Core
                     ["Directory"] = dir,
                     ["Phase"] = "Remediate",
                     ["DllUnloadExempt"] = "true",
-                    ["PermanentRule"] = "ModuleIdentityUnload"
+                    ["PermanentRule"] = "ModuleIdentityUnload",
+                    ["AlwaysOnPolicy"] = "DllUnload"
                 }
             });
         }

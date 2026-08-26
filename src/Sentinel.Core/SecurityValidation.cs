@@ -881,5 +881,17 @@ namespace Sentinel.Core
             imagePath ??= GetProcessImagePath(pid);
             return IsGameOrAntiCheatPath(imagePath);
         }
+
+        /// <summary>
+        /// Name-only check against the known game/anti-cheat process name set.
+        /// Used by EphemeralProcessMonitor to suppress Prefetch false positives
+        /// on games that exit quickly (Denuvo crash, anti-cheat self-exit).
+        /// NOT a trust grant — only suppresses "ephemeral process" alerts.
+        /// </summary>
+        public static bool IsKnownGameProcessName(string? processName)
+        {
+            if (string.IsNullOrEmpty(processName)) return false;
+            return GameOrAntiCheatProcessNames.Contains(processName!);
+        }
     }
 }

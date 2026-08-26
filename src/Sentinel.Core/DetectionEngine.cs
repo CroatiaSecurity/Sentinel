@@ -94,7 +94,11 @@ namespace Sentinel.Core
 
         public async Task EmitAsync(DetectionEvent detectionEvent)
         {
-            // Direct emission bypassing rules (for composite detections)
+            // Direct emission bypassing rules (for monitors that emit detections directly).
+            // v2.3.1: Record detection metric here too — previously only rule-based detections
+            // were counted, leaving monitors (Ephemeral, Hardware, DNS, NamedPipe, etc.) invisible
+            // in ops metrics.
+            _metrics.RecordDetection(0);
             await HandleDetectionEventAsync(detectionEvent);
         }
 

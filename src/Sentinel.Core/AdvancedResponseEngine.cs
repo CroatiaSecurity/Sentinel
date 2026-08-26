@@ -358,6 +358,27 @@ namespace Sentinel.Core
                 return;
             }
 
+            // v2.3.1 ALWAYS-ON: Game Protection Policy — checked BEFORE allowlist and
+            // observe-until-chain. Game processes NEVER receive destructive actions.
+            // This is a hard product invariant that cannot be overridden by config.
+            if (!isPresidentsLaw && detection.ProcessId > 0 &&
+                AlwaysOnPolicies.ApplyGameProtection(detection, imagePath))
+            {
+                reason = $"LogOnly (AlwaysOn: Game Protection — {detection.ProcessName} at '{imagePath}')";
+                stopwatch.Stop();
+                _metrics.RecordResponse(stopwatch.ElapsedMilliseconds);
+                var gameLog = new ResponseEvent
+                {
+                    ProcessId = detection.ProcessId,
+                    ProcessName = detection.ProcessName,
+                    ActionTaken = "LOG",
+                    Reason = reason,
+                    ExecutionTimeMs = stopwatch.ElapsedMilliseconds
+                };
+                await _eventLogger.LogEventAsync("response", gameLog);
+                return;
+            }
+
             if (_allowlist != null && _allowlist.ShouldSuppress(detection.ProcessName, imagePath, detection.RuleName))
             {
                 effectiveTier = DetectionTier.Tier2Indicator;
@@ -368,13 +389,13 @@ namespace Sentinel.Core
 
             // Global observe-until-chain: every monitor is silent LogOnly until multi-signal
             // proof points at BYOVD / exfil / token theft / reverse shell / cred dump.
-            // DLL unload remediations are exempt (DllUnloadEngine still FreeLibrary/quarantines plants).
+            // v2.3.1: DLL unload is an ALWAYS-ON policy (AlwaysOnPolicies.IsDllUnloadAlwaysOn).
             // MitmDefense suite is also exempt: planted cert + ghost process + fake Chromecast /
             // FCM Send-Tab-to-Self is a confirmed post-incident chain that must act without waiting
             // for a second unrelated signal.
             // When chain confirms → full nuke (quarantine+kill + isolate + chain tracer).
             bool chainAuthorized = false;
-            bool dllExempt = ResponsePolicy.IsDllUnloadExempt(detection);
+            bool dllExempt = AlwaysOnPolicies.IsDllUnloadAlwaysOn(detection);
             bool mitmExempt = ResponsePolicy.IsMitmDefenseAction(detection, _config);
             if (_config.ObserveUntilChain)
             {

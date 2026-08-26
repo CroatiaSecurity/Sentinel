@@ -300,12 +300,15 @@ namespace Sentinel.Core
 
             detection.Metadata ??= new Dictionary<string, string>();
 
-            // Permanent: foreign mapped PE already unloaded. Never demote. Never kill-promote.
-            if (IsPermanentModuleIdentityUnload(detection))
+            // v2.3.1 ALWAYS-ON: DLL Unload policy — never demote, never gate.
+            // Checks both the legacy IsPermanentModuleIdentityUnload and the new
+            // AlwaysOnPolicies.IsDllUnloadAlwaysOn (which also reads metadata markers).
+            if (IsPermanentModuleIdentityUnload(detection) || AlwaysOnPolicies.IsDllUnloadAlwaysOn(detection))
             {
                 detection.Tier = DetectionTier.Tier1Behavioral;
                 detection.Metadata["TierLaw"] = "ModuleIdentityUnload";
                 detection.Metadata["PermanentRule"] = "ModuleIdentityUnload";
+                detection.Metadata["AlwaysOnPolicy"] = "DllUnload";
                 return;
             }
 

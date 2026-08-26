@@ -9,13 +9,14 @@ namespace Sentinel.Agent
     /// </summary>
     public static class DashboardHtml
     {
-        public static string GetHtml() => $@"<!DOCTYPE html>
+        public static string GetHtml(string? embeddedToken = null) => $@"<!DOCTYPE html>
 <html lang=""en"">
 <head>
 <meta charset=""UTF-8"">
 <meta http-equiv=""X-UA-Compatible"" content=""IE=edge"">
 <meta name=""viewport"" content=""width=device-width, initial-scale=1.0"">
 <title>Sentinel Dashboard</title>
+<script>var EMBEDDED_TOKEN = '{embeddedToken ?? ""}';</script>
 <style>
 * {{ margin: 0; padding: 0; box-sizing: border-box; }}
 body {{
@@ -215,7 +216,7 @@ select.rp-input {{ font-family: 'Segoe UI', sans-serif; }}
 <aside class=""sidebar"">
     <div class=""sidebar-header"">
         <img src=""/api/icon"" alt=""S"" style=""width:32px;height:32px;border-radius:8px"" onerror=""this.style.display='none'"">
-        <div><h1>Sentinel</h1><div class=""version"" id=""version"">v2.2.9</div></div>
+        <div><h1>Sentinel</h1><div class=""version"" id=""version"">v2.3.1</div></div>
     </div>
     <nav class=""nav"" id=""sidebar-nav"">
         <div class=""nav-item active"" data-page=""overview"">
@@ -492,8 +493,15 @@ var eventPollInterval = null;
 }})();
 
 // v2.2.0: token arrives via tray launch URL (?token=), then lives in sessionStorage.
+// v2.3.1: server embeds current token in HTML (EMBEDDED_TOKEN) so page refresh always works.
 function getToken() {{
     try {{
+        // 1. Prefer server-embedded token (always current after agent restart)
+        if (typeof EMBEDDED_TOKEN === 'string' && EMBEDDED_TOKEN.length > 0) {{
+            try {{ sessionStorage.setItem('sentinel_token', EMBEDDED_TOKEN); }} catch(e) {{}}
+            return EMBEDDED_TOKEN;
+        }}
+        // 2. URL ?token= param (tray icon launch)
         var search = window.location.search;
         var match = search.match(/[?&]token=([^&]*)/);
         if (match) {{
@@ -504,6 +512,7 @@ function getToken() {{
             try {{ history.replaceState({{}}, '', window.location.pathname + clean + window.location.hash); }} catch(e) {{}}
             return t;
         }}
+        // 3. Fallback to sessionStorage (stale after restart — will 401)
         try {{ return sessionStorage.getItem('sentinel_token') || ''; }} catch(e) {{ return ''; }}
     }} catch (e) {{ return ''; }}
 }}
@@ -525,6 +534,10 @@ function apiCall(path, opts, callback) {{
     }}
     xhr.onreadystatechange = function() {{
         if (xhr.readyState === 4) {{
+            if (xhr.status === 401) {{
+                document.getElementById('ov-events').innerHTML = '<div class=""empty-state"" style=""color:#f28b82"">Authentication failed. Reopen dashboard from the Sentinel tray icon.</div>';
+                return;
+            }}
             var data = null;
             try {{ data = JSON.parse(xhr.responseText); }} catch(e) {{ data = {{ ok: false, error: 'Parse error' }}; }}
             if (callback) callback(data);
@@ -741,12 +754,17 @@ function loadOps() {{
         var grid = document.getElementById('ops-grid');
         if (data && (data.ok || data.ops)) {{
             var ops = data.ops || data;
+            var telRecv = ops.TelemetryReceived || ops.telemetryReceived || 0;
+            var telDrop = ops.TelemetryDropped || ops.telemetryDropped || 0;
+            var dropRate = telRecv > 0 ? ((telDrop / telRecv) * 100).toFixed(2) : '0.00';
             var metrics = [
-                ['Events/sec', ops.EventsPerSecond || ops.eventsPerSecond || 0],
-                ['Detections/min', ops.DetectionsPerMinute || ops.detectionsPerMinute || 0],
-                ['Drop Rate', (ops.DropRate || ops.dropRate || 0) + '%'],
-                ['Correlation Latency', (ops.CorrelationLatencyMs || ops.correlationLatencyMs || 0) + 'ms'],
-                ['Monitors', ops.RegisteredMonitors || ops.registeredMonitors || 0],
+                ['Telemetry/sec', ops.TelemetryPerSecond || ops.telemetryPerSecond || 0],
+                ['Detections/sec', ops.DetectionsPerSecond || ops.detectionsPerSecond || 0],
+                ['Detections Total', ops.DetectionsTotal || ops.detectionsTotal || 0],
+                ['Responses Total', ops.ResponsesTotal || ops.responsesTotal || 0],
+                ['Drop Rate', dropRate + '%'],
+                ['Correlation P50', (ops.CorrelationLatencyMsP50 || ops.correlationLatencyMsP50 || 0) + 'ms'],
+                ['Monitors', (ops.RunningMonitors || ops.runningMonitors || 0) + '/' + (ops.RegisteredMonitors || ops.registeredMonitors || 0)],
                 ['Plugins', ops.PluginCount || ops.pluginCount || 0],
                 ['Weighted Correlation', (ops.WeightedCorrelationEnabled || ops.weightedCorrelationEnabled) ? 'Enabled' : 'Disabled'],
                 ['Product Version', ops.ProductVersion || ops.productVersion || '\u2014']
@@ -756,7 +774,7 @@ function loadOps() {{
                 html += '<div class=""metric""><div class=""metric-label"">' + esc(metrics[i][0]) + '</div><div class=""metric-value"">' + esc(String(metrics[i][1])) + '</div></div>';
             }}
             grid.innerHTML = html;
-            document.getElementById('ov-rate').textContent = ops.EventsPerSecond || ops.eventsPerSecond || 0;
+            document.getElementById('ov-rate').textContent = ops.TelemetryPerSecond || ops.telemetryPerSecond || 0;
         }} else {{
             grid.innerHTML = '<div class=""empty-state"">Unable to reach Sentinel Service</div>';
         }}

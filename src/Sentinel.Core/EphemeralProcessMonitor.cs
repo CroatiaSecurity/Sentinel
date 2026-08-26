@@ -227,6 +227,13 @@ namespace Sentinel.Core
             // This process ran and exited before WMI could report it
             // Try to find the executable on disk for reputation check
             var exePath = FindExecutable(exeName!);
+
+            // v2.3.1: Second-chance game-path check — if FindExecutable resolved the binary
+            // to a known game directory, suppress detection. Covers the case where the
+            // name-only check above didn't match (e.g. game-specific launcher binary).
+            if (exePath != null && SecurityValidation.IsGameOrAntiCheatPath(exePath))
+                return;
+
             bool isSuspiciousPath = exePath != null &&
                 SuspiciousStagingPaths.Any(p => exePath.Contains(p));
 
@@ -381,14 +388,18 @@ namespace Sentinel.Core
         private static bool IsKnownGameEphemeralName(string? name)
         {
             if (string.IsNullOrEmpty(name)) return false;
-            var n = name!.EndsWith(".exe")
+            var n = name!.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
                 ? Path.GetFileNameWithoutExtension(name)
                 : name;
+            n = n.ToLowerInvariant();
             if (n.Equals("fm")) return true;
             if (n.StartsWith("fm20")) return true;
             if (n.StartsWith("footballmanager")) return true;
             if (n.Equals("steam")) return true;
             if (n.Equals("gameoverlayui")) return true;
+            // Broader check: any known game/anti-cheat process name (uses path-based
+            // IsGameOrAntiCheatProcess which also consults the name set)
+            if (SecurityValidation.IsKnownGameProcessName(n)) return true;
             return false;
         }
 
