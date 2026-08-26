@@ -1,33 +1,35 @@
 $env:PATH = "C:\Program Files\Git\cmd;C:\Program Files\Git\bin;" + $env:PATH
 $gh = "C:\Program Files\GitHub CLI\gh.exe"
-$installer = "installer\SentinelSetup-2.2.9.exe"
+$installer = "installer\SentinelSetup-2.3.0.exe"
 
 $notes = @"
-## v2.2.9 — Unified Web Dashboard
+## v2.3.0 — Dashboard Redesign (GBrowser Theme + IE11 Fix)
 
-The native WinForms settings window has been replaced with the embedded web dashboard.
-Opening Settings from the tray icon now shows the same modern HTML/CSS/JS dashboard
-that was previously only available via a browser, but hosted inside a native window
-(no external browser launch required).
+The embedded web dashboard has been completely rewritten with a new visual theme
+and full IE11 WebBrowser control compatibility.
 
 ### What changed
 
-- **AgentDashboardForm** rewritten as a thin WebBrowser shell hosting localhost:19845
-- **WebDashboardService** re-enabled as a hosted service (serves REST API + HTML on localhost)
-- Sidebar navigation, live event stream, system scan, quarantine view, ops metrics,
-  report-to-police workflow, safety page, and hardened mode toggle all work exactly
-  as in the web dashboard
-- **BrowserLauncher.cs** removed — no more external browser dependency
-- IE11 Edge emulation mode set via registry for CSS grid/flexbox support
-- Avoids the broken http:// protocol handler issue that caused the v2.2.2 revert
+- **Dashboard theme**: Redesigned with GBrowser-inspired dark/creamy/mica palette
+  - Dark charcoal backgrounds (#202124), creamy blue accent (#8AB4F8)
+  - Mica-style `backdrop-filter: blur()` on sidebar and header
+  - Segoe UI font, tighter spacing, refined color hierarchy
+- **IE11 compatibility fix**: All JavaScript rewritten to ES5
+  - Replaced `fetch()` with `XMLHttpRequest`
+  - Removed arrow functions, `const`/`let`, template literals, `async/await`
+  - Navigation click handlers now use `onclick` + `getElementsByClassName`
+  - `URLSearchParams` replaced with regex-based token extraction
+  - `NodeList.forEach` replaced with classic `for` loops
+- **Navigation fix**: Sidebar tabs now work correctly in the WebBrowser control
+- All previous v2.2.9 features (WMI persistence, web dashboard, hardened mode) retained
 
-### Previous (v2.2.8) WMI improvements are still included
+### Previous features still included
 
-- WMI persistence triple snapshot (Filter + Consumer + Binding)
-- Hostile CommandLine/ActiveScript consumer detection
-- WmiPrvSE module enumeration
-- Policy hive attribution to WMI processes
+- Unified web dashboard (REST API + WebSocket on localhost:19845)
+- Bearer token authentication, CSRF protection, constant-time comparison
+- WMI persistence triple snapshot, hostile consumer detection
 - ETW provider #10 for WMI-Activity
+- Hardened mode toggle from dashboard
 
 ## Installation
 Requires .NET Framework 4.8. Run as Administrator.
@@ -35,7 +37,7 @@ Open Settings from the Sentinel tray icon.
 "@
 
 if (Test-Path $gh) {
-    & $gh release create v2.2.9 $installer --title "Sentinel 2.2.9" --notes $notes -R CroatiaSecurity/Sentinel
+    & $gh release create v2.3.0 $installer --title "Sentinel 2.3.0" --notes $notes -R CroatiaSecurity/Sentinel
 } else {
-    Write-Host "gh.exe not found - installer is at $installer and releases\2.2.9\"
+    Write-Host "gh.exe not found - installer is at $installer and releases\2.3.0\"
 }

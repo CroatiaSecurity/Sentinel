@@ -1,6 +1,6 @@
 [Setup]
 AppName=Sentinel
-AppVersion=2.2.9
+AppVersion=2.3.0
 AppPublisher=Gorstak
 AppPublisherURL=https://gorstak.eu
 SourceDir=.
@@ -11,7 +11,7 @@ UninstallDisplayIcon={app}\Sentinel.ico
 Compression=lzma2
 SolidCompression=yes
 OutputDir=.
-OutputBaseFilename=SentinelSetup-2.2.9
+OutputBaseFilename=SentinelSetup-2.3.0
 PrivilegesRequired=admin
 ; One active Setup wizard at a time (elevation handoff still works: non-elevated exits first)
 SetupMutex=Global\SentinelSetupMutex

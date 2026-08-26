@@ -3,6 +3,9 @@ namespace Sentinel.Agent
     /// <summary>
     /// Self-contained HTML/CSS/JS for the Sentinel web dashboard.
     /// Embedded as a static string to avoid external file dependencies.
+    /// 
+    /// v2.2.9: Rewritten with IE11-compatible JavaScript (no ES6+) and
+    /// GBrowser-inspired dark/creamy/mica theme for visual consistency.
     /// </summary>
     public static class DashboardHtml
     {
@@ -10,228 +13,211 @@ namespace Sentinel.Agent
 <html lang=""en"">
 <head>
 <meta charset=""UTF-8"">
+<meta http-equiv=""X-UA-Compatible"" content=""IE=edge"">
 <meta name=""viewport"" content=""width=device-width, initial-scale=1.0"">
 <title>Sentinel Dashboard</title>
 <style>
-:root {{
-    --bg-primary: #0d1117;
-    --bg-secondary: #161b22;
-    --bg-tertiary: #1c2128;
-    --bg-card: #21262d;
-    --border: #30363d;
-    --text-primary: #e6edf3;
-    --text-secondary: #8b949e;
-    --text-muted: #6e7681;
-    --accent: #58a6ff;
-    --accent-hover: #79c0ff;
-    --success: #3fb950;
-    --warning: #d29922;
-    --danger: #f85149;
-    --critical: #da3633;
-    --purple: #bc8cff;
-    --sidebar-width: 240px;
-    --header-height: 64px;
-    --radius: 8px;
-    --shadow: 0 1px 3px rgba(0,0,0,0.3), 0 4px 6px rgba(0,0,0,0.2);
-}}
 * {{ margin: 0; padding: 0; box-sizing: border-box; }}
 body {{
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif;
-    background: var(--bg-primary);
-    color: var(--text-primary);
+    font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+    background: #202124;
+    color: #e8eaed;
     line-height: 1.5;
     overflow: hidden;
     height: 100vh;
 }}
 .layout {{ display: flex; height: 100vh; }}
 .sidebar {{
-    width: var(--sidebar-width);
-    background: var(--bg-secondary);
-    border-right: 1px solid var(--border);
+    width: 220px;
+    background: rgba(32,33,36,0.92);
+    border-right: 1px solid #3c4043;
     display: flex;
     flex-direction: column;
     flex-shrink: 0;
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
 }}
 .sidebar-header {{
     padding: 20px 16px;
-    border-bottom: 1px solid var(--border);
+    border-bottom: 1px solid #3c4043;
     display: flex;
     align-items: center;
     gap: 10px;
 }}
 .sidebar-header .logo {{
     width: 32px; height: 32px;
-    background: linear-gradient(135deg, var(--accent), var(--purple));
+    background: linear-gradient(135deg, #8ab4f8, #c58af9);
     border-radius: 8px;
     display: flex; align-items: center; justify-content: center;
-    font-weight: bold; font-size: 16px; color: white;
+    font-weight: bold; font-size: 16px; color: #202124;
 }}
-.sidebar-header h1 {{ font-size: 16px; font-weight: 600; }}
-.sidebar-header .version {{ font-size: 11px; color: var(--text-muted); }}
+.sidebar-header h1 {{ font-size: 15px; font-weight: 600; color: #e8eaed; }}
+.sidebar-header .version {{ font-size: 11px; color: #9aa0a6; }}
 .nav {{ flex: 1; padding: 8px; overflow-y: auto; }}
 .nav-item {{
     display: flex; align-items: center; gap: 10px;
-    padding: 10px 12px; border-radius: var(--radius);
-    cursor: pointer; color: var(--text-secondary);
-    transition: all 0.15s ease; font-size: 14px; margin-bottom: 2px;
+    padding: 9px 12px; border-radius: 4px;
+    cursor: pointer; color: #b4b8be;
+    font-size: 13px; margin-bottom: 1px;
     border: 1px solid transparent;
+    transition: background 0.12s, color 0.12s;
 }}
-.nav-item:hover {{ background: var(--bg-tertiary); color: var(--text-primary); }}
+.nav-item:hover {{ background: #303135; color: #e8eaed; }}
 .nav-item.active {{
-    background: rgba(88,166,255,0.1);
-    color: var(--accent);
-    border-color: rgba(88,166,255,0.2);
+    background: rgba(138,180,248,0.12);
+    color: #8ab4f8;
+    border-color: rgba(138,180,248,0.25);
 }}
-.nav-item svg {{ width: 18px; height: 18px; flex-shrink: 0; }}
-.main {{ flex: 1; display: flex; flex-direction: column; overflow: hidden; }}
+.nav-item svg {{ width: 16px; height: 16px; flex-shrink: 0; }}
+.main {{ flex: 1; display: flex; flex-direction: column; overflow: hidden; background: #202124; }}
 .header {{
-    height: var(--header-height);
+    height: 56px;
     padding: 0 24px;
     display: flex; align-items: center; justify-content: space-between;
-    border-bottom: 1px solid var(--border);
-    background: var(--bg-secondary);
+    border-bottom: 1px solid #3c4043;
+    background: rgba(53,54,58,0.7);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
 }}
-.header h2 {{ font-size: 18px; font-weight: 600; }}
+.header h2 {{ font-size: 16px; font-weight: 600; color: #e8eaed; }}
 .status-badge {{
     display: flex; align-items: center; gap: 6px;
-    padding: 6px 12px; border-radius: 20px; font-size: 12px; font-weight: 500;
+    padding: 5px 12px; border-radius: 16px; font-size: 12px; font-weight: 500;
 }}
-.status-badge.active {{ background: rgba(63,185,80,0.15); color: var(--success); }}
-.status-badge.inactive {{ background: rgba(248,81,73,0.15); color: var(--danger); }}
-.status-dot {{ width: 8px; height: 8px; border-radius: 50%; animation: pulse 2s infinite; }}
-.status-badge.active .status-dot {{ background: var(--success); }}
-.status-badge.inactive .status-dot {{ background: var(--danger); }}
+.status-badge.active {{ background: rgba(129,201,149,0.12); color: #81c995; }}
+.status-badge.inactive {{ background: rgba(242,139,130,0.12); color: #f28b82; }}
+.status-dot {{ width: 7px; height: 7px; border-radius: 50%; animation: pulse 2s infinite; }}
+.status-badge.active .status-dot {{ background: #81c995; }}
+.status-badge.inactive .status-dot {{ background: #f28b82; }}
 @keyframes pulse {{ 0%,100% {{ opacity: 1; }} 50% {{ opacity: 0.5; }} }}
-.content {{ flex: 1; overflow-y: auto; padding: 24px; }}
+.content {{ flex: 1; overflow-y: auto; padding: 20px 24px; }}
 .page {{ display: none; }}
 .page.active {{ display: block; }}
-.cards {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-bottom: 24px; }}
+.cards {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 20px; }}
 .card {{
-    background: var(--bg-card); border: 1px solid var(--border);
-    border-radius: var(--radius); padding: 20px;
-    box-shadow: var(--shadow); transition: border-color 0.2s;
+    background: #292a2d;
+    border: 1px solid #3c4043;
+    border-radius: 8px; padding: 16px;
+    transition: border-color 0.15s;
 }}
-.card:hover {{ border-color: var(--accent); }}
-.card-label {{ font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }}
-.card-value {{ font-size: 28px; font-weight: 700; }}
-.card-value.success {{ color: var(--success); }}
-.card-value.warning {{ color: var(--warning); }}
-.card-value.danger {{ color: var(--danger); }}
-.card-sub {{ font-size: 12px; color: var(--text-secondary); margin-top: 4px; }}
+.card:hover {{ border-color: #8ab4f8; }}
+.card-label {{ font-size: 11px; color: #9aa0a6; text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 4px; }}
+.card-value {{ font-size: 26px; font-weight: 700; color: #e8eaed; }}
+.card-value.success {{ color: #81c995; }}
+.card-value.warning {{ color: #fdd663; }}
+.card-value.danger {{ color: #f28b82; }}
+.card-sub {{ font-size: 11px; color: #9aa0a6; margin-top: 3px; }}
 .panel {{
-    background: var(--bg-card); border: 1px solid var(--border);
-    border-radius: var(--radius); box-shadow: var(--shadow); margin-bottom: 24px;
+    background: #292a2d;
+    border: 1px solid #3c4043;
+    border-radius: 8px; margin-bottom: 20px;
 }}
 .panel-header {{
-    padding: 16px 20px; border-bottom: 1px solid var(--border);
+    padding: 14px 16px; border-bottom: 1px solid #3c4043;
     display: flex; align-items: center; justify-content: space-between;
 }}
-.panel-header h3 {{ font-size: 14px; font-weight: 600; }}
-.panel-body {{ padding: 16px 20px; }}
-.event-list {{ max-height: 400px; overflow-y: auto; }}
+.panel-header h3 {{ font-size: 13px; font-weight: 600; color: #e8eaed; }}
+.panel-body {{ padding: 14px 16px; }}
+.event-list {{ max-height: 380px; overflow-y: auto; }}
 .event-item {{
-    display: flex; align-items: flex-start; gap: 12px; padding: 12px 0;
-    border-bottom: 1px solid var(--border); font-size: 13px;
+    display: flex; align-items: flex-start; gap: 10px; padding: 10px 0;
+    border-bottom: 1px solid #3c4043; font-size: 12px;
 }}
 .event-item:last-child {{ border-bottom: none; }}
 .event-icon {{
-    width: 32px; height: 32px; border-radius: 50%;
+    width: 28px; height: 28px; border-radius: 50%;
     display: flex; align-items: center; justify-content: center;
-    flex-shrink: 0; font-size: 14px;
+    flex-shrink: 0; font-size: 12px;
 }}
-.event-icon.detection {{ background: rgba(248,81,73,0.15); color: var(--danger); }}
-.event-icon.response {{ background: rgba(63,185,80,0.15); color: var(--success); }}
-.event-icon.info {{ background: rgba(88,166,255,0.15); color: var(--accent); }}
+.event-icon.detection {{ background: rgba(242,139,130,0.12); color: #f28b82; }}
+.event-icon.response {{ background: rgba(129,201,149,0.12); color: #81c995; }}
+.event-icon.info {{ background: rgba(138,180,248,0.12); color: #8ab4f8; }}
 .event-body {{ flex: 1; min-width: 0; }}
-.event-title {{ font-weight: 500; color: var(--text-primary); }}
-.event-detail {{ color: var(--text-secondary); margin-top: 2px; word-break: break-word; }}
-.event-time {{ color: var(--text-muted); font-size: 11px; white-space: nowrap; }}
+.event-title {{ font-weight: 500; color: #e8eaed; font-size: 12px; }}
+.event-detail {{ color: #9aa0a6; margin-top: 2px; word-break: break-word; font-size: 11px; }}
+.event-time {{ color: #9aa0a6; font-size: 10px; white-space: nowrap; }}
 .btn {{
-    padding: 8px 16px; border-radius: var(--radius); border: 1px solid var(--border);
-    background: var(--bg-tertiary); color: var(--text-primary); cursor: pointer;
-    font-size: 13px; font-weight: 500; transition: all 0.15s;
+    padding: 7px 14px; border-radius: 4px; border: 1px solid #3c4043;
+    background: #35363a; color: #e8eaed; cursor: pointer;
+    font-size: 12px; font-weight: 500; transition: background 0.12s;
     display: inline-flex; align-items: center; gap: 6px;
+    font-family: 'Segoe UI', sans-serif;
 }}
-.btn:hover {{ background: var(--bg-card); border-color: var(--accent); }}
-.btn-primary {{ background: var(--accent); border-color: var(--accent); color: #fff; }}
-.btn-primary:hover {{ background: var(--accent-hover); }}
-.btn-danger {{ background: var(--danger); border-color: var(--danger); color: #fff; }}
-.scan-progress {{ margin: 20px 0; }}
+.btn:hover {{ background: #3c4043; border-color: #8ab4f8; }}
+.btn-primary {{ background: #8ab4f8; border-color: #8ab4f8; color: #202124; font-weight: 600; }}
+.btn-primary:hover {{ background: #aecbfa; }}
+.btn-danger {{ background: #f28b82; border-color: #f28b82; color: #202124; font-weight: 600; }}
+.btn-danger:hover {{ background: #f6aea8; }}
+.scan-progress {{ margin: 16px 0; }}
 .progress-bar {{
-    height: 6px; background: var(--bg-tertiary); border-radius: 3px; overflow: hidden;
+    height: 5px; background: #35363a; border-radius: 3px; overflow: hidden;
 }}
 .progress-fill {{
-    height: 100%; background: linear-gradient(90deg, var(--accent), var(--purple));
+    height: 100%; background: linear-gradient(90deg, #8ab4f8, #c58af9);
     border-radius: 3px; transition: width 0.3s; animation: shimmer 1.5s infinite;
 }}
-@keyframes shimmer {{ 0% {{ opacity: 0.8; }} 50% {{ opacity: 1; }} 100% {{ opacity: 0.8; }} }}
-.findings-grid {{ display: grid; gap: 8px; }}
+@keyframes shimmer {{ 0% {{ opacity: 0.7; }} 50% {{ opacity: 1; }} 100% {{ opacity: 0.7; }} }}
+.findings-grid {{ display: grid; gap: 6px; }}
 .finding {{
-    display: flex; align-items: flex-start; gap: 12px; padding: 12px 16px;
-    border-radius: var(--radius); border: 1px solid var(--border); background: var(--bg-tertiary);
+    display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px;
+    border-radius: 4px; border: 1px solid #3c4043; background: #35363a;
 }}
 .finding-severity {{
-    width: 8px; height: 8px; border-radius: 50%; margin-top: 6px; flex-shrink: 0;
+    width: 7px; height: 7px; border-radius: 50%; margin-top: 5px; flex-shrink: 0;
 }}
-.finding-severity.critical {{ background: var(--critical); }}
-.finding-severity.high {{ background: var(--danger); }}
-.finding-severity.medium {{ background: var(--warning); }}
-.finding-severity.low {{ background: var(--text-muted); }}
+.finding-severity.critical {{ background: #f28b82; }}
+.finding-severity.high {{ background: #f28b82; }}
+.finding-severity.medium {{ background: #fdd663; }}
+.finding-severity.low {{ background: #9aa0a6; }}
 .finding-body {{ flex: 1; }}
-.finding-title {{ font-weight: 500; font-size: 13px; }}
-.finding-desc {{ font-size: 12px; color: var(--text-secondary); margin-top: 2px; }}
-.chart-container {{ height: 200px; position: relative; margin: 16px 0; }}
-.bar-chart {{ display: flex; align-items: flex-end; gap: 4px; height: 100%; padding: 0 8px; }}
+.finding-title {{ font-weight: 500; font-size: 12px; color: #e8eaed; }}
+.finding-desc {{ font-size: 11px; color: #9aa0a6; margin-top: 2px; }}
+.chart-container {{ height: 160px; position: relative; margin: 12px 0; }}
+.bar-chart {{ display: flex; align-items: flex-end; gap: 3px; height: 100%; padding: 0 4px; }}
 .bar {{
-    flex: 1; min-width: 3px; background: var(--accent); border-radius: 2px 2px 0 0;
-    transition: height 0.3s ease; opacity: 0.8;
+    flex: 1; min-width: 2px; background: #8ab4f8; border-radius: 2px 2px 0 0;
+    transition: height 0.3s ease; opacity: 0.7;
 }}
 .bar:hover {{ opacity: 1; }}
-.metric-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }}
+.metric-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }}
 .metric {{
-    padding: 12px; border-radius: var(--radius); background: var(--bg-tertiary);
-    border: 1px solid var(--border);
+    padding: 10px; border-radius: 4px; background: #35363a;
+    border: 1px solid #3c4043;
 }}
-.metric-label {{ font-size: 11px; color: var(--text-muted); text-transform: uppercase; }}
-.metric-value {{ font-size: 20px; font-weight: 600; margin-top: 2px; }}
+.metric-label {{ font-size: 10px; color: #9aa0a6; text-transform: uppercase; letter-spacing: 0.3px; }}
+.metric-value {{ font-size: 18px; font-weight: 600; margin-top: 2px; color: #e8eaed; }}
 .empty-state {{
-    text-align: center; padding: 48px 24px; color: var(--text-secondary);
+    text-align: center; padding: 40px 20px; color: #9aa0a6; font-size: 13px;
 }}
-.empty-state svg {{ width: 48px; height: 48px; margin-bottom: 12px; opacity: 0.5; }}
-.tab-bar {{ display: flex; gap: 0; border-bottom: 1px solid var(--border); margin-bottom: 16px; }}
-.tab {{
-    padding: 8px 16px; cursor: pointer; font-size: 13px; color: var(--text-secondary);
-    border-bottom: 2px solid transparent; transition: all 0.15s;
-}}
-.tab:hover {{ color: var(--text-primary); }}
-.tab.active {{ color: var(--accent); border-bottom-color: var(--accent); }}
 .quarantine-item {{
     display: flex; align-items: center; justify-content: space-between;
-    padding: 12px 0; border-bottom: 1px solid var(--border); font-size: 13px;
+    padding: 10px 0; border-bottom: 1px solid #3c4043; font-size: 12px;
 }}
 .quarantine-item:last-child {{ border-bottom: none; }}
-.q-path {{ color: var(--text-secondary); font-family: monospace; font-size: 12px; }}
+.q-path {{ color: #9aa0a6; font-family: 'Consolas', monospace; font-size: 11px; }}
 .rp-input {{
-    width: 100%; padding: 6px 10px; border-radius: var(--radius); border: 1px solid var(--border);
-    background: var(--bg-tertiary); color: var(--text-primary); font-size: 13px;
-    margin-top: 4px; outline: none; transition: border-color 0.15s;
+    width: 100%; padding: 6px 10px; border-radius: 4px; border: 1px solid #3c4043;
+    background: #35363a; color: #e8eaed; font-size: 12px;
+    margin-top: 4px; outline: none; transition: border-color 0.12s;
+    font-family: 'Segoe UI', sans-serif;
 }}
-.rp-input:focus {{ border-color: var(--accent); }}
-textarea.rp-input {{ font-family: inherit; }}
-::-webkit-scrollbar {{ width: 8px; }}
-::-webkit-scrollbar-track {{ background: var(--bg-primary); }}
-::-webkit-scrollbar-thumb {{ background: var(--border); border-radius: 4px; }}
-::-webkit-scrollbar-thumb:hover {{ background: var(--text-muted); }}
+.rp-input:focus {{ border-color: #8ab4f8; }}
+textarea.rp-input {{ font-family: 'Segoe UI', sans-serif; }}
+select.rp-input {{ font-family: 'Segoe UI', sans-serif; }}
+::-webkit-scrollbar {{ width: 7px; }}
+::-webkit-scrollbar-track {{ background: #202124; }}
+::-webkit-scrollbar-thumb {{ background: #3c4043; border-radius: 4px; }}
+::-webkit-scrollbar-thumb:hover {{ background: #5f6368; }}
 </style>
 </head>
 <body>
 <div class=""layout"">
 <aside class=""sidebar"">
     <div class=""sidebar-header"">
-        <img src=""/api/icon"" alt=""Sentinel"" style=""width:32px;height:32px;border-radius:8px"">
-        <div><h1>Sentinel</h1><div class=""version"" id=""version"">v2.1.4</div></div>
+        <img src=""/api/icon"" alt=""S"" style=""width:32px;height:32px;border-radius:8px"" onerror=""this.style.display='none'"">
+        <div><h1>Sentinel</h1><div class=""version"" id=""version"">v2.2.9</div></div>
     </div>
-    <nav class=""nav"">
+    <nav class=""nav"" id=""sidebar-nav"">
         <div class=""nav-item active"" data-page=""overview"">
             <svg viewBox=""0 0 24 24"" fill=""none"" stroke=""currentColor"" stroke-width=""2""><rect x=""3"" y=""3"" width=""7"" height=""7"" rx=""1""/><rect x=""14"" y=""3"" width=""7"" height=""7"" rx=""1""/><rect x=""3"" y=""14"" width=""7"" height=""7"" rx=""1""/><rect x=""14"" y=""14"" width=""7"" height=""7"" rx=""1""/></svg>
             Overview
@@ -309,7 +295,7 @@ textarea.rp-input {{ font-family: inherit; }}
         <div class=""page"" id=""page-scan"">
             <div class=""cards"">
                 <div class=""card""><div class=""card-label"">Scan Status</div><div class=""card-value"" id=""sc-status"">Idle</div><div class=""card-sub"" id=""sc-time"">No scan run yet</div></div>
-                <div class=""card""><div class=""card-label"">Findings</div><div class=""card-value"" id=""sc-findings"">—</div><div class=""card-sub"" id=""sc-critical""></div></div>
+                <div class=""card""><div class=""card-label"">Findings</div><div class=""card-value"" id=""sc-findings"">&mdash;</div><div class=""card-sub"" id=""sc-critical""></div></div>
             </div>
             <div class=""panel"">
                 <div class=""panel-header"">
@@ -317,7 +303,7 @@ textarea.rp-input {{ font-family: inherit; }}
                     <button class=""btn btn-primary"" id=""btn-scan"" onclick=""startScan()"">Run Full Scan</button>
                 </div>
                 <div class=""panel-body"">
-                    <p style=""color:var(--text-secondary);font-size:13px;margin-bottom:12px"">
+                    <p style=""color:#9aa0a6;font-size:12px;margin-bottom:12px"">
                         Scans running processes, persistence mechanisms (Run keys, scheduled tasks, startup folder, services, IFEO, Winlogon),
                         certificate stores, LNK shortcuts, staging paths, and network state for indicators of compromise.
                     </p>
@@ -349,7 +335,7 @@ textarea.rp-input {{ font-family: inherit; }}
         <div class=""page"" id=""page-report"">
             <div class=""cards"">
                 <div class=""card""><div class=""card-label"">Evidence Packs</div><div class=""card-value"" id=""rp-pack-count"">0</div><div class=""card-sub"">Sealed incident packs</div></div>
-                <div class=""card""><div class=""card-label"">Integrity</div><div class=""card-value success"" id=""rp-integrity"">—</div><div class=""card-sub"">SHA-256 manifest + HMAC</div></div>
+                <div class=""card""><div class=""card-label"">Integrity</div><div class=""card-value success"" id=""rp-integrity"">&mdash;</div><div class=""card-sub"">SHA-256 manifest + HMAC</div></div>
             </div>
             <div class=""panel"">
                 <div class=""panel-header""><h3>Evidence Packs</h3><button class=""btn"" onclick=""loadReportPacks()"">Refresh</button></div>
@@ -358,11 +344,11 @@ textarea.rp-input {{ font-family: inherit; }}
             <div class=""panel"">
                 <div class=""panel-header""><h3>File with Law Enforcement</h3></div>
                 <div class=""panel-body"">
-                    <p style=""color:var(--text-secondary);font-size:13px;margin-bottom:16px"">
+                    <p style=""color:#9aa0a6;font-size:12px;margin-bottom:14px"">
                         Sentinel prepares sealed evidence for you. It does NOT submit complaints to INTERPOL, IC3, or any police API.
                         Fill in your details, save the affidavit, then use your national cybercrime portal to file.
                     </p>
-                    <div class=""metric-grid"" style=""margin-bottom:16px"">
+                    <div class=""metric-grid"" style=""margin-bottom:14px"">
                         <div class=""metric""><div class=""metric-label"">Full Name *</div><input type=""text"" id=""rp-name"" class=""rp-input"" placeholder=""Your legal name""></div>
                         <div class=""metric""><div class=""metric-label"">Email</div><input type=""text"" id=""rp-email"" class=""rp-input"" placeholder=""email@example.com""></div>
                         <div class=""metric""><div class=""metric-label"">Phone</div><input type=""text"" id=""rp-phone"" class=""rp-input"" placeholder=""+385...""></div>
@@ -370,27 +356,27 @@ textarea.rp-input {{ font-family: inherit; }}
                         <div class=""metric""><div class=""metric-label"">National ID</div><input type=""text"" id=""rp-nationalid"" class=""rp-input"" placeholder=""OIB / SSN / etc.""></div>
                         <div class=""metric""><div class=""metric-label"">I am the...</div><select id=""rp-relationship"" class=""rp-input""><option>owner</option><option>authorized user</option><option>administrator</option><option>other</option></select></div>
                     </div>
-                    <div style=""margin-bottom:16px"">
+                    <div style=""margin-bottom:14px"">
                         <div class=""metric-label"" style=""margin-bottom:4px"">Narrative (what happened)</div>
                         <textarea id=""rp-narrative"" class=""rp-input"" rows=""4"" placeholder=""Describe the incident..."" style=""width:100%;resize:vertical""></textarea>
                     </div>
-                    <div class=""metric-grid"" style=""margin-bottom:16px"">
+                    <div class=""metric-grid"" style=""margin-bottom:14px"">
                         <div class=""metric""><div class=""metric-label"">Financial Loss</div><input type=""text"" id=""rp-loss"" class=""rp-input"" placeholder=""e.g. 500 EUR""></div>
                         <div class=""metric""><div class=""metric-label"">Data Affected</div><input type=""text"" id=""rp-data"" class=""rp-input"" placeholder=""e.g. passwords, photos""></div>
                         <div class=""metric""><div class=""metric-label"">Other Harm</div><input type=""text"" id=""rp-harm"" class=""rp-input"" placeholder=""e.g. emotional distress""></div>
                     </div>
-                    <div style=""margin-bottom:16px;font-size:13px;color:var(--text-secondary)"">
-                        <label style=""display:block;margin-bottom:6px;cursor:pointer""><input type=""checkbox"" id=""rp-consent1""> I want to file a formal complaint with law enforcement / the national portal.</label>
-                        <label style=""display:block;margin-bottom:6px;cursor:pointer""><input type=""checkbox"" id=""rp-consent2""> I authorize investigators to examine this evidence pack and quarantined samples.</label>
-                        <label style=""display:block;margin-bottom:6px;cursor:pointer""><input type=""checkbox"" id=""rp-consent3""> I understand false statements to authorities may be a criminal offense.</label>
+                    <div style=""margin-bottom:14px;font-size:12px;color:#9aa0a6"">
+                        <label style=""display:block;margin-bottom:5px;cursor:pointer""><input type=""checkbox"" id=""rp-consent1""> I want to file a formal complaint with law enforcement / the national portal.</label>
+                        <label style=""display:block;margin-bottom:5px;cursor:pointer""><input type=""checkbox"" id=""rp-consent2""> I authorize investigators to examine this evidence pack and quarantined samples.</label>
+                        <label style=""display:block;margin-bottom:5px;cursor:pointer""><input type=""checkbox"" id=""rp-consent3""> I understand false statements to authorities may be a criminal offense.</label>
                     </div>
                     <div style=""display:flex;gap:8px;flex-wrap:wrap"">
                         <button class=""btn btn-primary"" onclick=""saveAffidavit()"">Save Affidavit</button>
-                        <button class=""btn"" style=""background:var(--success);border-color:var(--success);color:#fff"" onclick=""sendReport()"">Send Report to Police</button>
+                        <button class=""btn"" style=""background:#81c995;border-color:#81c995;color:#202124;font-weight:600"" onclick=""sendReport()"">Send Report to Police</button>
                         <button class=""btn"" onclick=""openPackFolder()"">Open Pack Folder</button>
                         <button class=""btn"" onclick=""verifyIntegrity()"">Verify Integrity</button>
                     </div>
-                    <div id=""rp-status"" style=""margin-top:8px;font-size:12px;color:var(--text-muted)""></div>
+                    <div id=""rp-status"" style=""margin-top:8px;font-size:11px;color:#9aa0a6""></div>
                 </div>
             </div>
         </div>
@@ -400,53 +386,45 @@ textarea.rp-input {{ font-family: inherit; }}
             <div class=""panel"">
                 <div class=""panel-header""><h3>Digital Coercion Defense</h3></div>
                 <div class=""panel-body"">
-                    <p style=""color:var(--text-secondary);font-size:13px;margin-bottom:16px"">
+                    <p style=""color:#9aa0a6;font-size:12px;margin-bottom:14px"">
                         Sentinel does not identify people as offenders and does not read your chats.
                         It watches THIS Windows PC for tools predators and stalkers often use:
                     </p>
-                    <div class=""metric-grid"" style=""margin-bottom:16px"">
-                        <div class=""metric""><div class=""metric-label"">Remote Control</div><div class=""metric-value"" style=""font-size:13px"">RATs, abused AnyDesk/TeamViewer, reverse shells</div></div>
-                        <div class=""metric""><div class=""metric-label"">Covert Surveillance</div><div class=""metric-value"" style=""font-size:13px"">Screen/camera/input capture + persistence</div></div>
-                        <div class=""metric""><div class=""metric-label"">Session Theft</div><div class=""metric-value"" style=""font-size:13px"">Browser, messaging, email, social, games, banking</div></div>
-                        <div class=""metric""><div class=""metric-label"">Extortion Malware</div><div class=""metric-value"" style=""font-size:13px"">Exfiltration + C2 chains</div></div>
+                    <div class=""metric-grid"" style=""margin-bottom:14px"">
+                        <div class=""metric""><div class=""metric-label"">Remote Control</div><div class=""metric-value"" style=""font-size:12px"">RATs, abused AnyDesk/TeamViewer, reverse shells</div></div>
+                        <div class=""metric""><div class=""metric-label"">Covert Surveillance</div><div class=""metric-value"" style=""font-size:12px"">Screen/camera/input capture + persistence</div></div>
+                        <div class=""metric""><div class=""metric-label"">Session Theft</div><div class=""metric-value"" style=""font-size:12px"">Browser, messaging, email, social, games, banking</div></div>
+                        <div class=""metric""><div class=""metric-label"">Extortion Malware</div><div class=""metric-value"" style=""font-size:12px"">Exfiltration + C2 chains</div></div>
                     </div>
-                    <p style=""color:var(--text-secondary);font-size:13px;margin-bottom:16px"">
-                        Scope is platform-agnostic: Discord, email, social apps, browsers, games, voice/video — anything that leaves host traces. Not chat moderation.
-                    </p>
-                    <p style=""color:var(--text-secondary);font-size:13px;margin-bottom:16px"">
+                    <p style=""color:#9aa0a6;font-size:12px;margin-bottom:14px"">
                         When a multi-signal chain confirms, Sentinel kills/quarantines and writes a sealed evidence pack.
                     </p>
-                    <div class=""panel"" style=""background:var(--bg-tertiary);margin-bottom:16px"">
-                        <div class=""panel-header""><h3 style=""color:var(--warning)"">What You Should Still Do</h3></div>
-                        <div class=""panel-body"" style=""font-size:13px;color:var(--text-secondary)"">
-                            <ol style=""padding-left:20px;margin:0"">
-                                <li style=""margin-bottom:6px"">Revoke sessions on important accounts (email, messaging, social, bank).</li>
-                                <li style=""margin-bottom:6px"">Turn on 2FA everywhere you can.</li>
-                                <li style=""margin-bottom:6px"">Block and report abusers on the platform — Sentinel cannot ban them.</li>
-                                <li style=""margin-bottom:6px"">Use Report to Police with a sealed pack for device crimes.</li>
-                                <li style=""margin-bottom:6px"">If you are in danger offline, contact emergency services / local support.</li>
+                    <div class=""panel"" style=""background:#35363a;margin-bottom:14px"">
+                        <div class=""panel-header""><h3 style=""color:#fdd663"">What You Should Still Do</h3></div>
+                        <div class=""panel-body"" style=""font-size:12px;color:#9aa0a6"">
+                            <ol style=""padding-left:18px;margin:0"">
+                                <li style=""margin-bottom:5px"">Revoke sessions on important accounts (email, messaging, social, bank).</li>
+                                <li style=""margin-bottom:5px"">Turn on 2FA everywhere you can.</li>
+                                <li style=""margin-bottom:5px"">Block and report abusers on the platform.</li>
+                                <li style=""margin-bottom:5px"">Use Report to Police with a sealed pack for device crimes.</li>
+                                <li style=""margin-bottom:5px"">If you are in danger offline, contact emergency services.</li>
                             </ol>
                         </div>
                     </div>
-                    <div class=""panel"" style=""background:rgba(255,180,60,0.05);border-color:var(--warning)"">
-                        <div class=""panel-header""><h3 style=""color:var(--warning)"">Hardened Mode</h3></div>
+                    <div class=""panel"" style=""background:rgba(253,214,99,0.04);border-color:#fdd663"">
+                        <div class=""panel-header""><h3 style=""color:#fdd663"">Hardened Mode</h3></div>
                         <div class=""panel-body"">
-                            <p style=""font-size:13px;color:var(--text-secondary);margin-bottom:12px"">
+                            <p style=""font-size:12px;color:#9aa0a6;margin-bottom:10px"">
                                 Enables aggressive network lockdown: IPSec blocks all non-essential ports, ASR Block rules enforced, RPC/DCOM firewalled.
-                                <strong>USE THIS</strong> when under active attack or on an untrusted network.
-                                Will block RDP, SMB, SSH, DISM. Browsers/apps/games unaffected.
+                                <strong style=""color:#e8eaed"">USE THIS</strong> when under active attack or on an untrusted network.
                             </p>
                             <button class=""btn btn-danger"" id=""btn-harden"" onclick=""toggleHardenedMode()"">Enable Hardened Mode</button>
-                            <span id=""harden-status"" style=""margin-left:12px;font-size:12px;color:var(--text-muted)""></span>
-                            <p style=""font-size:11px;color:var(--text-muted);margin-top:8px"">
-                                Requires service restart to take effect. If toggle fails, use elevated CLI:
-                                <code>Sentinel.Service.exe --set-config RestrictivePortHardening=true</code>
+                            <span id=""harden-status"" style=""margin-left:10px;font-size:11px;color:#9aa0a6""></span>
+                            <p style=""font-size:10px;color:#9aa0a6;margin-top:6px"">
+                                Requires service restart. CLI: <code style=""color:#8ab4f8"">Sentinel.Service.exe --set-config RestrictivePortHardening=true</code>
                             </p>
                         </div>
                     </div>
-                    <p style=""color:var(--text-muted);font-size:12px;margin-top:16px"">
-                        Honest limit: Sentinel cannot stop offline assault or prove someone's identity from a Discord ban reason. It stops and documents machine-side abuse tools.
-                    </p>
                 </div>
             </div>
         </div>
@@ -456,22 +434,19 @@ textarea.rp-input {{ font-family: inherit; }}
             <div class=""panel"">
                 <div class=""panel-header""><h3>Quick Access</h3></div>
                 <div class=""panel-body"">
-                    <p style=""color:var(--text-secondary);font-size:13px;margin-bottom:16px"">
-                        These paths are on your local machine. Copy them to open in Explorer.
-                    </p>
                     <div class=""metric-grid"">
-                        <div class=""metric""><div class=""metric-label"">Data Folder</div><div class=""metric-value"" style=""font-size:12px;font-family:monospace"">%ProgramData%\Sentinel</div></div>
-                        <div class=""metric""><div class=""metric-label"">Event Log</div><div class=""metric-value"" style=""font-size:12px;font-family:monospace"">%ProgramData%\Sentinel\events.jsonl</div></div>
-                        <div class=""metric""><div class=""metric-label"">Quarantine</div><div class=""metric-value"" style=""font-size:12px;font-family:monospace"">%ProgramData%\Sentinel\Quarantine</div></div>
-                        <div class=""metric""><div class=""metric-label"">Evidence Packs</div><div class=""metric-value"" style=""font-size:12px;font-family:monospace"">%ProgramData%\Sentinel\IncidentReports</div></div>
-                        <div class=""metric""><div class=""metric-label"">Install Folder</div><div class=""metric-value"" style=""font-size:12px;font-family:monospace"">C:\Program Files (x86)\Sentinel</div></div>
-                        <div class=""metric""><div class=""metric-label"">Startup Trace</div><div class=""metric-value"" style=""font-size:12px;font-family:monospace"">%ProgramData%\Sentinel\startup_trace.log</div></div>
+                        <div class=""metric""><div class=""metric-label"">Data Folder</div><div class=""metric-value"" style=""font-size:11px;font-family:Consolas,monospace"">%ProgramData%\Sentinel</div></div>
+                        <div class=""metric""><div class=""metric-label"">Event Log</div><div class=""metric-value"" style=""font-size:11px;font-family:Consolas,monospace"">%ProgramData%\Sentinel\events.jsonl</div></div>
+                        <div class=""metric""><div class=""metric-label"">Quarantine</div><div class=""metric-value"" style=""font-size:11px;font-family:Consolas,monospace"">%ProgramData%\Sentinel\Quarantine</div></div>
+                        <div class=""metric""><div class=""metric-label"">Evidence Packs</div><div class=""metric-value"" style=""font-size:11px;font-family:Consolas,monospace"">%ProgramData%\Sentinel\IncidentReports</div></div>
+                        <div class=""metric""><div class=""metric-label"">Install Folder</div><div class=""metric-value"" style=""font-size:11px;font-family:Consolas,monospace"">C:\Program Files (x86)\Sentinel</div></div>
+                        <div class=""metric""><div class=""metric-label"">Startup Trace</div><div class=""metric-value"" style=""font-size:11px;font-family:Consolas,monospace"">%ProgramData%\Sentinel\startup_trace.log</div></div>
                     </div>
                 </div>
             </div>
             <div class=""panel"">
                 <div class=""panel-header""><h3>Diagnostics</h3><button class=""btn"" onclick=""refreshDiagnostics()"">Refresh</button></div>
-                <div class=""panel-body""><pre id=""tools-diag"" style=""font-size:12px;color:var(--text-secondary);white-space:pre-wrap;margin:0"">Loading...</pre></div>
+                <div class=""panel-body""><pre id=""tools-diag"" style=""font-size:11px;color:#9aa0a6;white-space:pre-wrap;margin:0"">Loading...</pre></div>
             </div>
         </div>
 
@@ -480,12 +455,12 @@ textarea.rp-input {{ font-family: inherit; }}
             <div class=""panel"">
                 <div class=""panel-header""><h3>About Sentinel</h3></div>
                 <div class=""panel-body"">
-                    <p style=""margin-bottom:12px""><strong>Sentinel</strong> is a userland IDS/EDR for Windows built to battle hackers on machines people actually use.</p>
+                    <p style=""margin-bottom:12px;font-size:13px""><strong>Sentinel</strong> is a userland IDS/EDR for Windows built to battle hackers on machines people actually use.</p>
                     <div class=""metric-grid"">
-                        <div class=""metric""><div class=""metric-label"">Architecture</div><div class=""metric-value"" style=""font-size:14px"">Two-process (Service + Agent)</div></div>
-                        <div class=""metric""><div class=""metric-label"">Framework</div><div class=""metric-value"" style=""font-size:14px"">.NET Framework 4.8</div></div>
-                        <div class=""metric""><div class=""metric-label"">Platform</div><div class=""metric-value"" style=""font-size:14px"">Windows x64</div></div>
-                        <div class=""metric""><div class=""metric-label"">License</div><div class=""metric-value"" style=""font-size:14px"">MIT</div></div>
+                        <div class=""metric""><div class=""metric-label"">Architecture</div><div class=""metric-value"" style=""font-size:13px"">Two-process (Service + Agent)</div></div>
+                        <div class=""metric""><div class=""metric-label"">Framework</div><div class=""metric-value"" style=""font-size:13px"">.NET Framework 4.8</div></div>
+                        <div class=""metric""><div class=""metric-label"">Platform</div><div class=""metric-value"" style=""font-size:13px"">Windows x64</div></div>
+                        <div class=""metric""><div class=""metric-label"">License</div><div class=""metric-value"" style=""font-size:13px"">MIT</div></div>
                     </div>
                 </div>
             </div>
@@ -494,58 +469,78 @@ textarea.rp-input {{ font-family: inherit; }}
 </main>
 </div>
 <script>
-const API = '';
-let CSRF = '';
-let ws = null;
-let eventBuffer = [];
-let chartData = new Array(60).fill(0);
-let chartIdx = 0;
-let scanPolling = null;
+// ═══════════════════════════════════════════════════════════════════
+// Sentinel Dashboard — IE11-compatible JavaScript (ES5 only)
+// No arrow functions, no const/let, no template literals, no fetch,
+// no async/await, no URLSearchParams, no Array.from needed.
+// ═══════════════════════════════════════════════════════════════════
 
-// v2.2.0: token arrives only via tray launch URL (?token=), then lives in sessionStorage.
-// GET / does not embed secrets. Referer is never used as authentication.
+var API = '';
+var CSRF = '';
+var ws = null;
+var eventBuffer = [];
+var chartData = [];
+var chartIdx = 0;
+var scanPolling = null;
+var TOKEN = '';
+var wsRetries = 0;
+var eventPollInterval = null;
+
+// Initialize chart data
+(function() {{
+    for (var i = 0; i < 60; i++) chartData.push(0);
+}})();
+
+// v2.2.0: token arrives via tray launch URL (?token=), then lives in sessionStorage.
 function getToken() {{
     try {{
-        const params = new URLSearchParams(location.search);
-        const q = params.get('token');
-        if (q) {{
-            sessionStorage.setItem('sentinel_token', q);
-            params.delete('token');
-            const qs = params.toString();
-            history.replaceState({{}}, '', location.pathname + (qs ? '?' + qs : '') + location.hash);
-            return q;
+        var search = window.location.search;
+        var match = search.match(/[?&]token=([^&]*)/);
+        if (match) {{
+            var t = decodeURIComponent(match[1]);
+            try {{ sessionStorage.setItem('sentinel_token', t); }} catch(e) {{}}
+            // Strip token from URL
+            var clean = search.replace(/([?&])token=[^&]*/, '$1').replace(/^[?&]/, '?').replace(/[?&]$/, '');
+            try {{ history.replaceState({{}}, '', window.location.pathname + clean + window.location.hash); }} catch(e) {{}}
+            return t;
         }}
-        return sessionStorage.getItem('sentinel_token') || '';
+        try {{ return sessionStorage.getItem('sentinel_token') || ''; }} catch(e) {{ return ''; }}
     }} catch (e) {{ return ''; }}
 }}
-const TOKEN = getToken();
+TOKEN = getToken();
 
-function authHeaders(extra) {{
-    const h = Object.assign({{ 'Authorization': 'Bearer ' + TOKEN }}, extra || {{}});
-    return h;
+// ── XHR-based API helper (IE11 compatible) ─────────────────────────
+function apiCall(path, opts, callback) {{
+    opts = opts || {{}};
+    var method = opts.method || 'GET';
+    var xhr = new XMLHttpRequest();
+    xhr.open(method, API + path, true);
+    xhr.setRequestHeader('Authorization', 'Bearer ' + TOKEN);
+    if (opts.headers) {{
+        for (var key in opts.headers) {{
+            if (opts.headers.hasOwnProperty(key)) {{
+                xhr.setRequestHeader(key, opts.headers[key]);
+            }}
+        }}
+    }}
+    xhr.onreadystatechange = function() {{
+        if (xhr.readyState === 4) {{
+            var data = null;
+            try {{ data = JSON.parse(xhr.responseText); }} catch(e) {{ data = {{ ok: false, error: 'Parse error' }}; }}
+            if (callback) callback(data);
+        }}
+    }};
+    xhr.onerror = function() {{
+        if (callback) callback({{ ok: false, error: 'Network error' }});
+    }};
+    if (opts.body) {{
+        xhr.send(opts.body);
+    }} else {{
+        xhr.send();
+    }}
 }}
 
-// Navigation
-document.querySelectorAll('.nav-item').forEach(item => {{
-    item.addEventListener('click', () => {{
-        document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-        document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-        item.classList.add('active');
-        const page = item.dataset.page;
-        document.getElementById('page-' + page).classList.add('active');
-        document.getElementById('page-title').textContent = item.textContent.trim();
-        if (page === 'ops') loadOps();
-        if (page === 'quarantine') loadQuarantine();
-        if (page === 'scan') checkScanStatus();
-        if (page === 'report') loadReportPacks();
-        if (page === 'safety') checkHardenedMode();
-        if (page === 'tools') refreshDiagnostics();
-    }});
-}});
-
-// v2.1.9 SECURITY: HTML entity encoding to prevent stored XSS via detection event fields.
-// All user-controlled data (process names, rule names, file paths, evidence strings)
-// MUST be passed through esc() before interpolation into innerHTML templates.
+// ── XSS-safe HTML encoding ─────────────────────────────────────────
 function esc(s) {{
     if (s == null) return '';
     var d = document.createElement('div');
@@ -553,202 +548,248 @@ function esc(s) {{
     return d.innerHTML;
 }}
 
-// API helpers — always send bearer. CSRF is fetched on demand for POSTs.
-async function api(path, opts) {{
-    opts = opts || {{}};
-    opts.headers = authHeaders(opts.headers);
-    try {{
-        const res = await fetch(API + path, opts);
-        return await res.json();
-    }} catch(e) {{ return {{ ok: false, error: e.message }}; }}
+// ── Navigation ─────────────────────────────────────────────────────
+(function() {{
+    var navItems = document.getElementById('sidebar-nav').getElementsByClassName('nav-item');
+    var pages = document.getElementsByClassName('page');
+
+    function handleNavClick(idx) {{
+        return function() {{
+            var i;
+            for (i = 0; i < navItems.length; i++) {{
+                navItems[i].className = 'nav-item';
+            }}
+            for (i = 0; i < pages.length; i++) {{
+                pages[i].className = 'page';
+            }}
+            navItems[idx].className = 'nav-item active';
+            var page = navItems[idx].getAttribute('data-page');
+            var pageEl = document.getElementById('page-' + page);
+            if (pageEl) pageEl.className = 'page active';
+            document.getElementById('page-title').textContent = navItems[idx].textContent.replace(/^\s+|\s+$/g, '');
+            // Load page-specific data
+            if (page === 'ops') loadOps();
+            if (page === 'quarantine') loadQuarantine();
+            if (page === 'scan') checkScanStatus();
+            if (page === 'report') loadReportPacks();
+            if (page === 'safety') checkHardenedMode();
+            if (page === 'tools') refreshDiagnostics();
+        }};
+    }}
+
+    for (var i = 0; i < navItems.length; i++) {{
+        navItems[i].onclick = handleNavClick(i);
+    }}
+}})();
+
+// ── CSRF helper ────────────────────────────────────────────────────
+function ensureCsrf(callback) {{
+    if (CSRF) {{ callback(CSRF); return; }}
+    apiCall('/api/csrf', {{}}, function(d) {{
+        CSRF = (d && d.token) ? d.token : '';
+        callback(CSRF);
+    }});
 }}
 
-async function ensureCsrf() {{
-    if (CSRF) return CSRF;
-    const d = await api('/api/csrf');
-    CSRF = (d && d.token) ? d.token : '';
-    return CSRF;
-}}
-
-// Status
-async function loadStatus() {{
-    const data = await api('/api/status');
-    if (data && data.ok) {{
-        document.getElementById('version').textContent = 'v' + data.version;
-        const badge = document.getElementById('status-badge');
-        const text = document.getElementById('status-text');
-        if (data.serviceRunning) {{
-            badge.className = 'status-badge active';
-            text.textContent = 'Protection Active';
-            document.getElementById('ov-status').textContent = 'Active';
-            document.getElementById('ov-status').className = 'card-value success';
-        }} else {{
-            badge.className = 'status-badge inactive';
-            text.textContent = 'Service Stopped';
-            document.getElementById('ov-status').textContent = 'Stopped';
-            document.getElementById('ov-status').className = 'card-value danger';
+// ── Status ─────────────────────────────────────────────────────────
+function loadStatus() {{
+    apiCall('/api/status', {{}}, function(data) {{
+        if (data && data.ok) {{
+            document.getElementById('version').textContent = 'v' + data.version;
+            var badge = document.getElementById('status-badge');
+            var text = document.getElementById('status-text');
+            if (data.serviceRunning) {{
+                badge.className = 'status-badge active';
+                text.textContent = 'Protection Active';
+                document.getElementById('ov-status').textContent = 'Active';
+                document.getElementById('ov-status').className = 'card-value success';
+            }} else {{
+                badge.className = 'status-badge inactive';
+                text.textContent = 'Service Stopped';
+                document.getElementById('ov-status').textContent = 'Stopped';
+                document.getElementById('ov-status').className = 'card-value danger';
+            }}
         }}
-    }}
-    const health = await api('/api/health');
-    if (health && health.ok) {{
-        document.getElementById('ov-monitors').textContent =
-            health.monitorsRunning + '/' + health.monitorsRegistered + ' monitors running';
-    }}
+    }});
+    apiCall('/api/health', {{}}, function(health) {{
+        if (health && health.ok) {{
+            document.getElementById('ov-monitors').textContent =
+                health.monitorsRunning + '/' + health.monitorsRegistered + ' monitors running';
+        }}
+    }});
 }}
 
-// Events
-async function refreshEvents() {{
-    const data = await api('/api/events?count=20');
-    if (data && data.ok) {{
-        renderEvents(data.events, 'ov-events');
-        // Count detections
-        let detCount = 0;
-        data.events.forEach(e => {{ if (e.type === 'detection') detCount++; }});
-        document.getElementById('ov-detections').textContent = detCount;
-    }}
+// ── Events ─────────────────────────────────────────────────────────
+function refreshEvents() {{
+    apiCall('/api/events?count=20', {{}}, function(data) {{
+        if (data && data.ok) {{
+            renderEvents(data.events, 'ov-events');
+            var detCount = 0;
+            if (data.events) {{
+                for (var i = 0; i < data.events.length; i++) {{
+                    if (data.events[i].type === 'detection') detCount++;
+                }}
+            }}
+            document.getElementById('ov-detections').textContent = detCount;
+        }}
+    }});
 }}
 
 function renderEvents(events, containerId) {{
-    const container = document.getElementById(containerId);
+    var container = document.getElementById(containerId);
     if (!events || events.length === 0) {{
         container.innerHTML = '<div class=""empty-state"">No events recorded yet</div>';
         return;
     }}
-    container.innerHTML = events.map(ev => {{
-        let parsed;
-        try {{ parsed = JSON.parse(ev.data || ev); }} catch {{ parsed = ev; }}
-        const type = parsed.type || ev.type || 'info';
-        const ts = parsed.timestamp || ev.timestamp || '';
-        let title = '', detail = '';
+    var html = '';
+    for (var i = 0; i < events.length; i++) {{
+        var ev = events[i];
+        var parsed;
+        try {{ parsed = JSON.parse(ev.data || JSON.stringify(ev)); }} catch(e) {{ parsed = ev; }}
+        var type = parsed.type || ev.type || 'info';
+        var ts = parsed.timestamp || ev.timestamp || '';
+        var title = '', detail = '';
         if (parsed.data) {{
-            const d = parsed.data;
+            var d = parsed.data;
             title = d.RuleName || d.ActionTaken || type;
             detail = d.ProcessName ? (d.ProcessName + ' (PID ' + d.ProcessId + ')') : (d.Evidence || '');
         }} else {{
             title = type;
         }}
-        const iconClass = type === 'detection' ? 'detection' : type === 'response' ? 'response' : 'info';
-        const icon = type === 'detection' ? '!' : type === 'response' ? '\u2713' : '\u2022';
-        const timeStr = ts ? new Date(ts).toLocaleTimeString() : '';
-        return `<div class=""event-item""><div class=""event-icon ${{iconClass}}"">${{icon}}</div><div class=""event-body""><div class=""event-title"">${{esc(title)}}</div><div class=""event-detail"">${{esc(detail)}}</div></div><div class=""event-time"">${{esc(timeStr)}}</div></div>`;
-    }}).join('');
+        var iconClass = type === 'detection' ? 'detection' : type === 'response' ? 'response' : 'info';
+        var icon = type === 'detection' ? '!' : type === 'response' ? '\u2713' : '\u2022';
+        var timeStr = '';
+        if (ts) {{ try {{ timeStr = new Date(ts).toLocaleTimeString(); }} catch(e) {{}} }}
+        html += '<div class=""event-item""><div class=""event-icon ' + iconClass + '"">' + icon + '</div><div class=""event-body""><div class=""event-title"">' + esc(title) + '</div><div class=""event-detail"">' + esc(detail) + '</div></div><div class=""event-time"">' + esc(timeStr) + '</div></div>';
+    }}
+    container.innerHTML = html;
 }}
 
-// WebSocket
-let wsRetries = 0;
+// ── WebSocket ──────────────────────────────────────────────────────
 function connectWs() {{
     try {{
+        if (!window.WebSocket) {{ startEventPolling(); return; }}
         ws = new WebSocket('ws://localhost:19845/ws/events?token=' + encodeURIComponent(TOKEN));
-        ws.onopen = () => {{
+        ws.onopen = function() {{
             wsRetries = 0;
-            document.getElementById('ev-list').innerHTML = '<div class=""empty-state"">Connected — waiting for events...</div>';
+            document.getElementById('ev-list').innerHTML = '<div class=""empty-state"">Connected \u2014 waiting for events...</div>';
         }};
-        ws.onmessage = (msg) => {{
+        ws.onmessage = function(msg) {{
             eventBuffer.unshift(msg.data);
             if (eventBuffer.length > 200) eventBuffer.pop();
-            // Update live events page
-            const evList = document.getElementById('ev-list');
-            if (document.getElementById('page-events').classList.contains('active')) {{
-                const events = eventBuffer.slice(0, 50).map(d => ({{ data: d, type: 'info' }}));
-                renderEvents(events, 'ev-list');
+            var evList = document.getElementById('ev-list');
+            var pageEvents = document.getElementById('page-events');
+            if (pageEvents.className.indexOf('active') >= 0) {{
+                var events = eventBuffer.slice(0, 50);
+                var mapped = [];
+                for (var i = 0; i < events.length; i++) mapped.push({{ data: events[i], type: 'info' }});
+                renderEvents(mapped, 'ev-list');
                 document.getElementById('ev-count').textContent = eventBuffer.length + ' events';
             }}
-            // Update chart
             try {{
-                const parsed = JSON.parse(msg.data);
+                var parsed = JSON.parse(msg.data);
                 if (parsed.type === 'detection') chartData[chartIdx % 60]++;
-            }} catch {{}}
+            }} catch(e) {{}}
         }};
-        ws.onclose = () => {{
+        ws.onclose = function() {{
             wsRetries++;
-            if (wsRetries > 3) {{
-                // Fall back to polling
-                startEventPolling();
-            }} else {{
-                setTimeout(connectWs, 3000);
-            }}
+            if (wsRetries > 3) {{ startEventPolling(); }}
+            else {{ setTimeout(connectWs, 3000); }}
         }};
-        ws.onerror = () => ws.close();
-    }} catch {{
+        ws.onerror = function() {{ if (ws) ws.close(); }};
+    }} catch(e) {{
         wsRetries++;
         if (wsRetries > 3) startEventPolling();
         else setTimeout(connectWs, 3000);
     }}
 }}
 
-let eventPollInterval = null;
 function startEventPolling() {{
     document.getElementById('ev-list').innerHTML = '<div class=""empty-state"">Live polling (WebSocket unavailable)...</div>';
     if (eventPollInterval) return;
-    eventPollInterval = setInterval(async () => {{
-        const data = await api('/api/events?count=30');
-        if (data && data.ok && data.events) {{
-            const evList = document.getElementById('ev-list');
-            if (document.getElementById('page-events').classList.contains('active')) {{
-                renderEvents(data.events, 'ev-list');
-                document.getElementById('ev-count').textContent = data.events.length + ' events (polling)';
+    eventPollInterval = setInterval(function() {{
+        apiCall('/api/events?count=30', {{}}, function(data) {{
+            if (data && data.ok && data.events) {{
+                var pageEvents = document.getElementById('page-events');
+                if (pageEvents.className.indexOf('active') >= 0) {{
+                    renderEvents(data.events, 'ev-list');
+                    document.getElementById('ev-count').textContent = data.events.length + ' events (polling)';
+                }}
             }}
-        }}
+        }});
     }}, 3000);
 }}
 
-// Chart
+// ── Chart ──────────────────────────────────────────────────────────
 function updateChart() {{
-    const container = document.getElementById('ov-chart');
-    const max = Math.max(...chartData, 1);
-    container.innerHTML = chartData.map(v =>
-        `<div class=""bar"" style=""height:${{Math.max(2, (v/max)*100)}}%"" title=""${{v}}""></div>`
-    ).join('');
+    var container = document.getElementById('ov-chart');
+    var max = 1;
+    for (var i = 0; i < chartData.length; i++) {{ if (chartData[i] > max) max = chartData[i]; }}
+    var html = '';
+    for (var j = 0; j < chartData.length; j++) {{
+        var h = Math.max(2, (chartData[j] / max) * 100);
+        html += '<div class=""bar"" style=""height:' + h + '%"" title=""' + chartData[j] + '""></div>';
+    }}
+    container.innerHTML = html;
     chartIdx++;
     chartData[chartIdx % 60] = 0;
 }}
 
-// Ops
-async function loadOps() {{
-    const data = await api('/api/ops');
-    const grid = document.getElementById('ops-grid');
-    if (data && (data.ok || data.ops)) {{
-        const ops = data.ops || data;
-        const metrics = [
-            ['Events/sec', ops.EventsPerSecond || ops.eventsPerSecond || 0],
-            ['Detections/min', ops.DetectionsPerMinute || ops.detectionsPerMinute || 0],
-            ['Drop Rate', (ops.DropRate || ops.dropRate || 0) + '%'],
-            ['Correlation Latency', (ops.CorrelationLatencyMs || ops.correlationLatencyMs || 0) + 'ms'],
-            ['Monitors', ops.RegisteredMonitors || ops.registeredMonitors || 0],
-            ['Plugins', ops.PluginCount || ops.pluginCount || 0],
-            ['Weighted Correlation', ops.WeightedCorrelationEnabled || ops.weightedCorrelationEnabled ? 'Enabled' : 'Disabled'],
-            ['Product Version', ops.ProductVersion || ops.productVersion || '—'],
-        ];
-        grid.innerHTML = metrics.map(([label, value]) =>
-            `<div class=""metric""><div class=""metric-label"">${{esc(label)}}</div><div class=""metric-value"">${{esc(value)}}</div></div>`
-        ).join('');
-        document.getElementById('ov-rate').textContent = ops.EventsPerSecond || ops.eventsPerSecond || 0;
-    }} else {{
-        grid.innerHTML = '<div class=""empty-state"">Unable to reach Sentinel Service</div>';
-    }}
+// ── Ops ────────────────────────────────────────────────────────────
+function loadOps() {{
+    apiCall('/api/ops', {{}}, function(data) {{
+        var grid = document.getElementById('ops-grid');
+        if (data && (data.ok || data.ops)) {{
+            var ops = data.ops || data;
+            var metrics = [
+                ['Events/sec', ops.EventsPerSecond || ops.eventsPerSecond || 0],
+                ['Detections/min', ops.DetectionsPerMinute || ops.detectionsPerMinute || 0],
+                ['Drop Rate', (ops.DropRate || ops.dropRate || 0) + '%'],
+                ['Correlation Latency', (ops.CorrelationLatencyMs || ops.correlationLatencyMs || 0) + 'ms'],
+                ['Monitors', ops.RegisteredMonitors || ops.registeredMonitors || 0],
+                ['Plugins', ops.PluginCount || ops.pluginCount || 0],
+                ['Weighted Correlation', (ops.WeightedCorrelationEnabled || ops.weightedCorrelationEnabled) ? 'Enabled' : 'Disabled'],
+                ['Product Version', ops.ProductVersion || ops.productVersion || '\u2014']
+            ];
+            var html = '';
+            for (var i = 0; i < metrics.length; i++) {{
+                html += '<div class=""metric""><div class=""metric-label"">' + esc(metrics[i][0]) + '</div><div class=""metric-value"">' + esc(String(metrics[i][1])) + '</div></div>';
+            }}
+            grid.innerHTML = html;
+            document.getElementById('ov-rate').textContent = ops.EventsPerSecond || ops.eventsPerSecond || 0;
+        }} else {{
+            grid.innerHTML = '<div class=""empty-state"">Unable to reach Sentinel Service</div>';
+        }}
+    }});
 }}
 
-// Quarantine
-async function loadQuarantine() {{
-    const data = await api('/api/quarantine');
-    const container = document.getElementById('q-list');
-    if (data && data.ok && data.items && data.items.length > 0) {{
-        container.innerHTML = data.items.map(item => {{
-            const name = item.OriginalName || item.originalName || item.Name || 'Unknown';
-            const path = item.OriginalPath || item.originalPath || '';
-            const date = item.QuarantinedAt || item.quarantinedAt || '';
-            return `<div class=""quarantine-item""><div><div style=""font-weight:500"">${{esc(name)}}</div><div class=""q-path"">${{esc(path)}}</div></div><div class=""event-time"">${{date ? new Date(date).toLocaleDateString() : ''}}</div></div>`;
-        }}).join('');
-        document.getElementById('ov-quarantine').textContent = data.items.length;
-    }} else {{
-        container.innerHTML = '<div class=""empty-state"">No files in quarantine</div>';
-        document.getElementById('ov-quarantine').textContent = '0';
-    }}
+// ── Quarantine ─────────────────────────────────────────────────────
+function loadQuarantine() {{
+    apiCall('/api/quarantine', {{}}, function(data) {{
+        var container = document.getElementById('q-list');
+        if (data && data.ok && data.items && data.items.length > 0) {{
+            var html = '';
+            for (var i = 0; i < data.items.length; i++) {{
+                var item = data.items[i];
+                var name = item.OriginalName || item.originalName || item.Name || 'Unknown';
+                var path = item.OriginalPath || item.originalPath || '';
+                var date = item.QuarantinedAt || item.quarantinedAt || '';
+                var dateStr = '';
+                if (date) {{ try {{ dateStr = new Date(date).toLocaleDateString(); }} catch(e) {{}} }}
+                html += '<div class=""quarantine-item""><div><div style=""font-weight:500"">' + esc(name) + '</div><div class=""q-path"">' + esc(path) + '</div></div><div class=""event-time"">' + esc(dateStr) + '</div></div>';
+            }}
+            container.innerHTML = html;
+            document.getElementById('ov-quarantine').textContent = data.items.length;
+        }} else {{
+            container.innerHTML = '<div class=""empty-state"">No files in quarantine</div>';
+            document.getElementById('ov-quarantine').textContent = '0';
+        }}
+    }});
 }}
 
-// Scan
-async function startScan() {{
-    const btn = document.getElementById('btn-scan');
+// ── Scan ───────────────────────────────────────────────────────────
+function startScan() {{
+    var btn = document.getElementById('btn-scan');
     btn.disabled = true;
     btn.textContent = 'Scanning...';
     document.getElementById('scan-progress').style.display = 'block';
@@ -756,102 +797,112 @@ async function startScan() {{
     document.getElementById('sc-status').textContent = 'Running';
     document.getElementById('sc-status').className = 'card-value warning';
 
-    await ensureCsrf();
-    await api('/api/scan', {{ method: 'POST', headers: {{ 'X-CSRF-Token': CSRF }} }});
-
-    // Poll for results
-    scanPolling = setInterval(checkScanStatus, 2000);
+    ensureCsrf(function(token) {{
+        apiCall('/api/scan', {{ method: 'POST', headers: {{ 'X-CSRF-Token': token }} }}, function() {{
+            scanPolling = setInterval(checkScanStatus, 2000);
+        }});
+    }});
 }}
 
-async function checkScanStatus() {{
-    const data = await api('/api/scan/status');
-    if (!data || !data.ok) return;
+function checkScanStatus() {{
+    apiCall('/api/scan/status', {{}}, function(data) {{
+        if (!data || !data.ok) return;
+        var btn = document.getElementById('btn-scan');
+        if (data.status === 'running') {{
+            document.getElementById('scan-progress').style.display = 'block';
+            document.getElementById('scan-bar').style.width = '60%';
+            document.getElementById('sc-status').textContent = 'Running';
+            document.getElementById('sc-status').className = 'card-value warning';
+            btn.disabled = true;
+            btn.textContent = 'Scanning...';
+        }} else if (data.status === 'completed' && data.result) {{
+            if (scanPolling) {{ clearInterval(scanPolling); scanPolling = null; }}
+            var r = data.result;
+            document.getElementById('scan-progress').style.display = 'none';
+            document.getElementById('sc-status').textContent = 'Complete';
+            document.getElementById('sc-status').className = 'card-value success';
+            document.getElementById('sc-time').textContent = 'Duration: ' + (r.DurationMs || r.durationMs || 0) + 'ms';
+            var findings = r.Findings || r.findings || [];
+            document.getElementById('sc-findings').textContent = findings.length;
+            var critical = 0, high = 0;
+            for (var i = 0; i < findings.length; i++) {{
+                var sev = findings[i].Severity || findings[i].severity || 0;
+                if (sev >= 4) critical++;
+                else if (sev === 3) high++;
+            }}
+            document.getElementById('sc-critical').textContent = critical + ' critical, ' + high + ' high';
+            if (critical > 0) document.getElementById('sc-findings').className = 'card-value danger';
+            else if (high > 0) document.getElementById('sc-findings').className = 'card-value warning';
+            else document.getElementById('sc-findings').className = 'card-value success';
 
-    if (data.status === 'running') {{
-        document.getElementById('scan-progress').style.display = 'block';
-        document.getElementById('scan-bar').style.width = '60%';
-        document.getElementById('sc-status').textContent = 'Running';
-        document.getElementById('sc-status').className = 'card-value warning';
-        document.getElementById('btn-scan').disabled = true;
-        document.getElementById('btn-scan').textContent = 'Scanning...';
-    }} else if (data.status === 'completed' && data.result) {{
-        if (scanPolling) {{ clearInterval(scanPolling); scanPolling = null; }}
-        const r = data.result;
-        document.getElementById('scan-progress').style.display = 'none';
-        document.getElementById('sc-status').textContent = 'Complete';
-        document.getElementById('sc-status').className = 'card-value success';
-        document.getElementById('sc-time').textContent = 'Duration: ' + (r.DurationMs || r.durationMs || 0) + 'ms';
-
-        const findings = r.Findings || r.findings || [];
-        document.getElementById('sc-findings').textContent = findings.length;
-        const critical = findings.filter(f => (f.Severity || f.severity) >= 4).length;
-        const high = findings.filter(f => (f.Severity || f.severity) === 3).length;
-        document.getElementById('sc-critical').textContent = critical + ' critical, ' + high + ' high';
-        if (critical > 0) document.getElementById('sc-findings').className = 'card-value danger';
-        else if (high > 0) document.getElementById('sc-findings').className = 'card-value warning';
-        else document.getElementById('sc-findings').className = 'card-value success';
-
-        const container = document.getElementById('scan-findings');
-        if (findings.length === 0) {{
-            container.innerHTML = '<div class=""empty-state"" style=""padding:24px"">No threats found. System appears clean.</div>';
+            var container = document.getElementById('scan-findings');
+            if (findings.length === 0) {{
+                container.innerHTML = '<div class=""empty-state"" style=""padding:20px"">No threats found. System appears clean.</div>';
+            }} else {{
+                findings.sort(function(a, b) {{ return (b.Severity || b.severity || 0) - (a.Severity || a.severity || 0); }});
+                var html = '';
+                for (var j = 0; j < findings.length; j++) {{
+                    var f = findings[j];
+                    var s = f.Severity || f.severity || 0;
+                    var sevClass = s >= 4 ? 'critical' : s === 3 ? 'high' : s === 2 ? 'medium' : 'low';
+                    html += '<div class=""finding""><div class=""finding-severity ' + sevClass + '""></div><div class=""finding-body""><div class=""finding-title"">' + esc(f.Title || f.title) + '</div><div class=""finding-desc"">' + esc(f.Description || f.description) + '</div></div></div>';
+                }}
+                container.innerHTML = html;
+            }}
+            btn.disabled = false;
+            btn.textContent = 'Run Full Scan';
         }} else {{
-            container.innerHTML = findings.sort((a,b) => (b.Severity||b.severity) - (a.Severity||a.severity)).map(f => {{
-                const sev = f.Severity || f.severity || 0;
-                const sevClass = sev >= 4 ? 'critical' : sev === 3 ? 'high' : sev === 2 ? 'medium' : 'low';
-                return `<div class=""finding""><div class=""finding-severity ${{sevClass}}""></div><div class=""finding-body""><div class=""finding-title"">${{esc(f.Title || f.title)}}</div><div class=""finding-desc"">${{esc(f.Description || f.description)}}</div></div></div>`;
-            }}).join('');
+            btn.disabled = false;
+            btn.textContent = 'Run Full Scan';
         }}
-
-        document.getElementById('btn-scan').disabled = false;
-        document.getElementById('btn-scan').textContent = 'Run Full Scan';
-    }} else {{
-        // idle
-        document.getElementById('btn-scan').disabled = false;
-        document.getElementById('btn-scan').textContent = 'Run Full Scan';
-    }}
+    }});
 }}
 
-// Report to Police
-async function loadReportPacks() {{
-    const data = await api('/api/packs');
-    const container = document.getElementById('rp-packs');
-    if (data && data.ok && data.packs && data.packs.length > 0) {{
-        document.getElementById('rp-pack-count').textContent = data.packs.length;
-        container.innerHTML = data.packs.map(p => `
-            <div class=""finding"">
-                <div class=""finding-severity critical""></div>
-                <div class=""finding-body"">
-                    <div class=""finding-title"">${{esc(p.name)}}</div>
-                    <div class=""finding-desc"">${{p.fileCount}} files | Created: ${{new Date(p.created).toLocaleString()}} | Manifest: ${{p.hasManifest ? 'Sealed' : 'Missing'}}</div>
-                </div>
-            </div>`).join('');
-        document.getElementById('rp-integrity').textContent = data.packs.every(p => p.hasManifest) ? 'Sealed' : 'Partial';
-        document.getElementById('rp-integrity').className = data.packs.every(p => p.hasManifest) ? 'card-value success' : 'card-value warning';
-    }} else {{
-        container.innerHTML = '<div class=""empty-state"">No evidence packs yet. Packs are created when Sentinel confirms and responds to a multi-signal attack chain.</div>';
-        document.getElementById('rp-pack-count').textContent = '0';
-    }}
-    loadReportPrefs();
+// ── Report to Police ───────────────────────────────────────────────
+function loadReportPacks() {{
+    apiCall('/api/packs', {{}}, function(data) {{
+        var container = document.getElementById('rp-packs');
+        if (data && data.ok && data.packs && data.packs.length > 0) {{
+            document.getElementById('rp-pack-count').textContent = data.packs.length;
+            var html = '';
+            for (var i = 0; i < data.packs.length; i++) {{
+                var p = data.packs[i];
+                var created = '';
+                try {{ created = new Date(p.created).toLocaleString(); }} catch(e) {{}}
+                html += '<div class=""finding""><div class=""finding-severity critical""></div><div class=""finding-body""><div class=""finding-title"">' + esc(p.name) + '</div><div class=""finding-desc"">' + p.fileCount + ' files | Created: ' + esc(created) + ' | Manifest: ' + (p.hasManifest ? 'Sealed' : 'Missing') + '</div></div></div>';
+            }}
+            container.innerHTML = html;
+            var allSealed = true;
+            for (var j = 0; j < data.packs.length; j++) {{ if (!data.packs[j].hasManifest) allSealed = false; }}
+            document.getElementById('rp-integrity').textContent = allSealed ? 'Sealed' : 'Partial';
+            document.getElementById('rp-integrity').className = allSealed ? 'card-value success' : 'card-value warning';
+        }} else {{
+            container.innerHTML = '<div class=""empty-state"">No evidence packs yet. Packs are created when Sentinel confirms a multi-signal attack chain.</div>';
+            document.getElementById('rp-pack-count').textContent = '0';
+        }}
+        loadReportPrefs();
+    }});
 }}
 
-async function loadReportPrefs() {{
-    const data = await api('/api/report/prefs');
-    if (data && data.ok && data.prefs) {{
-        const p = data.prefs;
-        if (p.FullName || p.fullName) document.getElementById('rp-name').value = p.FullName || p.fullName || '';
-        if (p.Email || p.email) document.getElementById('rp-email').value = p.Email || p.email || '';
-        if (p.Phone || p.phone) document.getElementById('rp-phone').value = p.Phone || p.phone || '';
-        if (p.Address || p.address) document.getElementById('rp-address').value = p.Address || p.address || '';
-        if (p.NationalId || p.nationalId) document.getElementById('rp-nationalid').value = p.NationalId || p.nationalId || '';
-        if (p.AdditionalNarrative || p.additionalNarrative) document.getElementById('rp-narrative').value = p.AdditionalNarrative || p.additionalNarrative || '';
-        if (p.FinancialLoss || p.financialLoss) document.getElementById('rp-loss').value = p.FinancialLoss || p.financialLoss || '';
-        if (p.DataAffected || p.dataAffected) document.getElementById('rp-data').value = p.DataAffected || p.dataAffected || '';
-        if (p.OtherHarm || p.otherHarm) document.getElementById('rp-harm').value = p.OtherHarm || p.otherHarm || '';
-    }}
+function loadReportPrefs() {{
+    apiCall('/api/report/prefs', {{}}, function(data) {{
+        if (data && data.ok && data.prefs) {{
+            var p = data.prefs;
+            if (p.FullName || p.fullName) document.getElementById('rp-name').value = p.FullName || p.fullName || '';
+            if (p.Email || p.email) document.getElementById('rp-email').value = p.Email || p.email || '';
+            if (p.Phone || p.phone) document.getElementById('rp-phone').value = p.Phone || p.phone || '';
+            if (p.Address || p.address) document.getElementById('rp-address').value = p.Address || p.address || '';
+            if (p.NationalId || p.nationalId) document.getElementById('rp-nationalid').value = p.NationalId || p.nationalId || '';
+            if (p.AdditionalNarrative || p.additionalNarrative) document.getElementById('rp-narrative').value = p.AdditionalNarrative || p.additionalNarrative || '';
+            if (p.FinancialLoss || p.financialLoss) document.getElementById('rp-loss').value = p.FinancialLoss || p.financialLoss || '';
+            if (p.DataAffected || p.dataAffected) document.getElementById('rp-data').value = p.DataAffected || p.dataAffected || '';
+            if (p.OtherHarm || p.otherHarm) document.getElementById('rp-harm').value = p.OtherHarm || p.otherHarm || '';
+        }}
+    }});
 }}
 
-async function saveAffidavit() {{
-    const prefs = {{
+function saveAffidavit() {{
+    var prefs = {{
         FullName: document.getElementById('rp-name').value,
         Email: document.getElementById('rp-email').value,
         Phone: document.getElementById('rp-phone').value,
@@ -861,121 +912,128 @@ async function saveAffidavit() {{
         AdditionalNarrative: document.getElementById('rp-narrative').value,
         FinancialLoss: document.getElementById('rp-loss').value,
         DataAffected: document.getElementById('rp-data').value,
-        OtherHarm: document.getElementById('rp-harm').value,
+        OtherHarm: document.getElementById('rp-harm').value
     }};
-    await ensureCsrf();
-    const res = await api('/api/report/save', {{
-        method: 'POST',
-        headers: {{ 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF }},
-        body: JSON.stringify(prefs)
+    ensureCsrf(function(token) {{
+        apiCall('/api/report/save', {{
+            method: 'POST',
+            headers: {{ 'Content-Type': 'application/json', 'X-CSRF-Token': token }},
+            body: JSON.stringify(prefs)
+        }}, function(res) {{
+            var status = document.getElementById('rp-status');
+            if (res && res.ok) {{
+                status.textContent = 'Affidavit saved at ' + new Date().toLocaleTimeString();
+                status.style.color = '#81c995';
+            }} else {{
+                status.textContent = 'Failed to save: ' + ((res && res.error) || 'unknown');
+                status.style.color = '#f28b82';
+            }}
+        }});
     }});
-    const status = document.getElementById('rp-status');
-    if (res && res.ok) {{
-        status.textContent = 'Affidavit saved at ' + new Date().toLocaleTimeString();
-        status.style.color = 'var(--success)';
-    }} else {{
-        status.textContent = 'Failed to save: ' + (res?.error || 'unknown');
-        status.style.color = 'var(--danger)';
-    }}
 }}
 
 function sendReport() {{
-    // Open national cybercrime portal based on detected locale
-    const portals = {{
+    var portals = {{
         'HR': 'https://epolicija.gov.hr/',
         'US': 'https://www.ic3.gov/',
         'UK': 'https://www.actionfraud.police.uk/',
         'DE': 'https://www.polizei.de/onlinewache',
-        'AU': 'https://www.cyber.gov.au/report',
+        'AU': 'https://www.cyber.gov.au/report'
     }};
-    const url = portals['HR'] || 'https://www.interpol.int/en/Contacts/Contact-INTERPOL';
+    var url = portals['HR'] || 'https://www.interpol.int/en/Contacts/Contact-INTERPOL';
     window.open(url, '_blank');
     openPackFolder();
 }}
 
 function openPackFolder() {{
-    // Can't open local folders from browser — show path instead
-    const status = document.getElementById('rp-status');
+    var status = document.getElementById('rp-status');
     status.textContent = 'Evidence packs: %ProgramData%\\Sentinel\\IncidentReports\\';
-    status.style.color = 'var(--accent)';
+    status.style.color = '#8ab4f8';
 }}
 
-async function verifyIntegrity() {{
-    const status = document.getElementById('rp-status');
+function verifyIntegrity() {{
+    var status = document.getElementById('rp-status');
     status.textContent = 'Verifying...';
-    status.style.color = 'var(--text-muted)';
-    const res = await api('/api/report/verify');
-    if (res && res.ok) {{
-        status.textContent = res.message || 'All packs verified';
-        status.style.color = 'var(--success)';
-    }} else {{
-        status.textContent = res?.error || 'Verification failed';
-        status.style.color = 'var(--danger)';
-    }}
-}}
-
-// Tools
-async function refreshDiagnostics() {{
-    const data = await api('/api/diagnostics');
-    const pre = document.getElementById('tools-diag');
-    if (data && data.ok) {{
-        pre.textContent = data.text;
-    }} else {{
-        pre.textContent = 'Failed to load diagnostics: ' + (data?.error || 'service unreachable');
-    }}
-}}
-
-// Hardened Mode
-async function checkHardenedMode() {{
-    const res = await api('/api/hardened');
-    if (res && res.ok) {{
-        const btn = document.getElementById('btn-harden');
-        const status = document.getElementById('harden-status');
-        if (res.enabled) {{
-            btn.textContent = 'Disable Hardened Mode';
-            btn.className = 'btn';
-            btn.style.background = 'var(--success)';
-            btn.style.borderColor = 'var(--success)';
-            btn.style.color = '#fff';
-            status.textContent = 'ACTIVE — restrictive port hardening enabled';
-            status.style.color = 'var(--warning)';
+    status.style.color = '#9aa0a6';
+    apiCall('/api/report/verify', {{}}, function(res) {{
+        if (res && res.ok) {{
+            status.textContent = res.message || 'All packs verified';
+            status.style.color = '#81c995';
         }} else {{
-            btn.textContent = 'Enable Hardened Mode';
-            btn.className = 'btn btn-danger';
-            btn.style = '';
-            status.textContent = 'Normal (work-first) mode';
-            status.style.color = 'var(--success)';
+            status.textContent = (res && res.error) || 'Verification failed';
+            status.style.color = '#f28b82';
         }}
-    }}
+    }});
 }}
 
-async function toggleHardenedMode() {{
-    const btn = document.getElementById('btn-harden');
-    const status = document.getElementById('harden-status');
-    const enabling = btn.textContent.includes('Enable');
-    const confirmed = confirm(enabling
+// ── Tools ──────────────────────────────────────────────────────────
+function refreshDiagnostics() {{
+    apiCall('/api/diagnostics', {{}}, function(data) {{
+        var pre = document.getElementById('tools-diag');
+        if (data && data.ok) {{
+            pre.textContent = data.text;
+        }} else {{
+            pre.textContent = 'Failed to load diagnostics: ' + ((data && data.error) || 'service unreachable');
+        }}
+    }});
+}}
+
+// ── Hardened Mode ──────────────────────────────────────────────────
+function checkHardenedMode() {{
+    apiCall('/api/hardened', {{}}, function(res) {{
+        if (res && res.ok) {{
+            var btn = document.getElementById('btn-harden');
+            var status = document.getElementById('harden-status');
+            if (res.enabled) {{
+                btn.textContent = 'Disable Hardened Mode';
+                btn.className = 'btn';
+                btn.style.background = '#81c995';
+                btn.style.borderColor = '#81c995';
+                btn.style.color = '#202124';
+                status.textContent = 'ACTIVE \u2014 restrictive port hardening enabled';
+                status.style.color = '#fdd663';
+            }} else {{
+                btn.textContent = 'Enable Hardened Mode';
+                btn.className = 'btn btn-danger';
+                btn.style.background = '';
+                btn.style.borderColor = '';
+                btn.style.color = '';
+                status.textContent = 'Normal (work-first) mode';
+                status.style.color = '#81c995';
+            }}
+        }}
+    }});
+}}
+
+function toggleHardenedMode() {{
+    var btn = document.getElementById('btn-harden');
+    var status = document.getElementById('harden-status');
+    var enabling = btn.textContent.indexOf('Enable') >= 0;
+    var msg = enabling
         ? 'ENABLE Hardened Mode?\n\nThis will block RDP, SMB, SSH, DISM, and some admin tools.\nBrowsers, apps, and games are unaffected.\n\nRequires service restart to take effect.'
-        : 'DISABLE Hardened Mode?\n\nReturn to work-first mode. Detection and response remain active.\n\nRequires service restart to take effect.');
-    if (!confirmed) return;
+        : 'DISABLE Hardened Mode?\n\nReturn to work-first mode. Detection and response remain active.\n\nRequires service restart to take effect.';
+    if (!confirm(msg)) return;
 
     btn.disabled = true;
-    await ensureCsrf();
-    const res = await api('/api/hardened/toggle', {{
-        method: 'POST',
-        headers: {{ 'X-CSRF-Token': CSRF }}
+    ensureCsrf(function(token) {{
+        apiCall('/api/hardened/toggle', {{
+            method: 'POST',
+            headers: {{ 'X-CSRF-Token': token }}
+        }}, function(res) {{
+            btn.disabled = false;
+            if (res && res.ok) {{
+                status.textContent = res.message || 'Config saved \u2014 restart service to apply';
+                status.style.color = '#8ab4f8';
+                setTimeout(checkHardenedMode, 1000);
+            }} else {{
+                status.textContent = (res && res.error) || 'Failed \u2014 use elevated CLI instead';
+                status.style.color = '#f28b82';
+            }}
+        }});
     }});
-    btn.disabled = false;
-    if (res && res.ok) {{
-        status.textContent = res.message || 'Config saved — restart service to apply';
-        status.style.color = 'var(--accent)';
-        setTimeout(checkHardenedMode, 1000);
-    }} else {{
-        status.textContent = res?.error || 'Failed — use elevated CLI instead';
-        status.style.color = 'var(--danger)';
-    }}
 }}
 
-// Init
+// ── Init ───────────────────────────────────────────────────────────
 loadStatus();
 refreshEvents();
 connectWs();
