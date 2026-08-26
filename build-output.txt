@@ -1,0 +1,13 @@
+﻿  Determining projects to restore...
+  All projects are up-to-date for restore.
+  Sentinel.Core -> E:\Gorstak\Sentinel\src\Sentinel.Core\bin\Debug\net48-windows\Sentinel.Core.dll
+  Sentinel.Agent -> E:\Gorstak\Sentinel\src\Sentinel.Agent\bin\Debug\net48-windows\Sentinel.Agent.exe
+  Sentinel.Service -> E:\Gorstak\Sentinel\src\Sentinel.Service\bin\Debug\net48-windows\Sentinel.Service.exe
+  Sentinel.Tests -> E:\Gorstak\Sentinel\tests\Sentinel.Tests\bin\Debug\net48-windows\Sentinel.Tests.dll
+  Sentinel.MlTrainer -> E:\Gorstak\Sentinel\tools\Sentinel.MlTrainer\bin\Debug\net10.0-windows\Sentinel.MlTrainer.dll
+
+Build succeeded.
+    0 Warning(s)
+    0 Error(s)
+
+Time Elapsed 00:00:00.68
