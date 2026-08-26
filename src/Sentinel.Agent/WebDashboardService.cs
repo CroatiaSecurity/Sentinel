@@ -463,7 +463,16 @@ namespace Sentinel.Agent
         {
             try
             {
-                var items = _quarantine.ListQuarantined();
+                var raw = _quarantine.ListQuarantined();
+                var items = raw.Select(t => new
+                {
+                    OriginalName = t.DisplayName,
+                    OriginalPath = t.OriginalPath ?? "",
+                    QuarantineFile = t.QuarantineFile,
+                    QuarantinedAt = File.Exists(t.QuarantineFile)
+                        ? File.GetCreationTimeUtc(t.QuarantineFile).ToString("o")
+                        : ""
+                }).ToList();
                 await WriteJson(response, new { ok = true, items }).ConfigureAwait(false);
             }
             catch (Exception ex)
