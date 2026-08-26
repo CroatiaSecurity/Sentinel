@@ -1,6 +1,39 @@
 # Changelog
 
 
+## [2.3.1] - 2026-08-26
+
+Critical fix for game interference (Football Manager / Denuvo titles crashing on launch) and dashboard reliability improvements. Introduces formalized Always-On policies.
+
+### Fixed
+
+- **Game Protection: Denuvo/anti-cheat crash on launch** — `EphemeralProcessMonitor.IsKnownGameEphemeralName()` had a case-sensitivity bug: `FM.EXE` from Prefetch was not matched against lowercase game name list (`.EndsWith(".exe")` and `.Equals("fm")` both used ordinal comparison). Added `StringComparison.OrdinalIgnoreCase` and `.ToLowerInvariant()` normalization.
+- **Game Protection: Second-chance path check** — after `FindExecutable` resolves a binary to a known game directory (e.g. `D:\Steam\steamapps\common\...`), detection is now suppressed via `IsGameOrAntiCheatPath`.
+- **Dashboard: Events not loading after agent restart** — stale bearer token in browser sessionStorage caused silent 401 failures. Server now embeds current token directly in served HTML. Added `Cache-Control: no-store`.
+- **Dashboard: Ops metrics showing zero** — frontend referenced non-existent field names (`EventsPerSecond`, `DetectionsPerMinute`, `DropRate`). Aligned with actual backend `OpsMetricsSnapshot` fields (`TelemetryPerSecond`, `DetectionsPerSecond`, `CorrelationLatencyMsP50`).
+- **Dashboard: Ops fallback not wrapped** — file-read fallback for `/api/ops` was not wrapping JSON in `{ok, ops}` envelope, causing frontend to show "Unable to reach Sentinel Service."
+- **Metrics: DetectionsTotal always zero** — `DetectionEngine.EmitAsync()` (used by all monitors) was not calling `_metrics.RecordDetection()`. Only rule-evaluated detections were counted.
+- **Dashboard: Auth failure UX** — added visible 401 error message ("Reopen from tray icon") instead of silent empty state.
+
+### Added
+
+- **`AlwaysOnPolicies.cs`** — new static class formalizing permanent product invariants:
+  - `IsProtectedGameProcess()` / `IsProtectedGamePath()` / `ApplyGameProtection()` — game protection checked BEFORE allowlist and observe-until-chain in the response engine. Cannot be overridden by config.
+  - `IsDllUnloadAlwaysOn()` / `MayUnloadDllsFrom()` — DLL unload formalized as metadata-driven always-on policy. Never demoted by tier law, never gated on ObserveUntilChain.
+- **`SecurityValidation.IsKnownGameProcessName()`** — public API for name-only game process checks (used by EphemeralProcessMonitor).
+- **DLL unload emissions** now carry `["AlwaysOnPolicy"] = "DllUnload"` metadata marker for explicit policy recognition.
+
+### Changed
+
+- `AdvancedResponseEngine.HandleAsync()` — game protection fires as early-exit before allowlist evaluation.
+- `AdvancedResponseEngine` — DLL exempt check routes through `AlwaysOnPolicies.IsDllUnloadAlwaysOn()` instead of `ResponsePolicy.IsDllUnloadExempt()`.
+- `ResponsePolicy.ApplyTierLaw()` — uses `AlwaysOnPolicies.IsDllUnloadAlwaysOn()` to prevent tier demotion of DLL unload detections.
+- `DllUnloadEngine.ScanProcessAsync()` — uses `AlwaysOnPolicies.MayUnloadDllsFrom()` for game skip (centralizes logic).
+
+## [2.3.0] - 2026-08-26
+
+Dashboard redesign with GBrowser-inspired dark theme and IE11 WebBrowser control compatibility fix.
+
 ## [2.2.9] - 2026-08-26
 
 Unified web dashboard replaces the WinForms settings window. Opening Settings from the tray icon now shows the modern HTML/CSS/JS dashboard inside a native window (no external browser launch).
