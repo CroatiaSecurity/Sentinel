@@ -33,6 +33,12 @@ namespace Sentinel.Core
 
         /// <summary>If true, restart indefinitely (critical monitors).</summary>
         public bool RestartIndefinitely { get; set; }
+
+        /// <summary>
+        /// Category reported to the MonitorRegistry for the dashboard health view.
+        /// Defaults to SystemIntegrity; set per-group for accurate categorization.
+        /// </summary>
+        public MonitorCategory Category { get; set; } = MonitorCategory.SystemIntegrity;
     }
 
     /// <summary>
@@ -50,20 +56,26 @@ namespace Sentinel.Core
         private readonly MonitorGroupConfig _config;
         private readonly IReadOnlyList<IHostedService> _monitors;
         private readonly ILogger _logger;
+        private readonly MonitorRegistry? _registry;
         private readonly Dictionary<IHostedService, MonitorState> _states = new();
 
         public MonitorGroup(
             MonitorGroupConfig config,
             IReadOnlyList<IHostedService> monitors,
-            ILogger logger)
+            ILogger logger,
+            MonitorRegistry? registry = null)
         {
             _config = config;
             _monitors = monitors;
             _logger = logger;
+            _registry = registry;
 
             foreach (var monitor in _monitors)
             {
                 _states[monitor] = new MonitorState();
+                // Register with the health registry up front so the dashboard reflects
+                // the full monitor roster even before staggered startup completes.
+                _registry?.Register(GetMonitorName(monitor), _config.Category, monitor);
             }
         }
 
@@ -128,7 +140,13 @@ namespace Sentinel.Core
                     if (stoppingToken.IsCancellationRequested) break;
 
                     var state = _states[monitor];
-                    if (state.IsRunning) continue;
+                    if (state.IsRunning)
+                    {
+                        // Piggyback a heartbeat onto the group health check so the
+                        // MonitorRegistry watchdog sees running monitors as alive.
+                        _registry?.Heartbeat(GetMonitorName(monitor));
+                        continue;
+                    }
                     if (state.Failed && !ShouldRestart(state)) continue;
 
                     _logger.LogWarning("[MonitorGroup:{Group}] Monitor {Monitor} is not running — attempting restart (attempt {Attempt})",
@@ -155,6 +173,7 @@ namespace Sentinel.Core
                 state.IsRunning = true;
                 state.StartedAt = DateTimeOffset.UtcNow;
                 state.Failed = false;
+                _registry?.MarkStarted(GetMonitorName(monitor));
                 _logger.LogDebug("[MonitorGroup:{Group}] Started {Monitor}",
                     _config.Name, GetMonitorName(monitor));
             }
@@ -163,6 +182,7 @@ namespace Sentinel.Core
                 state.IsRunning = false;
                 state.Failed = true;
                 state.LastError = ex;
+                _registry?.MarkFailed(GetMonitorName(monitor), ex);
                 _logger.LogError(ex, "[MonitorGroup:{Group}] Failed to start {Monitor}",
                     _config.Name, GetMonitorName(monitor));
             }
@@ -200,6 +220,7 @@ namespace Sentinel.Core
             finally
             {
                 state.IsRunning = false;
+                _registry?.MarkStopped(GetMonitorName(monitor));
 
                 if (monitor is IDisposable disposable)
                 {

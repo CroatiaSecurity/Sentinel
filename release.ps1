@@ -1,54 +1,39 @@
 
 $env:PATH = "C:\Program Files\Git\cmd;C:\Program Files\Git\bin;" + $env:PATH
 $gh = "C:\Program Files\GitHub CLI\gh.exe"
-$installer = "installer\SentinelSetup-2.3.1.exe"
+$installer = "installer\SentinelSetup-2.3.2.exe"
 
 $notes = @"
-## v2.3.1 — Game Protection + Dashboard Fixes + Always-On Policies
+## v2.3.2 — Dashboard Monitor Health + Live Events Fixes
 
-Critical fix for game interference (Football Manager / Denuvo titles crashing on launch)
-and dashboard reliability improvements.
+Fixes the dashboard so the monitor health panel and the live event stream reflect
+the actually-running system.
 
 ### Bug Fixes
 
-- **Game Protection: Fixed Denuvo/anti-cheat crash on launch**
-  - EphemeralProcessMonitor case-sensitivity bug: `FM.EXE` from Prefetch was not matched
-    against lowercase game name list (`.EndsWith(".exe")` and `.Equals("fm")` both case-sensitive)
-  - Added second-chance `IsGameOrAntiCheatPath` check after `FindExecutable` resolves binary
-  - Games in recognized paths (Steam, Epic, GOG, etc.) will no longer trigger false ephemeral alerts
+- **Dashboard: "0/0 monitors running"**
+  - The MonitorRegistry that feeds Service Status (/api/health, /api/ops) was never populated.
+  - Monitors run via MonitorGroup hosted services and the SentinelService start loop, but
+    neither registered them with the registry (the StartupSequencer/SentinelOrchestrator path
+    that would have done so is not wired into service startup).
+  - Detections/quarantine still showed counts because they read from events.jsonl and the
+    quarantine folder directly — which made the 0/0 especially misleading.
+  - Fix: MonitorGroup and SentinelService now register their monitors, mark them
+    started/failed/stopped, and heartbeat running monitors so the registry watchdog keeps
+    them marked Running.
 
-- **Dashboard: Events not loading after agent restart**
-  - Root cause: stale bearer token in browser sessionStorage after agent restart
-  - Fix: server now embeds current token directly in served HTML
-  - Added `Cache-Control: no-store` to prevent browser caching stale auth
-  - Added visible 401 error message instead of silent empty state
-
-- **Dashboard: Ops metrics showing zero**
-  - Frontend was referencing non-existent field names (EventsPerSecond, DetectionsPerMinute, DropRate)
-  - Aligned with actual backend fields (TelemetryPerSecond, DetectionsPerSecond, CorrelationLatencyMsP50)
-  - Fixed file-fallback not wrapping response in `{ok, ops}` envelope
-  - Fixed `DetectionsTotal` counter: `EmitAsync` was not calling `RecordDetection()`
-
-### New Features
-
-- **Always-On Game Protection Policy** (`AlwaysOnPolicies.cs`)
-  - Formalized as explicit policy checked BEFORE allowlist and observe-until-chain
-  - Game processes forced to LogOnly regardless of detection confidence
-  - Cannot be overridden by config, allowlist, or tier law changes
-  - Only President's Law rules (actual confirmed injection INTO a game) can override
-
-- **Always-On DLL Unload Policy** (`AlwaysOnPolicies.cs`)
-  - Module identity enforcement formalized as permanent product law
-  - DLL unload detections carry `AlwaysOnPolicy=DllUnload` metadata marker
-  - Never demoted by tier law, never gated on ObserveUntilChain or ActiveResponse
-  - Game processes excluded from DLL unload via `MayUnloadDllsFrom()` gate
+- **Dashboard: Events page stuck on "Connected — waiting for events..."**
+  - The WebSocket stream only broadcasts events appended AFTER connect, and the frontend
+    never loaded existing history, so the page stayed empty even with logged detections.
+  - Fix: added loadEventHistory() which seeds the buffer from /api/events on WebSocket open
+    and whenever the Events page is opened.
 
 ### Technical Details
 
-- New `AlwaysOnPolicies` static class: single source of truth for permanent product invariants
-- `SecurityValidation.IsKnownGameProcessName()`: public API for name-only game checks
-- Response engine integration: game protection fires before allowlist evaluation
-- DLL unload: `ResponsePolicy.ApplyTierLaw` and `AdvancedResponseEngine` both route through AlwaysOnPolicies
+- `MonitorGroupConfig` gains a `Category` property; each group reports its category.
+- SystemIntegrity/Peripheral group health-check intervals lowered to 45s to stay inside the
+  registry watchdog's 3-minute critical timeout.
+- `ProductInfo.Version` -> 2.3.2
 
 ## Installation
 Requires .NET Framework 4.8. Run as Administrator.
@@ -56,7 +41,7 @@ Open Settings from the Sentinel tray icon.
 "@
 
 if (Test-Path $gh) {
-    & $gh release create v2.3.1 $installer --title "Sentinel 2.3.1" --notes $notes -R CroatiaSecurity/Sentinel
+    & $gh release create v2.3.2 $installer --title "Sentinel 2.3.2" --notes $notes -R CroatiaSecurity/Sentinel
 } else {
-    Write-Host "gh.exe not found - installer is at $installer and releases\2.3.1\"
+    Write-Host "gh.exe not found - installer is at $installer and releases\2.3.2\"
 }

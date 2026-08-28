@@ -581,6 +581,7 @@ function esc(s) {{
             if (pageEl) pageEl.className = 'page active';
             document.getElementById('page-title').textContent = navItems[idx].textContent.replace(/^\s+|\s+$/g, '');
             // Load page-specific data
+            if (page === 'events') loadEventHistory();
             if (page === 'ops') loadOps();
             if (page === 'quarantine') loadQuarantine();
             if (page === 'scan') checkScanStatus();
@@ -678,6 +679,28 @@ function renderEvents(events, containerId) {{
     container.innerHTML = html;
 }}
 
+// Load recent event history into the buffer (used on WS open and page show).
+function loadEventHistory() {{
+    apiCall('/api/events?count=50', {{}}, function(data) {{
+        var evList = document.getElementById('ev-list');
+        if (data && data.ok && data.events && data.events.length > 0) {{
+            // /api/events returns newest-first; seed the buffer with raw JSON lines.
+            eventBuffer = [];
+            for (var i = 0; i < data.events.length; i++) {{
+                var raw = data.events[i].data || JSON.stringify(data.events[i]);
+                eventBuffer.push(raw);
+            }}
+            if (eventBuffer.length > 200) eventBuffer = eventBuffer.slice(0, 200);
+            var mapped = [];
+            for (var j = 0; j < eventBuffer.slice(0, 50).length; j++) mapped.push({{ data: eventBuffer[j], type: 'info' }});
+            renderEvents(mapped, 'ev-list');
+            document.getElementById('ev-count').textContent = eventBuffer.length + ' events';
+        }} else if (eventBuffer.length === 0) {{
+            evList.innerHTML = '<div class=""empty-state"">Connected \u2014 waiting for events...</div>';
+        }}
+    }});
+}}
+
 // ── WebSocket ──────────────────────────────────────────────────────
 function connectWs() {{
     try {{
@@ -685,7 +708,9 @@ function connectWs() {{
         ws = new WebSocket('ws://localhost:19845/ws/events?token=' + encodeURIComponent(TOKEN));
         ws.onopen = function() {{
             wsRetries = 0;
-            document.getElementById('ev-list').innerHTML = '<div class=""empty-state"">Connected \u2014 waiting for events...</div>';
+            // The WebSocket only streams events that arrive AFTER connect. Seed the
+            // buffer with recent history so the Events page isn't empty on open.
+            loadEventHistory();
         }};
         ws.onmessage = function(msg) {{
             eventBuffer.unshift(msg.data);

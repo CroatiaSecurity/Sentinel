@@ -418,6 +418,7 @@ namespace Sentinel.Service
                             new MonitorGroupConfig
                             {
                                 Name = "Critical",
+                                Category = MonitorCategory.SystemIntegrity,
                                 StartDelay = TimeSpan.Zero,
                                 StaggerDelay = TimeSpan.FromMilliseconds(100),
                                 RestartIndefinitely = true,
@@ -425,7 +426,8 @@ namespace Sentinel.Service
                                 HealthCheckInterval = TimeSpan.FromSeconds(15),
                             },
                             monitors,
-                            sp.GetRequiredService<ILogger<MonitorGroup>>());
+                            sp.GetRequiredService<ILogger<MonitorGroup>>(),
+                            sp.GetRequiredService<MonitorRegistry>());
                     });
                     services.AddSingleton<AntiTamperGuard>();
                     services.AddSingleton<IPSecIntegrityGuard>();
@@ -486,6 +488,7 @@ namespace Sentinel.Service
                             new MonitorGroupConfig
                             {
                                 Name = "CoreDetection",
+                                Category = MonitorCategory.ProcessMonitoring,
                                 StartDelay = TimeSpan.FromSeconds(2),
                                 StaggerDelay = TimeSpan.FromMilliseconds(200),
                                 MaxRestartAttempts = 5,
@@ -493,7 +496,8 @@ namespace Sentinel.Service
                                 HealthCheckInterval = TimeSpan.FromSeconds(30),
                             },
                             monitors,
-                            sp.GetRequiredService<ILogger<MonitorGroup>>());
+                            sp.GetRequiredService<ILogger<MonitorGroup>>(),
+                            sp.GetRequiredService<MonitorRegistry>());
                     });
                     services.AddSingleton<FileVerdictScanner>();
                     services.AddSingleton<ConsultantSignalIngestor>();
@@ -552,6 +556,7 @@ namespace Sentinel.Service
                             new MonitorGroupConfig
                             {
                                 Name = "CredentialProtection",
+                                Category = MonitorCategory.CredentialProtection,
                                 StartDelay = TimeSpan.FromSeconds(4),
                                 StaggerDelay = TimeSpan.FromMilliseconds(200),
                                 MaxRestartAttempts = 3,
@@ -559,7 +564,8 @@ namespace Sentinel.Service
                                 HealthCheckInterval = TimeSpan.FromSeconds(30),
                             },
                             monitors,
-                            sp.GetRequiredService<ILogger<MonitorGroup>>());
+                            sp.GetRequiredService<ILogger<MonitorGroup>>(),
+                            sp.GetRequiredService<MonitorRegistry>());
                     });
                     services.AddSingleton<CanaryFileMonitor>();
                     services.AddSingleton<BrowserCredentialGuard>();
@@ -597,6 +603,7 @@ namespace Sentinel.Service
                             new MonitorGroupConfig
                             {
                                 Name = "NetworkIntegrity",
+                                Category = MonitorCategory.NetworkMonitoring,
                                 StartDelay = TimeSpan.FromSeconds(6),
                                 StaggerDelay = TimeSpan.FromMilliseconds(200),
                                 MaxRestartAttempts = 3,
@@ -604,7 +611,8 @@ namespace Sentinel.Service
                                 HealthCheckInterval = TimeSpan.FromSeconds(30),
                             },
                             monitors,
-                            sp.GetRequiredService<ILogger<MonitorGroup>>());
+                            sp.GetRequiredService<ILogger<MonitorGroup>>(),
+                            sp.GetRequiredService<MonitorRegistry>());
                     });
                     services.AddSingleton<ArpSpoofMonitor>();
                     services.AddSingleton<DnsResponseValidationMonitor>();
@@ -658,14 +666,16 @@ namespace Sentinel.Service
                             new MonitorGroupConfig
                             {
                                 Name = "SystemIntegrity",
+                                Category = MonitorCategory.SystemIntegrity,
                                 StartDelay = TimeSpan.FromSeconds(10),
                                 StaggerDelay = TimeSpan.FromMilliseconds(300),
                                 MaxRestartAttempts = 3,
                                 RestartCooldown = TimeSpan.FromSeconds(15),
-                                HealthCheckInterval = TimeSpan.FromSeconds(60),
+                                HealthCheckInterval = TimeSpan.FromSeconds(45),
                             },
                             monitors,
-                            sp.GetRequiredService<ILogger<MonitorGroup>>());
+                            sp.GetRequiredService<ILogger<MonitorGroup>>(),
+                            sp.GetRequiredService<MonitorRegistry>());
                     });
                     services.AddSingleton<FirewallIntegrityMonitor>();
                     services.AddSingleton<SecureBootIntegrityMonitor>();
@@ -717,14 +727,16 @@ namespace Sentinel.Service
                             new MonitorGroupConfig
                             {
                                 Name = "Peripheral",
+                                Category = MonitorCategory.UserProtection,
                                 StartDelay = TimeSpan.FromSeconds(30),
                                 StaggerDelay = TimeSpan.FromMilliseconds(500),
                                 MaxRestartAttempts = 2,
                                 RestartCooldown = TimeSpan.FromSeconds(30),
-                                HealthCheckInterval = TimeSpan.FromSeconds(60),
+                                HealthCheckInterval = TimeSpan.FromSeconds(45),
                             },
                             monitors,
-                            sp.GetRequiredService<ILogger<MonitorGroup>>());
+                            sp.GetRequiredService<ILogger<MonitorGroup>>(),
+                            sp.GetRequiredService<MonitorRegistry>());
                     });
                     services.AddSingleton<BluetoothMonitor>();
                     services.AddSingleton<DeviceInstallMonitor>();

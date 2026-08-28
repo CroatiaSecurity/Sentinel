@@ -1,6 +1,26 @@
 # Changelog
 
 
+## [2.3.2] - 2026-08-28
+
+Dashboard reliability fixes: the monitor health panel and the live event stream now reflect the running system.
+
+### Fixed
+
+- **Dashboard: "0/0 monitors running"** — the `MonitorRegistry` that feeds the dashboard's Service Status (`/api/health`, `/api/ops`) was never populated. Monitors are started by `MonitorGroup` hosted services and by the `SentinelService` start loop, but neither registered the monitors with the registry (the `StartupSequencer`/`SentinelOrchestrator` path that would have registered them is not wired into the service startup). Detections and quarantine counts still appeared because they read from `events.jsonl` and the quarantine folder directly, which made the `0/0` count especially misleading.
+  - `MonitorGroup` now takes an optional `MonitorRegistry`, registers each monitor up front, and marks it Started / Failed / Stopped through its lifecycle. It also heartbeats running monitors on every health-check tick.
+  - `SentinelService` now registers its `IMonitor` implementations and the constructor-injected singleton monitors (WMI, File, Network, LSASS canary, etc.), marks them started/failed, and heartbeats them from the keep-alive loop.
+  - Each monitor group reports a `MonitorCategory` for accurate grouping in the health view.
+- **Dashboard: Events page stuck on "Connected — waiting for events..."** — the WebSocket stream only broadcasts events appended *after* the browser connects (the file watcher seeks to end-of-file on open), and the frontend never loaded existing history. The page therefore stayed empty even when detections were already logged.
+  - Added `loadEventHistory()` (seeds the event buffer from `/api/events`), invoked on WebSocket open and whenever the Events page is opened.
+
+### Changed
+
+- `MonitorGroupConfig` gains a `Category` property (defaults to `SystemIntegrity`).
+- `SystemIntegrity` and `Peripheral` monitor-group health-check intervals lowered to 45s so heartbeats stay well inside the registry watchdog's 3-minute critical timeout.
+- `ProductInfo.Version` → `2.3.2`
+- Installer → `SentinelSetup-2.3.2`
+
 ## [2.3.1] - 2026-08-26
 
 Critical fix for game interference (Football Manager / Denuvo titles crashing on launch) and dashboard reliability improvements. Introduces formalized Always-On policies.

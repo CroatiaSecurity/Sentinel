@@ -17,6 +17,7 @@ namespace Sentinel.Service
         private readonly DetectionEngine _detectionEngine;
         private readonly ProcessAncestryCache _ancestryCache;
         private readonly IEnumerable<IMonitor> _monitors;
+        private readonly MonitorRegistry _monitorRegistry;
 
         // Unified ETW session — started before monitors for event-driven telemetry
         private readonly UnifiedEtwSession _unifiedEtwSession;
@@ -65,6 +66,7 @@ namespace Sentinel.Service
             ParentPidSpoofDetector parentPidSpoofDetector,
             ChainTracer chainTracer,
             SentinelOrchestrator orchestrator,
+            MonitorRegistry monitorRegistry,
             SentinelEventLogWriter? windowsEventLog = null)
         {
             // Wire incident response into response engine (late binding to avoid circular DI)
@@ -88,6 +90,7 @@ namespace Sentinel.Service
             _detectionEngine = detectionEngine;
             _ancestryCache = ancestryCache;
             _monitors = monitors;
+            _monitorRegistry = monitorRegistry;
             _unifiedEtwSession = unifiedEtwSession;
             _etwEventDispatcher = etwEventDispatcher;
             _usbDeviceFingerprinter = usbDeviceFingerprinter;
@@ -117,6 +120,66 @@ namespace Sentinel.Service
                 if (!string.IsNullOrEmpty(text)) return text;
             }
             return typeof(SentinelService).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
+        }
+
+        // The singleton monitors below are constructor-injected and self-start in their
+        // own ctors/loops. They aren't part of _monitors or any MonitorGroup, so we
+        // register them here and mark them running.
+        private readonly List<string> _ownedSingletonNames = new();
+
+        private void RegisterInjectedMonitors()
+        {
+            void Reg(string name, MonitorCategory cat)
+            {
+                _monitorRegistry.Register(name, cat, null);
+                _monitorRegistry.MarkStarted(name);
+                _ownedSingletonNames.Add(name);
+            }
+
+            Reg(nameof(UsbDeviceFingerprinter), MonitorCategory.UserProtection);
+            Reg(nameof(AppNetworkPolicyMonitor), MonitorCategory.NetworkMonitoring);
+            Reg(nameof(WmiProcessMonitor), MonitorCategory.ProcessMonitoring);
+            Reg(nameof(FileActivityMonitor), MonitorCategory.FileMonitoring);
+            Reg(nameof(NetworkMonitor), MonitorCategory.NetworkMonitoring);
+            Reg(nameof(LsassDumpCanaryMonitor), MonitorCategory.CredentialProtection);
+            Reg(nameof(RouteTableMonitor), MonitorCategory.NetworkMonitoring);
+            Reg(nameof(MemoryBehaviorAnalyzer), MonitorCategory.MemoryAnalysis);
+            Reg(nameof(TokenIntegrityMonitor), MonitorCategory.SystemIntegrity);
+            Reg(nameof(CredentialCanaryMonitor), MonitorCategory.CredentialProtection);
+            Reg(nameof(LocalServerMonitor), MonitorCategory.NetworkMonitoring);
+            Reg(nameof(ParentPidSpoofDetector), MonitorCategory.ProcessMonitoring);
+            Reg(nameof(ChainTracer), MonitorCategory.ResponseEngine);
+        }
+
+        private void HeartbeatOwnedMonitors()
+        {
+            try
+            {
+                foreach (var name in _ownedSingletonNames)
+                    _monitorRegistry.Heartbeat(name);
+                foreach (var monitor in _monitors)
+                    _monitorRegistry.Heartbeat(monitor.Name);
+            }
+            catch { /* heartbeat is best-effort */ }
+        }
+
+        /// <summary>Best-effort category assignment for IMonitor implementations by name.</summary>
+        private static MonitorCategory CategorizeMonitor(string name)
+        {
+            var n = name.ToLowerInvariant();
+            if (n.Contains("dns") || n.Contains("network") || n.Contains("beacon") || n.Contains("exfil"))
+                return MonitorCategory.NetworkMonitoring;
+            if (n.Contains("file") || n.Contains("dll") || n.Contains("ads"))
+                return MonitorCategory.FileMonitoring;
+            if (n.Contains("cred") || n.Contains("lsass") || n.Contains("token"))
+                return MonitorCategory.CredentialProtection;
+            if (n.Contains("memory") || n.Contains("module"))
+                return MonitorCategory.MemoryAnalysis;
+            if (n.Contains("threatintel") || n.Contains("ioc") || n.Contains("reputation"))
+                return MonitorCategory.ThreatIntel;
+            if (n.Contains("etw") || n.Contains("process") || n.Contains("ghost") || n.Contains("ephemeral"))
+                return MonitorCategory.ProcessMonitoring;
+            return MonitorCategory.SystemIntegrity;
         }
 
 
@@ -158,18 +221,26 @@ namespace Sentinel.Service
                 _logger.LogWarning(ex, "UnifiedEtwSession start failed — using WMI/polling fallback");
             }
 
+            // Register the constructor-injected singleton monitors that self-start
+            // (WMI/File/Network/etc.). These run but were never tracked by the registry,
+            // which is why the dashboard showed 0/0 monitors running.
+            RegisterInjectedMonitors();
+
             // Start all IMonitor implementations
             foreach (var monitor in _monitors)
             {
                 if (stoppingToken.IsCancellationRequested) break;
+                _monitorRegistry.Register(monitor.Name, CategorizeMonitor(monitor.Name), monitor);
                 try
                 {
                     await monitor.StartAsync(CancellationToken.None);
+                    _monitorRegistry.MarkStarted(monitor.Name);
                     _logger.LogInformation("Started monitor: {Monitor}", monitor.Name);
                 }
                 catch (OperationCanceledException) { break; }
                 catch (Exception ex)
                 {
+                    _monitorRegistry.MarkFailed(monitor.Name, ex);
                     _logger.LogError(ex, "Failed to start monitor: {Monitor}", monitor.Name);
                 }
             }
@@ -199,6 +270,10 @@ namespace Sentinel.Service
                 while (!stoppingToken.IsCancellationRequested)
                 {
                     await Task.Delay(5000, stoppingToken);
+
+                    // Heartbeat the monitors this service owns so the registry watchdog
+                    // keeps them marked Running (they don't self-heartbeat).
+                    HeartbeatOwnedMonitors();
                 }
             }
             catch (OperationCanceledException) { }
@@ -214,6 +289,7 @@ namespace Sentinel.Service
                 // Stop and dispose IMonitors
                 foreach (var monitor in _monitors)
                 {
+                    _monitorRegistry.MarkStopped(monitor.Name);
                     try { await monitor.StopAsync(); }
                     catch (Exception ex) { _logger.LogError(ex, "Error stopping monitor: {Monitor}", monitor.Name); }
 
