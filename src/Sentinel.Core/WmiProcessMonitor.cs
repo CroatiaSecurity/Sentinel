@@ -58,24 +58,41 @@ namespace Sentinel.Core
 
         public void Start()
         {
-            try
+            // Graceful degradation on stripped-down Windows: only touch WMI if the facility
+            // is actually present. Probing first avoids a JIT-time type-load fault when the
+            // System.Management assembly is missing from a trimmed image. If WMI is gone we
+            // keep the fast-poll snapshot loop below, which needs nothing but the process list.
+            if (SystemCapabilities.WmiAvailable)
             {
-                var query = new WqlEventQuery("__InstanceCreationEvent", new TimeSpan(0, 0, 1),
-                    "TargetInstance ISA 'Win32_Process'");
-
-                _watcher = new ManagementEventWatcher(query);
-                _watcher.EventArrived += OnProcessStarted;
-                _watcher.Start();
+                try { StartWmiWatcher(); }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"Failed to start WmiProcessMonitor watcher: {ex.Message}");
+                }
             }
-            catch (Exception ex)
+            else
             {
-                Debug.WriteLine($"Failed to start WmiProcessMonitor: {ex.Message}");
+                Debug.WriteLine("WmiProcessMonitor: WMI unavailable on this system — using fast-poll fallback only.");
             }
 
             // Start fast-poll gap coverage (250ms) to catch ephemeral processes
-            // that spawn and exit within WMI's 1-2s event delivery latency
+            // that spawn and exit within WMI's 1-2s event delivery latency. On systems where
+            // WMI is stripped out entirely, this is the sole process-birth signal.
             InitializeFastPoll();
             _fastPollTimer = new System.Threading.Timer(FastPollProcesses, null, 500, 500);
+        }
+
+        // Isolated so a missing System.Management assembly (stripped image) surfaces as a
+        // catchable exception at the call site in Start(), not as an escaping type-load fault.
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        private void StartWmiWatcher()
+        {
+            var query = new WqlEventQuery("__InstanceCreationEvent", new TimeSpan(0, 0, 1),
+                "TargetInstance ISA 'Win32_Process'");
+
+            _watcher = new ManagementEventWatcher(query);
+            _watcher.EventArrived += OnProcessStarted;
+            _watcher.Start();
         }
 
         private void InitializeFastPoll()

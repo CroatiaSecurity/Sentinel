@@ -160,6 +160,54 @@ namespace Sentinel.Core
             finally { CloseHandle(h); }
         }
 
+        /// <summary>
+        /// Neuters a mapped module in place by stripping EXECUTE from every committed, executable
+        /// page belonging to its image (walked from <paramref name="moduleBase"/> via VirtualQueryEx,
+        /// bounded by <paramref name="moduleSize"/>). Used as an escalation when FreeLibrary-by-APC
+        /// cannot be verified: the DLL stays mapped but its code can no longer run, so hooks and
+        /// DllMain-installed callbacks are defanged without killing the (possibly legitimate) host.
+        /// Games are refused by CanInspect. Returns true if at least one executable region was flipped.
+        /// </summary>
+        public static bool TryStripModuleExecute(int processId, IntPtr moduleBase, int moduleSize)
+        {
+            if (!CanInspect(processId) || moduleBase == IntPtr.Zero || moduleSize <= 0) return false;
+            var protect = FnProtect.Value;
+            var query = FnQuery.Value;
+            if (protect == null || query == null) return false;
+
+            IntPtr h = OpenRemoteHandle(AccessQuery | AccessVmOp | AccessVmRead, processId);
+            if (h == IntPtr.Zero) return false;
+            try
+            {
+                bool any = false;
+                long start = moduleBase.ToInt64();
+                long end = start + moduleSize;
+                long cursor = start;
+                int guard = 0;
+                while (cursor < end && guard++ < 4096)
+                {
+                    var addr = new IntPtr(cursor);
+                    int n = query(h, addr, out var mbi, Marshal.SizeOf<MEMORY_BASIC_INFORMATION>());
+                    if (n == 0) break;
+
+                    long regionSize = mbi.RegionSize.ToInt64();
+                    if (regionSize <= 0) break;
+
+                    if (mbi.State == StateCommit && IsExecutableProtection(mbi.Protect))
+                    {
+                        // Flip execute → PAGE_READONLY. Leave the bytes intact (analysts can still
+                        // read them); only remove the ability to execute.
+                        if (protect(h, mbi.BaseAddress, (UIntPtr)(ulong)regionSize, 0x02 /* PAGE_READONLY */, out _))
+                            any = true;
+                    }
+                    cursor += regionSize;
+                }
+                return any;
+            }
+            catch { return false; }
+            finally { CloseHandle(h); }
+        }
+
         public static bool LooksLikeMzPe(int processId, IntPtr address)
         {
             if (!CanInspect(processId) || address == IntPtr.Zero) return false;

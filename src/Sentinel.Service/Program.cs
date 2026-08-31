@@ -14,6 +14,39 @@ using Sentinel.Core.Plugins;
 
 namespace Sentinel.Service
 {
+    /// <summary>
+    /// Builds monitor-group member lists resiliently. On a heavily stripped-down Windows a
+    /// monitor's constructor can throw (missing WMI/System.Management, absent registry hive,
+    /// perf counters, a service, etc.). Resolving each member behind an isolated try/catch means
+    /// one un-constructable monitor is skipped with a warning instead of faulting host startup
+    /// and taking the whole group — and the process — down with it.
+    /// </summary>
+    internal static class SafeMonitorResolver
+    {
+        public static System.Collections.Generic.List<IHostedService> Build(
+            IServiceProvider sp,
+            params (string Name, Func<IServiceProvider, IHostedService> Factory)[] members)
+        {
+            var logger = sp.GetService<ILogger<Program>>();
+            var list = new System.Collections.Generic.List<IHostedService>(members.Length);
+            foreach (var (name, factory) in members)
+            {
+                try
+                {
+                    var m = factory(sp);
+                    if (m != null) list.Add(m);
+                }
+                catch (Exception ex)
+                {
+                    logger?.LogWarning(
+                        "[Startup] Monitor '{Monitor}' could not be constructed on this system and will be skipped (likely a missing OS facility on a stripped-down image): {Error}",
+                        name, ex.Message);
+                }
+            }
+            return list;
+        }
+    }
+
     public class Program
     {
         public static async Task Main(string[] args)
@@ -401,19 +434,18 @@ namespace Sentinel.Service
                     // Sentinel itself and must never stay down.
                     services.AddSingleton<IHostedService>(sp =>
                     {
-                        var monitors = new List<IHostedService>
-                        {
-                            sp.GetRequiredService<AntiTamperGuard>(),
-                            sp.GetRequiredService<IPSecIntegrityGuard>(),
-                            sp.GetRequiredService<AsrPolicyGuard>(),
-                            sp.GetRequiredService<AgentWatchdog>(),
-                            sp.GetRequiredService<SyscallStubMonitor>(),
-                            sp.GetRequiredService<ConnectivityCanaryMonitor>(),
-                            sp.GetRequiredService<EtwSessionGuard>(),
-                            sp.GetRequiredService<EtwProviderTamperMonitor>(),
-                            sp.GetRequiredService<AmsiIntegrityCheck>(),
-                            sp.GetRequiredService<HoneypotDllMonitor>(),
-                        };
+                        var monitors = SafeMonitorResolver.Build(sp,
+                            ("AntiTamperGuard",             s => s.GetRequiredService<AntiTamperGuard>()),
+                            ("IPSecIntegrityGuard",         s => s.GetRequiredService<IPSecIntegrityGuard>()),
+                            ("AsrPolicyGuard",              s => s.GetRequiredService<AsrPolicyGuard>()),
+                            ("AgentWatchdog",               s => s.GetRequiredService<AgentWatchdog>()),
+                            ("SyscallStubMonitor",          s => s.GetRequiredService<SyscallStubMonitor>()),
+                            ("ConnectivityCanaryMonitor",   s => s.GetRequiredService<ConnectivityCanaryMonitor>()),
+                            ("EtwSessionGuard",             s => s.GetRequiredService<EtwSessionGuard>()),
+                            ("EtwProviderTamperMonitor",    s => s.GetRequiredService<EtwProviderTamperMonitor>()),
+                            ("AmsiIntegrityCheck",          s => s.GetRequiredService<AmsiIntegrityCheck>()),
+                            ("HoneypotDllMonitor",          s => s.GetRequiredService<HoneypotDllMonitor>())
+                        );
                         return new MonitorGroup(
                             new MonitorGroupConfig
                             {
@@ -447,43 +479,41 @@ namespace Sentinel.Service
                     // Restart up to 5 times before degrading.
                     services.AddSingleton<IHostedService>(sp =>
                     {
-                        var monitors = new List<IHostedService>
-                        {
-                            sp.GetRequiredService<RansomwareIoMonitor>(),
-                            sp.GetRequiredService<BeaconingDetector>(),
-                            sp.GetRequiredService<BehavioralBaselineService>(),
-                            sp.GetRequiredService<FileVerdictScanner>(),
-                            sp.GetRequiredService<ConsultantSignalIngestor>(),
-                            sp.GetRequiredService<GhostProcessMonitor>(),
-                            sp.GetRequiredService<EphemeralProcessMonitor>(),
-                            sp.GetRequiredService<ModuleValidationMonitor>(),
-                            sp.GetRequiredService<RuntimeModuleIntegrityMonitor>(),
-                            sp.GetRequiredService<DllEntropyAnalyzer>(),
-                            sp.GetRequiredService<DllLoadFailureMonitor>(),
-                            sp.GetRequiredService<DiskWideDllScanner>(),
-                            sp.GetRequiredService<PersistentConnectionMonitor>(),
-                            sp.GetRequiredService<DataExfiltrationMonitor>(),
-                            sp.GetRequiredService<AdsDataStagingMonitor>(),
-                            sp.GetRequiredService<ScriptExecutionMonitor>(),
-                            sp.GetRequiredService<ScriptHardeningMonitor>(),
-                            sp.GetRequiredService<NamedPipeMonitor>(),
-                            sp.GetRequiredService<RpcLateralMonitor>(),
-                            sp.GetRequiredService<TokenTheftMonitor>(),
-                            sp.GetRequiredService<CloudSyncExfilMonitor>(),
-                            sp.GetRequiredService<LnkShortcutMonitor>(),
-                            sp.GetRequiredService<AgenticProcessMonitor>(),
-                            sp.GetRequiredService<PackageRuntimeMonitor>(),
-                            // v2.1.0 Phase A coverage expansion
-                            sp.GetRequiredService<LpeScaffoldMonitor>(),
-                            sp.GetRequiredService<InitialAccessMonitor>(),
-                            sp.GetRequiredService<PersistenceSurfaceMonitor>(),
-                            sp.GetRequiredService<DreamJobCampaignMonitor>(),
-                            sp.GetRequiredService<EdrKillerDetectionMonitor>(),
-                            sp.GetRequiredService<DecoyPipeMonitor>(),
-                            sp.GetRequiredService<CveClassCoverageMonitor>(),
-                            sp.GetRequiredService<MotwBypassMonitor>(),
-                            sp.GetRequiredService<ContainerIsolationTamperMonitor>(),
-                        };
+                        var monitors = SafeMonitorResolver.Build(sp,
+                            ("RansomwareIoMonitor",          s => s.GetRequiredService<RansomwareIoMonitor>()),
+                            ("BeaconingDetector",            s => s.GetRequiredService<BeaconingDetector>()),
+                            ("BehavioralBaselineService",    s => s.GetRequiredService<BehavioralBaselineService>()),
+                            ("FileVerdictScanner",           s => s.GetRequiredService<FileVerdictScanner>()),
+                            ("ConsultantSignalIngestor",     s => s.GetRequiredService<ConsultantSignalIngestor>()),
+                            ("GhostProcessMonitor",          s => s.GetRequiredService<GhostProcessMonitor>()),
+                            ("EphemeralProcessMonitor",      s => s.GetRequiredService<EphemeralProcessMonitor>()),
+                            ("ModuleValidationMonitor",      s => s.GetRequiredService<ModuleValidationMonitor>()),
+                            ("RuntimeModuleIntegrityMonitor",s => s.GetRequiredService<RuntimeModuleIntegrityMonitor>()),
+                            ("DllEntropyAnalyzer",           s => s.GetRequiredService<DllEntropyAnalyzer>()),
+                            ("DllLoadFailureMonitor",        s => s.GetRequiredService<DllLoadFailureMonitor>()),
+                            ("DiskWideDllScanner",           s => s.GetRequiredService<DiskWideDllScanner>()),
+                            ("PersistentConnectionMonitor",  s => s.GetRequiredService<PersistentConnectionMonitor>()),
+                            ("DataExfiltrationMonitor",      s => s.GetRequiredService<DataExfiltrationMonitor>()),
+                            ("AdsDataStagingMonitor",        s => s.GetRequiredService<AdsDataStagingMonitor>()),
+                            ("ScriptExecutionMonitor",       s => s.GetRequiredService<ScriptExecutionMonitor>()),
+                            ("ScriptHardeningMonitor",       s => s.GetRequiredService<ScriptHardeningMonitor>()),
+                            ("NamedPipeMonitor",             s => s.GetRequiredService<NamedPipeMonitor>()),
+                            ("RpcLateralMonitor",            s => s.GetRequiredService<RpcLateralMonitor>()),
+                            ("TokenTheftMonitor",            s => s.GetRequiredService<TokenTheftMonitor>()),
+                            ("CloudSyncExfilMonitor",        s => s.GetRequiredService<CloudSyncExfilMonitor>()),
+                            ("LnkShortcutMonitor",           s => s.GetRequiredService<LnkShortcutMonitor>()),
+                            ("AgenticProcessMonitor",        s => s.GetRequiredService<AgenticProcessMonitor>()),
+                            ("PackageRuntimeMonitor",        s => s.GetRequiredService<PackageRuntimeMonitor>()),
+                            ("LpeScaffoldMonitor",           s => s.GetRequiredService<LpeScaffoldMonitor>()),
+                            ("InitialAccessMonitor",         s => s.GetRequiredService<InitialAccessMonitor>()),
+                            ("PersistenceSurfaceMonitor",    s => s.GetRequiredService<PersistenceSurfaceMonitor>()),
+                            ("DreamJobCampaignMonitor",      s => s.GetRequiredService<DreamJobCampaignMonitor>()),
+                            ("EdrKillerDetectionMonitor",    s => s.GetRequiredService<EdrKillerDetectionMonitor>()),
+                            ("DecoyPipeMonitor",             s => s.GetRequiredService<DecoyPipeMonitor>()),
+                            ("CveClassCoverageMonitor",      s => s.GetRequiredService<CveClassCoverageMonitor>()),
+                            ("MotwBypassMonitor",            s => s.GetRequiredService<MotwBypassMonitor>()),
+                            ("ContainerIsolationTamperMonitor", s => s.GetRequiredService<ContainerIsolationTamperMonitor>())
+                        );
                         return new MonitorGroup(
                             new MonitorGroupConfig
                             {
@@ -540,18 +570,17 @@ namespace Sentinel.Service
                     // Starts after core detection (4s). Protects credentials and sessions.
                     services.AddSingleton<IHostedService>(sp =>
                     {
-                        var monitors = new List<IHostedService>
-                        {
-                            sp.GetRequiredService<CanaryFileMonitor>(),
-                            sp.GetRequiredService<BrowserCredentialGuard>(),
-                            sp.GetRequiredService<BrowserC2Guard>(),
-                            sp.GetRequiredService<MicrosoftAccountGuardMonitor>(),
-                            sp.GetRequiredService<NullSessionGuard>(),
-                            sp.GetRequiredService<BuiltinAdminGuard>(),
-                            sp.GetRequiredService<PasswordRotationGuard>(),
-                            sp.GetRequiredService<RemoteSessionGuard>(),
-                            sp.GetRequiredService<TokenPrivilegeAuditMonitor>(),
-                        };
+                        var monitors = SafeMonitorResolver.Build(sp,
+                            ("CanaryFileMonitor",               s => s.GetRequiredService<CanaryFileMonitor>()),
+                            ("BrowserCredentialGuard",          s => s.GetRequiredService<BrowserCredentialGuard>()),
+                            ("BrowserC2Guard",                  s => s.GetRequiredService<BrowserC2Guard>()),
+                            ("MicrosoftAccountGuardMonitor",    s => s.GetRequiredService<MicrosoftAccountGuardMonitor>()),
+                            ("NullSessionGuard",                s => s.GetRequiredService<NullSessionGuard>()),
+                            ("BuiltinAdminGuard",               s => s.GetRequiredService<BuiltinAdminGuard>()),
+                            ("PasswordRotationGuard",           s => s.GetRequiredService<PasswordRotationGuard>()),
+                            ("RemoteSessionGuard",              s => s.GetRequiredService<RemoteSessionGuard>()),
+                            ("TokenPrivilegeAuditMonitor",      s => s.GetRequiredService<TokenPrivilegeAuditMonitor>())
+                        );
                         return new MonitorGroup(
                             new MonitorGroupConfig
                             {
@@ -581,24 +610,23 @@ namespace Sentinel.Service
                     // Starts after credential group (6s). Monitors network-layer attacks.
                     services.AddSingleton<IHostedService>(sp =>
                     {
-                        var monitors = new List<IHostedService>
-                        {
-                            sp.GetRequiredService<ArpSpoofMonitor>(),
-                            sp.GetRequiredService<DnsResponseValidationMonitor>(),
-                            sp.GetRequiredService<PublicIpMonitor>(),
-                            sp.GetRequiredService<WifiSecurityMonitor>(),
-                            sp.GetRequiredService<NetworkInterfaceGuard>(),
-                            sp.GetRequiredService<AppDnsExfilMonitor>(),
-                            sp.GetRequiredService<NetworkShareMonitor>(),
-                            sp.GetRequiredService<NetworkReinfectionDetector>(),
-                            sp.GetRequiredService<ReinfectionCorrelator>(),
-                            sp.GetRequiredService<DnsCrossValidator>(),
-                            sp.GetRequiredService<TrafficVolumeBaseline>(),
-                            sp.GetRequiredService<OutboundConnectionWhitelist>(),
-                            sp.GetRequiredService<RemoteAccessMonitor>(),
-                            sp.GetRequiredService<ThreatIntelFeedBlocker>(),
-                            sp.GetRequiredService<ForumHrWatchMonitor>(),
-                        };
+                        var monitors = SafeMonitorResolver.Build(sp,
+                            ("ArpSpoofMonitor",                 s => s.GetRequiredService<ArpSpoofMonitor>()),
+                            ("DnsResponseValidationMonitor",    s => s.GetRequiredService<DnsResponseValidationMonitor>()),
+                            ("PublicIpMonitor",                 s => s.GetRequiredService<PublicIpMonitor>()),
+                            ("WifiSecurityMonitor",             s => s.GetRequiredService<WifiSecurityMonitor>()),
+                            ("NetworkInterfaceGuard",           s => s.GetRequiredService<NetworkInterfaceGuard>()),
+                            ("AppDnsExfilMonitor",              s => s.GetRequiredService<AppDnsExfilMonitor>()),
+                            ("NetworkShareMonitor",             s => s.GetRequiredService<NetworkShareMonitor>()),
+                            ("NetworkReinfectionDetector",      s => s.GetRequiredService<NetworkReinfectionDetector>()),
+                            ("ReinfectionCorrelator",           s => s.GetRequiredService<ReinfectionCorrelator>()),
+                            ("DnsCrossValidator",               s => s.GetRequiredService<DnsCrossValidator>()),
+                            ("TrafficVolumeBaseline",           s => s.GetRequiredService<TrafficVolumeBaseline>()),
+                            ("OutboundConnectionWhitelist",     s => s.GetRequiredService<OutboundConnectionWhitelist>()),
+                            ("RemoteAccessMonitor",             s => s.GetRequiredService<RemoteAccessMonitor>()),
+                            ("ThreatIntelFeedBlocker",          s => s.GetRequiredService<ThreatIntelFeedBlocker>()),
+                            ("ForumHrWatchMonitor",             s => s.GetRequiredService<ForumHrWatchMonitor>())
+                        );
                         return new MonitorGroup(
                             new MonitorGroupConfig
                             {
@@ -633,35 +661,34 @@ namespace Sentinel.Service
                     // Starts delayed (10s). Monitors OS-level configuration drift.
                     services.AddSingleton<IHostedService>(sp =>
                     {
-                        var monitors = new List<IHostedService>
-                        {
-                            sp.GetRequiredService<FirewallIntegrityMonitor>(),
-                            sp.GetRequiredService<SecureBootIntegrityMonitor>(),
-                            sp.GetRequiredService<WindowsUpdateIntegrityMonitor>(),
-                            sp.GetRequiredService<ScheduledTaskMonitor>(),
-                            sp.GetRequiredService<CriticalServiceGuard>(),
-                            sp.GetRequiredService<RegistryMonitor>(),
-                            sp.GetRequiredService<WmiPersistenceMonitor>(),
-                            sp.GetRequiredService<WmiPolicyRewriteMonitor>(),
-                            sp.GetRequiredService<WorkFoldersExfilMonitor>(),
-                            sp.GetRequiredService<PrivacyServiceOutboundMonitor>(),
-                            sp.GetRequiredService<TlsCertificateMonitor>(),
-                            sp.GetRequiredService<UacBypassSurfaceMonitor>(),
-                            sp.GetRequiredService<HostsFileGuard>(),
-                            sp.GetRequiredService<BrowserDnsPolicyGuard>(),
-                            sp.GetRequiredService<BootIntegrityGuard>(),
-                            sp.GetRequiredService<CveShieldHardener>(),
-                            sp.GetRequiredService<ApplicationIntegrityMonitor>(),
-                            sp.GetRequiredService<PseudoSandbox>(),
-                            sp.GetRequiredService<AcousticThreatMonitor>(),
-                            sp.GetRequiredService<WfpIntegrityMonitor>(),
-                            sp.GetRequiredService<DriverLoadMonitor>(),
-                            sp.GetRequiredService<GpuProcessMonitor>(),
-                            sp.GetRequiredService<WmiProviderIntegrityMonitor>(),
-                            sp.GetRequiredService<KernelModuleAuditMonitor>(),
-                            sp.GetRequiredService<LegacyHiveMonitor>(),
-                            sp.GetRequiredService<CloudFilesHydrationMonitor>(),
-                        };
+                        var monitors = SafeMonitorResolver.Build(sp,
+                            ("FirewallIntegrityMonitor",        s => s.GetRequiredService<FirewallIntegrityMonitor>()),
+                            ("SecureBootIntegrityMonitor",      s => s.GetRequiredService<SecureBootIntegrityMonitor>()),
+                            ("WindowsUpdateIntegrityMonitor",   s => s.GetRequiredService<WindowsUpdateIntegrityMonitor>()),
+                            ("ScheduledTaskMonitor",            s => s.GetRequiredService<ScheduledTaskMonitor>()),
+                            ("CriticalServiceGuard",            s => s.GetRequiredService<CriticalServiceGuard>()),
+                            ("RegistryMonitor",                 s => s.GetRequiredService<RegistryMonitor>()),
+                            ("WmiPersistenceMonitor",           s => s.GetRequiredService<WmiPersistenceMonitor>()),
+                            ("WmiPolicyRewriteMonitor",         s => s.GetRequiredService<WmiPolicyRewriteMonitor>()),
+                            ("WorkFoldersExfilMonitor",         s => s.GetRequiredService<WorkFoldersExfilMonitor>()),
+                            ("PrivacyServiceOutboundMonitor",   s => s.GetRequiredService<PrivacyServiceOutboundMonitor>()),
+                            ("TlsCertificateMonitor",           s => s.GetRequiredService<TlsCertificateMonitor>()),
+                            ("UacBypassSurfaceMonitor",         s => s.GetRequiredService<UacBypassSurfaceMonitor>()),
+                            ("HostsFileGuard",                  s => s.GetRequiredService<HostsFileGuard>()),
+                            ("BrowserDnsPolicyGuard",           s => s.GetRequiredService<BrowserDnsPolicyGuard>()),
+                            ("BootIntegrityGuard",              s => s.GetRequiredService<BootIntegrityGuard>()),
+                            ("CveShieldHardener",               s => s.GetRequiredService<CveShieldHardener>()),
+                            ("ApplicationIntegrityMonitor",     s => s.GetRequiredService<ApplicationIntegrityMonitor>()),
+                            ("PseudoSandbox",                   s => s.GetRequiredService<PseudoSandbox>()),
+                            ("AcousticThreatMonitor",           s => s.GetRequiredService<AcousticThreatMonitor>()),
+                            ("WfpIntegrityMonitor",             s => s.GetRequiredService<WfpIntegrityMonitor>()),
+                            ("DriverLoadMonitor",               s => s.GetRequiredService<DriverLoadMonitor>()),
+                            ("GpuProcessMonitor",               s => s.GetRequiredService<GpuProcessMonitor>()),
+                            ("WmiProviderIntegrityMonitor",     s => s.GetRequiredService<WmiProviderIntegrityMonitor>()),
+                            ("KernelModuleAuditMonitor",        s => s.GetRequiredService<KernelModuleAuditMonitor>()),
+                            ("LegacyHiveMonitor",               s => s.GetRequiredService<LegacyHiveMonitor>()),
+                            ("CloudFilesHydrationMonitor",      s => s.GetRequiredService<CloudFilesHydrationMonitor>())
+                        );
                         return new MonitorGroup(
                             new MonitorGroupConfig
                             {
@@ -707,22 +734,21 @@ namespace Sentinel.Service
                     // Lower priority — log and continue on failure.
                     services.AddSingleton<IHostedService>(sp =>
                     {
-                        var monitors = new List<IHostedService>
-                        {
-                            sp.GetRequiredService<BluetoothMonitor>(),
-                            sp.GetRequiredService<PhantomDeviceMonitor>(),
-                            sp.GetRequiredService<DeviceInstallMonitor>(),
-                            sp.GetRequiredService<MtpTransferGuard>(),
-                            sp.GetRequiredService<VolumeMountMonitor>(),
-                            sp.GetRequiredService<CastDeviceGuard>(),
-                            sp.GetRequiredService<WslMonitor>(),
-                            sp.GetRequiredService<RawDiskAccessMonitor>(),
-                            sp.GetRequiredService<PrintSpoolerMonitor>(),
-                            sp.GetRequiredService<SandboxEscapeMonitor>(),
-                            sp.GetRequiredService<HardwareSecurityGuard>(),
-                            sp.GetRequiredService<UsbHidWhitelist>(),
-                            sp.GetRequiredService<PhysicalAccessMonitor>(),
-                        };
+                        var monitors = SafeMonitorResolver.Build(sp,
+                            ("BluetoothMonitor",                s => s.GetRequiredService<BluetoothMonitor>()),
+                            ("PhantomDeviceMonitor",            s => s.GetRequiredService<PhantomDeviceMonitor>()),
+                            ("DeviceInstallMonitor",            s => s.GetRequiredService<DeviceInstallMonitor>()),
+                            ("MtpTransferGuard",                s => s.GetRequiredService<MtpTransferGuard>()),
+                            ("VolumeMountMonitor",              s => s.GetRequiredService<VolumeMountMonitor>()),
+                            ("CastDeviceGuard",                 s => s.GetRequiredService<CastDeviceGuard>()),
+                            ("WslMonitor",                      s => s.GetRequiredService<WslMonitor>()),
+                            ("RawDiskAccessMonitor",            s => s.GetRequiredService<RawDiskAccessMonitor>()),
+                            ("PrintSpoolerMonitor",             s => s.GetRequiredService<PrintSpoolerMonitor>()),
+                            ("SandboxEscapeMonitor",            s => s.GetRequiredService<SandboxEscapeMonitor>()),
+                            ("HardwareSecurityGuard",           s => s.GetRequiredService<HardwareSecurityGuard>()),
+                            ("UsbHidWhitelist",                 s => s.GetRequiredService<UsbHidWhitelist>()),
+                            ("PhysicalAccessMonitor",           s => s.GetRequiredService<PhysicalAccessMonitor>())
+                        );
                         return new MonitorGroup(
                             new MonitorGroupConfig
                             {

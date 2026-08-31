@@ -271,7 +271,7 @@ namespace Sentinel.Core
                 var hostileDisk = string.IsNullOrEmpty(procDir)
                     ? new List<string>()
                     : FindHostileSideloadDlls(procDir!);
-                var hostileLoaded = new List<(string Path, IntPtr Base)>();
+                var hostileLoaded = new List<(string Path, IntPtr Base, int Size)>();
 
                 if (NativeProcessMemory.CanInspect(processId, imagePath))
                 {
@@ -285,7 +285,7 @@ namespace Sentinel.Core
                             imagePath, mod.Path, IsMicrosoftFamilySigned);
                         if (verdict.Allowed) continue;
 
-                        hostileLoaded.Add((mod.Path, mod.Base));
+                        hostileLoaded.Add((mod.Path, mod.Base, mod.Size));
                     }
                 }
 
@@ -339,29 +339,52 @@ namespace Sentinel.Core
                 if (pathsToQuarantine.Count == 0) return result;
 
                 bool allUnloaded = hostileLoaded.Count > 0;
-                foreach (var (path, bas) in hostileLoaded)
+                bool anyNeutered = false;    // module code stripped-execute as a fallback
+                bool anyStillLive = false;   // module neither unloaded nor neutered
+                foreach (var (path, bas, size) in hostileLoaded)
                 {
-                    if (bas == IntPtr.Zero) { allUnloaded = false; continue; }
-                    if (!NativeProcessMemory.TryQueueFreeLibrary(processId, bas))
-                        allUnloaded = false;
-                    else
+                    if (bas == IntPtr.Zero) { allUnloaded = false; anyStillLive = true; continue; }
+
+                    bool unmapped = false;
+                    if (NativeProcessMemory.TryQueueFreeLibrary(processId, bas))
                     {
                         for (int i = 0; i < 20; i++)
                         {
                             Thread.Sleep(10);
                             if (!NativeProcessMemory.EnumModules(processId).Any(m => m.Base == bas))
-                                break;
+                            { unmapped = true; break; }
                         }
-                        if (NativeProcessMemory.EnumModules(processId).Any(m => m.Base == bas))
-                            allUnloaded = false;
+                        if (!unmapped && !NativeProcessMemory.EnumModules(processId).Any(m => m.Base == bas))
+                            unmapped = true;
+                    }
+
+                    if (unmapped) continue;
+
+                    // FreeLibrary-by-APC could not be verified (the APC never fired, or the module
+                    // is manually mapped / reflectively loaded and not truly a LoadLibrary'd module).
+                    // Escalate: strip EXECUTE from the module's code so it cannot run in place. This
+                    // defangs hooks and DllMain-installed callbacks WITHOUT killing the host, which is
+                    // the safe middle ground before the last-resort process kill.
+                    allUnloaded = false;
+                    if (NativeProcessMemory.TryStripModuleExecute(processId, bas, size))
+                    {
+                        anyNeutered = true;
+                        _logger.LogInformation(
+                            "[DllUnloadEngine] FreeLibrary unverified for '{Dll}' in PID {Pid} — stripped EXECUTE from module image (neutered in place).",
+                            path, processId);
+                    }
+                    else
+                    {
+                        anyStillLive = true;
                     }
                 }
 
-                // Kill the host only for a user-writable drop we could not unmap.
-                // Failed FreeLibrary of a misclassified OS DLL must not kill
+                // Kill the host only for a user-writable drop we could NOT unmap AND could NOT neuter.
+                // If we stripped execute successfully, the code is dead — no need to kill the (possibly
+                // legitimate) host. Failed FreeLibrary of a misclassified OS DLL must not kill
                 // Ceprkac / StartMenu / svchost (2.2.5 did that: CLR 80131506).
                 bool dropPlant = hostileLoaded.Any(h => ModuleIdentity.IsUserWritableDrop(h.Path));
-                if (dropPlant && !allUnloaded)
+                if (dropPlant && !allUnloaded && anyStillLive)
                 {
                     try { HardeningModule.SafeKillProcessTree(processId); }
                     catch
@@ -385,7 +408,7 @@ namespace Sentinel.Core
                     result.UnloadedDlls.Add(dllPath);
                 }
 
-                foreach (var (path, _) in hostileLoaded)
+                foreach (var (path, _, _) in hostileLoaded)
                 {
                     if (!result.UnloadedDlls.Contains(path, StringComparer.OrdinalIgnoreCase))
                         result.UnloadedDlls.Add(path);
@@ -399,7 +422,7 @@ namespace Sentinel.Core
                         RuleName = "DLL Injection: Foreign Module Unloaded",
                         Evidence = $"Process '{name}' (PID {processId}) loaded hostile DLL(s): " +
                                    string.Join(", ", result.UnloadedDlls) +
-                                   $". FreeLibraryAPC={allUnloaded && hostileLoaded.Count > 0}; hostKilled={dropPlant && !allUnloaded}.",
+                                   $". FreeLibraryAPC={allUnloaded && hostileLoaded.Count > 0}; neutered={anyNeutered}; hostKilled={dropPlant && !allUnloaded && anyStillLive}.",
                         Reasoning = "Proven behavior: a mapped module failed path+signer identity " +
                                     "(foreign folder, user-writable drop, or sideload plant). Unloaded immediately (T1055 / T1574.001).",
                         Confidence = 0.90,

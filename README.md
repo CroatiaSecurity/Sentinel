@@ -6,7 +6,7 @@ Sentinel is for **gamers, creators, and high-profile targets**. It hunts real at
 
 **You can browse and play.** Default mode must not break Chrome/Edge/Firefox, Microsoft Store, Xbox, Steam, Epic, DirectX/VC++ redists, Game Bar, or creator tools such as OBS Studio. Controllers, wheels, and HOTAS stay usable. Installing a game or a GPU/runtime redist is work, not an incident.
 
-**Current version: 2.3.1**
+**Current version: 2.3.3**
 
 ### Honest mission
 
@@ -75,6 +75,10 @@ Sentinel is effective against:
 - **GPU/Hardware acceleration exploitation (v2.1.5)** — Monitors browser GPU helper processes for sandbox escape indicators: child process spawning, outbound network connections, and post-exploitation DLL loads (AMSI, .NET CLR, credential vault). A GPU helper should never spawn processes or open external sockets — if it does, a WebGL/WebGPU exploit achieved sandbox escape and the tree gets killed. Also audits installed GPU driver versions (NVIDIA/AMD/Intel) against known-vulnerable CVE ranges and detects trojanized GPU drivers (.sys with GPU driver names in user-writable paths). Does NOT interfere with gaming, video playback, or GPU compute.
 
 - **Advanced evasion** — Indirect syscalls / Hell's Gate table detection (well-formed `syscall; ret` or copied ntdll stubs with 3+ distinct SSNs in non-image executable memory — not V8/Chromium JIT noise), process injection via unbacked RWX memory detection, named pipe C2 enumeration with known-bad pattern matching.
+
+- **Content smuggling (v2.3.3)** — File reputation now flags **MZ+ZIP polyglots** (a file that runs as an `.exe` but also extracts as a `.zip`) and **compression-oracle payloads** (an embedded GZIP/zlib/DEFLATE stream that decompresses to live script). Both feed the composite score. `.winmd` metadata modules are recognized as metadata-only and are no longer treated as "unsigned = risk".
+
+- **DLL-unload escalation (v2.3.3)** — when `FreeLibrary`-by-APC cannot be verified (unfired APC, or a manually-mapped module), the module's code pages are stripped of `EXECUTE` in place, neutering hooks and DllMain callbacks without killing the host. Process kill remains the last resort.
 
 - **Hardware security downgrade** — Detects if someone disables TPM, Secure Boot, BitLocker, or Credential Guard.
 
@@ -177,7 +181,7 @@ Full transparency in [THREAT_MODEL.md](THREAT_MODEL.md).
 
 ## Installation
 
-Download **`SentinelSetup-2.2.9.exe`** from [GitHub Releases](https://github.com/CroatiaSecurity/Sentinel/releases) (or `releases/2.2.9/` after a local build) and run it as Administrator.
+Download **`SentinelSetup-2.3.3.exe`** from [GitHub Releases](https://github.com/CroatiaSecurity/Sentinel/releases) (or `releases/2.3.3/` after a local build) and run it as Administrator.
 
 If Setup fails with **Error 5 / temporary directory** while an older Sentinel is installed, that was ASR rule `c1db55ab` (fixed in 1.9.6+). Use elevated `installer\install-no-inno.ps1` or `fix-asr-for-setup.ps1`, then upgrade.
 

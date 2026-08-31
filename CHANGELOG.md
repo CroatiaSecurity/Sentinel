@@ -1,6 +1,26 @@
 # Changelog
 
 
+## [2.3.3] - 2026-08-31
+
+Content-smuggling detection, resilience on stripped-down Windows, and a stronger DLL-unload fallback.
+
+### Added
+
+- **Polyglot & compression-oracle detection** (`FileReputationEngine`) — static analysis now flags two content-smuggling classes and feeds them into the composite score:
+  - **MZ+ZIP polyglots**: a file that starts with `MZ` (PE executable) *and* carries a valid ZIP End-Of-Central-Directory — it runs as an `.exe` but also extracts as a `.zip`. Scored +40.
+  - **Compression-oracle script payloads**: an embedded GZIP/zlib/DEFLATE stream that decompresses to live script content (`<script>`, `onerror=`, `eval(`, …). Scored +30. Applies to any file, not just PEs.
+  - `FileVerdictScanner` logs an explicit warning line for each when found.
+- **`SystemCapabilities`** — cached, isolation-safe capability probes (`WmiAvailable`, `EtwAvailable`, `EventLogAvailable`, `PerformanceCountersAvailable`, `ServiceInstalled`, `RegistryKeyExists`). Each risky facility touch lives behind a `NoInlining` method so a missing assembly/type on a trimmed image is caught rather than faulting startup.
+- **DLL-unload escalation** (`NativeProcessMemory.TryStripModuleExecute`) — when `FreeLibrary`-by-APC cannot be verified (APC never fired, or a manually-mapped module), the engine now strips `EXECUTE` from the module's image pages (→ `PAGE_READONLY`), neutering hooks and DllMain callbacks *in place* without killing the host. Process kill is now the last resort, used only when a user-writable drop could be neither unloaded nor neutered.
+
+### Changed
+
+- **Graceful degradation on heavily stripped-down Windows** — Sentinel no longer crashes when an OS facility is missing. `WmiProcessMonitor` probes WMI before touching `System.Management` (falls back to fast-poll only); `UsbDeviceFingerprinter` guards its first `setupapi` P/Invoke; and all six monitor groups now resolve members through `SafeMonitorResolver`, skipping any monitor that cannot be constructed (with a warning) instead of faulting host startup.
+- **`.winmd` false-positive hardening** — the reputation engine recognizes metadata-only modules (`.winmd`, `\WinMetadata\`, or a PE with no entry point + a CLR data directory) and no longer treats their (by-design) lack of Authenticode signature as elevated risk.
+- `ProductInfo.Version` → `2.3.3`
+- Installer → `SentinelSetup-2.3.3`
+
 ## [2.3.2] - 2026-08-28
 
 Dashboard reliability fixes: the monitor health panel and the live event stream now reflect the running system.

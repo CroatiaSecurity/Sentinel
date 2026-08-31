@@ -331,6 +331,21 @@ namespace Sentinel.Core
                 // Blocking execution based on reputation scores alone caused false positives
                 // (including quarantining our own installer) and violates the design principle
                 // that response actions only fire when a process is ACTIVELY malicious.
+                // Content-smuggling signals are noteworthy on their own, even if the composite
+                // verdict lands short of Unsafe — surface them explicitly so an analyst sees them.
+                if (reputationResult.StaticAnalysis.IsMzZipPolyglot)
+                {
+                    _logger.LogWarning(
+                        "[FileVerdictScanner] MZ+ZIP polyglot detected: {FilePath} (SHA256: {Hash}) — runs as .exe but also extracts as a .zip archive.",
+                        filePath, hash);
+                }
+                if (reputationResult.StaticAnalysis.HasEmbeddedScriptPayload)
+                {
+                    _logger.LogWarning(
+                        "[FileVerdictScanner] Embedded script payload in compressed stream: {FilePath} (SHA256: {Hash}) — decompresses to executable script content.",
+                        filePath, hash);
+                }
+
                 if (verdict == HashVerdict.Unsafe)
                 {
                     _logger.LogWarning(

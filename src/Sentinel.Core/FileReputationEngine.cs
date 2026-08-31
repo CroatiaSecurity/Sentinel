@@ -419,15 +419,33 @@ namespace Sentinel.Core
 
             try
             {
+                // .winmd (Windows Metadata) and files under \WinMetadata\ are metadata-only by
+                // extension — recognize them up front so they are never scored as "unsigned".
+                var extLower = System.IO.Path.GetExtension(filePath);
+                bool winmdByName = extLower.Equals(".winmd", StringComparison.OrdinalIgnoreCase)
+                    || filePath.IndexOf(@"\WinMetadata\", StringComparison.OrdinalIgnoreCase) >= 0;
+                if (winmdByName) result.IsMetadataOnlyModule = true;
+
                 using var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read,
                     FileShare.ReadWrite | FileShare.Delete);
                 using var reader = new BinaryReader(fs);
 
+                // ── Content smuggling heuristics (run regardless of PE-ness) ──
+                // These are cheap byte-signature / bounded-decompression checks that catch
+                // packaging tricks even when the file is not a well-formed PE.
+                try { result.HasEmbeddedScriptPayload = HasEmbeddedScriptPayload(fs); }
+                catch { /* best-effort */ }
+
                 // Check MZ header
                 if (fs.Length < 64) { result.IsPe = false; return result; }
+                fs.Seek(0, SeekOrigin.Begin);
                 var dosSignature = reader.ReadUInt16();
                 if (dosSignature != 0x5A4D) { result.IsPe = false; return result; } // Not MZ
                 result.IsPe = true;
+
+                // MZ + ZIP polyglot: an .exe that is also a valid .zip archive.
+                try { result.IsMzZipPolyglot = HasZipEndOfCentralDirectory(fs); }
+                catch { /* best-effort */ }
 
                 // Read PE offset
                 fs.Seek(0x3C, SeekOrigin.Begin);
@@ -449,6 +467,31 @@ namespace Sentinel.Core
                 fs.Seek(peOffset + 24, SeekOrigin.Begin);
                 ushort optionalMagic = reader.ReadUInt16();
                 result.Is64Bit = optionalMagic == 0x20B;
+
+                // Detect metadata-only managed modules (e.g. *.winmd) that aren't caught by name.
+                // Signals: AddressOfEntryPoint == 0 AND a present CLR (COM Descriptor) data
+                // directory (index 14). These are IL/metadata containers with no native code.
+                try
+                {
+                    // AddressOfEntryPoint is at optional-header offset +16 (same for PE32/PE32+).
+                    fs.Seek(peOffset + 24 + 16, SeekOrigin.Begin);
+                    uint addressOfEntryPoint = reader.ReadUInt32();
+
+                    // The CLR data directory (index 14) sits after the standard fields + windows
+                    // specific fields; its offset differs between PE32 (0x60+14*8) and PE32+ (0x70+14*8),
+                    // measured from the start of the optional header.
+                    int dirBase = result.Is64Bit ? 0x70 : 0x60;
+                    long clrDirPos = peOffset + 24 + dirBase + (14 * 8);
+                    if (clrDirPos + 8 <= fs.Length)
+                    {
+                        fs.Seek(clrDirPos, SeekOrigin.Begin);
+                        uint clrRva = reader.ReadUInt32();
+                        uint clrSize = reader.ReadUInt32();
+                        if (addressOfEntryPoint == 0 && clrRva != 0 && clrSize != 0)
+                            result.IsMetadataOnlyModule = true;
+                    }
+                }
+                catch { /* header shape unexpected — leave flag as-is */ }
 
                 // Calculate file entropy (sample first 64KB for speed)
                 fs.Seek(0, SeekOrigin.Begin);
@@ -574,6 +617,165 @@ namespace Sentinel.Core
         }
 
         // ═══════════════════════════════════════════════════════════════
+        // Content-smuggling heuristics (polyglot + compression oracle)
+        // ═══════════════════════════════════════════════════════════════
+
+        // ZIP End-Of-Central-Directory signature: "PK\x05\x06".
+        private static readonly byte[] ZipEocdSignature = { 0x50, 0x4B, 0x05, 0x06 };
+
+        /// <summary>
+        /// Detects an MZ+ZIP polyglot: the stream begins with 'MZ' (already established by the
+        /// caller) and also contains a ZIP End-Of-Central-Directory record. The EOCD lives within
+        /// the last 64KB of a valid zip (the trailing comment is capped at 65535 bytes), so we scan
+        /// the tail only. Requires at least one Local File Header ("PK\x03\x04") somewhere in the
+        /// file so we don't false-positive on the four bytes appearing by chance.
+        /// </summary>
+        private static bool HasZipEndOfCentralDirectory(FileStream fs)
+        {
+            long len = fs.Length;
+            if (len < 22) return false; // EOCD record is 22 bytes minimum
+
+            // EOCD sits within the final 64KB + 22 bytes.
+            const int MaxTail = 65536 + 22;
+            int tailLen = (int)Math.Min(MaxTail, len);
+            fs.Seek(len - tailLen, SeekOrigin.Begin);
+            var tail = new byte[tailLen];
+            ReadExactly(fs, tail, 0, tailLen);
+
+            int eocd = LastIndexOf(tail, ZipEocdSignature);
+            if (eocd < 0) return false;
+
+            // Confirm there is a local file header (PK\x03\x04) — a real archive has entries.
+            // Cheap probe of the file head (polyglots put the zip after the exe stub, but the
+            // central directory offset in the EOCD points at real entries; scanning the whole
+            // file is bounded to 4MB to stay fast).
+            const int MaxScan = 4 * 1024 * 1024;
+            int scanLen = (int)Math.Min(MaxScan, len);
+            fs.Seek(0, SeekOrigin.Begin);
+            var head = new byte[scanLen];
+            ReadExactly(fs, head, 0, scanLen);
+            byte[] lfh = { 0x50, 0x4B, 0x03, 0x04 };
+            return IndexOf(head, lfh, 0) >= 0;
+        }
+
+        // Compressed-stream magic numbers.
+        private static readonly byte[] GzipMagic = { 0x1F, 0x8B };
+
+        /// <summary>
+        /// Scans the file for embedded compressed streams (GZIP, zlib, and raw DEFLATE at offset 0)
+        /// and decompresses a bounded amount, then looks for live script fragments in the output.
+        /// This targets the compression-oracle technique from the threat notes: crafted bytes that
+        /// decompress into an executable script the browser would run.
+        /// </summary>
+        private static bool HasEmbeddedScriptPayload(FileStream fs)
+        {
+            long len = fs.Length;
+            if (len < 4 || len > 20_000_000) return false; // skip tiny/huge files
+
+            const int MaxRead = 2 * 1024 * 1024;   // bytes of the file we look at
+            int readLen = (int)Math.Min(MaxRead, len);
+            fs.Seek(0, SeekOrigin.Begin);
+            var data = new byte[readLen];
+            ReadExactly(fs, data, 0, readLen);
+
+            // 1) GZIP streams can appear anywhere (1F 8B 08).
+            for (int i = 0; i + 3 < data.Length; i++)
+            {
+                if (data[i] == GzipMagic[0] && data[i + 1] == GzipMagic[1] && data[i + 2] == 0x08)
+                {
+                    if (DecompressAndScan(data, i, isGzip: true)) return true;
+                }
+            }
+
+            // 2) zlib stream at offset 0 (0x78 0x01/0x9C/0xDA) — strip 2-byte header, raw DEFLATE.
+            if (data.Length > 2 && data[0] == 0x78 &&
+                (data[1] == 0x01 || data[1] == 0x9C || data[1] == 0xDA))
+            {
+                if (DecompressAndScan(data, 2, isGzip: false)) return true;
+            }
+
+            // 3) raw DEFLATE at offset 0 (no header) — the oracle case where the server compresses
+            //    an uploaded blob. Best-effort attempt.
+            if (DecompressAndScan(data, 0, isGzip: false)) return true;
+
+            return false;
+        }
+
+        private static bool DecompressAndScan(byte[] data, int offset, bool isGzip)
+        {
+            if (offset < 0 || offset >= data.Length) return false;
+            try
+            {
+                using var ms = new MemoryStream(data, offset, data.Length - offset, writable: false);
+                using System.IO.Stream decomp = isGzip
+                    ? new System.IO.Compression.GZipStream(ms, System.IO.Compression.CompressionMode.Decompress)
+                    : new System.IO.Compression.DeflateStream(ms, System.IO.Compression.CompressionMode.Decompress);
+
+                // Bounded decompression — decompression bombs and garbage stop early.
+                const int MaxOut = 1 * 1024 * 1024;
+                var outBuf = new byte[MaxOut];
+                int total = 0, n;
+                while (total < MaxOut && (n = decomp.Read(outBuf, total, MaxOut - total)) > 0)
+                    total += n;
+                if (total < 8) return false;
+
+                var text = System.Text.Encoding.ASCII.GetString(outBuf, 0, total);
+                return ContainsScriptFragment(text);
+            }
+            catch { return false; }
+        }
+
+        private static readonly string[] ScriptFragments =
+        {
+            "<script", "</script>", "javascript:", "onerror=", "onload=",
+            "eval(", "document.cookie", "document.write", "fromCharCode",
+            "<iframe", "<svg onload", "<img src=x onerror"
+        };
+
+        private static bool ContainsScriptFragment(string text)
+        {
+            foreach (var frag in ScriptFragments)
+                if (text.IndexOf(frag, StringComparison.OrdinalIgnoreCase) >= 0)
+                    return true;
+            return false;
+        }
+
+        // ── byte-array search helpers (net48-safe, no MemoryExtensions) ──
+        private static void ReadExactly(System.IO.Stream s, byte[] buf, int offset, int count)
+        {
+            int read = 0;
+            while (read < count)
+            {
+                int n = s.Read(buf, offset + read, count - read);
+                if (n <= 0) break;
+                read += n;
+            }
+        }
+
+        private static int IndexOf(byte[] haystack, byte[] needle, int start)
+        {
+            int end = haystack.Length - needle.Length;
+            for (int i = Math.Max(0, start); i <= end; i++)
+            {
+                int j = 0;
+                while (j < needle.Length && haystack[i + j] == needle[j]) j++;
+                if (j == needle.Length) return i;
+            }
+            return -1;
+        }
+
+        private static int LastIndexOf(byte[] haystack, byte[] needle)
+        {
+            for (int i = haystack.Length - needle.Length; i >= 0; i--)
+            {
+                int j = 0;
+                while (j < needle.Length && haystack[i + j] == needle[j]) j++;
+                if (j == needle.Length) return i;
+            }
+            return -1;
+        }
+
+        // ═══════════════════════════════════════════════════════════════
         // Signal 4: Contextual Risk
         // ═══════════════════════════════════════════════════════════════
 
@@ -667,12 +869,19 @@ namespace Sentinel.Core
                 else if (r.StaticAnalysis.Entropy > 7.0) staticScore += 10;
                 if (r.StaticAnalysis.SuspiciousImportCount > 5) staticScore += 20;
                 else if (r.StaticAnalysis.SuspiciousImportCount > 2) staticScore += 10;
-                staticScore = Math.Min(100, staticScore);
             }
             else
             {
                 staticScore = 20; // Non-PE files are lower risk by default
             }
+
+            // Content-smuggling signals apply regardless of PE-ness.
+            // An MZ+ZIP polyglot is almost never legitimate packaging — weight it heavily.
+            if (r.StaticAnalysis.IsMzZipPolyglot) staticScore += 40;
+            // A compressed stream that decompresses to a live script fragment (compression oracle).
+            if (r.StaticAnalysis.HasEmbeddedScriptPayload) staticScore += 30;
+
+            staticScore = Math.Min(100, staticScore);
             score += staticScore * (hasMl ? 0.20 : 0.25);
 
             // Offline PE ML (weight: 15%) — soft prior only; never sole kill signal
@@ -688,6 +897,7 @@ namespace Sentinel.Core
             // Signer trust (weight: 18% with ML, 20% without)
             double signerScore = 50; // Neutral
             if (r.IsSigned) signerScore = 10; // Strong trust signal
+            else if (r.StaticAnalysis.IsMetadataOnlyModule) signerScore = 15; // WinMD / metadata-only: unsigned by design
             else signerScore = 60; // Unsigned = elevated risk
             score += signerScore * (hasMl ? 0.18 : 0.20);
 
@@ -840,6 +1050,30 @@ namespace Sentinel.Core
         public int SectionCount { get; set; }
         public long FileSize { get; set; }
         public DateTimeOffset CompileTimestamp { get; set; }
+
+        /// <summary>
+        /// True when the file is a PE executable (starts with 'MZ') AND also contains a valid
+        /// ZIP End-Of-Central-Directory record — i.e. an executable/archive polyglot that runs
+        /// as an .exe but extracts as a .zip. Classic dropper/smuggling packaging.
+        /// </summary>
+        public bool IsMzZipPolyglot { get; set; }
+
+        /// <summary>
+        /// True when a compressed stream embedded in the file (GZIP/zlib/raw DEFLATE) decompresses
+        /// to content containing an executable script fragment (e.g. &lt;script&gt;). Targets the
+        /// compression-oracle smuggling technique where crafted bytes compress/decompress into a
+        /// live script that a server would re-emit to a browser.
+        /// </summary>
+        public bool HasEmbeddedScriptPayload { get; set; }
+
+        /// <summary>
+        /// True when the file is a metadata-only module (a Windows Metadata *.winmd, or a managed
+        /// PE with a CLR header, no entry point and no executable sections). These carry type
+        /// metadata only — no runnable code — and are shipped without Authenticode signatures by
+        /// design (e.g. C:\Windows\System32\WinMetadata\Windows.*.winmd). They must NOT be treated
+        /// as "unsigned = suspicious"; doing so is a well-known false-positive class.
+        /// </summary>
+        public bool IsMetadataOnlyModule { get; set; }
     }
 
     public sealed class ContextualRiskResult

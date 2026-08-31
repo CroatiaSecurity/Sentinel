@@ -741,8 +741,19 @@ namespace Sentinel.Core
         private List<UsbDevice> GetConnectedUsbDevices()
         {
             var list = new List<UsbDevice>();
-            Guid emptyGuid = Guid.Empty;
-            IntPtr deviceInfoSet = SetupDiGetClassDevs(ref emptyGuid, "USB", IntPtr.Zero, DIGCF_PRESENT | DIGCF_ALLCLASSES);
+            IntPtr deviceInfoSet;
+            try
+            {
+                // setupapi.dll is absent on some heavily stripped Windows images. Guard the very
+                // first P/Invoke so a DllNotFoundException degrades to "no USB devices" instead of
+                // faulting the constructor (which would take down service startup via DI).
+                Guid emptyGuid = Guid.Empty;
+                deviceInfoSet = SetupDiGetClassDevs(ref emptyGuid, "USB", IntPtr.Zero, DIGCF_PRESENT | DIGCF_ALLCLASSES);
+            }
+            catch
+            {
+                return list; // USB enumeration facility unavailable — skip gracefully.
+            }
             if (deviceInfoSet == (IntPtr)(-1))
             {
                 return list;
