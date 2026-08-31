@@ -1,6 +1,22 @@
 # Changelog
 
 
+## [2.3.5] - 2026-08-31
+
+Delivery-vector coverage: script-class droppers missing Mark-of-the-Web, and the WPAD / PAC auto-proxy hijack path (the host-side landing point for the DHCP Option 252 vector).
+
+### Added
+
+- **Script-dropper Mark-of-the-Web detection** (`MotwBypassMonitor` / `CveCoverageHeuristics`) — the delivery-folder scan previously only checked PE files for a missing `Zone.Identifier`. It now also flags script-class droppers (`.hta`, `.js`, `.jse`, `.vbs`, `.vbe`, `.wsf`, `.wsh`, `.ps1`, `.bat`, `.cmd`, `.lnk`, `.chm`, `.scf`, `.url`) that land in Downloads/Desktop without a Mark-of-the-Web. These detonate via WSH/mshta/batch without being a PE, so a drive-by or XSS-forced download that drops one was previously uncovered. New rule `CVE Class: Script Dropper Missing Mark-of-the-Web` (Tier2 / LogOnly / weak-observe seed, 0.70). New helper `CveCoverageHeuristics.IsScriptDropperExtension()` + `ScriptDropperExtensions`.
+- **`WpadProxyMonitor`** — a new `BackgroundService` covering the WPAD / Proxy Auto-Config (PAC) hijack path. A rogue DHCP server (Option 252) or malware can point the WinHTTP/WinINET auto-proxy resolver at an attacker-controlled PAC file — JavaScript that reroutes every browser through a MITM proxy. The monitor baselines `HKCU\...\Internet Settings\AutoConfigURL` (a pre-existing corporate PAC does not fire), then emits on: a PAC URL change after startup (`WPAD Auto-Proxy PAC Changed`), a remote/IP-literal PAC present at startup (`WPAD Auto-Proxy PAC Configured`), and WPAD auto-detect enabled alongside a remote PAC (`WPAD Auto-Detect With Remote PAC`). All Tier2 / LogOnly / weak-observe. Mapped to the DHCP-client CVE class (CVE-2026-62755).
+- **`WPAD Proxy Hijack Chain` composite** (`BehavioralCorrelationEngine`) — a WPAD/PAC signal correlated with outbound C2, a reverse shell, or an exfil/beacon rule promotes to a 0.9 composite. Does not revert the proxy setting.
+
+### Changed
+
+- Ceprkac (separate repo): credential autofill reworked — fills on first page load without a manual refresh, and handles Google's two-step (email page → separate password page) flow. See the Ceprkac changelog.
+- `ProductInfo.Version` → `2.3.5`
+- Installer → `SentinelSetup-2.3.5`
+
 ## [2.3.4] - 2026-08-31
 
 Full loadable-module-extension coverage for the DLL/module unloader.

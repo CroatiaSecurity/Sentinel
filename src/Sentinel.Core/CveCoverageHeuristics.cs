@@ -77,6 +77,16 @@ namespace Sentinel.Core
             ".iso", ".img", ".vhd", ".vhdx", ".vmdk", ".wim",
         };
 
+        // Script-class droppers that execute via WSH / mshta / batch. These don't need
+        // to be PE to detonate a drive-by / XSS-forced download, and a browser download
+        // normally still stamps them with a Zone.Identifier. Missing MOTW on one of these
+        // in a delivery folder is the classic MOTW-strip / archive-smuggle shape.
+        public static readonly string[] ScriptDropperExtensions =
+        {
+            ".hta", ".js", ".jse", ".vbs", ".vbe", ".wsf", ".wsh",
+            ".ps1", ".bat", ".cmd", ".lnk", ".chm", ".scf", ".url",
+        };
+
         public static readonly string[] ServerOnlyProducts =
         {
             "sharepoint", "exchange server", "sql server", "windows server",
@@ -238,6 +248,25 @@ namespace Sentinel.Core
                    || ext.Equals(".sys", StringComparison.OrdinalIgnoreCase)
                    || ext.Equals(".cpl", StringComparison.OrdinalIgnoreCase)
                    || ext.Equals(".com", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// True for script-class droppers (.hta/.js/.vbs/.wsf/.ps1/.lnk/etc.) that
+        /// detonate via WSH/mshta/batch without needing to be a PE. A browser download
+        /// normally stamps these with a Zone.Identifier, so a missing MOTW in a delivery
+        /// folder is a drive-by / archive-smuggle / MOTW-strip indicator.
+        /// </summary>
+        public static bool IsScriptDropperExtension(string? path)
+        {
+            if (string.IsNullOrWhiteSpace(path)) return false;
+            var ext = Path.GetExtension(path);
+            if (string.IsNullOrEmpty(ext)) return false;
+            foreach (var e in ScriptDropperExtensions)
+            {
+                if (ext.Equals(e, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+            return false;
         }
 
         /// <summary>

@@ -512,7 +512,8 @@ namespace Sentinel.Service
                             ("DecoyPipeMonitor",             s => s.GetRequiredService<DecoyPipeMonitor>()),
                             ("CveClassCoverageMonitor",      s => s.GetRequiredService<CveClassCoverageMonitor>()),
                             ("MotwBypassMonitor",            s => s.GetRequiredService<MotwBypassMonitor>()),
-                            ("ContainerIsolationTamperMonitor", s => s.GetRequiredService<ContainerIsolationTamperMonitor>())
+                            ("ContainerIsolationTamperMonitor", s => s.GetRequiredService<ContainerIsolationTamperMonitor>()),
+                            ("WpadProxyMonitor",             s => s.GetRequiredService<WpadProxyMonitor>())
                         );
                         return new MonitorGroup(
                             new MonitorGroupConfig
@@ -565,6 +566,7 @@ namespace Sentinel.Service
                     services.AddSingleton<CveClassCoverageMonitor>();
                     services.AddSingleton<MotwBypassMonitor>();
                     services.AddSingleton<ContainerIsolationTamperMonitor>();
+                    services.AddSingleton<WpadProxyMonitor>();
 
                     // ── Group 3: Credential Protection ────────────────────────────────
                     // Starts after core detection (4s). Protects credentials and sessions.

@@ -125,8 +125,9 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 | `EdrKillerDetectionMonitor` | **v2.2.0 registered.** Known EDR-killer **process names** — LogOnly observe fuel (rename bypasses) | 5s |
 | `DecoyPipeMonitor` | **v2.2.0 registered.** Default CS/Metasploit pipe-name honeypots | continuous |
 | `CveClassCoverageMonitor` | **v2.2.4.** Generic kernel-EoP / MSI / winget / VS Code / ClickFix / MIDI / RDP-client userland shape | 18s |
-| `MotwBypassMonitor` | **v2.2.4.** MOTW-strip PE, ISO/VHD, VSIX, .rdp, AppInstaller in Downloads/Desktop/Temp | 40s |
+| `MotwBypassMonitor` | **v2.2.4 / v2.3.5.** MOTW-strip PE **and script droppers** (`.hta`/`.js`/`.vbs`/`.wsf`/`.ps1`/`.lnk`/`.chm`), ISO/VHD, VSIX, .rdp, AppInstaller in Downloads/Desktop/Temp | 40s |
 | `ContainerIsolationTamperMonitor` | **v2.2.4.** unionfs/wcifs/bindflt staging (CVE-2026-72971); AlwaysInstallElevated | 30s |
+| `WpadProxyMonitor` | **v2.3.5.** WPAD / PAC auto-proxy config (`AutoConfigURL`) — rogue DHCP Option 252 / MITM proxy hijack (CVE-2026-62755 class). Composite `WPAD Proxy Hijack Chain` | 45s |
 
 #### Group 3: CredentialProtection (4s start delay, max 3 restarts)
 
@@ -760,7 +761,8 @@ Generic CVE-class coverage. Does not patch kernel races. Folder `Monitors/` is f
 |------|------------------|
 | Kernel EoP loaders | `CveClassCoverageMonitor` — exploit/CVE/Device\\Afd shape from staging. Composite `Kernel Exploit Loader Chain` |
 | Installer / winget | MSI from staging; ms-appinstaller; AlwaysInstallElevated. Composite `Installer / Package Manager EoP Chain` |
-| MOTW / ISO / ClickFix | Delivery-folder sensors; game ISOs LogOnly. Composite `MOTW Bypass Execution Chain` |
+| MOTW / ISO / ClickFix | Delivery-folder sensors (PE **and script droppers** missing MOTW, v2.3.5); game ISOs LogOnly. Composite `MOTW Bypass Execution Chain` |
+| WPAD / PAC proxy hijack | `WpadProxyMonitor` — rogue `AutoConfigURL` / DHCP Option 252 (v2.3.5). Composite `WPAD Proxy Hijack Chain` |
 | VS Code SFB | Encoded shell from Code/Cursor. Composite `VS Code Workspace Abuse Chain` |
 | unionfs | User-writable isolation-filter .sys (CVE-2026-72971) |
 | CveShield | Windows OS-class KEV matches WorkstationOs; no synthetic PoC hashes |

@@ -530,6 +530,23 @@ namespace Sentinel.Core
                 return;
             }
 
+            // WPAD / rogue-PAC network hijack (DHCP Option 252 vector, CVE-2026-62755 class).
+            // A rewritten/remote auto-proxy PAC correlated with outbound C2 or data exfil is
+            // the man-in-the-middle proxy-hijack chain: attacker JS routes all browser traffic.
+            var hasWpadHijack = currentSignals.Any(s =>
+                s.RuleName.IndexOf("WPAD", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                s.RuleName.IndexOf("Auto-Proxy PAC", StringComparison.OrdinalIgnoreCase) >= 0);
+            if (hasWpadHijack &&
+                (types.Contains(SignalType.NetworkC2) || types.Contains(SignalType.ReverseShell) ||
+                 currentSignals.Any(s => s.RuleName.Contains("Exfil") || s.RuleName.Contains("Beacon"))))
+            {
+                await EmitCompositeAsync(pid, "WPAD Proxy Hijack Chain", 0.9,
+                    "Rogue/changed auto-proxy PAC correlated with outbound C2 or data exfiltration.",
+                    "DHCP Option 252 / WPAD man-in-the-middle: an attacker-controlled PAC URL reroutes browser " +
+                    "traffic through a hostile proxy, plus corroborating C2/exfil. Does not revert the proxy setting.");
+                return;
+            }
+
             // v1.9.4: Digital coercion toolkit (platform-agnostic)
             // Covert surveillance + remote/network channel (stalkerware / coercive control PC)
             var hasSurveillance = currentSignals.Any(CoercionAbusePolicy.IsSurveillanceRule);

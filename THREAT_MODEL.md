@@ -1,8 +1,12 @@
 # Sentinel — Threat Model
 
-**Version: 2.3.4**
+**Version: 2.3.5**
 
 This document assumes the attacker has read the source code.
+
+### v2.3.5 — script-dropper MOTW + WPAD/PAC proxy hijack (DHCP Option 252)
+
+Two delivery-vector gaps closed. **(1) Script-class droppers.** `MotwBypassMonitor` previously only checked PE files in delivery folders for a missing `Zone.Identifier`. A drive-by or XSS-forced download that drops a `.hta`/`.js`/`.vbs`/`.wsf`/`.ps1`/`.lnk`/`.chm` detonates via WSH/mshta/batch without ever being a PE, so it slipped the PE-only check. The scan now also flags script-class droppers missing MOTW (`CveCoverageHeuristics.IsScriptDropperExtension`) as `CVE Class: Script Dropper Missing Mark-of-the-Web` (Tier2/LogOnly weak observe). Because the correlation engine keys `hasMotwDelivery` on `Contains("Mark-of-the-Web")`, the new signal feeds the existing `MOTW Bypass Execution Chain` automatically when it correlates with a LOLBin, script, or C2. **(2) WPAD/PAC.** DHCP does not deliver JavaScript, but DHCP **Option 252** delivers a *PAC URL*, and a PAC file is JavaScript (`FindProxyForURL`) that the WinHTTP/WinINET auto-proxy resolver executes to route traffic. A rogue DHCP server or malware that sets `AutoConfigURL` can MITM every browser and leak visited hosts even for HTTPS. `WpadProxyMonitor` baselines the current PAC config (a pre-existing corporate PAC does not fire), then emits on a post-startup PAC change, a remote/IP-literal PAC, or WPAD auto-detect + remote PAC — all Tier2/LogOnly. Correlated with C2/exfil it promotes to the `WPAD Proxy Hijack Chain` composite (0.9). Neither monitor reverts the proxy setting or kills — corporate PAC and game ISOs are legitimate; these are observe fuel that only escalate on a corroborating execution or callback leg. This is a userland delivery/observe sensor: it does not patch the DHCP client (CVE-2026-62755 class) and does not stop a PAC-engine memory-corruption RCE — patch the OS for that.
 
 ### v2.3.4 — module identity spans all loadable extensions
 

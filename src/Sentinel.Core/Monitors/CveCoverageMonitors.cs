@@ -415,15 +415,31 @@ namespace Sentinel.Core
                             continue;
                         }
 
-                        if (!CveCoverageHeuristics.IsPeExtension(file)) continue;
-                        if (HasZoneIdentifier(file)) continue;
+                        if (CveCoverageHeuristics.IsPeExtension(file))
+                        {
+                            if (HasZoneIdentifier(file)) continue;
 
-                        await EmitFileAsync(
-                            "CVE Class: PE Missing Mark-of-the-Web",
-                            $"Recently written PE '{file}' has no Zone.Identifier ADS",
-                            "Browser downloads normally carry MOTW. A PE in Downloads/Desktop without Zone.Identifier " +
-                            "is a MOTW-strip / ISO-smuggle / inner-archive drop. Local compiles rarely land here. LogOnly.",
-                            0.72, file).ConfigureAwait(false);
+                            await EmitFileAsync(
+                                "CVE Class: PE Missing Mark-of-the-Web",
+                                $"Recently written PE '{file}' has no Zone.Identifier ADS",
+                                "Browser downloads normally carry MOTW. A PE in Downloads/Desktop without Zone.Identifier " +
+                                "is a MOTW-strip / ISO-smuggle / inner-archive drop. Local compiles rarely land here. LogOnly.",
+                                0.72, file).ConfigureAwait(false);
+                            continue;
+                        }
+
+                        if (CveCoverageHeuristics.IsScriptDropperExtension(file))
+                        {
+                            if (HasZoneIdentifier(file)) continue;
+
+                            await EmitFileAsync(
+                                "CVE Class: Script Dropper Missing Mark-of-the-Web",
+                                $"Recently written script '{file}' has no Zone.Identifier ADS",
+                                "Script-class droppers (.hta/.js/.vbs/.wsf/.ps1/.lnk/.chm) detonate via WSH/mshta " +
+                                "without being a PE. A browser or archive extraction normally stamps MOTW; its absence " +
+                                "in Downloads/Desktop is a drive-by / XSS-forced-download / archive-smuggle shape. LogOnly.",
+                                0.70, file).ConfigureAwait(false);
+                        }
                     }
                     catch (Exception ex)
                     {
@@ -659,6 +675,211 @@ namespace Sentinel.Core
                 return v is int i && i == 1;
             }
             catch { return false; }
+        }
+
+        private bool ShouldAlert(string key)
+        {
+            lock (_alerted)
+            {
+                if (_alerted.Contains(key)) return false;
+                _alerted.Add(key);
+                if (_alerted.Count > 200)
+                    _alerted.Clear();
+                return true;
+            }
+        }
+    }
+
+    /// <summary>
+    /// WPAD / auto-proxy (PAC) rogue-configuration monitor. This is the host-side
+    /// landing spot for the DHCP Option 252 vector (CVE-2026-62755 DHCP client class):
+    /// a rogue DHCP server or attacker hands the client a PAC (Proxy Auto-Config) URL,
+    /// which is JavaScript the WinHTTP/WinINET auto-proxy resolver executes to decide
+    /// routing. Set AutoConfigURL points every browser through an attacker proxy (MITM)
+    /// and can leak visited hosts even for HTTPS. We do not disable the user's proxy —
+    /// legitimate corporate PAC exists — this is observe fuel. A remote/IP-literal PAC
+    /// URL or WPAD auto-detect turning on unexpectedly is the interesting shape.
+    /// </summary>
+    public sealed class WpadProxyMonitor : BackgroundService
+    {
+        private readonly DetectionEngine _detectionEngine;
+        private readonly ILogger<WpadProxyMonitor> _logger;
+        private readonly HashSet<string> _alerted = new(StringComparer.OrdinalIgnoreCase);
+        private static readonly TimeSpan ScanInterval = TimeSpan.FromSeconds(45);
+
+        // AutoConfigURL values seen at baseline. A change (new/different PAC URL) is
+        // higher signal than a static corporate PAC that was there before Sentinel started.
+        private string? _baselineAutoConfigUrl;
+        private bool _baselineCaptured;
+
+        private const string InternetSettingsPath =
+            @"Software\Microsoft\Windows\CurrentVersion\Internet Settings";
+
+        public WpadProxyMonitor(DetectionEngine detectionEngine, ILogger<WpadProxyMonitor> logger)
+        {
+            _detectionEngine = detectionEngine;
+            _logger = logger;
+        }
+
+        protected override async Task ExecuteAsync(CancellationToken ct)
+        {
+            _logger.LogInformation("[WpadProxyMonitor] Started — WPAD / PAC auto-proxy (DHCP Option 252 vector)");
+            try { await Task.Delay(TimeSpan.FromSeconds(15), ct).ConfigureAwait(false); }
+            catch (OperationCanceledException) { return; }
+
+            while (!ct.IsCancellationRequested)
+            {
+                try
+                {
+                    await ScanAsync().ConfigureAwait(false);
+                    await Task.Delay(ScanInterval, ct).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
+                catch (Exception ex) { _logger.LogDebug(ex, "[WpadProxyMonitor] scan error"); }
+            }
+        }
+
+        private async Task ScanAsync()
+        {
+            string? autoConfigUrl = ReadAutoConfigUrl();
+
+            // Capture the first observed value as baseline so a pre-existing corporate
+            // PAC does not fire on every startup — only a subsequent change does.
+            if (!_baselineCaptured)
+            {
+                _baselineAutoConfigUrl = autoConfigUrl;
+                _baselineCaptured = true;
+
+                // If a PAC is already present at startup AND it looks remote/IP-literal,
+                // still surface it once (weak) — it may predate Sentinel but be malicious.
+                if (IsSuspiciousPacUrl(autoConfigUrl))
+                {
+                    await EmitAsync(
+                        "WPAD Auto-Proxy PAC Configured",
+                        $"AutoConfigURL present at startup: {Redact(autoConfigUrl)}",
+                        "A Proxy Auto-Config (PAC) URL is set. PAC files are JavaScript the WinHTTP auto-proxy " +
+                        "resolver executes to route traffic — the host-side landing point for the DHCP Option 252 / " +
+                        "WPAD vector (CVE-2026-62755 DHCP client class). A remote or IP-literal PAC can MITM all " +
+                        "browser traffic and leak visited hosts. Corporate PAC is legitimate; LogOnly.",
+                        0.55, autoConfigUrl!);
+                }
+                return;
+            }
+
+            // A change from baseline is the strong signal: something rewrote the PAC URL
+            // after Sentinel was running (rogue DHCP renew, malware, MITM).
+            if (!string.Equals(autoConfigUrl, _baselineAutoConfigUrl, StringComparison.OrdinalIgnoreCase))
+            {
+                var conf = IsSuspiciousPacUrl(autoConfigUrl) ? 0.82 : 0.68;
+                await EmitAsync(
+                    "WPAD Auto-Proxy PAC Changed",
+                    $"AutoConfigURL changed from '{Redact(_baselineAutoConfigUrl)}' to '{Redact(autoConfigUrl)}'",
+                    "The Proxy Auto-Config URL was rewritten after Sentinel started. A rogue DHCP server (Option 252) " +
+                    "or malware can point the WinHTTP/WinINET auto-proxy resolver at an attacker-controlled PAC — " +
+                    "JavaScript that reroutes every browser through a MITM proxy. Unexpected PAC changes are a strong " +
+                    "network-hijack indicator. Does not revert the setting; LogOnly + chain fuel.",
+                    conf, autoConfigUrl ?? "(cleared)");
+                _baselineAutoConfigUrl = autoConfigUrl;
+            }
+
+            // WPAD auto-detect flag flipping on (DefaultConnectionSettings bit 0x08) is a
+            // secondary signal; combined with an AutoConfigURL it is the full WPAD chain.
+            if (IsAutoDetectEnabled() && IsSuspiciousPacUrl(autoConfigUrl))
+            {
+                await EmitAsync(
+                    "WPAD Auto-Detect With Remote PAC",
+                    "WPAD auto-detect is enabled and a remote/IP-literal PAC URL is configured",
+                    "Automatic proxy discovery (WPAD) plus a remote PAC URL is the complete DHCP/DNS WPAD hijack shape. " +
+                    "An attacker on the LAN can answer WPAD and serve routing JavaScript. Recommend disabling " +
+                    "'Automatically detect settings' unless a trusted corporate PAC requires it. LogOnly.",
+                    0.78, autoConfigUrl ?? "wpad");
+            }
+        }
+
+        private async Task EmitAsync(string rule, string evidence, string reasoning, double conf, string key)
+        {
+            if (!ShouldAlert(rule + ":" + key)) return;
+            await _detectionEngine.EmitAsync(new DetectionEvent
+            {
+                RuleName = rule,
+                Evidence = evidence,
+                Reasoning = reasoning,
+                Confidence = conf,
+                Tier = DetectionTier.Tier2Indicator,
+                AuthorizedResponse = ResponseAction.LogOnly,
+                ProcessName = "SYSTEM",
+                ProcessId = 0,
+                SignalType = SignalType.SecurityEvasion,
+                Metadata = new Dictionary<string, string>
+                {
+                    ["WeakObserveSeed"] = "true",
+                    ["Vector"] = "WPAD/PAC",
+                    ["CVE"] = CveCoverageHeuristics.CveDhcpClient,
+                    ["CveClass"] = "true",
+                }
+            }).ConfigureAwait(false);
+        }
+
+        private static string? ReadAutoConfigUrl()
+        {
+            try
+            {
+                using var k = Registry.CurrentUser.OpenSubKey(InternetSettingsPath);
+                var v = k?.GetValue("AutoConfigURL") as string;
+                return string.IsNullOrWhiteSpace(v) ? null : v!.Trim();
+            }
+            catch { return null; }
+        }
+
+        /// <summary>
+        /// A PAC URL that is remote (http/https) or points at a bare IP is the interesting
+        /// case. file:// PACs and empty values are treated as low-signal.
+        /// </summary>
+        private static bool IsSuspiciousPacUrl(string? url)
+        {
+            if (string.IsNullOrWhiteSpace(url)) return false;
+            var u = url!.Trim();
+            if (u.StartsWith("file:", StringComparison.OrdinalIgnoreCase)) return false;
+
+            bool remote = u.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+                          || u.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
+            if (!remote) return false;
+
+            // http:// (not https) PAC is more suspicious; IP-literal host is more suspicious still.
+            bool plainHttp = u.StartsWith("http://", StringComparison.OrdinalIgnoreCase);
+            bool ipLiteral = System.Text.RegularExpressions.Regex.IsMatch(
+                u, @"^https?://\d{1,3}(\.\d{1,3}){3}",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+            return plainHttp || ipLiteral || remote;
+        }
+
+        /// <summary>
+        /// Reads the WPAD auto-detect flag from DefaultConnectionSettings (bit 0x08 of
+        /// byte 8). This is the "Automatically detect settings" checkbox.
+        /// </summary>
+        private static bool IsAutoDetectEnabled()
+        {
+            try
+            {
+                using var k = Registry.CurrentUser.OpenSubKey(
+                    InternetSettingsPath + @"\Connections");
+                if (k?.GetValue("DefaultConnectionSettings") is byte[] blob && blob.Length > 8)
+                {
+                    // Byte index 8 holds the option flags; 0x08 = auto-detect (WPAD).
+                    return (blob[8] & 0x08) != 0;
+                }
+            }
+            catch { }
+            return false;
+        }
+
+        /// <summary>Trim a URL for evidence so a long/credentialed PAC URL is not dumped whole.</summary>
+        private static string Redact(string? url)
+        {
+            if (string.IsNullOrWhiteSpace(url)) return "(none)";
+            var u = url!.Trim();
+            return u.Length <= 120 ? u : u.Substring(0, 120) + "...";
         }
 
         private bool ShouldAlert(string key)
