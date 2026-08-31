@@ -1,6 +1,19 @@
 # Changelog
 
 
+## [2.3.4] - 2026-08-31
+
+Full loadable-module-extension coverage for the DLL/module unloader.
+
+### Changed
+
+- **Module identity spans every loadable extension, not just `.dll`.** `DllUnloadEngine` enumerates every mapped PE via `EnumProcessModules` (`NativeProcessMemory.EnumModules`) regardless of file extension and runs each through `ModuleIdentity.Evaluate` (path + Microsoft-family signature). A foreign / user-writable-drop / non-keep-tree module is now unloaded whether it is a `.dll`, a managed `.winmd` (WinRT metadata carrying MSIL), an `.ocx`, `.cpl`, `.ax`, `.node`, `.drv`, `.acm`, `.tsp`, `.mui`, or `.efi`. System-provided metadata-only `.winmd` stays keep-tree.
+  - New `ModuleIdentity.ModuleExtensions` set + `ModuleIdentity.IsModuleFileName()`, and `DllUnloadEngine.IsLoadableModuleFileName()`, so the filename-keyed helpers are no longer silently `.dll`-only.
+  - Search-order hijack names (`dbghelp`/`version`/`winmm`/…) remain the classic `.dll` `SideloadTargets` set — those specific names are only ever sideloaded as `.dll`.
+- **Ceprkac parity** (separate repo): `InjectedModuleCleaner` now keeps bundled `Microsoft.*.winmd` / `System.*.winmd` (WinUI/WinRT) and matches sideload hijack base names against any loadable-module extension.
+- `ProductInfo.Version` → `2.3.4`
+- Installer → `SentinelSetup-2.3.4`
+
 ## [2.3.3] - 2026-08-31
 
 Content-smuggling detection, resilience on stripped-down Windows, and a stronger DLL-unload fallback.

@@ -1,8 +1,12 @@
 # Sentinel — Threat Model
 
-**Version: 2.2.9**
+**Version: 2.3.4**
 
 This document assumes the attacker has read the source code.
+
+### v2.3.4 — module identity spans all loadable extensions
+
+`DllUnloadEngine` enumerates every mapped PE via `EnumProcessModules` (`NativeProcessMemory.EnumModules`) **regardless of file extension**, then runs each through `ModuleIdentity.Evaluate`. Identity is path + Microsoft-family signature, never extension. So a foreign / user-writable-drop / non-keep-tree module is unloaded whether it is a `.dll`, a managed `.winmd` (WinRT metadata that carries MSIL), an `.ocx`, `.cpl`, `.ax`, `.node`, `.drv`, `.acm`, `.tsp`, `.mui`, or `.efi`. System-provided `.winmd` is pure metadata and stays keep-tree. `ModuleIdentity.ModuleExtensions` / `IsModuleFileName` and `DllUnloadEngine.IsLoadableModuleFileName` make the filename-keyed helpers extension-aware so a non-`.dll` module is never silently treated as "not a module". Search-order hijack names (`dbghelp`/`version`/`winmm`/…) remain the classic `.dll` set (`SideloadTargets`); those specific names are only sideloaded as `.dll`. Ceprkac's in-process/child `InjectedModuleCleaner` mirrors this: `IsBundledFileName` now keeps bundled `Microsoft.*.winmd` / `System.*.winmd` (WinUI/WinRT), and `IsSideloadFileName` matches the hijack base name against any loadable-module extension. No change to the unload primitive (FreeLibrary-APC) or the protected-host / OS-servicing / game skips.
 
 ### v2.2.8 — WMI triple + policy rewrite
 

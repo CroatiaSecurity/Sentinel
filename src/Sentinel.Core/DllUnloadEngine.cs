@@ -189,6 +189,15 @@ namespace Sentinel.Core
         }
 
         /// <summary>
+        /// True when <paramref name="pathOrName"/> is a loadable module by extension
+        /// (.dll, .winmd, .ocx, .cpl, .ax, .node, .drv, …). The engine enumerates and
+        /// evaluates every mapped PE regardless of extension; this helper exists so
+        /// filename-keyed logic and disk scans are not silently .dll-only.
+        /// </summary>
+        public static bool IsLoadableModuleFileName(string? pathOrName)
+            => ModuleIdentity.IsModuleFileName(pathOrName);
+
+        /// <summary>
         /// True when <paramref name="dllPath"/> is a search-order hijack plant:
         /// known target name, not the OS copy, not games, not DISM/NTLite scratch,
         /// not Sentinel's own honeypot folder.

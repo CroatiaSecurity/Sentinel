@@ -11,6 +11,43 @@ namespace Sentinel.Core
     /// </summary>
     public static class ModuleIdentity
     {
+        /// <summary>
+        /// Loadable-module file extensions. The unloader enumerates every mapped PE via
+        /// EnumProcessModules regardless of extension, so identity applies to all of them.
+        /// This set is used by the filename-keyed helpers (bundled / sideload plant) so a
+        /// non-.dll module (WinRT .winmd with MSIL, .ocx, .cpl, .node, .ax, .drv, …) is not
+        /// silently treated as "not a module". A system-provided .winmd is pure metadata and
+        /// stays keep-tree; a third-party managed .winmd can carry code, so it is in scope.
+        /// </summary>
+        public static readonly System.Collections.Generic.HashSet<string> ModuleExtensions =
+            new(StringComparer.OrdinalIgnoreCase)
+            {
+                ".dll",   // classic PE library
+                ".winmd", // WinRT metadata (managed ones carry MSIL)
+                ".ocx",   // ActiveX / OLE control
+                ".cpl",   // Control Panel applet (PE)
+                ".ax",    // DirectShow filter (PE)
+                ".node",  // Node.js native addon (PE)
+                ".drv",   // legacy driver-model user DLL
+                ".acm",   // audio compression manager (PE)
+                ".tsp",   // TAPI service provider (PE)
+                ".mui",   // resource-only module
+                ".efi",   // EFI application/driver (PE)
+            };
+
+        /// <summary>
+        /// True when the file name (or path) ends with a known loadable-module extension.
+        /// Executables (.exe) are their own process image and are handled separately.
+        /// </summary>
+        public static bool IsModuleFileName(string? pathOrName)
+        {
+            if (string.IsNullOrWhiteSpace(pathOrName)) return false;
+            string ext;
+            try { ext = Path.GetExtension(pathOrName) ?? ""; }
+            catch { return false; }
+            return ext.Length > 0 && ModuleExtensions.Contains(ext);
+        }
+
         public readonly struct Verdict
         {
             public Verdict(bool allowed, string reason)

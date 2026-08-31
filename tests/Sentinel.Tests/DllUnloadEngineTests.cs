@@ -216,6 +216,56 @@ namespace Sentinel.Tests
                 @"C:\Program Files\Google\Chrome\Application\chrome_elf.dll"));
         }
 
+        // ═══════════════════════════════════════════════════════════════
+        // IsLoadableModuleFileName — full module-extension coverage
+        // ═══════════════════════════════════════════════════════════════
+
+        [Theory]
+        [InlineData("foo.dll")]
+        [InlineData("Windows.Foundation.winmd")]
+        [InlineData("flash.ocx")]
+        [InlineData("desk.cpl")]
+        [InlineData("quartz.ax")]
+        [InlineData("addon.node")]
+        [InlineData("legacy.drv")]
+        [InlineData("codec.acm")]
+        [InlineData("provider.tsp")]
+        [InlineData("shell32.mui")]
+        [InlineData("boot.efi")]
+        public void IsLoadableModuleFileName_ReturnsTrue_ForModuleExtensions(string fileName)
+        {
+            Assert.True(DllUnloadEngine.IsLoadableModuleFileName(fileName));
+        }
+
+        [Theory]
+        [InlineData(@"C:\Users\Attacker\AppData\Local\Temp\Evil.Component.winmd")]
+        [InlineData(@"C:\evil\hijack.ocx")]
+        public void IsLoadableModuleFileName_ExtractsExtension_FromFullPath(string fullPath)
+        {
+            Assert.True(DllUnloadEngine.IsLoadableModuleFileName(fullPath));
+        }
+
+        [Theory]
+        [InlineData("readme.txt")]
+        [InlineData("photo.png")]
+        [InlineData("payload.exe")]
+        [InlineData("script.ps1")]
+        [InlineData("noext")]
+        [InlineData(null)]
+        [InlineData("")]
+        public void IsLoadableModuleFileName_ReturnsFalse_ForNonModules(string? fileName)
+        {
+            Assert.False(DllUnloadEngine.IsLoadableModuleFileName(fileName));
+        }
+
+        [Fact]
+        public void ModuleExtensions_ContainsWinmdAndOcx()
+        {
+            Assert.Contains(".winmd", ModuleIdentity.ModuleExtensions);
+            Assert.Contains(".ocx", ModuleIdentity.ModuleExtensions);
+            Assert.Contains(".dll", ModuleIdentity.ModuleExtensions);
+        }
+
         [Fact]
         public void DllUnloadResult_DefaultValues_AreEmpty()
         {
