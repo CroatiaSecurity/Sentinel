@@ -85,6 +85,21 @@ foreach ($target in @("service", "agent")) {
     }
 }
 
+# 3c. LGPO.exe and GSecurity.inf — shipped as plain files, NOT embedded in the assembly.
+#     Embedding a PE inside a DLL triggers AV dropper heuristics. These files are
+#     placed beside the service/agent EXE and loaded at runtime from the install directory.
+$HardeningResourcesSrc = Join-Path $PSScriptRoot "..\src\Sentinel.Core\HardeningResources"
+foreach ($target in @("service", "agent")) {
+    $dest = Join-Path $PublishDir $target
+    foreach ($hardeningFile in @("LGPO.exe", "GSecurity.inf")) {
+        $src = Join-Path $HardeningResourcesSrc $hardeningFile
+        if (Test-Path $src) {
+            Copy-Item $src -Destination $dest -Force
+            Write-Host "Copied $hardeningFile -> $target\" -ForegroundColor Yellow
+        }
+    }
+}
+
 # 4. Locate Inno Setup Compiler
 Write-Host "Locating Inno Setup compiler..." -ForegroundColor Yellow
 $DefaultIsccPaths = @(

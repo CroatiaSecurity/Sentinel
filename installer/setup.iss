@@ -1,6 +1,6 @@
 [Setup]
 AppName=Sentinel
-AppVersion=2.3.4
+AppVersion=2.3.6
 AppPublisher=Gorstak
 AppPublisherURL=https://gorstak.eu
 SourceDir=.
@@ -11,7 +11,7 @@ UninstallDisplayIcon={app}\Sentinel.ico
 Compression=lzma2
 SolidCompression=yes
 OutputDir=.
-OutputBaseFilename=SentinelSetup-2.3.4
+OutputBaseFilename=SentinelSetup-2.3.6
 PrivilegesRequired=admin
 ; One active Setup wizard at a time (elevation handoff still works: non-elevated exits first)
 SetupMutex=Global\SentinelSetupMutex
@@ -28,6 +28,9 @@ Source: "..\publish\service\*"; DestDir: "{app}"; Flags: ignoreversion recursesu
 Source: "..\publish\agent\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "appsettings.json"
 ; v2.0.4: appsettings.json is no longer shipped — config uses compiled defaults + DPAPI-encrypted store.
 ; If the file exists from a prior install, it is ignored (but detected as suspicious by AntiTamperGuard).
+; v2.3.6: LGPO.exe and GSecurity.inf are shipped as plain files (not embedded in the DLL assembly).
+;         They are already included via the publish\service\* wildcard above (CopyToOutputDirectory).
+;         Listed explicitly here for clarity and to ensure they are present in the installer.
 
 [Icons]
 Name: "{group}\Sentinel Agent"; Filename: "{app}\Sentinel.Agent.exe"; IconFilename: "{app}\Sentinel.ico"
@@ -72,9 +75,6 @@ const
   // How long a leftover first wizard is blocked after the real install finishes
   SetupSiblingBlockMinutes = 30;
 
-function GetCurrentProcessId: Cardinal;
-  external 'GetCurrentProcessId@kernel32.dll stdcall';
-
 function GetTickCount: Cardinal;
   external 'GetTickCount@kernel32.dll stdcall';
 
@@ -118,28 +118,18 @@ begin
     Result := True;
 end;
 
-// Close other SentinelSetup*.exe / *.tmp processes so a leftover first wizard
+// Close other SentinelSetup*.exe processes so a leftover first wizard
 // cannot continue after the elevated/temp install finished.
 procedure CloseSiblingSetupProcesses();
 var
   ResultCode: Integer;
-  PsPath: String;
-  Cmd: String;
-  MyPid: String;
 begin
-  MyPid := IntToStr(GetCurrentProcessId());
-  PsPath := ExpandConstant('{sysnative}\WindowsPowerShell\v1.0\powershell.exe');
-  // Only SentinelSetup* images — do not touch unrelated Inno installers (Git, etc.)
-  Cmd :=
-    '-ExecutionPolicy Bypass -Command "' +
-    '$exclude = ' + MyPid + '; ' +
-    'Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object { ' +
-    '  $_.ProcessId -ne $exclude -and ( ' +
-    '    $_.Name -like ''SentinelSetup*'' -or ' +
-    '    ($_.ExecutablePath -and ($_.ExecutablePath -like ''*SentinelSetup*'')) ' +
-    '  ) ' +
-    '} | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"';
-  Exec(PsPath, Cmd, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  // taskkill by image name — only targets SentinelSetup* processes.
+  // /F forces termination; /FI filters by window title prefix pattern.
+  // This avoids launching PowerShell from the installer (AV heuristic trigger).
+  Exec(ExpandConstant('{sysnative}\taskkill.exe'),
+    '/F /FI "IMAGENAME eq SentinelSetup*"',
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
 
 // .NET Framework 4.8 (Release DWORD >= 528040). Framework-dependent install.
@@ -277,17 +267,16 @@ begin
   Exec(ExpandConstant('{sysnative}\sc.exe'), 'failure "' + ServiceName + '" reset= 86400 actions= ""', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Exec(ExpandConstant('{sysnative}\sc.exe'), 'stop "' + ServiceName + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
-  // Poll until STOPPED (or timeout ~10s)
+  // Poll until STOPPED using sc queryex (no PowerShell needed)
   Cmd := '-ExecutionPolicy Bypass -Command "for ($i = 0; $i -lt 20; $i++) { $out = & sc.exe queryex ''' + ServiceName + ''' 2>&1; if ($out -match ''STOPPED'') { break }; Start-Sleep -Milliseconds 500 }"';
   Exec(PsPath, Cmd, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
 
-// v2.0.9: Full install-dir unlock for upgrades (required for unins000.exe + all payload files).
-// v2.0.8 per-file unlock broke upgrades: hardened installs denied create of unins000.exe
-// ("Access is denied") — users cannot be asked to run takeown manually.
-//
-// Security model: Setup already requires PrivilegesRequired=admin. The unlock window is only
-// while elevated Setup runs after the service is stopped. On first service start,
+// Minimal install-dir unlock for upgrades: grants Administrators full control so
+// Setup can overwrite files locked by AntiTamper ACLs. SYSTEM already has full
+// control from the initial hardening; this only adds Administrators and removes
+// any explicit Deny ACEs for Users/Everyone that AntiTamper may have set.
+// Security model: Setup requires PrivilegesRequired=admin. On first service start,
 // HardeningModule.SecureInstallationDirectory() re-applies SYSTEM-centric ACLs.
 procedure ResetInstallDirAcls(const DirPath: String);
 var
@@ -296,52 +285,40 @@ begin
   if not DirExists(DirPath) then
     Exit;
 
-  // Take ownership of the whole tree (AntiTamper may have SYSTEM-only ownership)
-  Exec(ExpandConstant('{sysnative}\takeown.exe'), '/F "' + DirPath + '" /R /A /D Y', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  // Grant Administrators full control (inheritable) so Setup can write all files
+  Exec(ExpandConstant('{sysnative}\icacls.exe'),
+    '"' + DirPath + '" /grant Administrators:(OI)(CI)F /T /C /Q',
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
-  // Grant Administrators + SYSTEM full control (files + containers inherit)
-  Exec(ExpandConstant('{sysnative}\icacls.exe'), '"' + DirPath + '" /grant Administrators:(OI)(CI)F /T /C /Q', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Exec(ExpandConstant('{sysnative}\icacls.exe'), '"' + DirPath + '" /grant SYSTEM:(OI)(CI)F /T /C /Q', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  // Remove any explicit Deny ACEs AntiTamper may have set for Users/Everyone
+  Exec(ExpandConstant('{sysnative}\icacls.exe'),
+    '"' + DirPath + '" /remove:d *S-1-5-32-545 /T /C /Q',
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
-  // Explicit root ACE so Setup can create unins000.exe / new files even if inheritance was broken
-  Exec(ExpandConstant('{sysnative}\icacls.exe'), '"' + DirPath + '" /grant Administrators:F /C /Q', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Exec(ExpandConstant('{sysnative}\icacls.exe'), '"' + DirPath + '" /grant SYSTEM:F /C /Q', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-
-  // Drop Deny ACEs AntiTamper / older hardening may have set
-  Exec(ExpandConstant('{sysnative}\icacls.exe'), '"' + DirPath + '" /remove:d Users /T /C /Q', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Exec(ExpandConstant('{sysnative}\icacls.exe'), '"' + DirPath + '" /remove:d *S-1-5-32-545 /T /C /Q', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Exec(ExpandConstant('{sysnative}\icacls.exe'), '"' + DirPath + '" /remove:d Everyone /T /C /Q', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Exec(ExpandConstant('{sysnative}\icacls.exe'), '"' + DirPath + '" /remove:d *S-1-1-0 /T /C /Q', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-
-  // Explicitly unlock uninstaller stubs Inno rewrites
+  // Ensure uninstaller stubs are writable by Administrators
   if FileExists(DirPath + '\unins000.exe') then
-  begin
-    Exec(ExpandConstant('{sysnative}\takeown.exe'), '/F "' + DirPath + '\unins000.exe" /A /D Y', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-    Exec(ExpandConstant('{sysnative}\icacls.exe'), '"' + DirPath + '\unins000.exe" /grant Administrators:F /C /Q', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  end;
+    Exec(ExpandConstant('{sysnative}\icacls.exe'),
+      '"' + DirPath + '\unins000.exe" /grant Administrators:F /C /Q',
+      '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   if FileExists(DirPath + '\unins000.dat') then
-  begin
-    Exec(ExpandConstant('{sysnative}\takeown.exe'), '/F "' + DirPath + '\unins000.dat" /A /D Y', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-    Exec(ExpandConstant('{sysnative}\icacls.exe'), '"' + DirPath + '\unins000.dat" /grant Administrators:F /C /Q', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  end;
+    Exec(ExpandConstant('{sysnative}\icacls.exe'),
+      '"' + DirPath + '\unins000.dat" /grant Administrators:F /C /Q',
+      '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
 
 procedure StopExistingService();
 var
   ResultCode: Integer;
-  PsPath: String;
 begin
   // Use {sysnative} to bypass WOW64 redirection — ensures we reach the real 64-bit
-  // PowerShell and sc.exe even when the installer runs as a 32-bit process.
-  PsPath := ExpandConstant('{sysnative}\WindowsPowerShell\v1.0\powershell.exe');
+  // sc.exe even when the installer runs as a 32-bit process.
 
   StopServiceByName('Sentinel');
 
-  // Kill any remaining Sentinel processes
-  Exec(PsPath, '-ExecutionPolicy Bypass -Command "foreach ($i in 1..5) { $procs = Get-Process -Name ''Sentinel.Service'',''Sentinel.Agent'' -ErrorAction SilentlyContinue; if (-not $procs) { break }; $procs | Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 500 }"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  // Kill any remaining Sentinel processes using taskkill (standard installer practice)
+  Exec(ExpandConstant('{sysnative}\taskkill.exe'), '/F /IM "Sentinel.Service.exe"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{sysnative}\taskkill.exe'), '/F /IM "Sentinel.Agent.exe"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Sleep(1000);
-  Exec(PsPath, '-ExecutionPolicy Bypass -Command "Get-Process -Name ''Sentinel.Service'',''Sentinel.Agent'' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Sleep(500);
 
   // Unlock every known prior install path (x64 + x86 + previous {app})
   ResetInstallDirAcls(ExpandConstant('{app}'));

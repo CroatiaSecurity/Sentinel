@@ -928,98 +928,41 @@ namespace Sentinel.Core
         /// <summary>
         /// Applies the embedded GSecurity.inf security policy via LGPO.exe.
         /// LGPO.exe is Microsoft's Local Group Policy Object utility — it's the only
+        /// <summary>
+        /// Applies the GSecurity.inf security policy via LGPO.exe.
+        /// LGPO.exe is Microsoft's Local Group Policy Object utility — it's the only
         /// supported way to apply .inf security templates programmatically without
         /// Active Directory. No .NET equivalent exists.
-        /// 
-        /// The extraction directory is ACL-locked to SYSTEM+Admins before writing files.
+        ///
+        /// LGPO.exe and GSecurity.inf are shipped as standalone files in the installation
+        /// directory (not embedded in the assembly) so they remain inspectable and
+        /// auditable by security scanners.
         /// </summary>
         private static void ApplyLgpoSecurityPolicy()
         {
-            string tempDir = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-                @"Sentinel\HardeningTemp");
-
             try
             {
-                if (!Directory.Exists(tempDir))
-                    Directory.CreateDirectory(tempDir);
+                // Look for LGPO.exe and GSecurity.inf in the same directory as the running assembly.
+                // These are shipped as plain files in the installation directory.
+                string baseDir = AppContext.BaseDirectory;
+                string lgpoPath = Path.Combine(baseDir, "LGPO.exe");
+                string infPath = Path.Combine(baseDir, "GSecurity.inf");
 
-                // Lock down temp directory ACL
-                LockDirectoryAcl(tempDir);
+                if (!File.Exists(lgpoPath) || !File.Exists(infPath))
+                    return;
 
-                var assembly = typeof(HardeningModule).Assembly;
-                string resourcePrefix = "Sentinel.Core.HardeningResources.";
-
-                // Extract only LGPO.exe and GSecurity.inf
-                string? lgpoPath = ExtractResource(assembly, resourcePrefix + "LGPO.exe", tempDir, "LGPO.exe");
-                string? infPath = ExtractResource(assembly, resourcePrefix + "GSecurity.inf", tempDir, "GSecurity.inf");
-
-                if (lgpoPath != null && infPath != null && File.Exists(lgpoPath) && File.Exists(infPath))
+                var psi = new ProcessStartInfo(lgpoPath, $"/s \"{infPath}\"")
                 {
-                    var psi = new ProcessStartInfo(lgpoPath, $"/s \"{infPath}\"")
-                    {
-                        CreateNoWindow = true,
-                        UseShellExecute = false,
-                        WorkingDirectory = tempDir
-                    };
-                    using var proc = Process.Start(psi);
-                    proc?.WaitForExit(30000);
-                }
-
-                // Clean up temp files
-                try { if (File.Exists(lgpoPath)) File.Delete(lgpoPath); } catch { }
-                try { if (File.Exists(infPath)) File.Delete(infPath); } catch { }
+                    CreateNoWindow = true,
+                    UseShellExecute = false,
+                    WorkingDirectory = baseDir
+                };
+                using var proc = Process.Start(psi);
+                proc?.WaitForExit(30000);
             }
             catch { }
         }
 
-        private static void LockDirectoryAcl(string dirPath)
-        {
-            try
-            {
-                var dirInfo = new DirectoryInfo(dirPath);
-                var security = dirInfo.GetAccessControl();
-                security.SetAccessRuleProtection(true, false);
-
-                var systemSid = new System.Security.Principal.SecurityIdentifier(
-                    System.Security.Principal.WellKnownSidType.LocalSystemSid, null);
-                security.AddAccessRule(new System.Security.AccessControl.FileSystemAccessRule(
-                    systemSid,
-                    System.Security.AccessControl.FileSystemRights.FullControl,
-                    System.Security.AccessControl.InheritanceFlags.ContainerInherit |
-                    System.Security.AccessControl.InheritanceFlags.ObjectInherit,
-                    System.Security.AccessControl.PropagationFlags.None,
-                    System.Security.AccessControl.AccessControlType.Allow));
-
-                var adminsSid = new System.Security.Principal.SecurityIdentifier(
-                    System.Security.Principal.WellKnownSidType.BuiltinAdministratorsSid, null);
-                security.AddAccessRule(new System.Security.AccessControl.FileSystemAccessRule(
-                    adminsSid,
-                    System.Security.AccessControl.FileSystemRights.FullControl,
-                    System.Security.AccessControl.InheritanceFlags.ContainerInherit |
-                    System.Security.AccessControl.InheritanceFlags.ObjectInherit,
-                    System.Security.AccessControl.PropagationFlags.None,
-                    System.Security.AccessControl.AccessControlType.Allow));
-
-                dirInfo.SetAccessControl(security);
-            }
-            catch { }
-        }
-
-        private static string? ExtractResource(System.Reflection.Assembly assembly, string resourceName, string targetDir, string fileName)
-        {
-            try
-            {
-                using var stream = assembly.GetManifestResourceStream(resourceName);
-                if (stream == null) return null;
-
-                string destPath = Path.Combine(targetDir, fileName);
-                using var fileStream = new FileStream(destPath, FileMode.Create, FileAccess.Write);
-                stream.CopyTo(fileStream);
-                return destPath;
-            }
-            catch { return null; }
-        }
 
         #endregion
 

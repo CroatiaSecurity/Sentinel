@@ -4,7 +4,7 @@
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
     <ImplicitUsings>enable</ImplicitUsings>
-    <Version>2.3.4</Version>
+    <Version>2.3.6</Version>
     <Platforms>AnyCPU;x64</Platforms>
     <UseWindowsForms>true</UseWindowsForms>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
@@ -42,8 +42,11 @@
   </ItemGroup>
 
   <ItemGroup>
-    <EmbeddedResource Include="HardeningResources\LGPO.exe" Condition="Exists('HardeningResources\LGPO.exe')" />
-    <EmbeddedResource Include="HardeningResources\GSecurity.inf" Condition="Exists('HardeningResources\GSecurity.inf')" />
+    <!-- LGPO.exe and GSecurity.inf are shipped as plain files in the install directory.
+         They are NOT embedded in the assembly — embedding a PE inside a DLL triggers
+         AV heuristics (dropper pattern). The build script copies them to publish output. -->
+    <None Include="HardeningResources\LGPO.exe" Condition="Exists('HardeningResources\LGPO.exe')" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="HardeningResources\GSecurity.inf" Condition="Exists('HardeningResources\GSecurity.inf')" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

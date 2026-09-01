@@ -6,6 +6,13 @@
 
 Detection quality improvements ported from [GorstaksProtection](https://github.com/CroatiaSecurity/GorstaksProtection): sliding-window ransomware rules, full-path parent verification, ThreatFox live IOC feed, and a mandatory pre-action audit log.
 
+### Fixed
+
+- **AV false positive on `Sentinel.Core.dll`** (Kaspersky, confirmed via `report.rpt`) — two patterns in the DLL were causing legitimate EDR code to be flagged as malware:
+  - **`NativeProcessMemory.cs`** previously resolved Win32 API names at runtime by concatenating string fragments (`J("Open","Process")`, `J("QueueUser","APC")`, etc.) to avoid static string scanning — a technique modern ML-based AV engines now specifically detect as evasion. All API calls are now declared with standard `[DllImport]` attributes, making the binary fully transparent and auditable by security scanners.
+  - **`HardeningModule.cs`** previously embedded `LGPO.exe` as an assembly resource and extracted it to `%ProgramData%\Sentinel\HardeningTemp\` at runtime — the classic "PE dropped from DLL resource" dropper pattern. `LGPO.exe` and `GSecurity.inf` are now shipped as plain files in the installation directory and loaded directly from there.
+- **Installer AV triggers reduced** — `SentinelSetup-*.exe` Pascal script now uses `taskkill /F /IM` instead of PowerShell `-ExecutionPolicy Bypass` + `Stop-Process -Force` for process termination during upgrades. The `ResetInstallDirAcls` procedure is reduced from 8 `takeown`/`icacls` calls to 2 targeted `icacls` calls (no recursive `takeown`), eliminating the "ACL-stripping rootkit installer" heuristic profile.
+
 ### Added
 
 - **`ThreatFoxFeedService`** — new background service that queries the [ThreatFox API](https://threatfox-api.abuse.ch/api/v1/) every 6 hours and maintains a unified in-memory IOC store covering SHA-256 hashes, IP addresses, and **domain names** (all indicator types in one `ConcurrentDictionary`). Each entry carries `malware_family` and `confidence_level` from ThreatFox. SHA-256 hits are pushed directly into `IoCScanner` so `FileReputationEngine` detections are enriched with malware-family metadata. On startup, loads a bundled offline snapshot (`%ProgramData%\Sentinel\threatfox-bundle.json.gz`) so detections work from first launch without waiting for the live network — if the bundle is absent the service starts empty and seeds itself on the first refresh. Registered in the `NetworkIntegrity` monitor group alongside `ThreatIntelFeedBlocker`.

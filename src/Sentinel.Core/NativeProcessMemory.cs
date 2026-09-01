@@ -5,9 +5,9 @@ using System.Runtime.InteropServices;
 namespace Sentinel.Core
 {
     /// <summary>
-    /// Remote process primitives resolved at runtime.
-    /// Export names are never stored as contiguous literals (AV / VT heuristics).
-    /// Method/type names intentionally avoid malware-signature vocabulary.
+    /// Remote process inspection and response primitives used by the EDR engine.
+    /// All Win32 API calls use direct P/Invoke declarations — transparent to AV scanners,
+    /// identical in behavior to any legitimate security product.
     /// </summary>
     internal static class NativeProcessMemory
     {
@@ -47,6 +47,39 @@ namespace Sentinel.Core
             public uint Type;
         }
 
+        // ── Direct P/Invoke declarations ─────────────────────────────────────
+        // Standard EDR practice: declare imports explicitly so the intent is
+        // auditable and AV heuristics can correctly classify the binary.
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern bool CloseHandle(IntPtr hObject);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern IntPtr OpenProcess(uint dwDesiredAccess, bool bInheritHandle, int dwProcessId);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool ReadProcessMemory(IntPtr hProcess, IntPtr lpBaseAddress,
+            byte[] lpBuffer, int nSize, out int lpNumberOfBytesRead);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool VirtualProtectEx(IntPtr hProcess, IntPtr lpAddress,
+            UIntPtr dwSize, uint flNewProtect, out uint lpflOldProtect);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern int VirtualQueryEx(IntPtr hProcess, IntPtr lpAddress,
+            out MEMORY_BASIC_INFORMATION lpBuffer, int dwLength);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern IntPtr OpenThread(uint dwDesiredAccess, bool bInheritHandle, uint dwThreadId);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern uint QueueUserAPC(IntPtr pfnAPC, IntPtr hThread, IntPtr dwData);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool DuplicateHandle(IntPtr hSourceProcessHandle, IntPtr hSourceHandle,
+            IntPtr hTargetProcessHandle, out IntPtr lpTargetHandle,
+            int dwDesiredAccess, bool bInheritHandle, int dwOptions);
+
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         private static extern IntPtr LoadLibraryW(string lpFileName);
 
@@ -54,49 +87,18 @@ namespace Sentinel.Core
         private static extern IntPtr GetProcAddress(IntPtr hModule, string procName);
 
         [DllImport("kernel32.dll", SetLastError = true)]
-        public static extern bool CloseHandle(IntPtr hObject);
+        private static extern bool FreeLibrary(IntPtr hModule);
 
-        private delegate IntPtr DOpen(uint access, bool inherit, int pid);
-        private delegate bool DRead(IntPtr h, IntPtr addr, byte[] buf, int size, out int read);
-        private delegate bool DProtect(IntPtr h, IntPtr addr, UIntPtr size, uint neu, out uint old);
-        private delegate int DQuery(IntPtr h, IntPtr addr, out MEMORY_BASIC_INFORMATION mbi, int length);
-        private delegate IntPtr DOpenThr(uint access, bool inherit, uint tid);
-        private delegate uint DQueue(IntPtr pfn, IntPtr thr, IntPtr data);
-        private delegate int DNtQsi(int cls, IntPtr buf, int size, out int retLen);
-        private delegate bool DDup(IntPtr srcProc, IntPtr src, IntPtr dstProc, out IntPtr dst, int access, bool inherit, int options);
-        private delegate IntPtr DHook(int id, IntPtr cb, IntPtr mod, uint tid);
-        private delegate bool DUnhook(IntPtr hh);
+        [DllImport("ntdll.dll")]
+        private static extern int NtQuerySystemInformation(int SystemInformationClass,
+            IntPtr SystemInformation, int SystemInformationLength, out int ReturnLength);
 
-        private static string J(string a, string b) => string.Concat(a, b);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern IntPtr SetWindowsHookExW(int idHook, IntPtr lpfn,
+            IntPtr hmod, uint dwThreadId);
 
-        private static T? Resolve<T>(string module, string export) where T : class
-        {
-            try
-            {
-                var h = LoadLibraryW(module);
-                if (h == IntPtr.Zero) return null;
-                var p = GetProcAddress(h, export);
-                if (p == IntPtr.Zero) return null;
-                return Marshal.GetDelegateForFunctionPointer<T>(p);
-            }
-            catch { return null; }
-        }
-
-        private static readonly Lazy<DOpen?> FnOpen = new(() => Resolve<DOpen>("kernel32.dll", J("Open", "Process")));
-        private static readonly Lazy<DRead?> FnRead = new(() => Resolve<DRead>("kernel32.dll", J("ReadProcess", "Memory")));
-        private static readonly Lazy<DProtect?> FnProtect = new(() => Resolve<DProtect>("kernel32.dll", J("VirtualProtect", "Ex")));
-        private static readonly Lazy<DQuery?> FnQuery = new(() => Resolve<DQuery>("kernel32.dll", J("VirtualQuery", "Ex")));
-        private static readonly Lazy<DOpenThr?> FnThr = new(() => Resolve<DOpenThr>("kernel32.dll", J("Open", "Thread")));
-        private static readonly Lazy<DQueue?> FnQueue = new(() => Resolve<DQueue>("kernel32.dll", J("QueueUser", "APC")));
-        private static readonly Lazy<DNtQsi?> FnNtQsi = new(() => Resolve<DNtQsi>("ntdll.dll", J("NtQuerySystem", "Information")));
-        private static readonly Lazy<DDup?> FnDup = new(() => Resolve<DDup>("kernel32.dll", J("Duplicate", "Handle")));
-        private static readonly Lazy<DHook?> FnHook = new(() => Resolve<DHook>("user32.dll", J("SetWindows", "HookExW")));
-        private static readonly Lazy<DUnhook?> FnUnhook = new(() => Resolve<DUnhook>("user32.dll", J("UnhookWindows", "HookEx")));
-        private static readonly Lazy<IntPtr> FreeLib = new(() =>
-        {
-            var k = LoadLibraryW("kernel32.dll");
-            return k == IntPtr.Zero ? IntPtr.Zero : GetProcAddress(k, J("Free", "Library"));
-        });
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool UnhookWindowsHookEx(IntPtr hhk);
 
         public static bool CanInspect(int pid, string? imagePath = null)
         {
@@ -117,24 +119,21 @@ namespace Sentinel.Core
             // Central gate: never grant VM_READ to game / unresolved PIDs.
             if ((access & AccessVmRead) != 0 && !CanInspect(pid))
                 return IntPtr.Zero;
-            var fn = FnOpen.Value;
-            return fn == null ? IntPtr.Zero : fn(access, false, pid);
+            return OpenProcess(access, false, pid);
         }
 
         public static bool CopyRemote(IntPtr hProcess, IntPtr address, byte[] buffer, out int bytesRead)
         {
             bytesRead = 0;
-            var fn = FnRead.Value;
-            if (fn == null || hProcess == IntPtr.Zero) return false;
-            return fn(hProcess, address, buffer, buffer.Length, out bytesRead);
+            if (hProcess == IntPtr.Zero) return false;
+            return ReadProcessMemory(hProcess, address, buffer, buffer.Length, out bytesRead);
         }
 
         public static int QueryRemoteRegion(IntPtr hProcess, IntPtr address, out MEMORY_BASIC_INFORMATION mbi)
         {
             mbi = default;
-            var fn = FnQuery.Value;
-            if (fn == null || hProcess == IntPtr.Zero) return 0;
-            return fn(hProcess, address, out mbi, Marshal.SizeOf<MEMORY_BASIC_INFORMATION>());
+            if (hProcess == IntPtr.Zero) return 0;
+            return VirtualQueryEx(hProcess, address, out mbi, Marshal.SizeOf<MEMORY_BASIC_INFORMATION>());
         }
 
         public static bool IsExecutableProtection(uint protect) =>
@@ -148,13 +147,11 @@ namespace Sentinel.Core
         {
             if (!CanInspect(processId) || address == IntPtr.Zero || size == IntPtr.Zero)
                 return false;
-            var fn = FnProtect.Value;
-            if (fn == null) return false;
             IntPtr h = OpenRemoteHandle(AccessQuery | AccessVmOp | AccessVmRead, processId);
             if (h == IntPtr.Zero) return false;
             try
             {
-                return fn(h, address, (UIntPtr)(ulong)size.ToInt64(), 0x02 /* PAGE_READONLY */, out _);
+                return VirtualProtectEx(h, address, (UIntPtr)(ulong)size.ToInt64(), 0x02 /* PAGE_READONLY */, out _);
             }
             catch { return false; }
             finally { CloseHandle(h); }
@@ -171,9 +168,6 @@ namespace Sentinel.Core
         public static bool TryStripModuleExecute(int processId, IntPtr moduleBase, int moduleSize)
         {
             if (!CanInspect(processId) || moduleBase == IntPtr.Zero || moduleSize <= 0) return false;
-            var protect = FnProtect.Value;
-            var query = FnQuery.Value;
-            if (protect == null || query == null) return false;
 
             IntPtr h = OpenRemoteHandle(AccessQuery | AccessVmOp | AccessVmRead, processId);
             if (h == IntPtr.Zero) return false;
@@ -187,7 +181,7 @@ namespace Sentinel.Core
                 while (cursor < end && guard++ < 4096)
                 {
                     var addr = new IntPtr(cursor);
-                    int n = query(h, addr, out var mbi, Marshal.SizeOf<MEMORY_BASIC_INFORMATION>());
+                    int n = VirtualQueryEx(h, addr, out var mbi, Marshal.SizeOf<MEMORY_BASIC_INFORMATION>());
                     if (n == 0) break;
 
                     long regionSize = mbi.RegionSize.ToInt64();
@@ -197,7 +191,7 @@ namespace Sentinel.Core
                     {
                         // Flip execute → PAGE_READONLY. Leave the bytes intact (analysts can still
                         // read them); only remove the ability to execute.
-                        if (protect(h, mbi.BaseAddress, (UIntPtr)(ulong)regionSize, 0x02 /* PAGE_READONLY */, out _))
+                        if (VirtualProtectEx(h, mbi.BaseAddress, (UIntPtr)(ulong)regionSize, 0x02 /* PAGE_READONLY */, out _))
                             any = true;
                     }
                     cursor += regionSize;
@@ -226,21 +220,25 @@ namespace Sentinel.Core
         public static bool TryQueueFreeLibrary(int processId, IntPtr moduleBase)
         {
             if (!CanInspect(processId)) return false;
-            var openThr = FnThr.Value;
-            var queue = FnQueue.Value;
-            var free = FreeLib.Value;
-            if (openThr == null || queue == null || free == IntPtr.Zero) return false;
+
+            // Get FreeLibrary's raw function pointer via GetProcAddress.
+            // kernel32 is always mapped at the same base address across processes in the
+            // same session (known-DLL), so this pointer is valid as an APC target.
+            IntPtr hKernel = LoadLibraryW("kernel32.dll");
+            if (hKernel == IntPtr.Zero) return false;
+            IntPtr freeLibraryPtr = GetProcAddress(hKernel, "FreeLibrary");
+            if (freeLibraryPtr == IntPtr.Zero) return false;
 
             try
             {
                 using var proc = System.Diagnostics.Process.GetProcessById(processId);
                 foreach (System.Diagnostics.ProcessThread thread in proc.Threads)
                 {
-                    IntPtr hThread = openThr(AccessThreadCtx, false, (uint)thread.Id);
+                    IntPtr hThread = OpenThread(AccessThreadCtx, false, (uint)thread.Id);
                     if (hThread == IntPtr.Zero) continue;
                     try
                     {
-                        if (queue(free, hThread, moduleBase) != 0)
+                        if (QueueUserAPC(freeLibraryPtr, hThread, moduleBase) != 0)
                             return true;
                     }
                     finally { CloseHandle(hThread); }
@@ -252,33 +250,25 @@ namespace Sentinel.Core
 
         public static int QuerySystemInfo(int infoClass, IntPtr buffer, int size, out int returnLength)
         {
-            returnLength = 0;
-            var fn = FnNtQsi.Value;
-            if (fn == null) return unchecked((int)0xC0000002); // STATUS_NOT_IMPLEMENTED
-            return fn(infoClass, buffer, size, out returnLength);
+            return NtQuerySystemInformation(infoClass, buffer, size, out returnLength);
         }
 
         public static bool DupHandle(IntPtr srcProc, IntPtr src, IntPtr dstProc, out IntPtr dst, int access, bool inherit, int options)
         {
-            dst = IntPtr.Zero;
-            var fn = FnDup.Value;
-            if (fn == null) return false;
-            return fn(srcProc, src, dstProc, out dst, access, inherit, options);
+            return DuplicateHandle(srcProc, src, dstProc, out dst, access, inherit, options);
         }
 
         public static IntPtr InstallLowLevelHook(int idHook, Delegate callback, IntPtr module, uint threadId)
         {
-            var fn = FnHook.Value;
-            if (fn == null || callback == null) return IntPtr.Zero;
+            if (callback == null) return IntPtr.Zero;
             // Keep the delegate rooted by caller; convert to unmanaged pointer for the hook API.
             IntPtr cb = Marshal.GetFunctionPointerForDelegate(callback);
-            return fn(idHook, cb, module, threadId);
+            return SetWindowsHookExW(idHook, cb, module, threadId);
         }
 
         public static bool RemoveHook(IntPtr handle)
         {
-            var fn = FnUnhook.Value;
-            return fn != null && handle != IntPtr.Zero && fn(handle);
+            return handle != IntPtr.Zero && UnhookWindowsHookEx(handle);
         }
 
         public static List<(string Name, string Path, IntPtr Base, int Size)> EnumModules(int pid)
