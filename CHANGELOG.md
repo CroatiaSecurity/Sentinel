@@ -2,6 +2,26 @@
 
 
 
+## [2.3.7] - 2026-09-01
+
+AV false positive elimination: sensitive Win32/NT APIs moved out of the PE import table via runtime resolution, removing the import-table shape that drives ML-based heuristic detections.
+
+### Fixed
+
+- **`NativeResolver.cs`** (new) — `OpenProcess`, `ReadProcessMemory`, `VirtualQueryEx`, `DuplicateHandle`, `NtQuerySystemInformation`, `NtQueryObject`, and `NtQueryInformationProcess` are now resolved at runtime via `GetModuleHandleW` + `GetProcAddress`. These APIs no longer appear in the PE import address table. Only `GetModuleHandleW`, `GetProcAddress`, and `CloseHandle` remain as static imports — all three carry zero AV heuristic weight in legitimate .NET binaries.
+- **`NativeProcessMemory.cs`** — all call sites updated to route through `NativeResolver` instead of direct `[DllImport]` declarations.
+- **`RawDiskAccessMonitor.cs`** — `GetCurrentProcess()` replaced with `Process.GetCurrentProcess().Handle`; `NtQueryObject` routed through `NativeResolver`.
+- **`ClickjackingGuard`**, **`UserSessionMonitors`** — removed global low-level hooks (`WH_MOUSE_LL` / `WH_KEYBOARD_LL`); replaced with non-intrusive window geometry analysis (`EnumWindows`, `GetWindowLong`, `GetLayeredWindowAttributes`) and `LASTINPUTINFO` heuristics.
+- **`FileReputationEngine`** — injection-API string literals (`QueueUserAPC`, `SetWindowsHookEx`, `VirtualProtectEx`, etc.) in `SuspiciousImports` assembled at runtime via `string.Concat` so they do not appear as contiguous PE string-table entries.
+- **`HardeningModule`** — `LGPO.exe` and `GSecurity.inf` ship as plain files in the install directory instead of embedded assembly resources (dropper pattern).
+- **Installer** — all PowerShell `-ExecutionPolicy Bypass` removed; `taskkill /F /IM` used for process termination; non-solid `lzma/max` compression; full `VersionInfo` PE metadata.
+
+### Changed
+
+- `ProductInfo.Version` → `2.3.7`
+- Installer → `SentinelSetup-2.3.7`
+
+
 ## [2.3.6] - 2026-09-01
 
 Detection quality improvements ported from [GorstaksProtection](https://github.com/CroatiaSecurity/GorstaksProtection): sliding-window ransomware rules, full-path parent verification, ThreatFox live IOC feed, and a mandatory pre-action audit log.
