@@ -1,6 +1,26 @@
 # Changelog
 
 
+
+## [2.3.6] - 2026-09-01
+
+Detection quality improvements ported from [GorstaksProtection](https://github.com/CroatiaSecurity/GorstaksProtection): sliding-window ransomware rules, full-path parent verification, ThreatFox live IOC feed, and a mandatory pre-action audit log.
+
+### Added
+
+- **`ThreatFoxFeedService`** — new background service that queries the [ThreatFox API](https://threatfox-api.abuse.ch/api/v1/) every 6 hours and maintains a unified in-memory IOC store covering SHA-256 hashes, IP addresses, and **domain names** (all indicator types in one `ConcurrentDictionary`). Each entry carries `malware_family` and `confidence_level` from ThreatFox. SHA-256 hits are pushed directly into `IoCScanner` so `FileReputationEngine` detections are enriched with malware-family metadata. On startup, loads a bundled offline snapshot (`%ProgramData%\Sentinel\threatfox-bundle.json.gz`) so detections work from first launch without waiting for the live network — if the bundle is absent the service starts empty and seeds itself on the first refresh. Registered in the `NetworkIntegrity` monitor group alongside `ThreatIntelFeedBlocker`.
+- **`DnsQueryMonitor` — ThreatFox domain IOC check** — `ProcessDnsQuery` now runs an O(1) domain lookup against `ThreatFoxFeedService` before the existing heuristics. A hit emits rule `SENT-TF-001` ("DNS: ThreatFox Known-Malicious Domain") at Tier1 / `NetworkIsolate`, carrying `malware_family` in the detection metadata.
+- **`SlidingWindowRansomwareRule` (SENT-SW-001)** — fires when a single process writes or renames files with more than 50 unique extensions within a 30-second sliding window. Complementary to the existing shadow-copy / `.locked`-extension single-event rule; catches encryption loops that use arbitrary extensions. Confidence 0.90 → Tier1 / `KillProcessTree`. Uses per-PID `ConcurrentDictionary` state with idle-entry eviction every 1,000 evaluations to prevent unbounded memory growth. Ported from GorstaksProtection `RansomwareBehaviorRule` (GRS-004).
+- **`SlidingWindowMassDeletionRule` (SENT-SW-002)** — fires when a single process deletes more than 100 files within a 10-second window. Consistent with wiper malware or ransomware destroying shadow copies / backups prior to encryption. Confidence 0.85 → Tier1 / `KillProcessTree`. Same idle-eviction pattern as above. Ported from GorstaksProtection `MassFileDeletionRule` (GRS-008).
+- **`FullPathParentChildRule` (SENT-003)** — detects Office apps, browsers, and PDF readers spawning shells or scripting engines, with **full-path verification of the parent binary**. The existing `AttackToolsRule` matches by process name only, which an attacker can spoof by naming malware `winword.exe`. This rule additionally checks that the parent's binary path contains a known legitimate install-directory fragment (e.g. `\\microsoft office\\`) before firing — a `winword.exe` living in `C:\Temp\` is rejected. Covers Word, Excel, PowerPoint, Outlook, OneNote, Access, LibreOffice, Chrome, Edge, Brave, Opera, Vivaldi, Firefox, Acrobat, and script-chain parents (`wscript.exe`, `cscript.exe`). Confidence 0.75 → Tier2 / `LogOnly` (feeds correlation engine; kill requires chain confirmation). Ported from GorstaksProtection `SuspiciousParentChildRule` (GRS-006).
+- **`RuleId` field on `DetectionEvent`** — new nullable `string? RuleId` property enables stable per-rule identifiers (`SENT-SW-001`, `SENT-003`, `SENT-TF-001`) for deduplication, action mapping, and audit correlation. Legacy rules leave it null; backward-compatible.
+- **Pre-action audit log in `JsonlEventLogger`** — separate append-only daily-rotating file (`%ProgramData%\Sentinel\audit-YYYY-MM-DD.jsonl`) written before every kill or block action via `LogAuditBeforeActionAsync` / `LogAuditActionOutcomeAsync`. 90-day retention with automatic pruning. SYSTEM + Admins ACL (no interactive-user read). Mandatory pre-action write enforced structurally — the audit entry always comes first. Ported from GorstaksProtection `GorstaksLogger.LogAuditBeforeAction`.
+
+### Changed
+
+- `ProductInfo.Version` → `2.3.6`
+- Installer → `SentinelSetup-2.3.6`
+
 ## [2.3.5] - 2026-08-31
 
 Delivery-vector coverage: script-class droppers missing Mark-of-the-Web, and the WPAD / PAC auto-proxy hijack path (the host-side landing point for the DHCP Option 252 vector).

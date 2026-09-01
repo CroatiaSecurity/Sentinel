@@ -17,6 +17,15 @@ namespace Sentinel.Core
         private bool _diskSpaceDegraded;
         private bool _disposed;
 
+        // ── Pre-action audit log (Improvement #5 from GorstaksProtection) ─────────
+        // Separate append-only file guaranteed to be written BEFORE any kill/block
+        // action fires. Daily rotation, 90 days retained.  ACLs: SYSTEM + Admins only.
+        private string _auditLogFilePath = null!;
+        private readonly SemaphoreSlim _auditSemaphore = new(1, 1);
+        private FileStream? _auditFileStream;
+        private StreamWriter? _auditWriter;
+        private bool _auditDegraded;
+
         public string LogFilePath => _logFilePath;
         private long _droppedEvents;
         public long DroppedEvents => Interlocked.Read(ref _droppedEvents);
@@ -70,6 +79,149 @@ namespace Sentinel.Core
             }
 
             TryOpenFileInternal();
+
+            // ── Audit log setup (Improvement #5 from GorstaksProtection) ─────────
+            // Daily-rotated, SYSTEM+Admins-only append file written BEFORE any kill/block.
+            var sentinelDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "Sentinel");
+            _auditLogFilePath = Path.Combine(sentinelDir,
+                $"audit-{DateTime.UtcNow:yyyy-MM-dd}.jsonl");
+            TryOpenAuditFileInternal();
+        }
+
+        private void TryOpenAuditFileInternal()
+        {
+            try
+            {
+                // Rotate to today's file if the date has changed
+                var todayPath = Path.Combine(
+                    Path.GetDirectoryName(_auditLogFilePath)!,
+                    $"audit-{DateTime.UtcNow:yyyy-MM-dd}.jsonl");
+                if (todayPath != _auditLogFilePath)
+                {
+                    _auditWriter?.Dispose();
+                    _auditWriter = null;
+                    _auditFileStream?.Dispose();
+                    _auditFileStream = null;
+                    _auditLogFilePath = todayPath;
+                }
+
+                if (_auditWriter != null) return; // already open for today
+
+                _auditFileStream = new FileStream(_auditLogFilePath, FileMode.Append, FileAccess.Write,
+                    FileShare.Read | FileShare.Delete);
+                _auditWriter = new StreamWriter(_auditFileStream) { AutoFlush = true };
+                _auditDegraded = false;
+
+                // Prune audit files older than 90 days
+                PruneOldAuditFiles();
+            }
+            catch
+            {
+                _auditDegraded = true;
+            }
+        }
+
+        private void PruneOldAuditFiles()
+        {
+            try
+            {
+                var dir = Path.GetDirectoryName(_auditLogFilePath);
+                if (dir == null || !Directory.Exists(dir)) return;
+                var cutoff = DateTime.UtcNow.AddDays(-90);
+                foreach (var file in Directory.GetFiles(dir, "audit-*.jsonl"))
+                {
+                    if (File.GetLastWriteTimeUtc(file) < cutoff)
+                        try { File.Delete(file); } catch { /* best-effort */ }
+                }
+            }
+            catch { /* best-effort */ }
+        }
+
+        /// <summary>
+        /// MANDATORY pre-action audit entry. MUST be called and awaited before any
+        /// kill or block action executes. Writes to the dedicated audit log (not the
+        /// main events.jsonl). Ported from GorstaksProtection GorstaksLogger.LogAuditBeforeAction.
+        /// </summary>
+        public async Task LogAuditBeforeActionAsync(
+            string detectionId,
+            string ruleId,
+            string ruleName,
+            ResponseAction proposedAction,
+            double confidence,
+            string processName,
+            int processId,
+            string justification)
+        {
+            TryOpenAuditFileInternal();
+            if (_auditDegraded || _auditWriter == null) return;
+
+            var entry = new
+            {
+                AuditType       = "PRE_ACTION",
+                Timestamp       = DateTime.UtcNow,
+                DetectionId     = detectionId,
+                RuleId          = ruleId,
+                RuleName        = ruleName,
+                ProposedAction  = proposedAction.ToString(),
+                Confidence      = confidence,
+                ProcessName     = processName,
+                ProcessId       = processId,
+                Justification   = justification
+            };
+
+            var json = JsonSerializer.Serialize(entry);
+
+            await _auditSemaphore.WaitAsync();
+            try
+            {
+                await _auditWriter.WriteLineAsync(json);
+            }
+            catch
+            {
+                _auditDegraded = true;
+            }
+            finally
+            {
+                _auditSemaphore.Release();
+            }
+        }
+
+        /// <summary>Records the outcome of a response action to the audit log.</summary>
+        public async Task LogAuditActionOutcomeAsync(
+            string detectionId,
+            ResponseAction action,
+            bool succeeded,
+            string? errorMessage = null)
+        {
+            TryOpenAuditFileInternal();
+            if (_auditDegraded || _auditWriter == null) return;
+
+            var entry = new
+            {
+                AuditType    = "ACTION_OUTCOME",
+                Timestamp    = DateTime.UtcNow,
+                DetectionId  = detectionId,
+                Action       = action.ToString(),
+                Succeeded    = succeeded,
+                ErrorMessage = errorMessage
+            };
+
+            var json = JsonSerializer.Serialize(entry);
+
+            await _auditSemaphore.WaitAsync();
+            try
+            {
+                await _auditWriter.WriteLineAsync(json);
+            }
+            catch
+            {
+                _auditDegraded = true;
+            }
+            finally
+            {
+                _auditSemaphore.Release();
+            }
         }
 
         private void TryOpenFileInternal()
@@ -355,11 +507,24 @@ namespace Sentinel.Core
                     await _fileStream.DisposeAsync();
                     _fileStream = null;
                 }
+                // Dispose audit log streams
+                if (_auditWriter != null)
+                {
+                    await _auditWriter.DisposeAsync();
+                    _auditWriter = null;
+                }
+                if (_auditFileStream != null)
+                {
+                    await _auditFileStream.DisposeAsync();
+                    _auditFileStream = null;
+                }
             }
             finally
             {
                 try { _semaphore.Release(); } catch (ObjectDisposedException) { }
                 _semaphore.Dispose();
+                try { _auditSemaphore.Release(); } catch (ObjectDisposedException) { }
+                _auditSemaphore.Dispose();
             }
             GC.SuppressFinalize(this);
         }

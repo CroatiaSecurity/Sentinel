@@ -464,6 +464,12 @@ namespace Sentinel.Core
     public class DetectionEvent
     {
         public string RuleName { get; set; } = string.Empty;
+        /// <summary>
+        /// Stable rule identifier (e.g. "SENT-001") used for central action mapping,
+        /// deduplication, and audit correlation. Optional — legacy rules leave this null.
+        /// Ported from GorstaksProtection (GRS-00X scheme).
+        /// </summary>
+        public string? RuleId { get; set; }
         public string Evidence { get; set; } = string.Empty;
         public string Reasoning { get; set; } = string.Empty;
         public double Confidence { get; set; }

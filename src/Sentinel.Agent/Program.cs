@@ -342,6 +342,10 @@ namespace Sentinel.Agent
                     services.AddTransient<IDetectionRule, DllSideloadingDetectionRule>();
                     services.AddTransient<IDetectionRule, ChromeRemoteDebuggingRule>();
                     services.AddSingleton<IDetectionRule, DynamicRulesEvaluator>();
+                    // GorstaksProtection-ported rules (v2.4.0)
+                    services.AddSingleton<IDetectionRule, SlidingWindowRansomwareRule>();
+                    services.AddSingleton<IDetectionRule, SlidingWindowMassDeletionRule>();
+                    services.AddSingleton<IDetectionRule, FullPathParentChildRule>();
 
                     // Web dashboard served on localhost + native WinForms shell.
                     // The embedded WebBrowser control in AgentDashboardForm connects to

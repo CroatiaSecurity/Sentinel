@@ -1,37 +1,34 @@
-
 $env:PATH = "C:\Program Files\Git\cmd;C:\Program Files\Git\bin;" + $env:PATH
 $gh = "C:\Program Files\GitHub CLI\gh.exe"
-$installer = "installer\SentinelSetup-2.3.5.exe"
+$installer = "installer\SentinelSetup-2.3.6.exe"
 
 $notes = @"
-## v2.3.5 — Delivery-vector coverage: script-dropper MOTW + WPAD/PAC proxy hijack
+## v2.3.6 — GorstaksProtection detection improvements
 
-Closes two initial-access delivery gaps. DHCP does not deliver JavaScript, but DHCP
-Option 252 delivers a PAC URL — JavaScript the auto-proxy resolver runs — and a drive-by
-download can drop a script payload that never has to be a PE.
+Detection quality improvements ported from GorstaksProtection: sliding-window ransomware
+rules, full-path parent verification, ThreatFox live IOC feed, and a mandatory pre-action
+audit log.
 
 ### Added
 
-- **Script-dropper Mark-of-the-Web detection.** ``MotwBypassMonitor`` now flags script-class
-  droppers (``.hta``, ``.js``, ``.vbs``, ``.wsf``, ``.ps1``, ``.bat``, ``.lnk``, ``.chm``, …)
-  that land in Downloads/Desktop without a ``Zone.Identifier`` — not just PE files. New rule
-  ``CVE Class: Script Dropper Missing Mark-of-the-Web`` (Tier2/LogOnly weak observe). Feeds the
-  existing ``MOTW Bypass Execution Chain`` composite.
-- **``WpadProxyMonitor``.** Watches the WPAD / Proxy Auto-Config (PAC) config — the host-side
-  landing point for the DHCP Option 252 vector (CVE-2026-62755 class). A rogue DHCP server or
-  malware that sets ``AutoConfigURL`` can MITM every browser. Baselines existing corporate PAC
-  (does not fire), then emits on a PAC change, a remote/IP-literal PAC, or WPAD auto-detect +
-  remote PAC. All Tier2/LogOnly.
-- **``WPAD Proxy Hijack Chain`` composite** — a WPAD/PAC signal correlated with C2 or exfil
-  promotes to 0.9. Does not revert the proxy setting.
+- **ThreatFoxFeedService** — queries the ThreatFox API every 6 hours for hash/IP/domain IOCs
+  with malware-family metadata. Loads an offline bundle on startup so detections work
+  immediately. Domain hits surface as rule SENT-TF-001 in DnsQueryMonitor.
+- **SlidingWindowRansomwareRule (SENT-SW-001)** — fires when a single process touches >50
+  unique file extensions within 30 seconds. Complements the existing shadow-copy rule.
+  Tier1 / KillProcessTree. Memory-safe per-PID idle eviction.
+- **SlidingWindowMassDeletionRule (SENT-SW-002)** — fires on >100 file deletions within 10
+  seconds. Wiper / backup-destruction pattern. Tier1 / KillProcessTree.
+- **FullPathParentChildRule (SENT-003)** — Office/browser/PDF parent-child detection with
+  full binary-path verification. Rejects a ``winword.exe`` living outside known install paths.
+  Tier2 / LogOnly -> feeds correlation engine.
+- **RuleId field on DetectionEvent** — stable per-rule identifiers for audit and dedup.
+- **Pre-action audit log** — ``JsonlEventLogger`` now writes a mandatory PRE_ACTION entry to a
+  daily-rotating ``audit-YYYY-MM-DD.jsonl`` (90-day retention) before every kill or block.
 
 ### Changed
 
-- ``ProductInfo.Version`` -> 2.3.5
-
-Neither monitor kills or reverts settings — corporate PAC and game ISOs are legitimate.
-These are observe fuel that only escalate on a corroborating execution or callback leg.
-They do not patch the DHCP client or stop a PAC-engine RCE; patch the OS for that.
+- ``ProductInfo.Version`` -> 2.3.6
 
 ## Installation
 Requires .NET Framework 4.8. Run as Administrator.
@@ -39,7 +36,7 @@ Open Settings from the Sentinel tray icon.
 "@
 
 if (Test-Path $gh) {
-    & $gh release create v2.3.5 $installer --title "Sentinel 2.3.5" --notes $notes -R CroatiaSecurity/Sentinel
+    & $gh release create v2.3.6 $installer --title "Sentinel 2.3.6" --notes $notes -R CroatiaSecurity/Sentinel
 } else {
-    Write-Host "gh.exe not found - installer is at $installer and releases\2.3.5\"
+    Write-Host "gh.exe not found - installer is at $installer and releases\2.3.6\"
 }

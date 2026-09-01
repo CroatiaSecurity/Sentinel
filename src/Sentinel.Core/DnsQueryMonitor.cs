@@ -39,6 +39,8 @@ namespace Sentinel.Core
 
         private readonly ConcurrentDictionary<string, DomainStats> _domainStats = new(StringComparer.OrdinalIgnoreCase);
         private readonly ConcurrentDictionary<string, byte> _mlAlertedDomains = new(StringComparer.OrdinalIgnoreCase);
+        // GorstaksProtection v2.4.0: optional ThreatFox domain IOC feed integration
+        private ThreatFoxFeedService? _threatFoxFeed;
         private const int RapidQueryThreshold = 50;
         private const double EntropyThreshold = 4.0;
         /// <summary>ML URL score threshold for Tier2 log-only DNS alert (soft signal).</summary>
@@ -83,7 +85,8 @@ namespace Sentinel.Core
             PersistentConnectionMonitor? persistentConnMon = null,
             ContextBus? contextBus = null,
             ForumHrWatchMonitor? forumHrWatch = null,
-            MlThreatScorer? mlScorer = null)
+            MlThreatScorer? mlScorer = null,
+            ThreatFoxFeedService? threatFoxFeed = null)
         {
             _detectionEngine = detectionEngine;
             _config = config;
@@ -92,6 +95,7 @@ namespace Sentinel.Core
             _contextBus = contextBus;
             _forumHrWatch = forumHrWatch;
             _mlScorer = mlScorer;
+            _threatFoxFeed = threatFoxFeed;
             _pollInterval = TimeSpan.FromSeconds(config.DnsPollIntervalSeconds > 0 ? config.DnsPollIntervalSeconds : 15);
         }
 
@@ -170,6 +174,33 @@ namespace Sentinel.Core
 
             _persistentConnMon?.RecordDnsQuery(pid, domain);
             _forumHrWatch?.RecordDnsQuery(pid, domain);
+
+            // GorstaksProtection v2.4.0: ThreatFox domain IOC check — fast O(1) lookup
+            if (_threatFoxFeed != null && _threatFoxFeed.IsMaliciousDomain(domain, out var tfVerdict))
+            {
+                _ = _detectionEngine.EmitAsync(new DetectionEvent
+                {
+                    RuleName          = "DNS: ThreatFox Known-Malicious Domain",
+                    RuleId            = "SENT-TF-001",
+                    Evidence          = $"DNS query for '{domain}' matched ThreatFox IOC " +
+                                        $"(malware: {tfVerdict.MalwareFamily ?? "unknown"}, confidence: {tfVerdict.Confidence})",
+                    Reasoning         = "The queried domain is listed in the ThreatFox threat intelligence database as a known C2 or malicious domain. " +
+                                        "Block or investigate the originating process.",
+                    Confidence        = Math.Min(1.0, tfVerdict.Confidence / 100.0),
+                    Tier              = DetectionTier.Tier1Behavioral,
+                    AuthorizedResponse = ResponseAction.NetworkIsolate,
+                    ProcessName       = "SYSTEM",
+                    ProcessId         = pid,
+                    Metadata          = new Dictionary<string, string>
+                    {
+                        { "RuleId",         "SENT-TF-001" },
+                        { "Domain",         domain },
+                        { "MalwareFamily",  tfVerdict.MalwareFamily ?? "unknown" },
+                        { "ThreatFoxConf",  tfVerdict.Confidence.ToString() },
+                        { "IocSource",      tfVerdict.Source }
+                    }
+                });
+            }
 
             var stats = _domainStats.GetOrAdd(baseDomain, _ => new DomainStats());
             stats.QueryCount++;

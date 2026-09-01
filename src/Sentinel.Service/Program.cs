@@ -364,6 +364,10 @@ namespace Sentinel.Service
                     services.AddTransient<IDetectionRule, DllSideloadingDetectionRule>();
                     services.AddTransient<IDetectionRule, ChromeRemoteDebuggingRule>();
                     services.AddSingleton<IDetectionRule, DynamicRulesEvaluator>();
+                    // GorstaksProtection-ported rules (v2.4.0)
+                    services.AddSingleton<IDetectionRule, SlidingWindowRansomwareRule>();
+                    services.AddSingleton<IDetectionRule, SlidingWindowMassDeletionRule>();
+                    services.AddSingleton<IDetectionRule, FullPathParentChildRule>();
 
                     // Detection Engine
                     services.AddSingleton<FileReputationEngine>();
@@ -627,6 +631,7 @@ namespace Sentinel.Service
                             ("OutboundConnectionWhitelist",     s => s.GetRequiredService<OutboundConnectionWhitelist>()),
                             ("RemoteAccessMonitor",             s => s.GetRequiredService<RemoteAccessMonitor>()),
                             ("ThreatIntelFeedBlocker",          s => s.GetRequiredService<ThreatIntelFeedBlocker>()),
+                            ("ThreatFoxFeedService",            s => s.GetRequiredService<ThreatFoxFeedService>()),
                             ("ForumHrWatchMonitor",             s => s.GetRequiredService<ForumHrWatchMonitor>())
                         );
                         return new MonitorGroup(
@@ -657,6 +662,8 @@ namespace Sentinel.Service
                     services.AddSingleton<OutboundConnectionWhitelist>();
                     services.AddSingleton<RemoteAccessMonitor>();
                     services.AddSingleton<ThreatIntelFeedBlocker>();
+                    // GorstaksProtection-ported: ThreatFox hash/domain/IP feed (v2.4.0)
+                    services.AddSingleton<ThreatFoxFeedService>();
                     services.AddSingleton<ForumHrWatchMonitor>();
 
                     // ── Group 5: System Integrity ─────────────────────────────────────
