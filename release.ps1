@@ -3,11 +3,21 @@ $gh = "C:\Program Files\GitHub CLI\gh.exe"
 $installer = "installer\SentinelSetup-2.3.6.exe"
 
 $notes = @"
-## v2.3.6 — GorstaksProtection detection improvements
+## v2.3.6 — AV false positive fix + GorstaksProtection detection improvements
 
-Detection quality improvements ported from GorstaksProtection: sliding-window ransomware
-rules, full-path parent verification, ThreatFox live IOC feed, and a mandatory pre-action
-audit log.
+### Fixed
+
+- **Kaspersky false positive on Sentinel.Core.dll** (confirmed via Kaspersky report log):
+  - ``NativeProcessMemory``: removed split-string runtime API resolution (``J("Open","Process")``
+    pattern). All Win32 API calls now use standard ``[DllImport]`` declarations, making the
+    binary fully transparent to security scanners.
+  - ``HardeningModule``: ``LGPO.exe`` and ``GSecurity.inf`` are now shipped as plain files in the
+    installation directory instead of being embedded in the assembly as resources. Extracting
+    a PE from a DLL resource at runtime is a top AV dropper heuristic.
+- **Installer heuristic profile reduced**: Pascal script now uses ``taskkill /F /IM`` instead
+  of PowerShell ``-ExecutionPolicy Bypass`` + ``Stop-Process -Force`` for process termination.
+  ``ResetInstallDirAcls`` reduced from 8 ``takeown``/``icacls`` calls to 2 targeted ``icacls``
+  calls (no recursive ``takeown``).
 
 ### Added
 
