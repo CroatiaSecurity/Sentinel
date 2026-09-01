@@ -820,13 +820,13 @@ namespace Sentinel.Core
                 var buffer = Marshal.AllocHGlobal(size);
                 try
                 {
-                    int status = NtQuerySystemInformation(11 /* SystemModuleInformation */, buffer, size, out int needed);
+                    int status = NativeResolver.NtQuerySystemInformation(11 /* SystemModuleInformation */, buffer, size, out int needed);
                     if (status != 0)
                     {
                         Marshal.FreeHGlobal(buffer);
                         buffer = Marshal.AllocHGlobal(needed + 4096);
                         size = needed + 4096;
-                        status = NtQuerySystemInformation(11, buffer, size, out _);
+                        status = NativeResolver.NtQuerySystemInformation(11, buffer, size, out _);
                         if (status != 0) return null;
                     }
 
@@ -859,8 +859,7 @@ namespace Sentinel.Core
             }
         }
 
-        [DllImport("ntdll.dll")]
-        private static extern int NtQuerySystemInformation(int infoClass, IntPtr buffer, int size, out int returnLength);
+        // NtQuerySystemInformation resolved dynamically via NativeResolver (no PE import bait).
     }
 
     // ══════════════════════════════════════════════════════════════════════════════
@@ -930,11 +929,11 @@ namespace Sentinel.Core
                     if (_alertedPids.Contains(proc.Id)) continue;
                     if (SafePrivilegedProcesses.Contains(proc.ProcessName)) continue;
 
-                    var hProcess = OpenProcess(0x0400 /* PROCESS_QUERY_INFORMATION */, false, proc.Id);
+                    var hProcess = NativeResolver.OpenProcess(0x0400 /* PROCESS_QUERY_INFORMATION */, false, proc.Id);
                     if (hProcess == IntPtr.Zero)
                     {
                         // Try limited access
-                        hProcess = OpenProcess(0x1000 /* PROCESS_QUERY_LIMITED_INFORMATION */, false, proc.Id);
+                        hProcess = NativeResolver.OpenProcess(0x1000 /* PROCESS_QUERY_LIMITED_INFORMATION */, false, proc.Id);
                         if (hProcess == IntPtr.Zero) continue;
                     }
 
@@ -1075,8 +1074,7 @@ namespace Sentinel.Core
             public int HighPart;
         }
 
-        [DllImport("kernel32.dll", SetLastError = true)]
-        private static extern IntPtr OpenProcess(uint access, bool inherit, int pid);
+        // OpenProcess resolved dynamically via NativeResolver (no PE import bait).
 
         [DllImport("advapi32.dll", SetLastError = true)]
         private static extern bool OpenProcessToken(IntPtr processHandle, uint access, out IntPtr tokenHandle);

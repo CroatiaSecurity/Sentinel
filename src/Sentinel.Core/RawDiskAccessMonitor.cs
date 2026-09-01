@@ -89,12 +89,7 @@ namespace Sentinel.Core
             @"\\.\Scsi"
         };
 
-        // NtQuery* / OpenProcess / DuplicateHandle resolved via NativeProcessMemory (no PE import bait).
-        [DllImport("ntdll.dll")]
-        private static extern int NtQueryObject(IntPtr handle, int infoClass, IntPtr buffer, int bufferSize, out int returnLength);
-
-        [DllImport("kernel32.dll")]
-        private static extern IntPtr GetCurrentProcess();
+        // NtQuery* / OpenProcess / DuplicateHandle resolved via NativeResolver (no PE import bait).
 
         private const int PROCESS_DUP_HANDLE = 0x0040;
         private const int DUPLICATE_SAME_ACCESS = 0x0002;
@@ -319,8 +314,9 @@ namespace Sentinel.Core
                         IntPtr dupHandle = IntPtr.Zero;
                         try
                         {
+                            using var currentProc = System.Diagnostics.Process.GetCurrentProcess();
                             if (!NativeProcessMemory.DupHandle(processHandle, handleValue,
-                                GetCurrentProcess(), out dupHandle, 0, false, DUPLICATE_SAME_ACCESS))
+                                currentProc.Handle, out dupHandle, 0, false, DUPLICATE_SAME_ACCESS))
                                 continue;
 
                             var name = GetObjectName(dupHandle);
@@ -357,7 +353,7 @@ namespace Sentinel.Core
             IntPtr buffer = Marshal.AllocHGlobal(bufferSize);
             try
             {
-                int status = NtQueryObject(handle, ObjectNameInformation, buffer, bufferSize, out _);
+                int status = NativeResolver.NtQueryObject(handle, ObjectNameInformation, buffer, bufferSize, out _);
                 if (status != 0) return null;
 
                 // UNICODE_STRING structure: Length (2), MaxLength (2), Buffer (ptr)

@@ -231,27 +231,17 @@ namespace Sentinel.Core
                         if (_dllUnload != null)
                             await _dllUnload.CheckAndUnloadAsync(proc.Id, name);
 
-                        int stripped = 0;
-                        foreach (var region in mzRegions)
-                        {
-                            var start = new IntPtr(region.Address);
-                            if (NativeProcessMemory.TryStripExecute(proc.Id, start, new IntPtr(region.Size)))
-                                stripped++;
-                        }
-
                         _alertedPids[proc.Id] = DateTimeOffset.UtcNow;
                         await _detectionEngine.EmitAsync(new DetectionEvent
                         {
                             RuleName = "Threat Intel: Remote Memory Injection (ALLOCVM_REMOTE + PROTECTVM_REMOTE)",
-                            Evidence = $"Process '{name}' (PID {proc.Id}) has {rwx.Count} unbacked RWX region(s), " +
-                                       $"total {rwx.Sum(r => r.Size):N0} bytes; stripped-execute={stripped}.",
-                            Reasoning = "Unbacked RWX with MZ or compact shellcode size is remote injection (T1055). " +
-                                        "Execute bit stripped immediately; named foreign modules unloaded.",
-                            Confidence = stripped > 0 ? 0.92 : 0.88,
+                            Evidence = $"Process '{name}' (PID {proc.Id}) has {rwx.Count} unbacked RWX region(s) with injected MZ header, " +
+                                       $"total {rwx.Sum(r => r.Size):N0} bytes.",
+                            Reasoning = "Unbacked RWX with MZ header indicates remote memory injection / hollowed payload (T1055). " +
+                                        "Process contained and response triggered.",
+                            Confidence = 0.95,
                             Tier = DetectionTier.Tier1Behavioral,
-                            AuthorizedResponse = stripped > 0
-                                ? ResponseAction.LogOnly
-                                : ResponseAction.KillProcessTree,
+                            AuthorizedResponse = ResponseAction.KillProcessTree,
                             ProcessName = name,
                             ProcessId = proc.Id,
                             SignalType = SignalType.ProcessInjection,
@@ -259,7 +249,6 @@ namespace Sentinel.Core
                             {
                                 ["RwxRegionCount"] = rwx.Count.ToString(),
                                 ["TotalRwxSize"] = rwx.Sum(r => r.Size).ToString(),
-                                ["StrippedExecute"] = stripped.ToString(),
                                 ["ImagePath"] = imagePath ?? ""
                             }
                         });

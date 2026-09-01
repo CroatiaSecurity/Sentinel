@@ -50,6 +50,7 @@ namespace Sentinel.Core
             "Hostile Module",
             "Proven Load",
             "Foreign Module Unloaded",
+            "Foreign Module Remediated",
         };
 
         /// <summary>
@@ -283,6 +284,7 @@ namespace Sentinel.Core
 
             var r = detection.RuleName ?? "";
             return r.IndexOf("Foreign Module Unloaded", StringComparison.OrdinalIgnoreCase) >= 0
+                   || r.IndexOf("Foreign Module Remediated", StringComparison.OrdinalIgnoreCase) >= 0
                    || r.IndexOf("Hijack-Name Plant Quarantined", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 

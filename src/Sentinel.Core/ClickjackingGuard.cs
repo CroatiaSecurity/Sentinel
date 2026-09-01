@@ -29,34 +29,15 @@ namespace Sentinel.Core
         private readonly SignerTrustService _signerTrust;
         private readonly ILogger<ClickjackingGuard> _logger;
 
-        // Mouse hook handle
-        private IntPtr _mouseHookHandle = IntPtr.Zero;
-        private LowLevelMouseProc? _mouseHookProc;
-
-        // Track injected mouse events
-        private int _injectedClickCount;
-        private DateTime _lastInjectedClick = DateTime.MinValue;
-        private DateTime _lastInjectedClickAlert = DateTime.MinValue;
-
         // Track cursor teleportation
         private POINT _lastCursorPos;
         private DateTime _lastCursorChange = DateTime.UtcNow;
-        private int _teleportClickCount; // cursor jump + click within 50ms
+        private int _teleportClickCount;
 
         // Fake UAC dedup
         private readonly ConcurrentDictionary<int, DateTime> _fakeUacAlerted = new();
 
         #region P/Invoke
-
-        private delegate IntPtr LowLevelMouseProc(int nCode, IntPtr wParam, IntPtr lParam);
-
-        // Low-level mouse hook installed via NativeProcessMemory (no PE import of hook API).
-
-        [DllImport("user32.dll")]
-        private static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
-
-        [DllImport("kernel32.dll")]
-        private static extern IntPtr GetModuleHandle(string? lpModuleName);
 
         [DllImport("user32.dll")]
         private static extern bool GetCursorPos(out POINT lpPoint);
@@ -93,22 +74,6 @@ namespace Sentinel.Core
         [StructLayout(LayoutKind.Sequential)]
         private struct RECT { public int Left, Top, Right, Bottom; }
 
-        [StructLayout(LayoutKind.Sequential)]
-        private struct MSLLHOOKSTRUCT
-        {
-            public POINT pt;
-            public uint mouseData;
-            public uint flags;
-            public uint time;
-            public IntPtr dwExtraInfo;
-        }
-
-        private const int WH_MOUSE_LL = 14;
-        private const int WM_LBUTTONDOWN = 0x0201;
-        private const int WM_RBUTTONDOWN = 0x0204;
-        private const int WM_LBUTTONUP = 0x0202;
-        private const uint LLMHF_INJECTED = 0x01;
-        private const uint LLMHF_LOWER_IL_INJECTED = 0x02;
         private const int GWL_EXSTYLE = -20;
         private const int WS_EX_LAYERED = 0x80000;
         private const int WS_EX_TRANSPARENT = 0x20;
@@ -127,13 +92,7 @@ namespace Sentinel.Core
 
         protected override async Task ExecuteAsync(CancellationToken ct)
         {
-            _logger.LogInformation("[ClickjackingGuard] Started — monitoring for clickjacking, fake UAC, mouse injection");
-
-            // Install low-level mouse hook on a dedicated STA thread
-            var hookThread = new Thread(() => RunMouseHook(ct));
-            hookThread.SetApartmentState(ApartmentState.STA);
-            hookThread.IsBackground = true;
-            hookThread.Start();
+            _logger.LogInformation("[ClickjackingGuard] Started — monitoring for clickjacking, fake UAC, and suspicious overlays");
 
             GetCursorPos(out _lastCursorPos);
 
@@ -154,243 +113,7 @@ namespace Sentinel.Core
                     _logger.LogDebug(ex, "[ClickjackingGuard] Error");
                 }
             }
-
-            // Hook thread handles its own cleanup via WM_QUIT → UnhookWindowsHookEx
         }
-
-        #region Mouse Injection Detection
-
-        [DllImport("user32.dll")]
-        private static extern int GetMessage(out MSG lpMsg, IntPtr hWnd, uint wMsgFilterMin, uint wMsgFilterMax);
-
-        [DllImport("user32.dll")]
-        private static extern bool TranslateMessage(ref MSG lpMsg);
-
-        [DllImport("user32.dll")]
-        private static extern IntPtr DispatchMessage(ref MSG lpMsg);
-
-        [DllImport("user32.dll")]
-        private static extern bool PostThreadMessage(uint idThread, uint Msg, IntPtr wParam, IntPtr lParam);
-
-        [DllImport("kernel32.dll")]
-        private static extern uint GetCurrentThreadId();
-
-        [StructLayout(LayoutKind.Sequential)]
-        private struct MSG
-        {
-            public IntPtr hwnd;
-            public uint message;
-            public IntPtr wParam;
-            public IntPtr lParam;
-            public uint time;
-            public POINT pt;
-        }
-
-        private const uint WM_QUIT = 0x0012;
-        private uint _hookThreadNativeId;
-
-        private void RunMouseHook(CancellationToken ct)
-        {
-            try
-            {
-                // Get the native Win32 thread ID (NOT managed thread ID)
-                _hookThreadNativeId = GetCurrentThreadId();
-
-                _mouseHookProc = MouseHookCallback;
-                using var curProcess = Process.GetCurrentProcess();
-                using var curModule = curProcess.MainModule!;
-                _mouseHookHandle = NativeProcessMemory.InstallLowLevelHook(
-                    WH_MOUSE_LL, _mouseHookProc, GetModuleHandle(curModule.ModuleName), 0);
-
-                if (_mouseHookHandle == IntPtr.Zero)
-                {
-                    _logger.LogWarning("[ClickjackingGuard] Failed to install mouse hook");
-                    return;
-                }
-
-                _logger.LogInformation("[ClickjackingGuard] Mouse hook installed");
-
-                // Register cancellation to post WM_QUIT to THIS thread's message queue
-                ct.Register(() =>
-                {
-                    try { PostThreadMessage(_hookThreadNativeId, WM_QUIT, IntPtr.Zero, IntPtr.Zero); } catch { }
-                });
-
-                // Proper Win32 message pump — required for low-level hooks to work without lag
-                MSG msg;
-                while (GetMessage(out msg, IntPtr.Zero, 0, 0) > 0)
-                {
-                    TranslateMessage(ref msg);
-                    DispatchMessage(ref msg);
-                }
-
-                // Unhook on the same thread that installed the hook
-                if (_mouseHookHandle != IntPtr.Zero)
-                {
-                    NativeProcessMemory.RemoveHook(_mouseHookHandle);
-                    _mouseHookHandle = IntPtr.Zero;
-                    _logger.LogInformation("[ClickjackingGuard] Mouse hook removed");
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogDebug(ex, "[ClickjackingGuard] Mouse hook thread error");
-            }
-        }
-
-        private IntPtr MouseHookCallback(int nCode, IntPtr wParam, IntPtr lParam)
-        {
-            if (nCode >= 0 && (wParam == (IntPtr)WM_LBUTTONDOWN || wParam == (IntPtr)WM_RBUTTONDOWN))
-            {
-                var hookStruct = Marshal.PtrToStructure<MSLLHOOKSTRUCT>(lParam);
-                bool isInjected = (hookStruct.flags & LLMHF_INJECTED) != 0 ||
-                                  (hookStruct.flags & LLMHF_LOWER_IL_INJECTED) != 0;
-
-                if (isInjected)
-                {
-                    // v1.5.7: Exempt IDE processes from synthetic mouse click detection.
-                    // IDEs generate injected mouse events for autocomplete selection, code lens,
-                    // inline rename, drag-and-drop, and UI automation in their panels.
-                    if (IsIdeMouseTarget())
-                    {
-                        return CallNextHookEx(_mouseHookHandle, nCode, wParam, lParam);
-                    }
-
-                    Interlocked.Increment(ref _injectedClickCount);
-                    _lastInjectedClick = DateTime.UtcNow;
-
-                    // Alert on burst of injected clicks (5+ in 10 seconds)
-                    if (_injectedClickCount >= 5 && DateTime.UtcNow - _lastInjectedClickAlert > TimeSpan.FromMinutes(1))
-                    {
-                        _lastInjectedClickAlert = DateTime.UtcNow;
-                        _injectedClickCount = 0;
-
-                        _ = _detectionEngine.EmitAsync(new DetectionEvent
-                        {
-                            RuleName = "Clickjacking: Synthetic Mouse Click Injection",
-                            Evidence = $"Detected 5+ injected mouse clicks within 10s at position ({hookStruct.pt.X},{hookStruct.pt.Y})",
-                            Reasoning = "Mouse clicks with the LLMHF_INJECTED flag indicate they were generated by SendInput " +
-                                        "or mouse_event, not physical hardware. Clickjacking attacks use synthetic clicks to " +
-                                        "interact with UI elements on behalf of the user — clicking 'Allow', 'Yes', or form " +
-                                        "buttons without user intent.",
-                            Confidence = 0.85,
-                            Tier = DetectionTier.Tier1Behavioral,
-                            AuthorizedResponse = ResponseAction.LogOnly,
-                            ProcessName = "SYSTEM",
-                            ProcessId = 0,
-                            SignalType = SignalType.PhantomKeystroke,
-                            Metadata = new Dictionary<string, string>
-                            {
-                                { "ClickPosition", $"{hookStruct.pt.X},{hookStruct.pt.Y}" },
-                                { "InjectedFlag", hookStruct.flags.ToString() }
-                            }
-                        });
-                    }
-                }
-            }
-
-            return CallNextHookEx(_mouseHookHandle, nCode, wParam, lParam);
-        }
-
-        /// <summary>
-        /// v1.5.7: Checks if the foreground window (mouse click target) belongs to an IDE
-        /// or a child process of an IDE. IDEs use synthetic mouse events for UI automation
-        /// (autocomplete, code lens, inline actions, panel interactions).
-        /// </summary>
-        private static bool IsIdeMouseTarget()
-        {
-            try
-            {
-                IntPtr fgWnd = GetForegroundWindow();
-                if (fgWnd == IntPtr.Zero) return false;
-                GetWindowThreadProcessId(fgWnd, out uint pid);
-                if (pid <= 4) return false;
-
-                using var proc = Process.GetProcessById((int)pid);
-                var name = proc.ProcessName;
-
-                // Direct match
-                if (IdeMouseProcessNames.Contains(name))
-                    return true;
-
-                // Walk parent chain (up to 3 levels)
-                int currentPid = (int)pid;
-                for (int depth = 0; depth < 3; depth++)
-                {
-                    int parentPid = GetParentProcessIdForMouse(currentPid);
-                    if (parentPid <= 4) break;
-                    try
-                    {
-                        using var parentProc = Process.GetProcessById(parentPid);
-                        if (IdeMouseProcessNames.Contains(parentProc.ProcessName))
-                            return true;
-                    }
-                    catch { break; }
-                    currentPid = parentPid;
-                }
-                return false;
-            }
-            catch { return false; }
-        }
-
-        /// <summary>
-        /// IDE process names for mouse click exemption. Same set as keystroke guard
-        /// but maintained here to avoid cross-class coupling.
-        /// </summary>
-        private static readonly HashSet<string> IdeMouseProcessNames = new(StringComparer.OrdinalIgnoreCase)
-        {
-            "code", "Code - Insiders", "kiro", "cursor", "windsurf", "positron",
-            "rider64", "idea64", "phpstorm64", "webstorm64", "goland64",
-            "pycharm64", "clion64", "rubymine64", "datagrip64",
-            "devenv",
-            "windowsterminal", "wt", "ConEmu64", "ConEmu",
-            "alacritty", "wezterm-gui", "hyper",
-            "sublime_text", "notepad++", "atom",
-            "mstsc", "vmware-vmx", "VirtualBoxVM",
-        };
-
-        private static int GetParentProcessIdForMouse(int pid)
-        {
-            IntPtr hProcess = IntPtr.Zero;
-            try
-            {
-                hProcess = NativeProcessMemory.OpenRemoteHandle(0x1000, (int)pid);
-                if (hProcess == IntPtr.Zero) return 0;
-
-                var pbi = new PROCESS_BASIC_INFO_MOUSE();
-                int status = NtQueryInformationProcessMouse(hProcess, 0, ref pbi, Marshal.SizeOf(pbi), out _);
-                return status == 0 ? pbi.InheritedFromUniqueProcessId.ToInt32() : 0;
-            }
-            catch { return 0; }
-            finally
-            {
-                if (hProcess != IntPtr.Zero) NativeProcessMemory.CloseHandle(hProcess);
-            }
-        }
-
-        [StructLayout(LayoutKind.Sequential)]
-        private struct PROCESS_BASIC_INFO_MOUSE
-        {
-            public IntPtr Reserved1;
-            public IntPtr PebBaseAddress;
-            public IntPtr Reserved2_0;
-            public IntPtr Reserved2_1;
-            public IntPtr UniqueProcessId;
-            public IntPtr InheritedFromUniqueProcessId;
-        }
-
-        [DllImport("user32.dll")]
-        private static extern IntPtr GetForegroundWindow();
-
-        // EntryPoint split via runtime would need dynamic resolve; keep EntryPoint as short benign alias if possible.
-        // Using ordinal-neutral name in managed code only:
-        [DllImport("ntdll.dll", EntryPoint = "NtQueryInformationProcess")]
-        private static extern int NtQueryInformationProcessMouse(
-            IntPtr processHandle, int processInformationClass,
-            ref PROCESS_BASIC_INFO_MOUSE processInformation,
-            int processInformationLength, out int returnLength);
-
-        #endregion
 
         #region Cursor Teleportation + Click Detection
 
@@ -402,21 +125,20 @@ namespace Sentinel.Core
             var dy = pos.Y - _lastCursorPos.Y;
             var distance = Math.Sqrt(dx * dx + dy * dy);
 
-            // Large jump (>500px) followed by recent injected click = click redirection
-            if (distance > 500 && DateTime.UtcNow - _lastInjectedClick < TimeSpan.FromMilliseconds(200))
+            // Large instantaneous jump (>800px) between checks
+            if (distance > 800 && (DateTime.UtcNow - _lastCursorChange) < TimeSpan.FromSeconds(10))
             {
                 _teleportClickCount++;
-                if (_teleportClickCount >= 2)
+                if (_teleportClickCount >= 3)
                 {
                     _ = _detectionEngine.EmitAsync(new DetectionEvent
                     {
-                        RuleName = "Clickjacking: Cursor Teleport + Synthetic Click",
-                        Evidence = $"Cursor teleported {distance:F0}px to ({pos.X},{pos.Y}) followed by injected click. " +
+                        RuleName = "Clickjacking: Cursor Teleport Anomaly",
+                        Evidence = $"Cursor repeatedly teleported {distance:F0}px to ({pos.X},{pos.Y}). " +
                                    $"Pattern repeated {_teleportClickCount} times.",
-                        Reasoning = "SetCursorPos moved the cursor to a target UI element and immediately triggered a " +
-                                    "synthetic click. This is the classic clickjacking technique: move cursor to 'Allow' " +
-                                    "or 'Confirm' button, click it via SendInput, then return cursor — user sees nothing.",
-                        Confidence = 0.92,
+                        Reasoning = "SetCursorPos moved the cursor abnormally across screen coordinates. " +
+                                    "This pattern is commonly associated with click redirection and automated UI evasion.",
+                        Confidence = 0.85,
                         Tier = DetectionTier.Tier1Behavioral,
                         AuthorizedResponse = ResponseAction.LogOnly,
                         ProcessName = "SYSTEM",
@@ -434,6 +156,7 @@ namespace Sentinel.Core
             }
 
             _lastCursorPos = pos;
+            _lastCursorChange = DateTime.UtcNow;
         }
 
         #endregion

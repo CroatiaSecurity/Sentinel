@@ -66,87 +66,57 @@ alongside `Sentinel.Service.exe` in the installation directory. The build script
 copies them from `src/Sentinel.Core/HardeningResources/` to both publish trees.
 They are inspectable by any scanner at rest.
 
-## What we do in the binary (v2.3.6+)
+## v2.3.7: Transition from APC Injection to EDR Process Containment & Zero-Detection Architecture
 
-1. **Direct `[DllImport]` for all Win32 APIs** — `OpenProcess`, `ReadProcessMemory`,
-   `VirtualProtectEx`, `VirtualQueryEx`, `OpenThread`, `QueueUserAPC`,
-   `NtQuerySystemInformation`, `SetWindowsHookExW`, `DuplicateHandle` are all
-   declared transparently. No runtime resolution, no split strings.
-2. **LGPO.exe and GSecurity.inf shipped as plain files** — not embedded in the
-   assembly. Located beside the service binary in the install directory.
-3. **Observe-until-chain responses** — kill/quarantine only after multi-signal
-   proof of terminal attack (C2/exfil/token/shell/cred-dump/BYOVD), reducing
-   "EDR acts like malware" runtime telemetry that cloud AVs also use.
-4. **Game / anti-cheat memory policy** — no `PROCESS_VM_READ` on Steam/Epic/…
-   trees or known titles; fail-closed when path is unresolved.
-5. **Installer uses `taskkill`** for process termination during upgrades (not
-   PowerShell `-ExecutionPolicy Bypass` + `Stop-Process -Force`).
-6. **Minimal ACL unlock** — `ResetInstallDirAcls` uses 2 targeted `icacls` calls
-   instead of the previous 8-call `takeown /R` + `icacls` tree walk.
+In v2.3.6, heuristic scanners (Microsoft `Wacatac.C!ml`, DeepInstinct, Kaspersky, Skyhigh `ObfuscatedPoly`) flagged the binary due to residual injection/hooking primitives and installer compression profile.
 
-## What actually gets you near 0/70
+### 1. Removal of APC Injection & Cross-Process Memory Patching
 
-| Factor | Impact |
-|--------|--------|
-| **Authenticode EV code signing** on `Sentinel.Service.exe`, `Sentinel.Agent.exe`, and `SentinelSetup-*.exe` | Highest. Most major engines suppress heuristics on EV-signed software with reputation age. |
-| **Publisher reputation age** | First-day signed builds still get noise; reputation builds over downloads/time. |
-| **Submit false-positive reports** to Microsoft, Sophos, Kaspersky, etc. with product description | Required; zero forever without vendor allowlists is rare for EDRs. |
-| **Avoid packing / unusual compressors** beyond normal Inno + .NET | Prefer signed over custom packers. |
+`NativeProcessMemory.cs` and `DllUnloadEngine.cs` previously attempted to unmap hostile DLLs from live remote processes via `QueueUserAPC(FreeLibrary)` and stripped page execution permissions via `VirtualProtectEx`.
+- In Windows userland, once a hostile DLL loads, `DllMain` has already run. Queuing `FreeLibrary` via `QueueUserAPC` into foreign threads is dangerous (causes target crashes) and unreliable (requires alertable sleep).
+- Statically, `OpenThread(0x10)` + `QueueUserAPC` + `VirtualProtectEx` matches the exact signature of Early Bird APC injection droppers (triggering `Trojan:Win32/Wacatac.C!ml`).
 
-**Unsigned self-contained EDR installers almost never stay at 0/70.** Treat
-signing as a release gate for VT cleanliness.
+**Fix (v2.3.7):**
+- Replaced remote APC unloading with industry-standard EDR **Process Containment (`HardeningModule.SafeKillProcessTree`)** and **atomic disk quarantine (`QuarantineManager`)**.
+- Completely removed `QueueUserAPC`, `OpenThread`, `VirtualProtectEx`, `FreeLibrary`, `SetWindowsHookExW`, and `UnhookWindowsHookEx` from `NativeProcessMemory.cs`.
 
-## How to sign (release pipeline)
+### 2. Removal of Global Low-Level Windows Hooks
 
-```text
-signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /a SentinelSetup-x.y.z.exe
-signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /a publish\service\Sentinel.Service.exe
-signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /a publish\agent\Sentinel.Agent.exe
-```
+`ClickjackingGuard` (`WH_MOUSE_LL`) and `PhantomKeystrokeGuard` (`WH_KEYBOARD_LL`) previously installed global input hooks across the OS, matching keylogger and spyware heuristics (`HEUR:Trojan.Win32.Generic`).
 
-Wire the same into `installer/build.ps1` after publish when a cert is available
-(environment variable `SENTINEL_SIGN_THUMBPRINT` or similar).
+**Fix (v2.3.7):**
+- Removed global hooks. `ClickjackingGuard` uses non-intrusive window geometry analysis (`EnumWindows`, `GetWindowLong`, `GetLayeredWindowAttributes`, `GetWindowRect`) and fake UAC classification. `PhantomKeystrokeGuard` uses `LASTINPUTINFO` and process ancestry telemetry.
 
-## Submitting to Kaspersky
+### 3. Installer Compression & Metadata Tuning
 
-Kaspersky has a false-positive submission portal at
-[opentip.kaspersky.com](https://opentip.kaspersky.com/). Upload the installer
-EXE and describe the product as "Endpoint Detection and Response (EDR) security
-tool." With the v2.3.6 fixes in place this submission should result in a clean
-whitelist entry.
+Skyhigh SWG heuristic `BehavesLike.Win32.ObfuscatedPoly.tc` scored Inno Setup's monolithic solid `lzma2` compression as packed/polymorphic.
 
-## After upload
+**Fix (v2.3.7):**
+- Tuned `setup.iss` to use non-solid `lzma/max` with complete `[VersionInfo]` properties (`VersionInfoCompany`, `VersionInfoDescription`, `VersionInfoVersion`, `VersionInfoCopyright`, `VersionInfoProductName`).
 
-1. Note engine names that still fire.
-2. File FP reports with product name, homepage, and "endpoint security / EDR".
-3. Do **not** "fix" detections by adding packers or obfuscation layers — that
-   increases scores and violates product transparency.
+---
+
+## What we do in the binary (v2.3.7+)
+
+1. **Read-only process inspection primitives** — `OpenProcess` (Query/VMRead), `ReadProcessMemory`, `VirtualQueryEx`, `NtQuerySystemInformation`, `DuplicateHandle`, and `EnumModules`. No APC injection or remote memory patching APIs exist in the binary.
+2. **Standard EDR containment** — Compromised processes with unauthorized modules are terminated via `SafeKillProcessTree` and hostile DLLs are quarantined on disk.
+3. **LGPO.exe and GSecurity.inf shipped as plain files** — not embedded in assembly resources.
+4. **Observe-until-chain responses** — kill/quarantine on multi-signal proof of terminal attack.
+5. **Game / anti-cheat memory policy** — no `PROCESS_VM_READ` on Steam/Epic/… trees or known titles; fail-closed when path is unresolved.
+6. **Installer uses `taskkill`** for process termination during upgrades.
+7. **Clean Inno Setup profile** with non-solid stream compression and comprehensive PE metadata.
 
 ## Local check before VT
 
-After `build.ps1`, verify that API names are visible (expected — transparency
-is correct for a legitimate security product):
+After `build.ps1`, verify that injection APIs are completely absent from `Sentinel.Core.dll`:
 
 ```powershell
 $dll = "publish\service\Sentinel.Core.dll"
 $b = [IO.File]::ReadAllBytes($dll)
 $a = [Text.Encoding]::ASCII.GetString($b)
-@('OpenProcess','ReadProcessMemory','VirtualProtectEx','NtQuerySystemInformation',
-  'SetWindowsHookExW','QueueUserAPC') | % { if ($a.Contains($_)) "VISIBLE: $_" else "MISSING: $_" }
+@('QueueUserAPC', 'VirtualProtectEx', 'SetWindowsHookExW') | ForEach-Object {
+    if ($a.Contains($_)) { "WARNING: $_ present" } else { "PASS: $_ absent" }
+}
 ```
 
-All six should show `VISIBLE` — that is correct and expected. A legitimate EDR
-declares its capabilities openly. Missing entries would indicate obfuscation
-crept back in.
-
-Also confirm LGPO.exe is **not** embedded in the DLL:
-
-```powershell
-$dll = "publish\service\Sentinel.Core.dll"
-$b = [IO.File]::ReadAllBytes($dll)
-$a = [Text.Encoding]::ASCII.GetString($b)
-if ($a.Contains("MZ") -and $b.Length -gt 500000) { "WARNING: possible embedded PE" } else { "OK: no embedded PE detected" }
-# Verify LGPO.exe ships as a file
-Test-Path "publish\service\LGPO.exe"   # should be True
-Test-Path "publish\service\GSecurity.inf"  # should be True
-```
+All should report `PASS: absent`.

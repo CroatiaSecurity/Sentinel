@@ -252,7 +252,7 @@ namespace Sentinel.Core
 
                     var ioc = new ThreatFoxIoc
                     {
-                        Indicator     = iocValue,
+                        Indicator     = iocValue!,
                         IocType       = iocType ?? "unknown",
                         MalwareFamily = malware,
                         Confidence    = Math.Min(100, Math.Max(0, confidence)),

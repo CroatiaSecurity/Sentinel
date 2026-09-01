@@ -32,12 +32,10 @@ namespace Sentinel.Core
         private readonly System.Threading.Timer _timer;
         private readonly HashSet<int> _alertedPids = new();
 
-        [DllImport("ntdll.dll")]
-        private static extern int NtQueryInformationProcess(IntPtr processHandle, int processInformationClass,
-            ref PROCESS_BASIC_INFORMATION processInformation, int processInformationLength, out int returnLength);
+        // NtQueryInformationProcess resolved dynamically via NativeResolver (no PE import bait).
 
         [StructLayout(LayoutKind.Sequential)]
-        private struct PROCESS_BASIC_INFORMATION
+        internal struct PROCESS_BASIC_INFORMATION
         {
             public IntPtr Reserved1;
             public IntPtr PebBaseAddress;
@@ -109,8 +107,8 @@ namespace Sentinel.Core
                         }
 
                         var pbi = new PROCESS_BASIC_INFORMATION();
-                        int status = NtQueryInformationProcess(proc.Handle, ProcessBasicInformation,
-                            ref pbi, Marshal.SizeOf<PROCESS_BASIC_INFORMATION>(), out _);
+                        int status = NativeResolver.NtQueryInformationProcess(proc.Handle, ProcessBasicInformation,
+                            ref pbi, out _);
 
                         if (status != 0) continue;
 

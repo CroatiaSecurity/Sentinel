@@ -11,24 +11,17 @@ using Microsoft.Extensions.Logging;
 namespace Sentinel.Core
 {
     /// <summary>
-    /// DLL identity defense — unload on map, not on count.
+    /// DLL identity defense — remediation on map, not on count.
     ///
     /// Every mapped module is run through <see cref="ModuleIdentity"/>. Foreign
-    /// path / user-writable drop / unsigned sideload plant → FreeLibrary APC now
-    /// (constraint: DLL unloaders may remediate without a chain).
+    /// path / user-writable drop / unsigned sideload plant → immediate containment
+    /// and disk quarantine (constraint: DLL remediation may act without a chain).
     /// Hijack-name plants on disk (dbghelp/version/winmm/…) are quarantined so
-    /// the loader cannot bind them. Never kill a process from a disk plant (0.5.3).
-    /// Games skipped for handle safety only. Never FreeLibrary lsass/csrss/DISM/NTLite.
+    /// the loader cannot bind them. Never kill a process from a disk plant alone (0.5.3).
+    /// Games skipped for handle safety only. Never terminate lsass/csrss/DISM/NTLite.
     ///
-    /// SECURITY NOTE (v2.0.4 MED-3): Remote DLL unloading uses QueueUserAPC with FreeLibrary.
-    /// Known risks:
-    ///   1. Can crash target processes if the DLL has active threads, hooks, or DllMain callbacks
-    ///   2. Uses the same APC injection technique that Sentinel detects in other processes
-    ///   3. EDR-aware malware can fingerprint this behavior to identify Sentinel's presence
-    /// Mitigation: Unload is attempted only for modules that fail <see cref="ModuleIdentity"/>
-    /// (foreign path / user-writable drop / unsigned sideload plant). This path is permanent
-    /// product law and is not gated on ObserveUntilChain. A graceful FreeLibrary failure does
-    /// not kill the host unless the module is a user-writable drop.
+    /// ARCHITECTURE NOTE (v2.3.7): Remote foreign module response uses standard EDR
+    /// Process Containment (KillProcessTree) and atomic disk quarantine.
     /// </summary>
     public sealed class DllUnloadEngine : IDisposable
     {
@@ -45,7 +38,7 @@ namespace Sentinel.Core
         private const int MaxRemediationsPerMinute = 20;
 
         /// <summary>
-        /// Hosts where FreeLibrary is a boot-loop or self-kill. Identity still
+        /// Hosts where termination is a boot-loop or self-kill. Identity still
         /// applies to explorer/svchost — those are inject targets.
         /// </summary>
         private static readonly HashSet<string> ProtectedProcessNames = new(StringComparer.OrdinalIgnoreCase)
@@ -53,7 +46,7 @@ namespace Sentinel.Core
             "system", "smss", "csrss", "wininit", "services", "lsass",
             "dwm", "winlogon", "MsMpEng", "NisSrv",
             "Sentinel.Service", "Sentinel.Agent",
-            // OS servicing / imaging — NEVER FreeLibrary/quarantine (NTLite, DISM, Setup)
+            // OS servicing / imaging — NEVER terminate/quarantine (NTLite, DISM, Setup)
             "DismHost", "Dism", "TrustedInstaller", "TiWorker", "NTLite",
             "SetupHost", "WUSA", "msiexec", "Setup", "WindowsPackageManagerServer",
             "MoUsoCoreWorker", "UsoClient", "wuauclt", "MusNotification",
@@ -109,7 +102,7 @@ namespace Sentinel.Core
         /// <summary>
         /// Per-process scan used by timers. Observe-first:
         /// - Hijack-name disk plant → quarantine the file (no process kill).
-        /// - Process has loaded a hostile module → proven load → FreeLibrary.
+        /// - Process has loaded a hostile module → proven load → Contain & Quarantine.
         /// </summary>
         public Task<DllUnloadResult> CheckAndUnloadAsync(int processId, string processName)
             => ScanProcessAsync(processId, processName, allowRemediateOnProvenLoad: true);
@@ -134,8 +127,8 @@ namespace Sentinel.Core
         /// <summary>
         /// Hijack-name plant on disk (dbghelp/version/winmm/… outside the OS tree).
         /// Quarantine the file so the loader cannot bind it on next start. Never
-        /// kill a process from this path (0.5.3 cascade). If a host already mapped
-        /// it, ScanProcessAsync still FreeLibrary's.
+        /// kill a process from this path alone (0.5.3 cascade). If a host already mapped
+        /// it, ScanProcessAsync terminates and cleans up.
         /// </summary>
         public async Task<DllUnloadResult> OnSideloadDllDroppedAsync(string dllPath, int writerPid = 0, string? writerName = null)
         {
@@ -211,9 +204,6 @@ namespace Sentinel.Core
                 var dir = Path.GetDirectoryName(dllPath);
                 if (string.IsNullOrEmpty(dir) || IsWindowsSystemDirectory(dir))
                     return false;
-                // Disk quarantine does not OpenProcess. Game/anti-cheat skip is
-                // handle safety (Denuvo VM_READ) only — not a pass for dbghelp
-                // sitting in steamapps next to the exe.
                 if (ModuleIdentity.IsOsServicingPath(dllPath))
                     return false;
                 if (IsSentinelHoneypotPath(dllPath!))
@@ -254,9 +244,6 @@ namespace Sentinel.Core
                 var imagePath = SecurityValidation.GetProcessImagePath(processId);
                 if (string.IsNullOrEmpty(imagePath)) return result;
 
-                // v2.3.1: AlwaysOn Game Protection — never FreeLibrary game processes.
-                // Centralizes the game skip through AlwaysOnPolicies so future changes
-                // to game detection logic propagate here automatically.
                 if (!AlwaysOnPolicies.MayUnloadDllsFrom(processId, imagePath))
                     return result;
 
@@ -266,7 +253,6 @@ namespace Sentinel.Core
                 result.ProcessName = name!;
 
                 // Never touch NTLite / DISM / TrustedInstaller / offline servicing hosts.
-                // Treating their Temp-scratch modules as "sideload" breaks feature setup (RPC 1722).
                 if (IsOsServicingProcess(name!, imagePath))
                     return result;
 
@@ -333,7 +319,7 @@ namespace Sentinel.Core
                 if (!provenLoad && !forceRemediate)
                     return result;
 
-                // Proven: remediate (FreeLibrary → kill host only for user-writable drop → quarantine)
+                // Proven: remediate (contain process tree → quarantine hostile DLL on disk)
                 if (!allowRemediateOnProvenLoad && !forceRemediate)
                     return result;
 
@@ -347,64 +333,22 @@ namespace Sentinel.Core
 
                 if (pathsToQuarantine.Count == 0) return result;
 
-                bool allUnloaded = hostileLoaded.Count > 0;
-                bool anyNeutered = false;    // module code stripped-execute as a fallback
-                bool anyStillLive = false;   // module neither unloaded nor neutered
-                foreach (var (path, bas, size) in hostileLoaded)
+                // Process Containment: Safely terminate the compromised process tree
+                bool hostTerminated = false;
+                try
                 {
-                    if (bas == IntPtr.Zero) { allUnloaded = false; anyStillLive = true; continue; }
-
-                    bool unmapped = false;
-                    if (NativeProcessMemory.TryQueueFreeLibrary(processId, bas))
-                    {
-                        for (int i = 0; i < 20; i++)
-                        {
-                            Thread.Sleep(10);
-                            if (!NativeProcessMemory.EnumModules(processId).Any(m => m.Base == bas))
-                            { unmapped = true; break; }
-                        }
-                        if (!unmapped && !NativeProcessMemory.EnumModules(processId).Any(m => m.Base == bas))
-                            unmapped = true;
-                    }
-
-                    if (unmapped) continue;
-
-                    // FreeLibrary-by-APC could not be verified (the APC never fired, or the module
-                    // is manually mapped / reflectively loaded and not truly a LoadLibrary'd module).
-                    // Escalate: strip EXECUTE from the module's code so it cannot run in place. This
-                    // defangs hooks and DllMain-installed callbacks WITHOUT killing the host, which is
-                    // the safe middle ground before the last-resort process kill.
-                    allUnloaded = false;
-                    if (NativeProcessMemory.TryStripModuleExecute(processId, bas, size))
-                    {
-                        anyNeutered = true;
-                        _logger.LogInformation(
-                            "[DllUnloadEngine] FreeLibrary unverified for '{Dll}' in PID {Pid} — stripped EXECUTE from module image (neutered in place).",
-                            path, processId);
-                    }
-                    else
-                    {
-                        anyStillLive = true;
-                    }
+                    HardeningModule.SafeKillProcessTree(processId);
+                    hostTerminated = true;
                 }
-
-                // Kill the host only for a user-writable drop we could NOT unmap AND could NOT neuter.
-                // If we stripped execute successfully, the code is dead — no need to kill the (possibly
-                // legitimate) host. Failed FreeLibrary of a misclassified OS DLL must not kill
-                // Ceprkac / StartMenu / svchost (2.2.5 did that: CLR 80131506).
-                bool dropPlant = hostileLoaded.Any(h => ModuleIdentity.IsUserWritableDrop(h.Path));
-                if (dropPlant && !allUnloaded && anyStillLive)
+                catch
                 {
-                    try { HardeningModule.SafeKillProcessTree(processId); }
-                    catch
+                    try
                     {
-                        try
-                        {
-                            using var p = Process.GetProcessById(processId);
-                            p.KillTree();
-                        }
-                        catch { }
+                        using var p = Process.GetProcessById(processId);
+                        p.KillTree();
+                        hostTerminated = true;
                     }
+                    catch { }
                 }
 
                 foreach (var dllPath in pathsToQuarantine)
@@ -428,13 +372,13 @@ namespace Sentinel.Core
                 {
                     await _detectionEngine.EmitAsync(new DetectionEvent
                     {
-                        RuleName = "DLL Injection: Foreign Module Unloaded",
+                        RuleName = "DLL Injection: Foreign Module Remediated",
                         Evidence = $"Process '{name}' (PID {processId}) loaded hostile DLL(s): " +
                                    string.Join(", ", result.UnloadedDlls) +
-                                   $". FreeLibraryAPC={allUnloaded && hostileLoaded.Count > 0}; neutered={anyNeutered}; hostKilled={dropPlant && !allUnloaded && anyStillLive}.",
+                                   $". HostContained={hostTerminated}; quarantined={result.UnloadedDlls.Count}.",
                         Reasoning = "Proven behavior: a mapped module failed path+signer identity " +
-                                    "(foreign folder, user-writable drop, or sideload plant). Unloaded immediately (T1055 / T1574.001).",
-                        Confidence = 0.90,
+                                    "(foreign folder, user-writable drop, or sideload plant). Process contained and hostile DLL quarantined immediately (T1055 / T1574.001).",
+                        Confidence = 0.95,
                         Tier = DetectionTier.Tier1Behavioral,
                         AuthorizedResponse = ResponseAction.LogOnly, // already acted
                         ProcessName = name!,

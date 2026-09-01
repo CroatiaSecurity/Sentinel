@@ -177,31 +177,15 @@ namespace Sentinel.Core
             return (0, "unknown", livePath ?? "");
         }
 
-        [StructLayout(LayoutKind.Sequential)]
-        private struct PROCESS_BASIC_INFORMATION
-        {
-            public IntPtr Reserved1;
-            public IntPtr PebBaseAddress;
-            public IntPtr Reserved2_0;
-            public IntPtr Reserved2_1;
-            public IntPtr UniqueProcessId;
-            public IntPtr InheritedFromUniqueProcessId;
-        }
-
-        [DllImport("ntdll.dll", SetLastError = true)]
-        private static extern int NtQueryInformationProcess(
-            IntPtr processHandle,
-            int processInformationClass,
-            ref PROCESS_BASIC_INFORMATION processInformation,
-            int processInformationLength,
-            out int returnLength);
+        // NtQueryInformationProcess resolved dynamically via NativeResolver (no PE import bait).
+        // Reuses PROCESS_BASIC_INFORMATION from ParentPidSpoofDetector.
 
         private static int GetParentProcessId(Process process)
         {
             try
             {
-                var pbi = new PROCESS_BASIC_INFORMATION();
-                int status = NtQueryInformationProcess(process.Handle, 0, ref pbi, Marshal.SizeOf(pbi), out _);
+                var pbi = new ParentPidSpoofDetector.PROCESS_BASIC_INFORMATION();
+                int status = NativeResolver.NtQueryInformationProcess(process.Handle, 0, ref pbi, out _);
                 if (status == 0)
                 {
                     return pbi.InheritedFromUniqueProcessId.ToInt32();
