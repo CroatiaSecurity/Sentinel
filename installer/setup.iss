@@ -258,18 +258,24 @@ end;
 procedure StopServiceByName(const ServiceName: String);
 var
   ResultCode: Integer;
-  PsPath: String;
-  Cmd: String;
+  i: Integer;
 begin
-  PsPath := ExpandConstant('{sysnative}\WindowsPowerShell\v1.0\powershell.exe');
-
   // CRITICAL: Disable failure recovery first so sc stop does not auto-restart.
   Exec(ExpandConstant('{sysnative}\sc.exe'), 'failure "' + ServiceName + '" reset= 86400 actions= ""', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Exec(ExpandConstant('{sysnative}\sc.exe'), 'stop "' + ServiceName + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
-  // Poll until STOPPED using sc queryex (no PowerShell needed)
-  Cmd := '-ExecutionPolicy Bypass -Command "for ($i = 0; $i -lt 20; $i++) { $out = & sc.exe queryex ''' + ServiceName + ''' 2>&1; if ($out -match ''STOPPED'') { break }; Start-Sleep -Milliseconds 500 }"';
-  Exec(PsPath, Cmd, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  // Poll until STOPPED using sc.exe queryex — no PowerShell required.
+  // Inno's Exec returns the process exit code; sc queryex returns 0 when
+  // the service state is anything (we can't read stdout from Pascal directly).
+  // Simple time-based wait: 10 x 500ms = 5 seconds is enough for a clean stop.
+  for i := 1 to 10 do
+  begin
+    Sleep(500);
+    // Re-issue stop each iteration in case the service is in STOP_PENDING
+    Exec(ExpandConstant('{sysnative}\sc.exe'), 'stop "' + ServiceName + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    if ResultCode = 1062 then  // ERROR_SERVICE_NOT_ACTIVE — already stopped
+      Break;
+  end;
 end;
 
 // Minimal install-dir unlock for upgrades: grants Administrators full control so
