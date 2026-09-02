@@ -78,13 +78,18 @@ namespace Sentinel.Core
         };
 
         // Script-class droppers that execute via WSH / mshta / batch. These don't need
-        // to be PE to detonate a drive-by / XSS-forced download, and a browser download
+        // to be PE to detonate a drive-by / XSS-forced-download, and a browser download
         // normally still stamps them with a Zone.Identifier. Missing MOTW on one of these
         // in a delivery folder is the classic MOTW-strip / archive-smuggle shape.
         public static readonly string[] ScriptDropperExtensions =
         {
             ".hta", ".js", ".jse", ".vbs", ".vbe", ".wsf", ".wsh",
             ".ps1", ".bat", ".cmd", ".lnk", ".chm", ".scf", ".url",
+        };
+
+        public static readonly string[] AppInstallerPackageExtensions =
+        {
+            ".appinstaller", ".msix", ".msixbundle", ".appx", ".appxbundle",
         };
 
         public static readonly string[] ServerOnlyProducts =
@@ -210,6 +215,19 @@ namespace Sentinel.Core
             var ext = Path.GetExtension(path);
             if (string.IsNullOrEmpty(ext)) return false;
             foreach (var e in DiskImageExtensions)
+            {
+                if (ext.Equals(e, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+            return false;
+        }
+
+        public static bool IsAppInstallerPackagePath(string? path)
+        {
+            if (string.IsNullOrWhiteSpace(path)) return false;
+            var ext = Path.GetExtension(path);
+            if (string.IsNullOrEmpty(ext)) return false;
+            foreach (var e in AppInstallerPackageExtensions)
             {
                 if (ext.Equals(e, StringComparison.OrdinalIgnoreCase))
                     return true;
