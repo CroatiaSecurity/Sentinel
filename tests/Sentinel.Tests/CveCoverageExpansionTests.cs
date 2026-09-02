@@ -67,6 +67,8 @@ namespace Sentinel.Tests
             Assert.True(CveCoverageHeuristics.IsDiskImagePath(@"C:\Users\x\Downloads\setup.iso"));
             Assert.True(CveCoverageHeuristics.IsDiskImagePath(@"game.vhdx"));
             Assert.False(CveCoverageHeuristics.IsDiskImagePath("readme.txt"));
+            Assert.True(CveCoverageHeuristics.IsScriptDropperExtension("drop.hta"));
+            Assert.True(CveCoverageHeuristics.IsAppInstallerPackagePath("sideload.appx"));
             Assert.True(CveCoverageHeuristics.IsIsolationDriverName("unionfs.sys"));
             Assert.True(CveCoverageHeuristics.IsIsolationDriverName(@"C:\Temp\wcifs.sys"));
             Assert.False(CveCoverageHeuristics.IsIsolationDriverName("afd.sys"));
