@@ -46,6 +46,29 @@ namespace Sentinel.Core
             "RQeZkB42znUfsDIIFWIRiYEcKl7nHwNFwWCrnMMJbVc=",
         };
 
+        // v2.3.8: live-chain SPKI pins (Base64 SHA-256 SPKI) for direct CIRCL / MalwareBazaar HTTPS.
+        // Captured 2026-09-02 from the presented TLS chain — not invented hashes.
+        // Leaf pins rotate; intermediates/roots keep coverage across cert renewal.
+        public static readonly string[] CirclHashlookupPins = new[]
+        {
+            // hashlookup.circl.lu leaf (CN=*.circl.lu)
+            "mBzq4UvIEDgA22BvW/mVBYZThnS7Vbm7YdPuca2iCx0=",
+            // DigiCert Global G2 TLS RSA SHA256 2020 CA1 (CIRCL chain intermediate)
+            "Wec45nQiFwKvHtuHxSAMGkt19k+uPSw9JlEkxhvYPHk=",
+            // DigiCert Global Root G2 (same pin as VT/report helper)
+            "i7WTqTvh0OioIruIfFR4kMPnBqrS2rdiVPl/s2uC/CY=",
+        };
+
+        public static readonly string[] MalwareBazaarPins = new[]
+        {
+            // mb-api.abuse.ch leaf
+            "lcJpD91vTKgimQopP7T3Pojug+KQBRitUbmW90pKTeE=",
+            // Google Trust Services WR3 intermediate
+            "OdSlmQD9NWJh4EbcOHBxkhygPwNSwA9Q91eounfbcoE=",
+            // GTS Root R1
+            "hxqRlPTu1bMS/0DITB1SSu0vd4u/8l8TjPgfaAp63Gc=",
+        };
+
         /// <summary>
         /// When true, pin validation accepts any chain that passes normal TLS
         /// (unit tests / air-gapped labs only). Never set in production builds.
@@ -56,9 +79,19 @@ namespace Sentinel.Core
         /// Creates an HttpClient with certificate pinning for the proxy endpoint.
         /// </summary>
         public static HttpClient CreatePinnedHttpClient(int timeoutSeconds = 10)
+            => CreatePinnedHttpClient(timeoutSeconds, PinnedSpkiHashes);
+
+        /// <summary>
+        /// Creates an HttpClient that requires a matching SPKI (or rotation-safe) pin
+        /// from <paramref name="pins"/>. Used for VirusTotal/report (Cloudflare pins)
+        /// and for CIRCL / MalwareBazaar (their own chain pins).
+        /// </summary>
+        public static HttpClient CreatePinnedHttpClient(int timeoutSeconds, IReadOnlyList<string> pins)
         {
+            var pinSet = pins ?? Array.Empty<string>();
             var handler = new HttpClientHandler();
-            handler.ServerCertificateCustomValidationCallback = ValidateCertificatePin;
+            handler.ServerCertificateCustomValidationCallback = (req, cert, chain, errors) =>
+                ValidateCertificatePin(req, cert, chain, errors, pinSet);
             return new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(timeoutSeconds) };
         }
 
@@ -71,6 +104,14 @@ namespace Sentinel.Core
             X509Certificate2? certificate,
             X509Chain? chain,
             SslPolicyErrors sslErrors)
+            => ValidateCertificatePin(request, certificate, chain, sslErrors, PinnedSpkiHashes);
+
+        internal static bool ValidateCertificatePin(
+            HttpRequestMessage request,
+            X509Certificate2? certificate,
+            X509Chain? chain,
+            SslPolicyErrors sslErrors,
+            IReadOnlyList<string> pins)
         {
             if (sslErrors != SslPolicyErrors.None)
                 return false;
@@ -81,14 +122,14 @@ namespace Sentinel.Core
             if (PinValidationRelaxedForTests)
                 return true;
 
-            if (IsPinMatch(certificate))
+            if (IsPinMatch(certificate, pins))
                 return true;
 
             if (chain != null)
             {
                 foreach (var element in chain.ChainElements)
                 {
-                    if (IsPinMatch(element.Certificate))
+                    if (IsPinMatch(element.Certificate, pins))
                         return true;
                 }
             }
@@ -101,13 +142,17 @@ namespace Sentinel.Core
         /// Exposed for unit tests.
         /// </summary>
         public static bool IsPinMatch(X509Certificate2 cert)
+            => IsPinMatch(cert, PinnedSpkiHashes);
+
+        public static bool IsPinMatch(X509Certificate2 cert, IReadOnlyList<string> pins)
         {
             if (cert == null) return false;
+            if (pins == null || pins.Count == 0) return false;
             try
             {
                 foreach (var candidate in EnumeratePinCandidates(cert))
                 {
-                    foreach (var pin in PinnedSpkiHashes)
+                    foreach (var pin in pins)
                     {
                         if (string.Equals(candidate, pin, StringComparison.Ordinal))
                             return true;
