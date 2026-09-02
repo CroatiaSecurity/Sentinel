@@ -372,12 +372,19 @@ namespace Sentinel.Core
 
                         if (CveCoverageHeuristics.IsDiskImagePath(file))
                         {
+                            // Browser-downloaded game ISOs carry MOTW — skip (work-first).
+                            // Missing Zone.Identifier is the ISO-smuggle / USB-copy MOTW-bypass shape
+                            // and is the only disk-image signal that feeds MOTW Bypass Execution Chain.
+                            if (HasZoneIdentifier(file))
+                                continue;
+
                             await EmitFileAsync(
-                                "CVE Class: Disk Image in Delivery Folder",
-                                $"Recently written disk image '{file}' ({info.Length} bytes)",
-                                "ISO/VHD in Downloads/Desktop is a MOTW-bypass initial-access path " +
-                                $"(CVE-2026-59125 VHD miniport class). Game ISOs are common — LogOnly, never a kill seed.",
-                                0.62, file).ConfigureAwait(false);
+                                "CVE Class: Disk Image Missing Mark-of-the-Web",
+                                $"Recently written disk image '{file}' ({info.Length} bytes) has no Zone.Identifier ADS",
+                                "ISO/VHD in Downloads/Desktop without MOTW is a MOTW-bypass initial-access path " +
+                                "(USB copy / inner-archive smuggle / CVE-2026-59125 VHD miniport class). " +
+                                "Browser-stamped game ISOs are skipped. LogOnly, never a kill seed.",
+                                0.68, file).ConfigureAwait(false);
                             continue;
                         }
 
@@ -405,7 +412,9 @@ namespace Sentinel.Core
 
                         if (ext.Equals(".appinstaller", StringComparison.OrdinalIgnoreCase) ||
                             ext.Equals(".msix", StringComparison.OrdinalIgnoreCase) ||
-                            ext.Equals(".msixbundle", StringComparison.OrdinalIgnoreCase))
+                            ext.Equals(".msixbundle", StringComparison.OrdinalIgnoreCase) ||
+                            ext.Equals(".appx", StringComparison.OrdinalIgnoreCase) ||
+                            ext.Equals(".appxbundle", StringComparison.OrdinalIgnoreCase))
                         {
                             await EmitFileAsync(
                                 "CVE Class: AppInstaller Package in Delivery Folder",
@@ -706,7 +715,7 @@ namespace Sentinel.Core
         private readonly ILogger<WpadProxyMonitor> _logger;
         private readonly HashSet<string> _alerted = new(StringComparer.OrdinalIgnoreCase);
         private static readonly TimeSpan ScanInterval = TimeSpan.FromSeconds(45);
-
+ mar
         // AutoConfigURL values seen at baseline. A change (new/different PAC URL) is
         // higher signal than a static corporate PAC that was there before Sentinel started.
         private string? _baselineAutoConfigUrl;
@@ -743,15 +752,11 @@ namespace Sentinel.Core
         {
             string? autoConfigUrl = ReadAutoConfigUrl();
 
-            // Capture the first observed value as baseline so a pre-existing corporate
-            // PAC does not fire on every startup — only a subsequent change does.
             if (!_baselineCaptured)
             {
                 _baselineAutoConfigUrl = autoConfigUrl;
                 _baselineCaptured = true;
 
-                // If a PAC is already present at startup AND it looks remote/IP-literal,
-                // still surface it once (weak) — it may predate Sentinel but be malicious.
                 if (IsSuspiciousPacUrl(autoConfigUrl))
                 {
                     await EmitAsync(
@@ -766,8 +771,6 @@ namespace Sentinel.Core
                 return;
             }
 
-            // A change from baseline is the strong signal: something rewrote the PAC URL
-            // after Sentinel was running (rogue DHCP renew, malware, MITM).
             if (!string.Equals(autoConfigUrl, _baselineAutoConfigUrl, StringComparison.OrdinalIgnoreCase))
             {
                 var conf = IsSuspiciousPacUrl(autoConfigUrl) ? 0.82 : 0.68;
@@ -782,8 +785,6 @@ namespace Sentinel.Core
                 _baselineAutoConfigUrl = autoConfigUrl;
             }
 
-            // WPAD auto-detect flag flipping on (DefaultConnectionSettings bit 0x08) is a
-            // secondary signal; combined with an AutoConfigURL it is the full WPAD chain.
             if (IsAutoDetectEnabled() && IsSuspiciousPacUrl(autoConfigUrl))
             {
                 await EmitAsync(
@@ -831,10 +832,6 @@ namespace Sentinel.Core
             catch { return null; }
         }
 
-        /// <summary>
-        /// A PAC URL that is remote (http/https) or points at a bare IP is the interesting
-        /// case. file:// PACs and empty values are treated as low-signal.
-        /// </summary>
         private static bool IsSuspiciousPacUrl(string? url)
         {
             if (string.IsNullOrWhiteSpace(url)) return false;
@@ -845,7 +842,6 @@ namespace Sentinel.Core
                           || u.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
             if (!remote) return false;
 
-            // http:// (not https) PAC is more suspicious; IP-literal host is more suspicious still.
             bool plainHttp = u.StartsWith("http://", StringComparison.OrdinalIgnoreCase);
             bool ipLiteral = System.Text.RegularExpressions.Regex.IsMatch(
                 u, @"^https?://\d{1,3}(\.\d{1,3}){3}",
@@ -854,10 +850,6 @@ namespace Sentinel.Core
             return plainHttp || ipLiteral || remote;
         }
 
-        /// <summary>
-        /// Reads the WPAD auto-detect flag from DefaultConnectionSettings (bit 0x08 of
-        /// byte 8). This is the "Automatically detect settings" checkbox.
-        /// </summary>
         private static bool IsAutoDetectEnabled()
         {
             try
@@ -866,7 +858,6 @@ namespace Sentinel.Core
                     InternetSettingsPath + @"\Connections");
                 if (k?.GetValue("DefaultConnectionSettings") is byte[] blob && blob.Length > 8)
                 {
-                    // Byte index 8 holds the option flags; 0x08 = auto-detect (WPAD).
                     return (blob[8] & 0x08) != 0;
                 }
             }
@@ -874,7 +865,6 @@ namespace Sentinel.Core
             return false;
         }
 
-        /// <summary>Trim a URL for evidence so a long/credentialed PAC URL is not dumped whole.</summary>
         private static string Redact(string? url)
         {
             if (string.IsNullOrWhiteSpace(url)) return "(none)";
