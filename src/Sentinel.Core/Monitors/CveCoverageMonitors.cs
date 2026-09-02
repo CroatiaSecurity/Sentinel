@@ -188,8 +188,6 @@ namespace Sentinel.Core
                         if (CveCoverageHeuristics.IsMidiServiceProcess(name) &&
                             CveCoverageHeuristics.IsLolBinName(parentStem) == false)
                         {
-                            // MIDI service should not spawn shells; check children via ancestry reverse is expensive.
-                            // Flag MIDI srv image outside System32.
                             if (!string.IsNullOrEmpty(path) &&
                                 path!.IndexOf(@"\Windows\System32\", StringComparison.OrdinalIgnoreCase) < 0 &&
                                 path.IndexOf(@"\Windows\SysWOW64\", StringComparison.OrdinalIgnoreCase) < 0)
@@ -228,7 +226,7 @@ namespace Sentinel.Core
                                 SignalType.SecurityEvasion).ConfigureAwait(false);
                         }
                     }
-                    catch { /* process exited */ }
+                    catch { }
                     finally
                     {
                         try { proc.Dispose(); } catch { }
@@ -372,9 +370,6 @@ namespace Sentinel.Core
 
                         if (CveCoverageHeuristics.IsDiskImagePath(file))
                         {
-                            // Browser-downloaded game ISOs carry MOTW — skip (work-first).
-                            // Missing Zone.Identifier is the ISO-smuggle / USB-copy MOTW-bypass shape
-                            // and is the only disk-image signal that feeds MOTW Bypass Execution Chain.
                             if (HasZoneIdentifier(file))
                                 continue;
 
@@ -499,9 +494,6 @@ namespace Sentinel.Core
 
         private const uint InvalidFileAttributes = 0xFFFFFFFF;
 
-        /// <summary>
-        /// net48 FileStream/File.Exists reject ADS paths (colon). kernel32 does not.
-        /// </summary>
         internal static bool HasZoneIdentifier(string path)
         {
             if (string.IsNullOrWhiteSpace(path)) return false;
@@ -542,10 +534,6 @@ namespace Sentinel.Core
         }
     }
 
-    /// <summary>
-    /// Container Isolation FS Filter (unionfs.sys / wcifs) staging — CVE-2026-72971.
-    /// Also AlwaysInstallElevated registry (MSI EoP prerequisite).
-    /// </summary>
     public sealed class ContainerIsolationTamperMonitor : BackgroundService
     {
         private readonly DetectionEngine _detectionEngine;
@@ -699,25 +687,13 @@ namespace Sentinel.Core
         }
     }
 
-    /// <summary>
-    /// WPAD / auto-proxy (PAC) rogue-configuration monitor. This is the host-side
-    /// landing spot for the DHCP Option 252 vector (CVE-2026-62755 DHCP client class):
-    /// a rogue DHCP server or attacker hands the client a PAC (Proxy Auto-Config) URL,
-    /// which is JavaScript the WinHTTP/WinINET auto-proxy resolver executes to decide
-    /// routing. Set AutoConfigURL points every browser through an attacker proxy (MITM)
-    /// and can leak visited hosts even for HTTPS. We do not disable the user's proxy —
-    /// legitimate corporate PAC exists — this is observe fuel. A remote/IP-literal PAC
-    /// URL or WPAD auto-detect turning on unexpectedly is the interesting shape.
-    /// </summary>
     public sealed class WpadProxyMonitor : BackgroundService
     {
         private readonly DetectionEngine _detectionEngine;
         private readonly ILogger<WpadProxyMonitor> _logger;
         private readonly HashSet<string> _alerted = new(StringComparer.OrdinalIgnoreCase);
         private static readonly TimeSpan ScanInterval = TimeSpan.FromSeconds(45);
- mar
-        // AutoConfigURL values seen at baseline. A change (new/different PAC URL) is
-        // higher signal than a static corporate PAC that was there before Sentinel started.
+
         private string? _baselineAutoConfigUrl;
         private bool _baselineCaptured;
 
