@@ -7,6 +7,7 @@ using System.Runtime.InteropServices;
 using Xunit;
 using Sentinel.Core;
 
+
 namespace Sentinel.Tests
 {
     public class NativeResolverCompletenessTests
@@ -50,13 +51,35 @@ namespace Sentinel.Tests
         }
 
         [Fact]
-        public void OpenProcess_ResolvesAtRuntime_ForCurrentProcess()
+        public void OpenProcess_WorksForCurrentProcess()
         {
+            // v2.3.8 AV FP policy: NativeResolver uses plain [DllImport], not GetProcAddress.
             int pid = Process.GetCurrentProcess().Id;
             IntPtr h = NativeResolver.OpenProcess(
                 NativeProcessMemory.PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
             Assert.NotEqual(IntPtr.Zero, h);
             Assert.True(NativeProcessMemory.CloseHandle(h));
+        }
+
+        [Fact]
+        public void NativeResolver_DoesNotUseGetProcAddressBootstrap()
+        {
+            // v2.3.8 AV FP: inspection APIs are plain [DllImport], not GetProcAddress-resolved.
+            var methods = typeof(NativeResolver).GetMethods(
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.DeclaredOnly);
+            Assert.DoesNotContain(methods, m =>
+            {
+                var dll = m.GetCustomAttribute<DllImportAttribute>();
+                if (dll == null) return false;
+                var entry = string.IsNullOrEmpty(dll.EntryPoint) ? m.Name : dll.EntryPoint;
+                return entry.Equals("GetProcAddress", StringComparison.Ordinal)
+                    || entry.Equals("GetModuleHandleW", StringComparison.Ordinal);
+            });
+            Assert.Contains(methods, m =>
+                m.GetCustomAttribute<DllImportAttribute>() != null
+                && (string.IsNullOrEmpty(m.GetCustomAttribute<DllImportAttribute>()!.EntryPoint)
+                    ? m.Name
+                    : m.GetCustomAttribute<DllImportAttribute>()!.EntryPoint) == "OpenProcess");
         }
 
         [Fact]

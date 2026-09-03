@@ -6,10 +6,11 @@ AppPublisherURL=https://gorstak.eu
 AppCopyright=Copyright (C) 2026 Gorstak
 VersionInfoVersion=2.3.8.0
 VersionInfoCompany=Gorstak
-VersionInfoDescription=Sentinel Endpoint Detection & Response Setup
+VersionInfoDescription=Sentinel Endpoint Detection and Response Setup
 VersionInfoCopyright=Copyright (C) 2026 Gorstak
 VersionInfoProductName=Sentinel EDR
 VersionInfoProductVersion=2.3.8.0
+VersionInfoOriginalFileName=SentinelSetup-2.3.8.exe
 SourceDir=.
 DefaultDirName={autopf}\Sentinel
 DefaultGroupName=Sentinel
@@ -333,11 +334,11 @@ begin
   Exec(ExpandConstant('{sysnative}\taskkill.exe'), '/F /IM "Sentinel.Agent.exe"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Sleep(1000);
 
-  // Unlock every known prior install path (x64 + x86 + previous {app})
+  // Unlock only the destination and the classic x86 leftover path.
+  // Avoid blasting icacls across four trees (AV "ACL-stripping installer" heuristic).
   ResetInstallDirAcls(ExpandConstant('{app}'));
-  ResetInstallDirAcls(ExpandConstant('{commonpf}\Sentinel'));
-  ResetInstallDirAcls(ExpandConstant('{commonpf32}\Sentinel'));
-  ResetInstallDirAcls(ExpandConstant('{autopf}\Sentinel'));
+  if not SameText(ExpandConstant('{app}'), ExpandConstant('{commonpf32}\Sentinel')) then
+    ResetInstallDirAcls(ExpandConstant('{commonpf32}\Sentinel'));
 
   // Rename locked PE as final fallback (ACLs reset — file should be writable)
   if FileExists(ExpandConstant('{app}\Sentinel.Service.exe')) then

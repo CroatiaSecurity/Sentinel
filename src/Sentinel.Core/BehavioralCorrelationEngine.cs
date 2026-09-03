@@ -118,11 +118,13 @@ namespace Sentinel.Core
             var types = new HashSet<SignalType>(currentSignals.Select(s => s.SignalType));
             var distinctRules = currentSignals.Select(s => s.RuleName).Distinct().Count();
 
+            // Highest confidence composites first (return on match).
+            // Active mass-encryption chain (0.99): multiple distinct encryption/wipe indicators.
             if (currentSignals.Count(s => s.SignalType == SignalType.Ransomware) >= 2 &&
                 currentSignals.Where(s => s.SignalType == SignalType.Ransomware).Select(s => s.RuleName).Distinct().Count() >= 2)
             {
-                await EmitCompositeAsync(pid, "Active Ransomware Chain", 0.99,
-                    "Multiple distinct ransomware indicators from independent sources.",
+                await EmitCompositeAsync(pid, "Active Mass-Encryption Chain", 0.99,
+                    "Multiple distinct mass-encryption indicators from independent sources.",
                     "Shadow copy destruction, backup deletion, or mass file encryption confirmed by cross-signal correlation.");
                 return;
             }

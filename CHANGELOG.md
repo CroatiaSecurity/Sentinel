@@ -2,6 +2,32 @@
 
 
 
+## [2.3.8] - 2026-09-03
+
+Combines Grok Bot hardening (CIRCL/MB SPKI pins, MOTW/WPAD host-wide fuel) with AV false-positive follow-up after VirusTotal **4/72** on `SentinelSetup-2.3.6.exe`. Policy shift for imports/strings: **transparency over evasion**.
+
+### Added
+
+- **SPKI pins** for CIRCL hashlookup + MalwareBazaar (same pin helper as VirusTotal/report); pin/TLS failure → `Unknown`, never `Safe`.
+- **Host-wide MOTW/WPAD delivery fuel** — pid=0 observe signals buffer and merge into composites (`MOTW Bypass Execution Chain` / `WPAD Proxy Hijack Chain`).
+- NativeResolver completeness + delivery/pinning tests.
+
+### Fixed
+
+- **`NativeResolver`** — plain `[DllImport]` (no `GetProcAddress` bootstrap). Dynamic resolution of `OpenProcess` / `ReadProcessMemory` was an ML evasion signal.
+- **Split-string detection vocab** — removed `string.Concat` / `S()` / `A()` helpers; contiguous literals are honest EDR vocabulary.
+- **Quarantine vault** — `SENQ` magic + `.senq` under `%ProgramData%\Sentinel\Quarantine`; legacy DPAPI blobs still restore; `.meta` decrypt fixed.
+- **Installer** — VersionInfo synced; fewer `icacls` trees; `VersionInfoOriginalFileName` set.
+- **Composite display name** — `Active Mass-Encryption Chain` (was `Active Ransomware Chain`).
+- **`DllUnloadEngine`** — no zero-byte Hidden|System stub after quarantine.
+- **`JsonlEventLogger.DisposeAsync`** — wait on audit semaphore before Release (CI cascade fix).
+
+### Changed
+
+- `version.txt` / installer → `2.3.8`
+- Docs: `docs/VIRUSTOTAL.md` records the 2.3.6 VT result and the transparency policy.
+
+
 ## [2.3.7] - 2026-09-01
 
 AV false positive elimination: sensitive Win32/NT APIs moved out of the PE import table via runtime resolution, removing the import-table shape that drives ML-based heuristic detections.

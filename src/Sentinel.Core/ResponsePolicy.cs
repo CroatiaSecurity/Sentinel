@@ -225,7 +225,7 @@ namespace Sentinel.Core
             "Named Pipe C2 + Network Beaconing",
             "Spoofed Process Phoning Home",
             "Escalation + C2 Channel",
-            "Active Ransomware Chain",
+            "Active Mass-Encryption Chain",
             "Covert RAT",
             "Confirmed C2 Beacon",
             "Covert C2",

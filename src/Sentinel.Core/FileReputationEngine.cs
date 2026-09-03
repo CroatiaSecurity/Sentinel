@@ -72,45 +72,34 @@ namespace Sentinel.Core
         // Deduplication: track in-flight lookups to avoid duplicate API calls
         private readonly ConcurrentDictionary<string, Task<FileReputationResult>> _inFlight = new();
 
-        // API names used to scan PE import tables for suspicious capabilities.
-        // Strings are assembled at initialization — not stored as contiguous literals —
-        // so the scanner DLL itself does not accumulate injection-API vocabulary in its
-        // own string heap and trigger the same heuristics it is designed to detect.
-        private static readonly HashSet<string> SuspiciousImports = BuildSuspiciousImports();
-
-        private static HashSet<string> BuildSuspiciousImports()
+        // Import names compared against target PE import tables (not invoked by Sentinel).
+        // Plain literals — split-string Concat is an ML evasion heuristic (Kaspersky/Defender).
+        private static readonly HashSet<string> SuspiciousImports = new(StringComparer.OrdinalIgnoreCase)
         {
-            // Each name is assembled from two halves to avoid the full string appearing
-            // as a PE string-table entry in this DLL. The scanner reads target PE bytes
-            // directly; these names are only used as comparison keys at runtime.
-            static string A(string a, string b) => string.Concat(a, b);
-            return new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-            {
-                A("Virtual", "AllocEx"),
-                A("Write", "ProcessMemory"),
-                A("Create", "RemoteThread"),
-                A("NtMap", "ViewOfSection"),
-                A("Rtl", "CreateUserThread"),
-                A("Queue", "UserAPC"),
-                A("SetWindows", "HookEx"),
-                A("NtUnmap", "ViewOfSection"),
-                A("Virtual", "ProtectEx"),
-                "OpenProcess",
-                "ReadProcessMemory",
-                "NtQueryInformationProcess",
-                "AdjustTokenPrivileges",
-                "LookupPrivilegeValue",
-                "CryptEncrypt",
-                "CryptDecrypt",
-                "BCryptEncrypt",
-                "InternetOpen",
-                "HttpSendRequest",
-                "URLDownloadToFile",
-                "WinExec",
-                "ShellExecute",
-                "CreateProcess"
-            };
-        }
+            "VirtualAllocEx",
+            "WriteProcessMemory",
+            "CreateRemoteThread",
+            "NtMapViewOfSection",
+            "RtlCreateUserThread",
+            "QueueUserAPC",
+            "SetWindowsHookEx",
+            "NtUnmapViewOfSection",
+            "VirtualProtectEx",
+            "OpenProcess",
+            "ReadProcessMemory",
+            "NtQueryInformationProcess",
+            "AdjustTokenPrivileges",
+            "LookupPrivilegeValue",
+            "CryptEncrypt",
+            "CryptDecrypt",
+            "BCryptEncrypt",
+            "InternetOpen",
+            "HttpSendRequest",
+            "URLDownloadToFile",
+            "WinExec",
+            "ShellExecute",
+            "CreateProcess"
+        };
 
         private static readonly HashSet<string> HighRiskPaths = new(StringComparer.OrdinalIgnoreCase)
         {

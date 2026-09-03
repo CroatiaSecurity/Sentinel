@@ -46,7 +46,7 @@ namespace Sentinel.Tests
             });
             var result = getResult();
             Assert.NotNull(result);
-            Assert.Equal("Active Ransomware Chain", result!.RuleName);
+            Assert.Equal("Active Mass-Encryption Chain", result!.RuleName);
             Assert.Equal(0.99, result.Confidence);
         }
 

@@ -47,7 +47,7 @@ namespace Sentinel.Core
             "nc -", "ncat ", "socat ", "/dev/tcp/", "bash -i",
             "curl http", "wget http", "python -c", "python3 -c",
             "perl -e", "ruby -e", "php -r",
-            "/etc/shadow", "/etc/passwd", string.Concat("mimi","katz"), string.Concat("seku","rlsa"),
+            "/etc/shadow", "/etc/passwd", "mimikatz", "sekurlsa",
             "meterpreter", "reverse_tcp", "bind_shell",
             "base64 -d", "openssl enc",
             "iptables", "tcpdump", "nmap ", "masscan",
