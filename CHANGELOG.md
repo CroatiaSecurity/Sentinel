@@ -2,6 +2,28 @@
 
 
 
+## [2.3.9] - 2026-09-03
+
+Installer release for VirusTotal re-check after the 2.3.6 **4/72** false-positive result. Ships the 2.3.8 hardening line plus AV transparency hygiene.
+
+### Fixed (AV / VT)
+
+- **`NativeResolver`** — plain `[DllImport]` (no `GetProcAddress` bootstrap for inspection APIs).
+- **Split-string Concat** detection vocab removed (`Rules`, `FileReputationEngine`, monitors).
+- **Quarantine vault** — `SENQ` magic + `.senq` under `%ProgramData%\Sentinel\Quarantine`; no Hidden|System zero-byte stubs after DLL quarantine.
+- **Installer** — full `VersionInfo*` including `OriginalFileName`; fewer upgrade `icacls` trees.
+- **Composite display** — `Active Mass-Encryption Chain` (was `Active Ransomware Chain`).
+- **`JsonlEventLogger.DisposeAsync`** — acquire audit semaphore before Release (CI dispose cascade).
+
+### Included from 2.3.8
+
+- CIRCL / MalwareBazaar SPKI pins; MOTW/WPAD host-wide delivery fuel; NativeResolver completeness tests.
+
+### Changed
+
+- `version.txt` / installer → **2.3.9** (`SentinelSetup-2.3.9.exe`)
+
+
 ## [2.3.8] - 2026-09-03
 
 Combines Grok Bot hardening (CIRCL/MB SPKI pins, MOTW/WPAD host-wide fuel) with AV false-positive follow-up after VirusTotal **4/72** on `SentinelSetup-2.3.6.exe`. Policy shift for imports/strings: **transparency over evasion**.

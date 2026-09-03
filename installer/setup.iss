@@ -1,16 +1,16 @@
 [Setup]
 AppName=Sentinel
-AppVersion=2.3.8
+AppVersion=2.3.9
 AppPublisher=Gorstak
 AppPublisherURL=https://gorstak.eu
 AppCopyright=Copyright (C) 2026 Gorstak
-VersionInfoVersion=2.3.8.0
+VersionInfoVersion=2.3.9.0
 VersionInfoCompany=Gorstak
 VersionInfoDescription=Sentinel Endpoint Detection and Response Setup
 VersionInfoCopyright=Copyright (C) 2026 Gorstak
 VersionInfoProductName=Sentinel EDR
-VersionInfoProductVersion=2.3.8.0
-VersionInfoOriginalFileName=SentinelSetup-2.3.8.exe
+VersionInfoProductVersion=2.3.9.0
+VersionInfoOriginalFileName=SentinelSetup-2.3.9.exe
 SourceDir=.
 DefaultDirName={autopf}\Sentinel
 DefaultGroupName=Sentinel
@@ -19,7 +19,7 @@ UninstallDisplayIcon={app}\Sentinel.ico
 Compression=lzma/max
 SolidCompression=no
 OutputDir=.
-OutputBaseFilename=SentinelSetup-2.3.8
+OutputBaseFilename=SentinelSetup-2.3.9
 PrivilegesRequired=admin
 ; One active Setup wizard at a time (elevation handoff still works: non-elevated exits first)
 SetupMutex=Global\SentinelSetupMutex
