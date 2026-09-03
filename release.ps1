@@ -1,26 +1,27 @@
 $env:PATH = "C:\Program Files\Git\cmd;C:\Program Files\Git\bin;" + $env:PATH
 $gh = "C:\Program Files\GitHub CLI\gh.exe"
-$installer = "installer\SentinelSetup-2.4.1.exe"
+$installer = "installer\SentinelSetup-2.4.2.exe"
 
 $notes = @"
-## v2.4.1 — tray icon visible after install
+## v2.4.2 — restore working upgrade installer
 
-After ``Sentinel.Service.exe --install``, run the ``ShowAllTrayIcons`` scheduled
-task so a newly created NotifyIconSettings entry is visible without a re-logon.
-Silent no-op if the task is missing (hosts not provisioned via the GSecurity ISO).
+v2.3.9 slim-down dropped ``ResetInstallDirAcls``, so a hardened install
+(Users Deny-Write on the install dir) fails Inno overwrite of ``unins000.exe``
+with **Access is denied**.
 
-Also fixes leftover 2.4.0 version-stamp drift: README and ProductInfo tests
-still said 2.3.9. Installer ``build.ps1`` now stamps all Inno VersionInfo* fields
-from ``version.txt``.
+2.4.2 restores the v2.3.7 unlock: takeown/icacls on ``unins000.*``, grant
+Administrators full control, remove Users Deny, and taskkill leftover
+Service/Agent. ``--prepare-upgrade`` also unlocks natively for later upgrades.
 
-2.4.0 remains published (Kaspersky / VT 3/71 AV pass).
+2.4.0 and 2.4.1 remain published.
 
 ## Installation
 Requires .NET Framework 4.8. Run as Administrator.
+Cancel any stuck 2.4.1 Setup wizard first, then run this installer.
 "@
 
 if (Test-Path $gh) {
-    & $gh release create v2.4.1 $installer --title "Sentinel 2.4.1" --notes $notes -R CroatiaSecurity/Sentinel
+    & $gh release create v2.4.2 $installer --title "Sentinel 2.4.2" --notes $notes -R CroatiaSecurity/Sentinel
 } else {
-    Write-Host "gh.exe not found - installer is at $installer and releases\2.4.1\"
+    Write-Host "gh.exe not found - installer is at $installer and releases\2.4.2\"
 }

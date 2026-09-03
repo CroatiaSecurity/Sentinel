@@ -681,6 +681,93 @@ namespace Sentinel.Core
         }
 
         /// <summary>
+        /// Inverse of <see cref="SecureInstallationDirectory"/> for upgrades.
+        /// Removes the Users Deny-Write (admin accounts are in Users, so it blocks Inno)
+        /// and grants Administrators full control, including Inno <c>unins000.*</c> stubs
+        /// that have inheritance disabled. Called from <c>--prepare-upgrade</c>.
+        /// </summary>
+        public static void UnlockInstallationDirectoryForUpgrade(string? dir)
+        {
+            if (string.IsNullOrWhiteSpace(dir) || !Directory.Exists(dir))
+                return;
+
+            try
+            {
+                var dirInfo = new DirectoryInfo(dir);
+                var security = dirInfo.GetAccessControl();
+                var usersSid = new System.Security.Principal.SecurityIdentifier(
+                    System.Security.Principal.WellKnownSidType.BuiltinUsersSid, null);
+                var adminsSid = new System.Security.Principal.SecurityIdentifier(
+                    System.Security.Principal.WellKnownSidType.BuiltinAdministratorsSid, null);
+
+                var rules = security.GetAccessRules(true, true, typeof(System.Security.Principal.SecurityIdentifier));
+                foreach (System.Security.AccessControl.FileSystemAccessRule rule in rules)
+                {
+                    if (rule.AccessControlType == System.Security.AccessControl.AccessControlType.Deny &&
+                        rule.IdentityReference.Value == usersSid.Value)
+                    {
+                        security.RemoveAccessRule(rule);
+                    }
+                }
+
+                security.AddAccessRule(new System.Security.AccessControl.FileSystemAccessRule(
+                    adminsSid,
+                    System.Security.AccessControl.FileSystemRights.FullControl,
+                    System.Security.AccessControl.InheritanceFlags.ContainerInherit |
+                    System.Security.AccessControl.InheritanceFlags.ObjectInherit,
+                    System.Security.AccessControl.PropagationFlags.None,
+                    System.Security.AccessControl.AccessControlType.Allow));
+
+                dirInfo.SetAccessControl(security);
+            }
+            catch
+            {
+                // Non-fatal — Setup also unlocks via icacls for older installed binaries.
+            }
+
+            try
+            {
+                foreach (var file in Directory.GetFiles(dir, "unins*"))
+                    UnlockUninstallerStubForUpgrade(file);
+            }
+            catch { }
+        }
+
+        private static void UnlockUninstallerStubForUpgrade(string filePath)
+        {
+            try
+            {
+                if (!File.Exists(filePath)) return;
+                var fileInfo = new FileInfo(filePath);
+                var security = fileInfo.GetAccessControl();
+                security.SetAccessRuleProtection(isProtected: false, preserveInheritance: true);
+
+                var usersSid = new System.Security.Principal.SecurityIdentifier(
+                    System.Security.Principal.WellKnownSidType.BuiltinUsersSid, null);
+                var adminsSid = new System.Security.Principal.SecurityIdentifier(
+                    System.Security.Principal.WellKnownSidType.BuiltinAdministratorsSid, null);
+
+                var rules = security.GetAccessRules(true, false, typeof(System.Security.Principal.SecurityIdentifier));
+                foreach (System.Security.AccessControl.FileSystemAccessRule rule in rules)
+                {
+                    if (rule.AccessControlType == System.Security.AccessControl.AccessControlType.Deny &&
+                        rule.IdentityReference.Value == usersSid.Value)
+                    {
+                        security.RemoveAccessRule(rule);
+                    }
+                }
+
+                security.AddAccessRule(new System.Security.AccessControl.FileSystemAccessRule(
+                    adminsSid,
+                    System.Security.AccessControl.FileSystemRights.FullControl,
+                    System.Security.AccessControl.AccessControlType.Allow));
+
+                fileInfo.SetAccessControl(security);
+            }
+            catch { }
+        }
+
+        /// <summary>
         /// v1.5.7: Native C# system hardening — no scripts, no shell-outs for logic.
         /// 
         /// Each hardening action is:

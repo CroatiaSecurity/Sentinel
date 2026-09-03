@@ -2,6 +2,32 @@
 
 
 
+## [2.4.2] - 2026-09-03
+
+Restore the working upgrade installer. v2.3.9 slim-down dropped `ResetInstallDirAcls`,
+so a hardened install (Users Deny-Write on `{app}`) fails Inno overwrite of
+`unins000.exe` with **Access is denied** — the v2.0.9 bug came back.
+
+The new setup EXE must unlock ACLs itself: `--prepare-upgrade` runs the *already
+installed* binary, which on 2.4.0/2.4.1 only stops the service.
+
+### Fixed
+
+- **Upgrade Access denied on `unins000.exe`** — restore v2.3.7 `takeown`/`icacls`
+  unlock of Inno uninstaller stubs + Administrators full control on the install
+  tree; remove Users Deny-Write (`S-1-5-32-545`). `taskkill` leftover
+  Service/Agent after `--prepare-upgrade`.
+- **`HardeningModule.UnlockInstallationDirectoryForUpgrade`** — native inverse of
+  `SecureInstallationDirectory` (re-enable unins inheritance, drop Users deny,
+  grant Administrators). Called from `--prepare-upgrade` for 2.4.2+ → later.
+
+### Changed
+
+- `ProductInfo.Version` → `2.4.2`
+- Installer → `SentinelSetup-2.4.2.exe`
+- 2.4.0 and 2.4.1 remain published and unmodified.
+
+
 ## [2.4.1] - 2026-09-03
 
 Post-install tray visibility on GSecurity-provisioned hosts, plus the leftover

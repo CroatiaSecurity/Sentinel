@@ -109,19 +109,50 @@ namespace Sentinel.Core
         }
 
         /// <summary>
-        /// Stop the running service cleanly so Setup can overwrite binaries.
+        /// Stop the running service, kill leftover agent, and unlock install-dir ACLs
+        /// so Setup can overwrite binaries and Inno <c>unins000.*</c> stubs.
+        /// Older installed builds only stopped the service — Setup also unlocks via icacls.
         /// </summary>
         public static int RunPrepareUpgrade()
         {
             try
             {
                 TryStopService(waitMs: 8000);
+                TryKillProcess("Sentinel.Agent");
+
+                var dir = Path.GetDirectoryName(Process.GetCurrentProcess().MainModule?.FileName)
+                    ?? AppContext.BaseDirectory;
+                HardeningModule.UnlockInstallationDirectoryForUpgrade(dir);
+                HardeningModule.UnlockInstallationDirectoryForUpgrade(
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Sentinel"));
+                HardeningModule.UnlockInstallationDirectoryForUpgrade(
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Sentinel"));
                 return 0;
             }
             catch
             {
                 return 1;
             }
+        }
+
+        private static void TryKillProcess(string processName)
+        {
+            try
+            {
+                var self = Process.GetCurrentProcess().Id;
+                foreach (var p in Process.GetProcessesByName(processName))
+                {
+                    try
+                    {
+                        if (p.Id == self) continue;
+                        p.Kill();
+                        p.WaitForExit(3000);
+                    }
+                    catch { }
+                    finally { p.Dispose(); }
+                }
+            }
+            catch { }
         }
 
         /// <summary>Stop service, delete SCM registration, remove Run + SafeBoot keys.</summary>
