@@ -34,26 +34,18 @@ Source: "..\publish\agent\*"; DestDir: "{app}"; Flags: ignoreversion recursesubd
 [Icons]
 Name: "{group}\Sentinel Agent"; Filename: "{app}\Sentinel.Agent.exe"; IconFilename: "{app}\Sentinel.ico"
 
-; v2.3.9: No [Registry] Run / SafeBoot here — Sentinel.Service.exe --install owns those.
-; v2.3.9: No Pascal sc/taskkill/icacls — upgrade stop + post-install via Service CLI.
-
 [Run]
-; After files are on disk: register service, Run key, SafeBoot, start service+agent
 Filename: "{app}\Sentinel.Service.exe"; Parameters: "--install"; Flags: runhidden waituntilterminated; StatusMsg: "Starting Sentinel..."
-; Clean leftover .old rename stubs from upgrade
 Filename: "{sys}\cmd.exe"; Parameters: "/c del /f /q ""{app}\*.old"" 2>nul & exit /b 0"; Flags: runhidden waituntilterminated
 
 [UninstallRun]
-Filename: "{app}\Sentinel.Service.exe"; Parameters: "--prepare-upgrade"; Flags: runhidden; RunOnceId: "StopService"
-Filename: "{sys}\sc.exe"; Parameters: "delete ""Sentinel"""; Flags: runhidden; RunOnceId: "DeleteService"
+Filename: "{app}\Sentinel.Service.exe"; Parameters: "--uninstall-cleanup"; Flags: runhidden; RunOnceId: "SentinelCleanup"
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}"
 Type: filesandordirs; Name: "{commonpf32}\Sentinel"
 
 [Code]
-// Minimal Pascal: .NET 4.8 gate + upgrade prepare via Service.exe (no sc/taskkill/icacls).
-
 function IsDotNet48OrHigher(): Boolean;
 var
   Release: Cardinal;
@@ -104,7 +96,6 @@ begin
   Result := '';
   NeedsRestart := False;
 
-  // Prefer in-tree Service.exe (upgrade) to stop cleanly without taskkill/icacls.
   Svc := ExpandConstant('{app}\Sentinel.Service.exe');
   if FileExists(Svc) then
   begin
@@ -112,11 +103,10 @@ begin
     Sleep(800);
   end;
 
-  // Rename locked PE so Setup can replace (no ACL strip)
   if FileExists(ExpandConstant('{app}\Sentinel.Service.exe')) then
     RenameFile(ExpandConstant('{app}\Sentinel.Service.exe'), ExpandConstant('{app}\Sentinel.Service.exe.old'));
   if FileExists(ExpandConstant('{app}\Sentinel.Agent.exe')) then
-    renameFile(ExpandConstant('{app}\Sentinel.Agent.exe'), ExpandConstant('{app}\Sentinel.Agent.exe.old'));
+    RenameFile(ExpandConstant('{app}\Sentinel.Agent.exe'), ExpandConstant('{app}\Sentinel.Agent.exe.old'));
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
@@ -125,9 +115,6 @@ var
 begin
   if CurUninstallStep = usUninstall then
   begin
-    RegDeleteValue(HKLM, 'SOFTWARE\Microsoft\Windows\CurrentVersion\Run', 'SentinelAgent');
-    RegDeleteKeyIncludingSubkeys(HKLM, 'SYSTEM\CurrentControlSet\Control\SafeBoot\Minimal\Sentinel');
-    RegDeleteKeyIncludingSubkeys(HKLM, 'SYSTEM\CurrentControlSet\Control\SafeBoot\Network\Sentinel');
     Exec(ExpandConstant('{sys}\netsh.exe'), 'ipsec static delete policy name=GSecurity', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     Exec(ExpandConstant('{sys}\netsh.exe'), 'advfirewall firewall delete rule name="Sentinel-Block-Remote-RPC-Ephemeral"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   end;

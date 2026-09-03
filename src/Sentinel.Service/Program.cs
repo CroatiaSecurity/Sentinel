@@ -70,6 +70,11 @@ namespace Sentinel.Service
                 Environment.ExitCode = InstallBootstrap.RunPrepareUpgrade();
                 return;
             }
+            if (args.Length >= 1 && args[0].Equals("--uninstall-cleanup", StringComparison.OrdinalIgnoreCase))
+            {
+                Environment.ExitCode = InstallBootstrap.RunUninstallCleanup();
+                return;
+            }
 
             // DIAGNOSTIC: Write immediately on process start, before anything else.
             // v1.8.1 RT-MED-3: ensure ProgramData\Sentinel exists with restricted ACLs

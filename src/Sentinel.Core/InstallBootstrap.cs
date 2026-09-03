@@ -62,6 +62,10 @@ namespace Sentinel.Core
         [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool CloseServiceHandle(IntPtr hSCObject);
 
+        [DllImport("advapi32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool DeleteService(IntPtr hService);
+
         [StructLayout(LayoutKind.Sequential)]
         private struct SERVICE_STATUS
         {
@@ -104,13 +108,30 @@ namespace Sentinel.Core
         }
 
         /// <summary>
-        /// Stop the running service cleanly so Setup can overwrite binaries (no taskkill / icacls).
+        /// Stop the running service cleanly so Setup can overwrite binaries.
         /// </summary>
         public static int RunPrepareUpgrade()
         {
             try
             {
                 TryStopService(waitMs: 8000);
+                return 0;
+            }
+            catch
+            {
+                return 1;
+            }
+        }
+
+        /// <summary>Stop service, delete SCM registration, remove Run + SafeBoot keys.</summary>
+        public static int RunUninstallCleanup()
+        {
+            try
+            {
+                TryStopService(waitMs: 8000);
+                TryDeleteService();
+                TryDeleteAgentRunKey();
+                TryDeleteSafeBootKeys();
                 return 0;
             }
             catch
@@ -243,6 +264,43 @@ namespace Sentinel.Core
                     UseShellExecute = true,
                     WindowStyle = ProcessWindowStyle.Hidden
                 });
+            }
+            catch { }
+        }
+
+        public static void TryDeleteService()
+        {
+            var scm = OpenSCManager(null, null, ScManagerAllAccess);
+            if (scm == IntPtr.Zero) return;
+            try
+            {
+                var svc = OpenService(scm, ServiceName, ServiceAllAccess);
+                if (svc == IntPtr.Zero) return;
+                try { DeleteService(svc); }
+                finally { CloseServiceHandle(svc); }
+            }
+            finally { CloseServiceHandle(scm); }
+        }
+
+        public static void TryDeleteAgentRunKey()
+        {
+            try
+            {
+                using var key = Registry.LocalMachine.OpenSubKey(
+                    @"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", writable: true);
+                key?.DeleteValue(AgentRunValueName, throwOnMissingValue: false);
+            }
+            catch { }
+        }
+
+        public static void TryDeleteSafeBootKeys()
+        {
+            try
+            {
+                Registry.LocalMachine.DeleteSubKeyTree(
+                    $@"SYSTEM\CurrentControlSet\Control\SafeBoot\Minimal\{ServiceName}", throwOnMissingSubKey: false);
+                Registry.LocalMachine.DeleteSubKeyTree(
+                    $@"SYSTEM\CurrentControlSet\Control\SafeBoot\Network\{ServiceName}", throwOnMissingSubKey: false);
             }
             catch { }
         }
