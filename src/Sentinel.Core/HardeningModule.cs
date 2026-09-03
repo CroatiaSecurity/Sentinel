@@ -364,6 +364,9 @@ namespace Sentinel.Core
         /// Without this, an attacker who triggers a Safe Mode reboot has
         /// unrestricted access because all non-registered services are stopped.
         /// </summary>
+        /// <summary>SafeBoot Minimal+Network registration (also used by InstallBootstrap --install).</summary>
+        public static void RegisterForSafeModePublic() => RegisterForSafeMode();
+
         private static void RegisterForSafeMode()
         {
             try

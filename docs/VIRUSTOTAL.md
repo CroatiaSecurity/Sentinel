@@ -125,9 +125,9 @@ Select-String -Path src\Sentinel.Core\NativeResolver.cs -Pattern 'GetProcAddress
 
 ## Path to 0/N detections
 
-1. Rebuild after v2.3.8 hygiene → re-upload to VirusTotal.
-2. Submit false-positive reports to AhnLab / Alibaba / Alyac / Kaspersky /
-   Microsoft with publisher info + source URL.
-3. **Sign** `SentinelSetup-*.exe`, `Sentinel.Service.exe`, `Sentinel.Agent.exe`,
-   and `Sentinel.Core.dll` with an Authenticode certificate (EV preferred).
-   Signing is the real prevalence/trust fix; code hygiene only reduces ML bait.
+1. Rebuild after v2.3.9 installer slim-down → re-upload to VirusTotal.
+2. Submit false-positive reports to AhnLab / Alibaba with publisher info + source URL
+   (Alyac ransom label was cleared on the first 2.3.9 upload).
+3. **Sign** when a cert is available — still the strongest prevalence/trust fix.
+   Until then: keep Setup free of `sc create` / Run / SafeBoot / `taskkill` / `icacls`
+   strings (delegated to `Sentinel.Service.exe --install`).

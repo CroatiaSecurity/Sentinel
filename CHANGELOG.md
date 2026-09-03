@@ -4,14 +4,14 @@
 
 ## [2.3.9] - 2026-09-03
 
-Installer release for VirusTotal re-check after the 2.3.6 **4/72** false-positive result. Ships the 2.3.8 hardening line plus AV transparency hygiene.
+Installer release for VirusTotal re-check after the 2.3.6 **4/72** (then 2.3.9 first build **2/72**) false-positive results. No Authenticode cert available — chase remaining AhnLab/Alibaba generic hits by removing install-time bait from the setup EXE.
 
 ### Fixed (AV / VT)
 
 - **`NativeResolver`** — plain `[DllImport]` (no `GetProcAddress` bootstrap for inspection APIs).
 - **Split-string Concat** detection vocab removed (`Rules`, `FileReputationEngine`, monitors).
 - **Quarantine vault** — `SENQ` magic + `.senq` under `%ProgramData%\Sentinel\Quarantine`; no Hidden|System zero-byte stubs after DLL quarantine.
-- **Installer** — full `VersionInfo*` including `OriginalFileName`; fewer upgrade `icacls` trees.
+- **Installer slim-down** — Inno no longer embeds `sc create`, HKLM Run, SafeBoot, `taskkill`, or `icacls`. Post-copy work is `Sentinel.Service.exe --install` / `--prepare-upgrade` via `InstallBootstrap` (native SCM APIs). Full `VersionInfo*` retained.
 - **Composite display** — `Active Mass-Encryption Chain` (was `Active Ransomware Chain`).
 - **`JsonlEventLogger.DisposeAsync`** — acquire audit semaphore before Release (CI dispose cascade).
 

@@ -58,6 +58,19 @@ namespace Sentinel.Service
                 return;
             }
 
+            // v2.3.9: Installer delegates SCM/Run-key work here so Inno Setup stays file-copy-only
+            // (avoids embedding sc create / Run / taskkill / icacls heuristics in the setup EXE).
+            if (args.Length >= 1 && args[0].Equals("--install", StringComparison.OrdinalIgnoreCase))
+            {
+                Environment.ExitCode = InstallBootstrap.RunInstall();
+                return;
+            }
+            if (args.Length >= 1 && args[0].Equals("--prepare-upgrade", StringComparison.OrdinalIgnoreCase))
+            {
+                Environment.ExitCode = InstallBootstrap.RunPrepareUpgrade();
+                return;
+            }
+
             // DIAGNOSTIC: Write immediately on process start, before anything else.
             // v1.8.1 RT-MED-3: ensure ProgramData\Sentinel exists with restricted ACLs
             // before any world-readable inherited default can apply to diagnostic files.

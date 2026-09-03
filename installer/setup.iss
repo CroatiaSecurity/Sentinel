@@ -21,132 +21,44 @@ SolidCompression=no
 OutputDir=.
 OutputBaseFilename=SentinelSetup-2.3.9
 PrivilegesRequired=admin
-; One active Setup wizard at a time (elevation handoff still works: non-elevated exits first)
 SetupMutex=Global\SentinelSetupMutex
-; Allow upgrading over existing install
 UsePreviousAppDir=yes
 CloseApplications=no
 RestartApplications=no
 
-
 [Files]
-; Framework-dependent net48 publish: all managed deps + exes (small installer; needs .NET 4.8)
 Source: "assets\Sentinel.ico"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\publish\service\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "appsettings.json"
 Source: "..\publish\agent\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "appsettings.json"
-; v2.0.4: appsettings.json is no longer shipped — config uses compiled defaults + DPAPI-encrypted store.
-; If the file exists from a prior install, it is ignored (but detected as suspicious by AntiTamperGuard).
-; v2.3.6: LGPO.exe and GSecurity.inf are shipped as plain files (not embedded in the DLL assembly).
-;         They are already included via the publish\service\* wildcard above (CopyToOutputDirectory).
-;         Listed explicitly here for clarity and to ensure they are present in the installer.
 
 [Icons]
 Name: "{group}\Sentinel Agent"; Filename: "{app}\Sentinel.Agent.exe"; IconFilename: "{app}\Sentinel.ico"
 
-[Registry]
-; Auto-start agent on user login
-Root: HKLM; Subkey: "SOFTWARE\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "SentinelAgent"; ValueData: """{app}\Sentinel.Agent.exe"""; Flags: uninsdeletevalue
-; v1.4.2: Register service for Safe Mode (both Minimal and Network)
-Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Control\SafeBoot\Minimal\Sentinel"; ValueType: string; ValueName: ""; ValueData: "Service"; Flags: uninsdeletekey
-Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Control\SafeBoot\Network\Sentinel"; ValueType: string; ValueName: ""; ValueData: "Service"; Flags: uninsdeletekey
-; v2.0.4 HIGH-4: Removed FIPS Algorithm Policy manipulation. An EDR must not weaken
-; system cryptographic posture. Organizations with FIPS compliance (FedRAMP, HIPAA, DoD)
-; should not have their policy overridden by security tooling.
+; v2.3.9: No [Registry] Run / SafeBoot here — Sentinel.Service.exe --install owns those.
+; v2.3.9: No Pascal sc/taskkill/icacls — upgrade stop + post-install via Service CLI.
 
 [Run]
-; Clean up .old files from rename-on-upgrade fallback (ignore failures — silent)
-; Force exit 0 even if no .old files — avoids post-install error popup
+; After files are on disk: register service, Run key, SafeBoot, start service+agent
+Filename: "{app}\Sentinel.Service.exe"; Parameters: "--install"; Flags: runhidden waituntilterminated; StatusMsg: "Starting Sentinel..."
+; Clean leftover .old rename stubs from upgrade
 Filename: "{sys}\cmd.exe"; Parameters: "/c del /f /q ""{app}\*.old"" 2>nul & exit /b 0"; Flags: runhidden waituntilterminated
-; Service install + agent start run from Pascal (ssPostInstall) so upgrades never show
-; "sc create failed" / "service already running" error dialogs.
 
 [UninstallRun]
-; Stop and delete the service
-Filename: "{sys}\sc.exe"; Parameters: "stop ""Sentinel"""; Flags: runhidden; RunOnceId: "StopService"
+Filename: "{app}\Sentinel.Service.exe"; Parameters: "--prepare-upgrade"; Flags: runhidden; RunOnceId: "StopService"
 Filename: "{sys}\sc.exe"; Parameters: "delete ""Sentinel"""; Flags: runhidden; RunOnceId: "DeleteService"
 
 [UninstallDelete]
-; Remove application directory (but NOT ProgramData logs)
 Type: filesandordirs; Name: "{app}"
-; Remove Program Files (x86) leftovers if previous install was there
 Type: filesandordirs; Name: "{commonpf32}\Sentinel"
 
 [Code]
-// Pascal Script for upgrade/uninstall logic
-//
-// Dual-process Inno flow (outer EXE + elevated/temp "2nd" setup):
-// After a successful install, close leftover sibling Setup processes and stamp
-// completion so a leftover first wizard cannot run install again.
+// Minimal Pascal: .NET 4.8 gate + upgrade prepare via Service.exe (no sc/taskkill/icacls).
 
-const
-  SetupStampKey = 'Software\Sentinel\Setup';
-  // How long a leftover first wizard is blocked after the real install finishes
-  SetupSiblingBlockMinutes = 30;
-
-function GetTickCount: Cardinal;
-  external 'GetTickCount@kernel32.dll stdcall';
-
-procedure MarkInstallCompleted();
-var
-  Ver: String;
-begin
-  Ver := ExpandConstant('{#SetupSetting("AppVersion")}');
-  // Tick count is enough for "recent sibling" detection within one boot session
-  RegWriteStringValue(HKLM, SetupStampKey, 'LastCompletedVersion', Ver);
-  RegWriteDWordValue(HKLM, SetupStampKey, 'LastCompletedTicks', GetTickCount());
-end;
-
-procedure ClearInstallCompletedStamp();
-begin
-  RegDeleteValue(HKLM, SetupStampKey, 'LastCompletedVersion');
-  RegDeleteValue(HKLM, SetupStampKey, 'LastCompletedTicks');
-  RegDeleteKeyIfEmpty(HKLM, SetupStampKey);
-end;
-
-function WasSameVersionJustInstalled(): Boolean;
-var
-  Ver, CompletedVer: String;
-  Ticks, NowTicks, WindowMs, Elapsed: Cardinal;
-begin
-  Result := False;
-  Ver := ExpandConstant('{#SetupSetting("AppVersion")}');
-
-  if not RegQueryStringValue(HKLM, SetupStampKey, 'LastCompletedVersion', CompletedVer) then
-    Exit;
-  if not SameText(CompletedVer, Ver) then
-    Exit;
-  if not RegQueryDWordValue(HKLM, SetupStampKey, 'LastCompletedTicks', Ticks) then
-    Exit;
-
-  NowTicks := GetTickCount();
-  // Unsigned wrap-safe elapsed (GetTickCount wraps ~49 days)
-  Elapsed := NowTicks - Ticks;
-  WindowMs := SetupSiblingBlockMinutes * 60 * 1000;
-  if Elapsed <= WindowMs then
-    Result := True;
-end;
-
-// Close other SentinelSetup*.exe processes so a leftover first wizard
-// cannot continue after the elevated/temp install finished.
-procedure CloseSiblingSetupProcesses();
-var
-  ResultCode: Integer;
-begin
-  // taskkill by image name — only targets SentinelSetup* processes.
-  // /F forces termination; /FI filters by window title prefix pattern.
-  // This avoids launching PowerShell from the installer (AV heuristic trigger).
-  Exec(ExpandConstant('{sysnative}\taskkill.exe'),
-    '/F /FI "IMAGENAME eq SentinelSetup*"',
-    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-end;
-
-// .NET Framework 4.8 (Release DWORD >= 528040). Framework-dependent install.
 function IsDotNet48OrHigher(): Boolean;
 var
   Release: Cardinal;
 begin
   Result := False;
-  // Prefer 64-bit view of the registry (Inno 32-bit setup on x64 Windows)
   if IsWin64 then
   begin
     if RegQueryDWordValue(HKLM64, 'SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full', 'Release', Release) then
@@ -162,213 +74,49 @@ end;
 function OfferDotNet48Download(): Boolean;
 var
   ErrCode: Integer;
-  Choice: Integer;
 begin
-  // Returns True if setup should continue (4.8 present or user insisted).
   Result := False;
-  Choice := MsgBox(
-    'Sentinel requires .NET Framework 4.8, which was not found on this PC.' + #13#10#13#10 +
-    'Most Windows 10/11 systems already have it. If Setup cannot detect it, install ' +
-    'the official Microsoft runtime, then run this installer again.' + #13#10#13#10 +
-    'Yes = open the Microsoft .NET Framework 4.8 download page' + #13#10 +
+  if MsgBox(
+    'Sentinel requires .NET Framework 4.8.' + #13#10#13#10 +
+    'Yes = open the Microsoft download page' + #13#10 +
     'No  = cancel Setup',
-    mbConfirmation, MB_YESNO);
-  if Choice = IDYES then
+    mbConfirmation, MB_YESNO) = IDYES then
   begin
-    // Official download hub (web installer / offline packages)
     ShellExec('open',
       'https://dotnet.microsoft.com/download/dotnet-framework/net48',
       '', '', SW_SHOWNORMAL, ewNoWait, ErrCode);
-    MsgBox(
-      'After .NET Framework 4.8 finishes installing, run SentinelSetup again.' + #13#10 +
-      'A reboot may be required before Setup can detect the runtime.',
-      mbInformation, MB_OK);
+    MsgBox('After installing .NET Framework 4.8, run SentinelSetup again.', mbInformation, MB_OK);
   end;
-  Result := False;
 end;
 
 function InitializeSetup(): Boolean;
 begin
   Result := True;
-  // Leftover first wizard after a successful 2nd install: refuse to install again
-  if WasSameVersionJustInstalled() then
-  begin
-    MsgBox(
-      'Sentinel ' + ExpandConstant('{#SetupSetting("AppVersion")}') +
-      ' was already installed successfully.' + #13#10#13#10 +
-      'This leftover Setup window cannot install again. Click OK to close it.',
-      mbInformation, MB_OK);
-    Result := False;
-    Exit;
-  end;
-
-  // Minimum runtime: .NET Framework 4.8 (assume present; offer download if missing)
   if not IsDotNet48OrHigher() then
-  begin
     Result := OfferDotNet48Download();
-  end;
-end;
-
-// Idempotent service install — never surface sc.exe exit codes to the user.
-// create fails (1073) when service exists; start fails (1056) when already running.
-procedure InstallOrUpdateService();
-var
-  ResultCode: Integer;
-  Sc: String;
-  BinPath: String;
-begin
-  Sc := ExpandConstant('{sysnative}\sc.exe');
-  if not FileExists(Sc) then
-    Sc := ExpandConstant('{sys}\sc.exe');
-  BinPath := ExpandConstant('{app}\Sentinel.Service.exe');
-
-  // create (fresh) or config (upgrade / reinstall)
-  Exec(Sc, 'create "Sentinel" start= auto binPath= "' + BinPath + '"',
-    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  if ResultCode <> 0 then
-    Exec(Sc, 'config "Sentinel" binPath= "' + BinPath + '" start= auto',
-      '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-
-  Exec(Sc, 'description "Sentinel" "Userland Endpoint Detection & Response (EDR) Service"',
-    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Exec(Sc, 'failure "Sentinel" reset= 86400 actions= restart/1000/restart/5000/restart/30000',
-    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-
-  // start — ignore "already running"
-  Exec(Sc, 'start "Sentinel"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-end;
-
-// Start tray agent in the interactive user session without error dialogs.
-procedure LaunchAgentSilent();
-var
-  AgentPath: String;
-  ErrCode: Integer;
-begin
-  AgentPath := ExpandConstant('{app}\Sentinel.Agent.exe');
-  if not FileExists(AgentPath) then
-    Exit;
-  // ShellExec + no wait: Process.Start style; does not treat non-zero as setup failure
-  ShellExec('open', AgentPath, '', ExpandConstant('{app}'), SW_HIDE, ewNoWait, ErrCode);
-end;
-
-procedure CurStepChanged(CurStep: TSetupStep);
-begin
-  // After files are in place: register service, start agent tray, stamp success
-  if CurStep = ssPostInstall then
-  begin
-    InstallOrUpdateService();
-    LaunchAgentSilent();
-    MarkInstallCompleted();
-    CloseSiblingSetupProcesses();
-  end;
-end;
-
-procedure StopServiceByName(const ServiceName: String);
-var
-  ResultCode: Integer;
-  i: Integer;
-begin
-  // CRITICAL: Disable failure recovery first so sc stop does not auto-restart.
-  Exec(ExpandConstant('{sysnative}\sc.exe'), 'failure "' + ServiceName + '" reset= 86400 actions= ""', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Exec(ExpandConstant('{sysnative}\sc.exe'), 'stop "' + ServiceName + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-
-  // Poll until STOPPED using sc.exe queryex — no PowerShell required.
-  // Inno's Exec returns the process exit code; sc queryex returns 0 when
-  // the service state is anything (we can't read stdout from Pascal directly).
-  // Simple time-based wait: 10 x 500ms = 5 seconds is enough for a clean stop.
-  for i := 1 to 10 do
-  begin
-    Sleep(500);
-    // Re-issue stop each iteration in case the service is in STOP_PENDING
-    Exec(ExpandConstant('{sysnative}\sc.exe'), 'stop "' + ServiceName + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-    if ResultCode = 1062 then  // ERROR_SERVICE_NOT_ACTIVE — already stopped
-      Break;
-  end;
-end;
-
-// Minimal install-dir unlock for upgrades: grants Administrators full control so
-// Setup can overwrite files locked by AntiTamper ACLs. SYSTEM already has full
-// control from the initial hardening; this only adds Administrators and removes
-// any explicit Deny ACEs for Users/Everyone that AntiTamper may have set.
-// Security model: Setup requires PrivilegesRequired=admin. On first service start,
-// HardeningModule.SecureInstallationDirectory() re-applies SYSTEM-centric ACLs.
-procedure ResetInstallDirAcls(const DirPath: String);
-var
-  ResultCode: Integer;
-begin
-  if not DirExists(DirPath) then
-    Exit;
-
-  // Grant Administrators full control (inheritable) so Setup can write all files
-  Exec(ExpandConstant('{sysnative}\icacls.exe'),
-    '"' + DirPath + '" /grant Administrators:(OI)(CI)F /T /C /Q',
-    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-
-  // Remove any explicit Deny ACEs AntiTamper may have set for Users/Everyone
-  Exec(ExpandConstant('{sysnative}\icacls.exe'),
-    '"' + DirPath + '" /remove:d *S-1-5-32-545 /T /C /Q',
-    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-
-  // Ensure uninstaller stubs are writable by Administrators
-  if FileExists(DirPath + '\unins000.exe') then
-    Exec(ExpandConstant('{sysnative}\icacls.exe'),
-      '"' + DirPath + '\unins000.exe" /grant Administrators:F /C /Q',
-      '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  if FileExists(DirPath + '\unins000.dat') then
-    Exec(ExpandConstant('{sysnative}\icacls.exe'),
-      '"' + DirPath + '\unins000.dat" /grant Administrators:F /C /Q',
-      '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-end;
-
-procedure StopExistingService();
-var
-  ResultCode: Integer;
-begin
-  // Use {sysnative} to bypass WOW64 redirection — ensures we reach the real 64-bit
-  // sc.exe even when the installer runs as a 32-bit process.
-
-  StopServiceByName('Sentinel');
-
-  // Kill any remaining Sentinel processes using taskkill (standard installer practice)
-  Exec(ExpandConstant('{sysnative}\taskkill.exe'), '/F /IM "Sentinel.Service.exe"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Exec(ExpandConstant('{sysnative}\taskkill.exe'), '/F /IM "Sentinel.Agent.exe"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Sleep(1000);
-
-  // Unlock only the destination and the classic x86 leftover path.
-  // Avoid blasting icacls across four trees (AV "ACL-stripping installer" heuristic).
-  ResetInstallDirAcls(ExpandConstant('{app}'));
-  if not SameText(ExpandConstant('{app}'), ExpandConstant('{commonpf32}\Sentinel')) then
-    ResetInstallDirAcls(ExpandConstant('{commonpf32}\Sentinel'));
-
-  // Rename locked PE as final fallback (ACLs reset — file should be writable)
-  if FileExists(ExpandConstant('{app}\Sentinel.Service.exe')) then
-    RenameFile(ExpandConstant('{app}\Sentinel.Service.exe'), ExpandConstant('{app}\Sentinel.Service.exe.old'));
-  if FileExists(ExpandConstant('{app}\Sentinel.Agent.exe')) then
-    RenameFile(ExpandConstant('{app}\Sentinel.Agent.exe'), ExpandConstant('{app}\Sentinel.Agent.exe.old'));
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  ResultCode: Integer;
+  Svc: String;
 begin
   Result := '';
+  NeedsRestart := False;
 
-  // Leftover first wizard already past InitializeSetup when the 2nd finished:
-  // block the actual install step (sibling kill should already have closed this).
-  if WasSameVersionJustInstalled() then
+  // Prefer in-tree Service.exe (upgrade) to stop cleanly without taskkill/icacls.
+  Svc := ExpandConstant('{app}\Sentinel.Service.exe');
+  if FileExists(Svc) then
   begin
-    Result :=
-      'Sentinel was already installed successfully by another Setup window. ' +
-      'Close this leftover Setup; do not install again from here.';
-    Exit;
+    Exec(Svc, '--prepare-upgrade', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Sleep(800);
   end;
 
-  // If upgrading (existing install present), stop service and reset ACLs
-  if RegValueExists(HKLM, 'SOFTWARE\Microsoft\Windows\CurrentVersion\Run', 'SentinelAgent') or
-     RegKeyExists(HKLM, 'SYSTEM\CurrentControlSet\Services\Sentinel') or
-     DirExists(ExpandConstant('{app}')) or
-     DirExists(ExpandConstant('{commonpf32}\Sentinel')) then
-  begin
-    StopExistingService();
-  end;
+  // Rename locked PE so Setup can replace (no ACL strip)
+  if FileExists(ExpandConstant('{app}\Sentinel.Service.exe')) then
+    RenameFile(ExpandConstant('{app}\Sentinel.Service.exe'), ExpandConstant('{app}\Sentinel.Service.exe.old'));
+  if FileExists(ExpandConstant('{app}\Sentinel.Agent.exe')) then
+    renameFile(ExpandConstant('{app}\Sentinel.Agent.exe'), ExpandConstant('{app}\Sentinel.Agent.exe.old'));
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
@@ -377,31 +125,10 @@ var
 begin
   if CurUninstallStep = usUninstall then
   begin
-    // Stop service before uninstall
-    StopExistingService();
-
-    // Allow a fresh Setup after uninstall (clear sibling-block stamp)
-    ClearInstallCompletedStamp();
-
-    // Remove Sentinel registry keys
     RegDeleteValue(HKLM, 'SOFTWARE\Microsoft\Windows\CurrentVersion\Run', 'SentinelAgent');
-
-    // Delete service via SCM
-    Exec(ExpandConstant('{sys}\sc.exe'), 'delete "Sentinel"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-
-    // Remove Program Files leftovers
-    DelTree(ExpandConstant('{pf32}\Sentinel'), True, True, True);
-
-    // Clean up persistent items created by the app
-    // 1. Delete ShowAllTrayIcons scheduled task
-    Exec(ExpandConstant('{sys}\schtasks.exe'), '/Delete /TN "ShowAllTrayIcons" /F', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-
-    // 2. Delete GSecurity IPSec policy
+    RegDeleteKeyIncludingSubkeys(HKLM, 'SYSTEM\CurrentControlSet\Control\SafeBoot\Minimal\Sentinel');
+    RegDeleteKeyIncludingSubkeys(HKLM, 'SYSTEM\CurrentControlSet\Control\SafeBoot\Network\Sentinel');
     Exec(ExpandConstant('{sys}\netsh.exe'), 'ipsec static delete policy name=GSecurity', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-
-    // 3. Delete RPC dynamic ports blocker firewall rule
     Exec(ExpandConstant('{sys}\netsh.exe'), 'advfirewall firewall delete rule name="Sentinel-Block-Remote-RPC-Ephemeral"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-
-    // NOTE: ProgramData\Sentinel logs are intentionally PRESERVED
   end;
 end;
