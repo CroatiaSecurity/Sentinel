@@ -485,6 +485,9 @@ namespace Sentinel.Core
             if (_disposed)
                 return;
 
+            // Hold both locks so in-flight event/audit writers finish before we tear down streams.
+            // Releasing _auditSemaphore without WaitAsync caused SemaphoreFullException (max=1)
+            // and cascaded into ~100 xUnit Dispose failures on CI.
             try
             {
                 await _semaphore.WaitAsync();
@@ -494,8 +497,16 @@ namespace Sentinel.Core
                 return;
             }
 
+            var auditHeld = false;
             try
             {
+                try
+                {
+                    await _auditSemaphore.WaitAsync();
+                    auditHeld = true;
+                }
+                catch (ObjectDisposedException) { }
+
                 _disposed = true;
                 if (_writer != null)
                 {
@@ -507,7 +518,6 @@ namespace Sentinel.Core
                     await _fileStream.DisposeAsync();
                     _fileStream = null;
                 }
-                // Dispose audit log streams
                 if (_auditWriter != null)
                 {
                     await _auditWriter.DisposeAsync();
@@ -521,10 +531,18 @@ namespace Sentinel.Core
             }
             finally
             {
-                try { _semaphore.Release(); } catch (ObjectDisposedException) { }
-                _semaphore.Dispose();
-                try { _auditSemaphore.Release(); } catch (ObjectDisposedException) { }
-                _auditSemaphore.Dispose();
+                if (auditHeld)
+                {
+                    try { _auditSemaphore.Release(); }
+                    catch (ObjectDisposedException) { }
+                    catch (SemaphoreFullException) { }
+                }
+                try { _auditSemaphore.Dispose(); } catch (ObjectDisposedException) { }
+
+                try { _semaphore.Release(); }
+                catch (ObjectDisposedException) { }
+                catch (SemaphoreFullException) { }
+                try { _semaphore.Dispose(); } catch (ObjectDisposedException) { }
             }
             GC.SuppressFinalize(this);
         }
