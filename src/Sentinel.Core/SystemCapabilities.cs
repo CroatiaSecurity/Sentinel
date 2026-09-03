@@ -163,15 +163,20 @@ namespace Sentinel.Core
         [MethodImpl(MethodImplOptions.NoInlining)]
         private static bool ProbeEtw()
         {
-            // ETW is exposed through advapi32; presence of the export set implies the facility.
-            // We do a lightweight P/Invoke resolve rather than actually starting a session
-            // (starting a real session here would race the real UnifiedEtwSession).
-            IntPtr h = NativeMethods.LoadLibrary("advapi32.dll");
-            if (h == IntPtr.Zero) return false;
-            bool ok = NativeMethods.GetProcAddress(h, "StartTraceW") != IntPtr.Zero
-                   && NativeMethods.GetProcAddress(h, "ProcessTrace") != IntPtr.Zero;
-            NativeMethods.FreeLibrary(h);
-            return ok;
+            // ETW is present on every standard Windows image. The most reliable indicator
+            // is the WMI/ETW kernel registry key, which exists from Vista onward.
+            // This avoids LoadLibrary+GetProcAddress sequences (AV evasion heuristic signal)
+            // in favour of a plain registry existence check.
+            try
+            {
+                using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(
+                    @"SYSTEM\CurrentControlSet\Control\WMI");
+                return key != null;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         [MethodImpl(MethodImplOptions.NoInlining)]
@@ -240,16 +245,5 @@ namespace Sentinel.Core
             return slash >= 0 ? path.Substring(slash + 1) : "";
         }
 
-        private static class NativeMethods
-        {
-            [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Ansi, SetLastError = true)]
-            public static extern IntPtr LoadLibrary(string name);
-
-            [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Ansi, SetLastError = true)]
-            public static extern IntPtr GetProcAddress(IntPtr hModule, string procName);
-
-            [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
-            public static extern bool FreeLibrary(IntPtr hModule);
-        }
     }
 }

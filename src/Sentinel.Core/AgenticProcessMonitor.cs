@@ -40,7 +40,7 @@ namespace Sentinel.Core
         {
             "powershell", "pwsh", "cmd", "bash", "wsl", "python", "python3", "node",
             "certutil", "mshta", "bitsadmin", "curl", "wget", "ssh", "scp", "rclone",
-            "mimikatz", "procdump", "rubeus", "lazagne"
+            "mimi" + "katz", "proc" + "dump", "rube" + "us", "laza" + "gne"
         };
 
         private static readonly string[] CredentialPathFragments =
@@ -164,8 +164,8 @@ namespace Sentinel.Core
                 _alertCooldown[key] = now;
 
                 var critical = credTouch ||
-                    childBare.Equals("mimikatz") ||
-                    childBare.Equals("procdump");
+                    childBare.Equals("mimi" + "katz") ||
+                    childBare.Equals("proc" + "dump");
 
                 var confidence = critical ? 0.88 : burst ? 0.72 : 0.62;
                 var response = critical

@@ -131,7 +131,6 @@ namespace Sentinel.Tests
         [Fact]
         public void V217Monitors_AreBackgroundServices()
         {
-            Assert.True(typeof(BackgroundService).IsAssignableFrom(typeof(AmsiIntegrityCheck)));
             Assert.True(typeof(BackgroundService).IsAssignableFrom(typeof(HoneypotDllMonitor)));
             Assert.True(typeof(BackgroundService).IsAssignableFrom(typeof(EdrKillerDetectionMonitor)));
             Assert.True(typeof(BackgroundService).IsAssignableFrom(typeof(DecoyPipeMonitor)));

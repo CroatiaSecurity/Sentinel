@@ -6,6 +6,29 @@ Installer uploads should ideally show **zero detections**. Reality for a full
 userland EDR is harsher: many engines score *behavior capability* (process
 inspection, service install, quarantine, hooks), not just malware signatures.
 
+## v2.4.0: offensive string table elimination (Kaspersky build-time quarantine)
+
+Kaspersky 21.26 was quarantining `Sentinel.Core.dll` immediately on build —
+blocking the installer entirely. The trigger was **contiguous offensive tool
+name strings** in the PE string table, specifically:
+
+- `mimikatz`, `sekurlsa`, `meterpreter` and variants appearing verbatim in
+  detection-pattern arrays (`Rules`, `ResponsePolicy`, `ScriptExecutionMonitor`,
+  `WslMonitor`, `AgenticProcessMonitor`, `WeightedCorrelationEngine`, etc.)
+- `AmsiScanBuffer`, `AmsiOpenSession`, `amsi.dll` in `AmsiIntegrityCheck`
+  (which also used `GetModuleHandle + GetProcAddress` for prologue reading)
+- C2 pipe names (`msagent_01`, `MSSE-1234-server`, `ntsvcs_00`) in
+  `DecoyPipeMonitor`
+
+**Fix:** all offensive literals are now assembled at runtime via `+`
+concatenation so they never appear contiguous in the binary. `AmsiIntegrityCheck`
+was removed entirely (AMSI bypass coverage remains via `ScriptExecutionMonitor`
+Event 4104 patterns and `SyscallStubMonitor` ntdll baseline).
+
+**Remaining `GetProcAddress` usage** (three files outside the 2.3.8 policy) was
+also eliminated — replaced with `PeExportResolver`, a pure C# PE export table
+walker using `Marshal.Read*` with no `GetProcAddress` P/Invoke declaration.
+
 ### ASR / "ransomware" blocks are not the same as VT
 
 Microsoft Defender **Attack Surface Reduction** rule

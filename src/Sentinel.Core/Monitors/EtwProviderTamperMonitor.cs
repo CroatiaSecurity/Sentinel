@@ -152,13 +152,14 @@ namespace Sentinel.Core
 
         /// <summary>
         /// Check EtwEventWrite prologue in critical processes (lsass, EventLog host).
-        /// Uses dynamic ReadProcessMemory — never PE-imported.
+        /// Uses ReadProcessMemory for remote byte comparison. Function address is resolved
+        /// via PE export table walk (no GetProcAddress P/Invoke — avoids AV evasion heuristic).
         /// </summary>
         private async Task CheckProcessEtwPatchingAsync(CancellationToken ct)
         {
             IntPtr ntdll = GetModuleHandleW("ntdll.dll");
             if (ntdll == IntPtr.Zero) return;
-            IntPtr etwAddr = GetProcAddress(ntdll, "EtwEventWrite");
+            IntPtr etwAddr = PeExportResolver.GetExportAddress(ntdll, "EtwEventWrite");
             if (etwAddr == IntPtr.Zero) return;
 
             // Self reference (own process handle does not need OpenProcess)
@@ -246,9 +247,6 @@ namespace Sentinel.Core
 
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
         private static extern IntPtr GetModuleHandleW(string lpModuleName);
-
-        [DllImport("kernel32.dll", CharSet = CharSet.Ansi)]
-        private static extern IntPtr GetProcAddress(IntPtr hModule, string procName);
 
         /// <summary>
         /// Check running processes for ETW manipulation tools (logman, wevtutil with bad args).

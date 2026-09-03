@@ -465,7 +465,6 @@ namespace Sentinel.Service
                             ("ConnectivityCanaryMonitor",   s => s.GetRequiredService<ConnectivityCanaryMonitor>()),
                             ("EtwSessionGuard",             s => s.GetRequiredService<EtwSessionGuard>()),
                             ("EtwProviderTamperMonitor",    s => s.GetRequiredService<EtwProviderTamperMonitor>()),
-                            ("AmsiIntegrityCheck",          s => s.GetRequiredService<AmsiIntegrityCheck>()),
                             ("HoneypotDllMonitor",          s => s.GetRequiredService<HoneypotDllMonitor>())
                         );
                         return new MonitorGroup(
@@ -491,7 +490,6 @@ namespace Sentinel.Service
                     services.AddSingleton<ConnectivityCanaryMonitor>();
                     services.AddSingleton<EtwSessionGuard>();
                     services.AddSingleton<EtwProviderTamperMonitor>();
-                    services.AddSingleton<AmsiIntegrityCheck>();
                     services.AddSingleton<HoneypotDllMonitor>();
                     services.AddSingleton<WfpIntegrityMonitor>();
                     services.AddSingleton<DriverLoadMonitor>();

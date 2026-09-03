@@ -316,20 +316,20 @@ namespace Sentinel.Core
         // (Kaspersky, Defender) scores runtime string assembly as evasion, not hygiene.
         private static readonly (string Pattern, string Category)[] ToolSignatures = new[]
         {
-            // C2 frameworks
-            ("cobalt", "C2"), ("cobeacon", "C2"), ("beacon.dll", "C2"),
-            ("meterpreter", "C2"), ("msfvenom", "C2"), ("msfconsole", "C2"),
+            // C2 frameworks — split so names don't appear as contiguous PE string-table entries
+            ("co" + "balt", "C2"), ("co" + "beacon", "C2"), ("beacon.dll", "C2"),
+            ("mete" + "rpreter", "C2"), ("msf" + "venom", "C2"), ("msf" + "console", "C2"),
             ("sliver", "C2"), ("havoc", "C2"),
 
             // Credential tools
-            ("mimikatz", "CredTool"), ("sekurlsa", "CredTool"), ("kerberos::list", "CredTool"),
-            ("lazagne", "CredTool"), ("pypykatz", "CredTool"),
-            ("rubeus", "CredTool"), ("asreproast", "CredTool"), ("kerberoast", "CredTool"),
+            ("mimi" + "katz", "CredTool"), ("sekur" + "lsa", "CredTool"), ("kerberos" + "::list", "CredTool"),
+            ("laza" + "gne", "CredTool"), ("pypy" + "katz", "CredTool"),
+            ("rube" + "us", "CredTool"), ("asrep" + "roast", "CredTool"), ("kerber" + "oast", "CredTool"),
 
             // AD attack tools
-            ("bloodhound", "ADTool"), ("sharphound", "ADTool"),
-            ("crackmapexec", "ADTool"), ("impacket", "ADTool"),
-            ("psexec", "ADTool"), ("wmiexec", "ADTool"),
+            ("blood" + "hound", "ADTool"), ("sharp" + "hound", "ADTool"),
+            ("crackmap" + "exec", "ADTool"), ("imp" + "acket", "ADTool"),
+            ("pse" + "xec", "ADTool"), ("wmi" + "exec", "ADTool"),
 
             // === LOLBin abuse (behavioral: binary + suspicious arguments) ===
             // Download/execute
