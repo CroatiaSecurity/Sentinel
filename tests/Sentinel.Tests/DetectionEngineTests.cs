@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -55,6 +56,19 @@ namespace Sentinel.Tests
             using var fs = new FileStream(logPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
             using var reader = new StreamReader(fs, Encoding.UTF8);
             return reader.ReadToEnd();
+        }
+
+        private async Task<string> WaitForLogAsync(params string[] needles)
+        {
+            string log = string.Empty;
+            for (int i = 0; i < 40; i++)
+            {
+                await Task.Delay(100);
+                log = ReadLog();
+                if (needles.All(n => log.Contains(n)))
+                    return log;
+            }
+            return log;
         }
 
         private DetectionEngine CreateEngine(IEnumerable<IDetectionRule> rules)
@@ -300,9 +314,8 @@ namespace Sentinel.Tests
                     }
                 };
                 engine.SubmitTelemetry(context2);
-                await Task.Delay(500);
 
-                var log = ReadLog();
+                var log = await WaitForLogAsync("LsassAccessRule", "RansomwareDetectionRule");
                 Assert.Contains("LsassAccessRule", log);
                 Assert.Contains("RansomwareDetectionRule", log);
             }
