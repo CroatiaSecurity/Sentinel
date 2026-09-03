@@ -31,6 +31,9 @@ Write-Host "Stamped project versions to $Version" -ForegroundColor Yellow
 $SetupScript = Join-Path $PSScriptRoot "setup.iss"
 $issContent = [System.IO.File]::ReadAllText($SetupScript)
 $issContent = $issContent -replace 'AppVersion=.*', "AppVersion=$Version"
+$issContent = $issContent -replace 'VersionInfoVersion=.*', "VersionInfoVersion=$Version.0"
+$issContent = $issContent -replace 'VersionInfoProductVersion=.*', "VersionInfoProductVersion=$Version.0"
+$issContent = $issContent -replace 'VersionInfoOriginalFileName=.*', "VersionInfoOriginalFileName=SentinelSetup-$Version.exe"
 $issContent = $issContent -replace 'OutputBaseFilename=SentinelSetup-.*', "OutputBaseFilename=SentinelSetup-$Version"
 [System.IO.File]::WriteAllText($SetupScript, $issContent)
 

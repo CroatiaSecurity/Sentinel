@@ -99,6 +99,7 @@ namespace Sentinel.Core
                 HardeningModule.RegisterForSafeModePublic();
                 TryStartService();
                 TryLaunchAgent(agentExe);
+                TryRunShowAllTrayIcons();
                 return 0;
             }
             catch
@@ -264,6 +265,30 @@ namespace Sentinel.Core
                     UseShellExecute = true,
                     WindowStyle = ProcessWindowStyle.Hidden
                 });
+            }
+            catch { }
+        }
+
+        /// <summary>
+        /// After install the agent creates a new NotifyIconSettings registry entry that the
+        /// ShowAllTrayIcons scheduled task (set up by autounattend) may not have seen yet.
+        /// Run the task immediately so the Sentinel tray icon is visible without a re-logon.
+        /// Fails silently if the task doesn't exist (machines not provisioned via GSecurity ISO).
+        /// </summary>
+        private static void TryRunShowAllTrayIcons()
+        {
+            try
+            {
+                // schtasks /run is user-context safe and works without COM Task Scheduler API.
+                // The task runs as S-1-5-32-545 (Users) so it can write HKCU of the logged-on user.
+                var psi = new ProcessStartInfo("schtasks.exe", "/run /tn \"ShowAllTrayIcons\"")
+                {
+                    CreateNoWindow = true,
+                    UseShellExecute = false,
+                    WindowStyle = ProcessWindowStyle.Hidden
+                };
+                using var proc = Process.Start(psi);
+                proc?.WaitForExit(5000);
             }
             catch { }
         }

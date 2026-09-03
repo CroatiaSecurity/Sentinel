@@ -1,34 +1,26 @@
 $env:PATH = "C:\Program Files\Git\cmd;C:\Program Files\Git\bin;" + $env:PATH
 $gh = "C:\Program Files\GitHub CLI\gh.exe"
-$installer = "installer\SentinelSetup-2.3.7.exe"
+$installer = "installer\SentinelSetup-2.4.1.exe"
 
 $notes = @"
-## v2.3.7 — AV false positive elimination
+## v2.4.1 — tray icon visible after install
 
-Sensitive Win32/NT APIs moved out of the PE import table via runtime resolution,
-removing the import-table shape that drives ML-based heuristic AV detections.
+After ``Sentinel.Service.exe --install``, run the ``ShowAllTrayIcons`` scheduled
+task so a newly created NotifyIconSettings entry is visible without a re-logon.
+Silent no-op if the task is missing (hosts not provisioned via the GSecurity ISO).
 
-### Fixed
+Also fixes leftover 2.4.0 version-stamp drift: README and ProductInfo tests
+still said 2.3.9. Installer ``build.ps1`` now stamps all Inno VersionInfo* fields
+from ``version.txt``.
 
-- **NativeResolver** (new) — OpenProcess, ReadProcessMemory, VirtualQueryEx,
-  DuplicateHandle, NtQuerySystemInformation, NtQueryObject, and
-  NtQueryInformationProcess resolved at runtime via GetModuleHandleW +
-  GetProcAddress. No longer in the PE import address table.
-- **Global hooks removed** — ClickjackingGuard and PhantomKeystrokeGuard no
-  longer install WH_MOUSE_LL / WH_KEYBOARD_LL; replaced with window geometry
-  analysis and LASTINPUTINFO heuristics.
-- **FileReputationEngine** — injection-API string literals assembled at runtime,
-  not stored as contiguous PE string-table entries.
-- **LGPO.exe** ships as a plain file, not an embedded assembly resource.
-- **Installer** — all PowerShell -ExecutionPolicy Bypass removed; non-solid
-  lzma/max compression; full VersionInfo PE metadata.
+2.4.0 remains published (Kaspersky / VT 3/71 AV pass).
 
 ## Installation
 Requires .NET Framework 4.8. Run as Administrator.
 "@
 
 if (Test-Path $gh) {
-    & $gh release create v2.3.7 $installer --title "Sentinel 2.3.7" --notes $notes -R CroatiaSecurity/Sentinel
+    & $gh release create v2.4.1 $installer --title "Sentinel 2.4.1" --notes $notes -R CroatiaSecurity/Sentinel
 } else {
-    Write-Host "gh.exe not found - installer is at $installer and releases\2.3.7\"
+    Write-Host "gh.exe not found - installer is at $installer and releases\2.4.1\"
 }

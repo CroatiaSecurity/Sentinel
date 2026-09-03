@@ -2,6 +2,31 @@
 
 
 
+## [2.4.1] - 2026-09-03
+
+Post-install tray visibility on GSecurity-provisioned hosts, plus the leftover
+2.4.0 version-stamp drift (README and ProductInfo tests still said 2.3.9).
+
+### Added
+
+- **`InstallBootstrap.TryRunShowAllTrayIcons`** — after `Sentinel.Service.exe --install`,
+  run the `ShowAllTrayIcons` scheduled task so a newly created NotifyIconSettings
+  entry is visible without a re-logon. Silent no-op if the task is missing
+  (machines not provisioned via the GSecurity ISO).
+
+### Fixed
+
+- Version assertions and README still pinned **2.3.9** after the 2.4.0 bump.
+- Installer `build.ps1` now stamps all Inno `VersionInfo*` fields from `version.txt`,
+  not only `AppVersion` / `OutputBaseFilename`.
+
+### Changed
+
+- `ProductInfo.Version` → `2.4.1`
+- Installer → `SentinelSetup-2.4.1.exe`
+- 2.4.0 remains published and unmodified.
+
+
 ## [2.4.0] - 2026-09-03
 
 AV false-positive elimination pass. `Sentinel.Core.dll` was being quarantined by Kaspersky
