@@ -177,7 +177,7 @@ namespace Sentinel.Core
             return (0, "unknown", livePath ?? "");
         }
 
-        // NtQueryInformationProcess resolved dynamically via NativeResolver (no PE import bait).
+        // NtQueryInformationProcess via NativeResolver (plain DllImport).
         // Reuses PROCESS_BASIC_INFORMATION from ParentPidSpoofDetector.
 
         private static int GetParentProcessId(Process process)

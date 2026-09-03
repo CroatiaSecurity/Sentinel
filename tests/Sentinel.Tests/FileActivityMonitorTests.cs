@@ -47,7 +47,13 @@ namespace Sentinel.Tests
         public void IsTrustedSystemWriter_UntrustedProcess_ReturnsFalse()
         {
             using var monitor = CreateMonitor(out _);
-            Assert.False(monitor.IsTrustedSystemWriter(9999, "malware.exe", "dummy.txt"));
+            // Use a PID that cannot exist and a name that does not substring-match
+            // trusted writers (e.g. "services"/"msiexec"). PID 9999 can be a live
+            // Microsoft-signed process on GitHub-hosted runners, which made this flaky.
+            Assert.False(monitor.IsTrustedSystemWriter(
+                int.MaxValue - 13,
+                "totally-evil-dropper.exe",
+                @"C:\Temp\sentinel_fp_untrusted_writer_test.dll"));
         }
 
         [Fact]

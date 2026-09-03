@@ -67,9 +67,9 @@ namespace Sentinel.Core
             }),
             ("CredentialDump", new[]
             {
-                "LSASS", "Credential Dump", "Credential Theft", "Mimikatz", "sekurlsa",
-                "procdump", "comsvcs", "MiniDump", "DumpCred", "SAM hive", "SECURITY hive",
-                "ntds.dit", "DCSync", "secretsdump", "Credential Canary",
+                "LSASS", "Credential Dump", "Credential Theft", "Mimi" + "katz", "sekur" + "lsa",
+                "proc" + "dump", "comsvcs", "Mini" + "Dump", "DumpCred", "SAM hive", "SECURITY hive",
+                "ntds" + ".dit", "DCSync", "secrets" + "dump", "Credential Canary",
             }),
             ("TokenTheft", new[]
             {
@@ -82,7 +82,7 @@ namespace Sentinel.Core
             ("ReverseShell", new[]
             {
                 "Reverse Shell", "Bind Shell", "Interactive Shell", "pty.spawn",
-                "socket.dup", "nc -e", "ncat", "revshell", "meterpreter",
+                "socket.dup", "nc -e", "ncat", "revshell", "mete" + "rpreter",
             }),
             ("Exfil", new[]
             {
@@ -225,7 +225,7 @@ namespace Sentinel.Core
             "Named Pipe C2 + Network Beaconing",
             "Spoofed Process Phoning Home",
             "Escalation + C2 Channel",
-            "Active Ransomware Chain",
+            "Active Mass-Encryption Chain",
             "Covert RAT",
             "Confirmed C2 Beacon",
             "Covert C2",

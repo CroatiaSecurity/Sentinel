@@ -45,7 +45,7 @@ namespace Sentinel.Tests
 
             // Assert
             Assert.NotNull(composite);
-            Assert.Equal("Active Ransomware Chain", composite!.RuleName);
+            Assert.Equal("Active Mass-Encryption Chain", composite!.RuleName);
             Assert.Equal(0.99, composite.Confidence);
             Assert.Equal(1234, composite.ProcessId);
         }

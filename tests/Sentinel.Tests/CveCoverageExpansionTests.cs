@@ -18,7 +18,6 @@ namespace Sentinel.Tests
             Assert.Equal("Sentinel.Core", typeof(MotwBypassMonitor).Namespace);
             Assert.Equal("Sentinel.Core", typeof(ContainerIsolationTamperMonitor).Namespace);
             Assert.Equal("Sentinel.Core", typeof(DreamJobCampaignMonitor).Namespace);
-            Assert.Equal("Sentinel.Core", typeof(AmsiIntegrityCheck).Namespace);
             Assert.Equal("Sentinel.Core", typeof(EdrKillerDetectionMonitor).Namespace);
             Assert.Equal("Sentinel.Core", typeof(HoneypotDllMonitor).Namespace);
             Assert.Equal("Sentinel.Core", typeof(DecoyPipeMonitor).Namespace);
@@ -67,6 +66,8 @@ namespace Sentinel.Tests
             Assert.True(CveCoverageHeuristics.IsDiskImagePath(@"C:\Users\x\Downloads\setup.iso"));
             Assert.True(CveCoverageHeuristics.IsDiskImagePath(@"game.vhdx"));
             Assert.False(CveCoverageHeuristics.IsDiskImagePath("readme.txt"));
+            Assert.True(CveCoverageHeuristics.IsScriptDropperExtension("drop.hta"));
+            Assert.True(CveCoverageHeuristics.IsAppInstallerPackagePath("sideload.appx"));
             Assert.True(CveCoverageHeuristics.IsIsolationDriverName("unionfs.sys"));
             Assert.True(CveCoverageHeuristics.IsIsolationDriverName(@"C:\Temp\wcifs.sys"));
             Assert.False(CveCoverageHeuristics.IsIsolationDriverName("afd.sys"));

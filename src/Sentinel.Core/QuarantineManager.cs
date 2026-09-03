@@ -13,7 +13,11 @@ namespace Sentinel.Core
     public class QuarantineManager
     {
         private readonly string _quarantineDir = null!;
-        private static readonly Regex MetadataRegex = new(@"^q_([a-fA-F0-9]+)_([a-zA-Z0-9_\-\s\.]+)$", RegexOptions.Compiled);
+        // Optional .senq suffix marks Sentinel quarantine vault blobs (not in-place ransomware).
+        private static readonly Regex MetadataRegex = new(@"^q_([a-fA-F0-9]+)_([a-zA-Z0-9_\-\s\.]+?)(?:\.senq)?$", RegexOptions.Compiled);
+
+        /// <summary>ASCII magic + version distinguishing EDR vault blobs from ransomware payloads.</summary>
+        private static readonly byte[] VaultMagic = { (byte)'S', (byte)'E', (byte)'N', (byte)'Q', 1, 0, 0, 0 };
 
         /// <summary>v1.8.1 RT-NEW-5: refuse multi-GB in-memory quarantine (OOM / service death).</summary>
         public const long MaxQuarantineFileBytes = 128L * 1024 * 1024;
@@ -191,22 +195,25 @@ namespace Sentinel.Core
                 try { SecureQuarantineDirectory(_quarantineDir); } catch { }
             }
 
-            // Encrypt using DPAPI (machine-scoped) for quarantine isolation
-            fileBytes = ProtectedData.Protect(fileBytes, null, DataProtectionScope.LocalMachine);
+            // Machine-scoped DPAPI vault blob with SENQ magic header (Alyac/MSIL.Ransom FP mitigation:
+            // structured EDR vault under ProgramData, not in-place user-file encryption).
+            var protectedBytes = ProtectedData.Protect(fileBytes, null, DataProtectionScope.LocalMachine);
+            var vaultBytes = new byte[VaultMagic.Length + protectedBytes.Length];
+            Buffer.BlockCopy(VaultMagic, 0, vaultBytes, 0, VaultMagic.Length);
+            Buffer.BlockCopy(protectedBytes, 0, vaultBytes, VaultMagic.Length, protectedBytes.Length);
 
             var fileName = Path.GetFileName(filePath);
             var safeName = Regex.Replace(fileName, @"[^a-zA-Z0-9_\-\.]", "_");
             var uniqueId = Guid.NewGuid().ToString("N");
 
-            // Format: q_<uniqueId>_<safeName>
-            // Also store original full path in a sibling .meta file for restore.
-            var quarantineFileName = $"q_{uniqueId}_{safeName}";
+            // Format: q_<uniqueId>_<safeName>.senq (+ sibling .meta for restore path)
+            var quarantineFileName = $"q_{uniqueId}_{safeName}.senq";
             var tempPath = Path.Combine(_quarantineDir, $"{quarantineFileName}.tmp");
             var finalPath = Path.Combine(_quarantineDir, quarantineFileName);
             var metaPath = Path.Combine(_quarantineDir, $"{quarantineFileName}.meta");
 
             // Write, move, and delete source atomically
-            await System.IO.FileNet48.WriteAllBytesAsync(tempPath, fileBytes);
+            await System.IO.FileNet48.WriteAllBytesAsync(tempPath, vaultBytes);
 
             if (File.Exists(finalPath))
             {
@@ -262,7 +269,7 @@ namespace Sentinel.Core
                     var meta = file + ".meta";
                     if (File.Exists(meta))
                     {
-                        try { original = File.ReadAllText(meta).Trim(); } catch { }
+                        try { original = TryReadMetaPath(meta); } catch { }
                     }
 
                     ParseQuarantineMetadata(name, out _, out var display);
@@ -292,9 +299,9 @@ namespace Sentinel.Core
                 var meta = quarantineFilePath + ".meta";
                 if (File.Exists(meta) && SecurityValidation.IsPathWithinDirectory(meta, QuarantineDirectory))
                 {
-                    destinationPath = (await System.IO.FileNet48.ReadAllTextAsync(meta)).Trim();
+                    destinationPath = TryReadMetaPath(meta);
                 }
-                else
+                if (string.IsNullOrEmpty(destinationPath))
                 {
                     ParseQuarantineMetadata(Path.GetFileName(quarantineFilePath), out _, out var originalName);
                     if (string.IsNullOrEmpty(originalName) || !SecurityValidation.IsSafeFilename(originalName))
@@ -316,8 +323,8 @@ namespace Sentinel.Core
 
             destinationPath = Path.GetFullPath(destinationPath);
 
-            var encrypted = await FileNet48.ReadAllBytesAsync(quarantineFilePath);
-            var plain = ProtectedData.Unprotect(encrypted, null, DataProtectionScope.LocalMachine);
+            var vault = await FileNet48.ReadAllBytesAsync(quarantineFilePath);
+            var plain = OpenVaultBlob(vault);
 
             var destDir = Path.GetDirectoryName(destinationPath);
             if (!string.IsNullOrEmpty(destDir) && !Directory.Exists(destDir))
@@ -349,6 +356,43 @@ namespace Sentinel.Core
                 return true;
             }
             return false;
+        }
+
+        /// <summary>Unwrap SENQ vault header (v2.3.8+) or legacy bare DPAPI blob.</summary>
+        private static byte[] OpenVaultBlob(byte[] vault)
+        {
+            if (vault.Length > VaultMagic.Length && HasVaultMagic(vault))
+            {
+                var protectedBytes = new byte[vault.Length - VaultMagic.Length];
+                Buffer.BlockCopy(vault, VaultMagic.Length, protectedBytes, 0, protectedBytes.Length);
+                return ProtectedData.Unprotect(protectedBytes, null, DataProtectionScope.LocalMachine);
+            }
+            return ProtectedData.Unprotect(vault, null, DataProtectionScope.LocalMachine);
+        }
+
+        private static bool HasVaultMagic(byte[] vault)
+        {
+            for (int i = 0; i < VaultMagic.Length; i++)
+            {
+                if (vault[i] != VaultMagic[i]) return false;
+            }
+            return true;
+        }
+
+        /// <summary>Read .meta path: DPAPI-protected (current) or plain UTF-8 (legacy).</summary>
+        private static string? TryReadMetaPath(string metaPath)
+        {
+            var raw = File.ReadAllBytes(metaPath);
+            if (raw.Length == 0) return null;
+            try
+            {
+                var plain = ProtectedData.Unprotect(raw, null, DataProtectionScope.LocalMachine);
+                return System.Text.Encoding.UTF8.GetString(plain).Trim();
+            }
+            catch (CryptographicException)
+            {
+                return System.Text.Encoding.UTF8.GetString(raw).Trim();
+            }
         }
     }
 }

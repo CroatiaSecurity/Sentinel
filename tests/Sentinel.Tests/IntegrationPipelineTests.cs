@@ -129,6 +129,20 @@ namespace Sentinel.Tests
             return reader.ReadToEnd();
         }
 
+        /// <summary>Poll until the log contains every needle (CI runners need more than a fixed 500ms).</summary>
+        private async Task<string> WaitForLogAsync(params string[] needles)
+        {
+            string log = string.Empty;
+            for (int i = 0; i < 40; i++)
+            {
+                await Task.Delay(100);
+                log = ReadLogFile();
+                if (needles.All(n => log.Contains(n)))
+                    return log;
+            }
+            return log;
+        }
+
         /// <summary>
         /// Verifies that an LSASS dump command flows through the full pipeline and produces
         /// a Tier1 detection with KillProcessTree response and Critical/Malicious verdict.
@@ -250,13 +264,12 @@ namespace Sentinel.Tests
             var fusedContext = _fusionEngine.FeedEvent(telemetry);
             _detectionEngine.SubmitTelemetry(fusedContext);
 
-            await Task.Delay(500);
-
-            var logContent = ReadLogFile();
+            var logContent = await WaitForLogAsync("ReverseShellRule", "\"ActionTaken\":\"LOG\"");
             // Should still be logged
             Assert.Contains("ReverseShellRule", logContent);
             // But response should be LOG, not KILL
             Assert.Contains("\"ActionTaken\":\"LOG\"", logContent);
+            Assert.DoesNotContain("\"ActionTaken\":\"KILL\"", logContent);
         }
 
         /// <summary>

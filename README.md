@@ -6,7 +6,7 @@ Sentinel is for **gamers, creators, and high-profile targets**. It hunts real at
 
 **You can browse and play.** Default mode must not break Chrome/Edge/Firefox, Microsoft Store, Xbox, Steam, Epic, DirectX/VC++ redists, Game Bar, or creator tools such as OBS Studio. Controllers, wheels, and HOTAS stay usable. Installing a game or a GPU/runtime redist is work, not an incident.
 
-**Current version: 2.3.7**
+**Current version: 2.3.9**
 
 ### Honest mission
 
@@ -72,6 +72,7 @@ Sentinel is effective against:
 - **Module identity unload (v2.2.5, permanent as of v2.2.7)** — every mapped PE is path+signer checked. Foreign modules are FreeLibrary-APC unloaded immediately (permanent Tier1). Hijack-name DLLs next to an exe — including a real Microsoft-signed `dbghelp.dll`, including in Steam game folders — are quarantined **on drop** so search order cannot bind them. Games are not memory-scanned (Denuvo). Chromium loading Edge DLLs is not injection. There is no config flag to disable this.
 - **Generic CVE-class coverage (v2.2.4)** — does not wait for a named campaign. Kernel-EoP loaders (AFD siblings, isolation FS `unionfs.sys`), MSI/winget EoP, MOTW-strip / ISO / ClickFix delivery, VS Code encoded shells, RDP-client LOLBin spawn. CISA KEV Windows OS entries match this workstation. Toast if the latest Patch Tuesday CU is missing. Still cannot patch the kernel. Tray/Settings **Open Quarantine** works under UAC (folder browse only; encrypted samples stay SYSTEM/Admin).
 
+- **Delivery-vector correlation (v2.3.9)** — MOTW / ISO / WPAD observe fuel used to emit `ProcessId=0`, which `BehavioralCorrelationEngine` dropped before composites. Host-wide delivery fuel now joins the 60s correlation window so `MOTW Bypass Execution Chain` / `WPAD Proxy Hijack Chain` can actually fire. Disk images with a browser MOTW stamp are skipped (game ISOs); missing MOTW on an ISO is observe fuel. CIRCL and MalwareBazaar HTTPS are SPKI-pinned like VirusTotal/report.
 - **Delivery-vector coverage (v2.3.5)** — the Mark-of-the-Web scan now flags script-class droppers (`.hta`/`.js`/`.vbs`/`.wsf`/`.ps1`/`.lnk`/`.chm`), not just PEs, when they land in Downloads/Desktop without a `Zone.Identifier` — the drive-by / XSS-forced-download shape. `WpadProxyMonitor` watches the WPAD / PAC auto-proxy config (the host-side landing point for the DHCP Option 252 vector): a rogue DHCP server or malware that sets `AutoConfigURL` can reroute every browser through a MITM proxy. Both are observe fuel; correlated with C2/exfil they promote to the `WPAD Proxy Hijack Chain` / `MOTW Bypass Execution Chain` composites. Neither reverts your proxy or touches a corporate PAC.
 
 - **GPU/Hardware acceleration exploitation (v2.1.5)** — Monitors browser GPU helper processes for sandbox escape indicators: child process spawning, outbound network connections, and post-exploitation DLL loads (AMSI, .NET CLR, credential vault). A GPU helper should never spawn processes or open external sockets — if it does, a WebGL/WebGPU exploit achieved sandbox escape and the tree gets killed. Also audits installed GPU driver versions (NVIDIA/AMD/Intel) against known-vulnerable CVE ranges and detects trojanized GPU drivers (.sys with GPU driver names in user-writable paths). Does NOT interfere with gaming, video playback, or GPU compute.

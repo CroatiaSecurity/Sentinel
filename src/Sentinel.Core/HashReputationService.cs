@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
@@ -19,28 +20,34 @@ namespace Sentinel.Core
         private readonly SecureCacheStore _cacheStore;
         private readonly ThreatReportingConfig _config;
         private readonly ILogger<HashReputationService> _logger;
+        private readonly HttpClient _circlClient;
+        private readonly HttpClient _malwareBazaarClient;
 
-        // SECURITY v1.4.4: Shared HttpClient instances to prevent socket exhaustion (TIME_WAIT).
-        // Previously created new HttpClient() per API call — under sustained load this exhausted
-        // ephemeral ports. Static instances are thread-safe and reuse connections via HTTP/1.1 keep-alive.
-        private static readonly System.Net.Http.HttpClient _circlClient = new()
+        // Default production clients: SPKI-pinned like VirusTotal/report (ProxyAuthHelper).
+        private static readonly HttpClient DefaultCirclClient = CreateDefaultCirclClient();
+        private static readonly HttpClient DefaultMalwareBazaarClient =
+            ProxyAuthHelper.CreatePinnedHttpClient(3, ProxyAuthHelper.MalwareBazaarPins);
+
+        private static HttpClient CreateDefaultCirclClient()
         {
-            Timeout = TimeSpan.FromSeconds(4),
-            DefaultRequestHeaders = { Accept = { new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json") } }
-        };
-        private static readonly System.Net.Http.HttpClient _malwareBazaarClient = new()
-        {
-            Timeout = TimeSpan.FromSeconds(3)
-        };
+            var client = ProxyAuthHelper.CreatePinnedHttpClient(4, ProxyAuthHelper.CirclHashlookupPins);
+            client.DefaultRequestHeaders.Accept.Add(
+                new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
+            return client;
+        }
 
         public HashReputationService(
             SecureCacheStore cacheStore,
             ThreatReportingConfig config,
-            ILogger<HashReputationService> logger)
+            ILogger<HashReputationService> logger,
+            HttpClient? circlClient = null,
+            HttpClient? malwareBazaarClient = null)
         {
             _cacheStore = cacheStore;
             _config = config;
             _logger = logger;
+            _circlClient = circlClient ?? DefaultCirclClient;
+            _malwareBazaarClient = malwareBazaarClient ?? DefaultMalwareBazaarClient;
         }
 
         public async Task<HashVerdict> GetVerdictAsync(string sha256, CancellationToken cancellationToken = default)
@@ -52,13 +59,11 @@ namespace Sentinel.Core
 
             sha256 = sha256.ToLowerInvariant();
 
-            // Tier 1: In-memory cache
             if (_memoryCache.TryGetValue(sha256, out var verdict))
             {
                 return verdict;
             }
 
-            // Tier 2: DPAPI cache store
             var cachedVal = _cacheStore.Load("reputation", sha256);
             if (cachedVal != null && Enum.TryParse<HashVerdict>(cachedVal, out var diskVerdict))
             {
@@ -66,11 +71,8 @@ namespace Sentinel.Core
                 return diskVerdict;
             }
 
-            // Tier 3: Live reputation lookup via MalwareBazaar API
             var liveVerdict = await FetchReputationFromApis(sha256, cancellationToken);
 
-            // HARDENING v1.3.0: Only cache definitive results (Safe or Unsafe).
-            // Unknown means the APIs failed — don't persist it or the file will never be re-checked.
             if (liveVerdict != HashVerdict.Unknown)
             {
                 _memoryCache[sha256] = liveVerdict;
@@ -80,9 +82,13 @@ namespace Sentinel.Core
             return liveVerdict;
         }
 
+        /// <summary>
+        /// Pin mismatch / TLS failure / transport error on a reputation lookup is Unknown, never Safe.
+        /// </summary>
+        internal static HashVerdict UnknownOnPinnedLookupFailure() => HashVerdict.Unknown;
+
         private async Task<HashVerdict> FetchReputationFromApis(string sha256, CancellationToken cancellationToken)
         {
-            // First check predefined hashes for local verification testing
             if (sha256 == "0000000000000000000000000000000000000000000000000000000000000000")
             {
                 return HashVerdict.Safe;
@@ -92,7 +98,6 @@ namespace Sentinel.Core
                 return HashVerdict.Unsafe;
             }
 
-            // Tier 1: CIRCL Hashlookup — fast-path for known-good files
             try
             {
                 var circlResponse = await _circlClient.GetAsync(
@@ -101,38 +106,31 @@ namespace Sentinel.Core
                 if (circlResponse.IsSuccessStatusCode)
                 {
                     var circlJson = await circlResponse.Content.ReadAsStringAsync();
-                    // Parse "hashlookup:trust" field — values above 60 indicate known-good software
                     var trustMatch = System.Text.RegularExpressions.Regex.Match(
-                        circlJson, @"""hashlookup:trust""\s*:\s*(\d+)");
+                        circlJson, @"\""hashlookup:trust\""\s*:\s*(\d+)");
                     if (trustMatch.Success && int.TryParse(trustMatch.Groups[1].Value, out int trustScore) && trustScore > 60)
                     {
                         return HashVerdict.Safe;
                     }
                 }
-                // 404 = not in CIRCL database, fall through to MalwareBazaar
             }
             catch (Exception ex)
             {
-                _logger.LogDebug(ex, "CIRCL hashlookup failed for hash {Hash}, falling through to MalwareBazaar", sha256);
+                // Includes HttpRequestException from SPKI pin mismatch. Never treat as Safe.
+                _logger.LogDebug(ex, "CIRCL hashlookup failed for hash {Hash} (pin/TLS/network) — not Safe", sha256);
             }
 
-            // Tier 2: MalwareBazaar — known-malicious check
             try
             {
-                if (!string.IsNullOrWhiteSpace(_config.MalwareBazaarApiKey))
-                {
-                    // Add API key per-request via message handler (can't set on shared client)
-                }
-
                 var values = new System.Collections.Generic.Dictionary<string, string>
                 {
                     { "query", "get_info" },
                     { "hash", sha256 }
                 };
 
-                var content = new System.Net.Http.FormUrlEncodedContent(values);
+                var content = new FormUrlEncodedContent(values);
 
-                using var request = new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Post, "https://mb-api.abuse.ch/api/v1/");
+                using var request = new HttpRequestMessage(HttpMethod.Post, "https://mb-api.abuse.ch/api/v1/");
                 request.Content = content;
                 if (!string.IsNullOrWhiteSpace(_config.MalwareBazaarApiKey))
                 {
@@ -150,21 +148,11 @@ namespace Sentinel.Core
                     }
                     if (responseString.Contains("\"query_status\": \"hash_not_found\"") || responseString.Contains("\"query_status\":\"hash_not_found\""))
                     {
-                        // SECURITY v1.4.4: Return Unknown, NOT Safe.
-                        // Previously returned Safe here — treating absence of evidence as evidence of safety.
-                        // Novel malware (zero-day payloads, custom implants) will ALWAYS be absent from
-                        // both CIRCL and MalwareBazaar. Marking them Safe caused permanent caching of a
-                        // false-safe verdict, fed trust scores to BeaconingDetector (+2 for Safe hash),
-                        // and made custom implants effectively invisible to reputation-based detection.
-                        //
-                        // Now: only CIRCL trust score > 60 can positively confirm a file as Safe.
-                        // Absent from both DBs = Unknown = will be re-checked on next scan cycle.
                         return HashVerdict.Unknown;
                     }
                 }
                 else
                 {
-                    // API returned error status — fail CLOSED, treat as suspicious
                     _logger.LogWarning("MalwareBazaar API returned HTTP {Status} for hash {Hash} — failing closed",
                         response.StatusCode, sha256);
                     return HashVerdict.Unknown;
@@ -172,18 +160,11 @@ namespace Sentinel.Core
             }
             catch (Exception ex)
             {
-                // HARDENING v1.3.0: Fail CLOSED on network/API failure.
-                // Previously returned Unknown which was treated as "not blocked" by FileVerdictScanner.
-                // Now we log a warning and return Unknown — but the caller (FileVerdictScanner) will
-                // NOT mark the file as Safe, and it will be re-checked on next scan cycle.
                 _logger.LogWarning(ex, "MalwareBazaar API call FAILED for hash {Hash} — failing closed (will retry)", sha256);
+                return UnknownOnPinnedLookupFailure();
             }
 
-            // HARDENING v1.3.0: If we reach here, BOTH APIs failed or returned non-definitive results.
-            // Do NOT cache this result — return Unknown without saving to disk cache so the file
-            // gets re-checked on the next scan cycle instead of being permanently marked "Unknown/Safe".
             return HashVerdict.Unknown;
         }
     }
 }
-

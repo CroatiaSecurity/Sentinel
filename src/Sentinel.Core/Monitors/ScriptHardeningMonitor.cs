@@ -847,8 +847,7 @@ namespace Sentinel.Core
                                     Reasoning = ".NET Assembly.Load was called from PowerShell to load a binary " +
                                                 "directly into memory. This bypasses AMSI scanning (AMSI only sees " +
                                                 "the Load call, not the loaded assembly's behavior) and avoids " +
-                                                "writing to disk. Used by Mimikatz, Rubeus, SharpHound, and virtually " +
-                                                "all modern post-exploitation tools for in-memory execution.",
+                                                "writing to disk. Used by post-exploitation tools for in-memory execution.",
                                     Confidence = 0.85,
                                     Tier = DetectionTier.Tier1Behavioral,
                                     AuthorizedResponse = ResponseAction.KillProcessTree,

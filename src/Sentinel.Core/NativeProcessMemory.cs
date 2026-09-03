@@ -43,10 +43,8 @@ namespace Sentinel.Core
             public uint Type;
         }
 
-        // ── P/Invoke declarations ────────────────────────────────────────────
-        // Only CloseHandle is statically imported (benign). All process-inspection
-        // APIs are resolved at runtime via NativeResolver to keep them out of the
-        // PE import table and avoid ML-based AV false positives.
+        // CloseHandle stays here; process-inspection APIs go through NativeResolver
+        // (plain [DllImport] — no GetProcAddress hiding; see NativeResolver remarks).
 
         [DllImport("kernel32.dll", SetLastError = true)]
         public static extern bool CloseHandle(IntPtr hObject);

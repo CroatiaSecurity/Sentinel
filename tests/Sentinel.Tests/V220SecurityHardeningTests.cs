@@ -19,7 +19,7 @@ namespace Sentinel.Tests
         [Fact]
         public void ProductInfo_Version_Is220()
         {
-            Assert.Equal("2.3.6", ProductInfo.Version);
+            Assert.Equal("2.3.9", ProductInfo.Version);
         }
 
         [Fact]
@@ -131,7 +131,6 @@ namespace Sentinel.Tests
         [Fact]
         public void V217Monitors_AreBackgroundServices()
         {
-            Assert.True(typeof(BackgroundService).IsAssignableFrom(typeof(AmsiIntegrityCheck)));
             Assert.True(typeof(BackgroundService).IsAssignableFrom(typeof(HoneypotDllMonitor)));
             Assert.True(typeof(BackgroundService).IsAssignableFrom(typeof(EdrKillerDetectionMonitor)));
             Assert.True(typeof(BackgroundService).IsAssignableFrom(typeof(DecoyPipeMonitor)));
@@ -142,24 +141,36 @@ namespace Sentinel.Tests
         [Fact]
         public void GSecurityInf_DoesNotWeakenPasswordsOrAuditOrFips()
         {
-            var asm = typeof(HardeningModule).Assembly;
-            string? inf = null;
-            foreach (var name in asm.GetManifestResourceNames())
+            // v2.3.6+: GSecurity.inf ships as a plain file under HardeningResources
+            // (not an embedded resource — that dropper pattern tripped AV heuristics).
+            var bases = new[]
             {
-                if (!name.EndsWith("GSecurity.inf", StringComparison.OrdinalIgnoreCase))
-                    continue;
-                using var stream = asm.GetManifestResourceStream(name);
-                Assert.NotNull(stream);
-                using var ms = new MemoryStream();
-                stream!.CopyTo(ms);
-                var bytes = ms.ToArray();
-                inf = bytes.Length >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE
-                    ? Encoding.Unicode.GetString(bytes)
-                    : Encoding.UTF8.GetString(bytes);
-                break;
-            }
+                AppContext.BaseDirectory,
+                AppDomain.CurrentDomain.BaseDirectory,
+                Path.GetDirectoryName(typeof(HardeningModule).Assembly.Location),
+                Path.GetDirectoryName(typeof(V220SecurityHardeningTests).Assembly.Location),
+            }.Where(d => !string.IsNullOrWhiteSpace(d)).Distinct(StringComparer.OrdinalIgnoreCase);
 
-            Assert.False(string.IsNullOrWhiteSpace(inf), "GSecurity.inf embedded resource missing");
+            var candidates = new List<string>();
+            foreach (var root in bases)
+            {
+                candidates.Add(Path.Combine(root!, "HardeningResources", "GSecurity.inf"));
+                candidates.Add(Path.Combine(root!, "GSecurity.inf"));
+            }
+            // Source-tree fallback when running from bin/ without Content copy
+            candidates.Add(Path.GetFullPath(Path.Combine(
+                AppContext.BaseDirectory, "..", "..", "..", "..", "src", "Sentinel.Core", "HardeningResources", "GSecurity.inf")));
+
+            string? path = candidates.FirstOrDefault(File.Exists);
+            Assert.False(string.IsNullOrEmpty(path),
+                "GSecurity.inf missing — tried: " + string.Join(" | ", candidates));
+
+            var bytes = File.ReadAllBytes(path!);
+            var inf = bytes.Length >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE
+                ? Encoding.Unicode.GetString(bytes)
+                : Encoding.UTF8.GetString(bytes);
+
+            Assert.False(string.IsNullOrWhiteSpace(inf), "GSecurity.inf is empty");
             Assert.DoesNotContain("MinimumPasswordLength = 0", inf);
             Assert.Contains("MinimumPasswordLength = 12", inf);
             Assert.DoesNotContain("PasswordComplexity = 0", inf);

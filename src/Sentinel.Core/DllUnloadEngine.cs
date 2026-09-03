@@ -496,19 +496,10 @@ namespace Sentinel.Core
                 if (File.Exists(dllPath))
                     await _quarantineManager.QuarantineFileAtomicAsync(dllPath, forceQuarantineSigned: true);
 
-                // Do not put a same-name stub back. Search order would bind the
-                // stub instead of System32. Re-drops are caught by FileActivityMonitor.
-                if (!IsSideloadTargetFileName(dllPath))
-                {
-                    try
-                    {
-                        if (!File.Exists(dllPath))
-                            await System.IO.FileNet48.WriteAllBytesAsync(dllPath, Array.Empty<byte>());
-                        File.SetAttributes(dllPath,
-                            FileAttributes.ReadOnly | FileAttributes.Hidden | FileAttributes.System);
-                    }
-                    catch { }
-                }
+                // No zero-byte Hidden|System stub after quarantine — that pattern scores as
+                // wiper/ransom agent behavior (Alyac MSIL.Ransom.Agent). Re-drops are caught
+                // by FileActivityMonitor; sideload names must not be re-planted either
+                // (search order would bind the stub instead of System32).
 
                 _logger.LogInformation(
                     "[DllUnloadEngine] Quarantined '{Dll}' (host {Name} PID {Pid})",
