@@ -119,7 +119,21 @@ namespace Sentinel.Core
                 return;
             }
             if (evt.EventId == ImageLoad)
+            {
                 HandleImageLoad(evt);
+                return;
+            }
+            if (evt.EventId == ProcessStop)
+                HandleProcessStop(evt);
+        }
+
+        private void HandleProcessStop(EtwRawEvent evt)
+        {
+            // Evict the dead PID from MappedModuleCache so its image ranges don't
+            // accumulate forever (PIDs are recycled; stale entries are misleading).
+            int pid = evt.ProcessId;
+            if (pid <= 4) return;
+            MappedModuleCache.Remove(pid);
         }
 
         private void HandleImageLoad(EtwRawEvent evt)

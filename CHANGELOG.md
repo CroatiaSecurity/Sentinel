@@ -2,6 +2,36 @@
 
 
 
+## [2.4.7] - 2026-09-05
+
+Two cache bugs introduced in v2.4.6.
+
+### Fixed
+
+- **`MappedModuleCache` PID leak** — `EtwEventDispatcher` now handles
+  `Kernel-Process ProcessStop` (event ID 2) and calls
+  `MappedModuleCache.Remove(pid)` immediately on process exit. Previously,
+  dead PID entries accumulated indefinitely; on busy machines with many
+  short-lived processes the dictionary grew without bound and stale ranges
+  were never evicted. New `MappedModuleCache.Remove()` helper added.
+
+- **`AuthenticodeCache` thundering-herd `Clear()`** — replaced the blunt
+  `AuthenticodeCache.Clear()` (which races under concurrent writes and
+  invalidates all warm entries at once) with a size-bounded LRU trim.
+  The cache now stores an insertion timestamp per entry. When the 20 000-
+  entry cap is hit, `TrimAuthenticodeCache()` acquires a `TryEnter` lock
+  (one trimmer at a time; other threads skip and continue), sorts entries
+  by insertion time, and evicts the oldest 2 000 (10 %). Prevents the
+  thundering herd of simultaneous `WinVerifyTrust` calls that would
+  otherwise re-map every PE at once — the exact hard-fault pattern the
+  2.4.x series was fixing.
+
+### Changed
+
+- `ProductInfo.Version` → `2.4.7`
+- Installer → `SentinelSetup-2.4.7.exe`
+
+
 ## [2.4.6] - 2026-09-05
 
 Revert the v2.4.5 WorkingSetGuard guess (image prefetch + 256 MB

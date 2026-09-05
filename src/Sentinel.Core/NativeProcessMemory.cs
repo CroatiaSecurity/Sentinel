@@ -170,5 +170,8 @@ namespace Sentinel.Core
             lock (list)
                 return new List<(ulong, ulong)>(list);
         }
+
+        /// <summary>Evict a PID on ProcessStop so dead entries don't accumulate.</summary>
+        public static void Remove(int pid) => Ranges.TryRemove(pid, out _);
     }
 }

@@ -426,15 +426,54 @@ namespace Sentinel.Core
 
         // WinVerifyTrust / catalog hash maps the PE. Uncached calls on the 5s
         // file-watcher and module scan were the remaining hard pagefaults after WS pin.
-        private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTime Write, long Length, bool Signed)> AuthenticodeCache =
+        //
+        // Tuple field meanings:
+        //   Write    — file LastWriteTimeUtc (cache invalidation key)
+        //   Length   — file Length           (cache invalidation key)
+        //   Signed   — WinVerifyTrust result
+        //   Cached   — wall-clock time this entry was inserted (for LRU trim)
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTime Write, long Length, bool Signed, DateTime Cached)> AuthenticodeCache =
             new(StringComparer.OrdinalIgnoreCase);
+
+        private const int AuthenticodeCacheMax = 20_000;
+        private const int AuthenticodeCacheTrim = 2_000; // evict oldest 10 % when cap is hit
 
         private static void CacheAuthenticode(string path, DateTime writeUtc, long length, bool signed)
         {
             if (string.IsNullOrEmpty(path) || length < 0) return;
-            AuthenticodeCache[path] = (writeUtc, length, signed);
-            if (AuthenticodeCache.Count > 20000)
-                AuthenticodeCache.Clear();
+            AuthenticodeCache[path] = (writeUtc, length, signed, DateTime.UtcNow);
+            if (AuthenticodeCache.Count > AuthenticodeCacheMax)
+                TrimAuthenticodeCache();
+        }
+
+        private static readonly object _authenticodeTrimLock = new();
+
+        private static void TrimAuthenticodeCache()
+        {
+            // Only one thread does the trim; others skip and let the next write retry.
+            if (!System.Threading.Monitor.TryEnter(_authenticodeTrimLock))
+                return;
+            try
+            {
+                // Re-check inside the lock — another thread may have already trimmed.
+                if (AuthenticodeCache.Count <= AuthenticodeCacheMax)
+                    return;
+
+                // Collect (path, insertedAt) pairs, sort oldest-first, remove the bottom 10 %.
+                var snapshot = new List<(string Path, DateTime Cached)>(AuthenticodeCache.Count);
+                foreach (var kv in AuthenticodeCache)
+                    snapshot.Add((kv.Key, kv.Value.Cached));
+
+                snapshot.Sort((a, b) => a.Cached.CompareTo(b.Cached));
+
+                int toRemove = Math.Max(AuthenticodeCacheTrim, snapshot.Count - AuthenticodeCacheMax);
+                for (int i = 0; i < toRemove && i < snapshot.Count; i++)
+                    AuthenticodeCache.TryRemove(snapshot[i].Path, out _);
+            }
+            finally
+            {
+                System.Threading.Monitor.Exit(_authenticodeTrimLock);
+            }
         }
 
         /// <summary>
