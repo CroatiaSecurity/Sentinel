@@ -51,6 +51,13 @@ namespace Sentinel.Service
     {
         public static async Task Main(string[] args)
         {
+            // Isolated hard-fault attribution — no host, no monitors, no response actions.
+            if (args.Length >= 1 && args[0].Equals("--pagefault-diag", StringComparison.OrdinalIgnoreCase))
+            {
+                Environment.ExitCode = PageFaultDiag.Run(args);
+                return;
+            }
+
             // v2.0.4: Handle --set-config before anything else (CLI config management)
             if (args.Length >= 2 && args[0].Equals("--set-config", StringComparison.OrdinalIgnoreCase))
             {

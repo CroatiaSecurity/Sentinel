@@ -2,6 +2,65 @@
 
 
 
+## [2.4.5] - 2026-09-05
+
+LatencyMon was attributing 1000+ hard pagefaults per few minutes to
+`Sentinel.Service` (PID working set ~1.6 GB). Isolated scan kernels
+(module enum, Hell's Gate RPM, Authenticode) produced **0** hard faults.
+The live service was being trimmed as a background process, then ETW
+callbacks faulted those pages back from disk.
+
+### Fixed
+
+- **Hard pagefaults / audio latency** — `WorkingSetGuard` raises process
+  memory priority to NORMAL, disables EcoQoS throttling, prefetches loaded
+  images, and pins a 256 MB minimum working set so Windows does not trim
+  the service first when a game or LatencyMon is foreground.
+- **Kernel-File ETW firehose** — only modules/scripts/installers/disk images
+  enter fusion (`SecurityFileScope`). Browser cache / `.tmp` no longer fill
+  500-event chains. Path extract capped at 520 chars.
+- **Kernel-Registry ETW** — keep PID hint (`WmiHostRegistryHint`); stop
+  stuffing path-less SetValue into fusion. `RegistryMonitor` still has paths.
+- **Fusion retention** 10 min → 2 min (scoring only uses the last 60 s).
+- **Acoustic WASAPI callback** — reuse sample buffers instead of allocating
+  every ~10 ms.
+
+### Added
+
+- `--pagefault-diag` on `Sentinel.Service.exe` — LatencyMon-equivalent
+  `HardFaultCount` attribution of the real scan kernels (no monitors, no kill).
+
+### Changed
+
+- `ProductInfo.Version` → `2.4.5`
+- Installer → `SentinelSetup-2.4.5.exe`
+
+
+## [2.4.4] - 2026-09-04
+
+Uninstall left `Sentinel.Service` and `Sentinel.Agent` running. Inno
+`CurUninstallStepChanged` only cleaned IPSec/firewall rules; process stop
+lived only on the install path.
+
+### Fixed
+
+- Call `--uninstall-cleanup` before file removal.
+- `taskkill /F` Service and Agent; sleep so handles release.
+- Remove SentinelAgent autorun registry key on uninstall.
+- Drop `[UninstallRun]` — uninstall sequence is stop → kill → cleanup.
+
+
+## [2.4.3] - 2026-09-04
+
+Hell's Gate false positive on V8/Chromium JIT. `SyscallStubMonitor` counted
+stubs across separate regions up to 4 MB.
+
+### Fixed
+
+- `MEM_PRIVATE` only, 64 KB region cap, 48-byte stub density, SSN range
+  `0x0001–0x01FF`. Each region evaluated independently.
+
+
 ## [2.4.2] - 2026-09-03
 
 Restore the working upgrade installer. v2.3.9 slim-down dropped `ResetInstallDirAcls`,

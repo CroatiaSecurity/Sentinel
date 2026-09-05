@@ -37,6 +37,8 @@ namespace Sentinel.Core
 
         private WasapiLoopbackCapture? _capture;
         private MMDevice? _device;
+        private float[] _scratchSamples = Array.Empty<float>();
+        private float[] _scratchMono = Array.Empty<float>();
         private bool _isMuted;
         private int _threatFrames;
         private int _safeFrames;
@@ -130,12 +132,16 @@ namespace Sentinel.Core
             var format = _capture.WaveFormat;
             int channels = format.Channels;
             int sampleCount = e.BytesRecorded / 4;
-            float[] samples = new float[sampleCount];
+            if (_scratchSamples.Length < sampleCount)
+                _scratchSamples = new float[sampleCount];
+            var samples = _scratchSamples;
             Buffer.BlockCopy(e.Buffer, 0, samples, 0, e.BytesRecorded);
 
             // Convert to mono for analysis
             int frameCount = sampleCount / channels;
-            float[] mono = new float[frameCount];
+            if (_scratchMono.Length < frameCount)
+                _scratchMono = new float[frameCount];
+            var mono = _scratchMono;
             for (int i = 0; i < frameCount; i++)
             {
                 float sum = 0;
@@ -144,8 +150,8 @@ namespace Sentinel.Core
                 mono[i] = sum / channels;
             }
 
-            // Analyze for threats
-            var threat = AnalyzeForThreats(mono, format.SampleRate);
+            // Analyze for threats (pass frameCount — scratch buffers may be larger)
+            var threat = AnalyzeForThreats(mono, frameCount, format.SampleRate);
 
             if (threat != null)
             {
@@ -213,25 +219,26 @@ namespace Sentinel.Core
             }
         }
 
-        private AcousticThreat? AnalyzeForThreats(float[] mono, int sampleRate)
+        private AcousticThreat? AnalyzeForThreats(float[] mono, int length, int sampleRate)
         {
+            if (length <= 0) return null;
             // 1. Check infrasound band (1-20Hz) — should NEVER be present at significant amplitude
-            float infrasoundPower = GoertzelBand(mono, sampleRate, InfrasoundLow, InfrasoundHigh, 10);
+            float infrasoundPower = GoertzelBand(mono, length, sampleRate, InfrasoundLow, InfrasoundHigh, 10);
             if (infrasoundPower > InfrasoundThreshold)
             {
                 // Check if it's the fear frequency specifically (18-19Hz)
-                float fearPower = GoertzelBand(mono, sampleRate, FearFrequencyLow, FearFrequencyHigh, 3);
+                float fearPower = GoertzelBand(mono, length, sampleRate, FearFrequencyLow, FearFrequencyHigh, 3);
                 if (fearPower > InfrasoundThreshold)
                 {
                     return new AcousticThreat { Type = "Fear Frequency", FrequencyHz = 18.5f, Amplitude = fearPower, Confidence = 0.90 };
                 }
 
                 // Check nausea band (6.5-8Hz)
-                float nauseaPower = GoertzelBand(mono, sampleRate, NauseaFrequencyLow, NauseaFrequencyHigh, 3);
+                float nauseaPower = GoertzelBand(mono, length, sampleRate, NauseaFrequencyLow, NauseaFrequencyHigh, 3);
                 if (nauseaPower > InfrasoundThreshold)
                 {
                     // Don't flag 7.83Hz at very low amplitude (could be Harmony app's Schumann)
-                    float schumannPower = GoertzelSingle(mono, sampleRate, 7.83f);
+                    float schumannPower = GoertzelSingle(mono, length, sampleRate, 7.83f);
                     if (schumannPower < 0.005f || nauseaPower > 0.05f) // Only flag if it's strong
                     {
                         return new AcousticThreat { Type = "Nausea Frequency", FrequencyHz = 7.25f, Amplitude = nauseaPower, Confidence = 0.85 };
@@ -248,7 +255,7 @@ namespace Sentinel.Core
             // 2. Check ultrasonic band (17-22kHz)
             if (sampleRate >= 44100) // Only check if sample rate can represent these frequencies
             {
-                float ultrasonicPower = GoertzelBand(mono, sampleRate, UltrasonicLow, UltrasonicHigh, 8);
+                float ultrasonicPower = GoertzelBand(mono, length, sampleRate, UltrasonicLow, UltrasonicHigh, 8);
                 if (ultrasonicPower > UltrasonicThreshold)
                 {
                     return new AcousticThreat { Type = "Ultrasonic Beacon", FrequencyHz = 19000f, Amplitude = ultrasonicPower, Confidence = 0.85 };
@@ -261,7 +268,7 @@ namespace Sentinel.Core
             foreach (float freq in suspiciousFreqs)
             {
                 if (IsHealingFrequency(freq)) continue;
-                float power = GoertzelSingle(mono, sampleRate, freq);
+                float power = GoertzelSingle(mono, length, sampleRate, freq);
                 if (power > NarrowBandThreshold)
                 {
                     return new AcousticThreat { Type = "Sustained Narrow-Band Tone", FrequencyHz = freq, Amplitude = power, Confidence = 0.70 };
@@ -370,9 +377,10 @@ namespace Sentinel.Core
 
         #region Goertzel Algorithm
 
-        private static float GoertzelSingle(float[] samples, int sampleRate, float targetFreq)
+        private static float GoertzelSingle(float[] samples, int length, int sampleRate, float targetFreq)
         {
-            int N = samples.Length;
+            int N = length;
+            if (N <= 0) return 0;
             float k = targetFreq * N / sampleRate;
             float w = 2 * MathF.PI * k / N;
             float coeff = 2 * MathF.Cos(w);
@@ -389,14 +397,14 @@ namespace Sentinel.Core
             return MathF.Sqrt(Math.Max(0, power));
         }
 
-        private static float GoertzelBand(float[] samples, int sampleRate, float lowHz, float highHz, int numPoints)
+        private static float GoertzelBand(float[] samples, int length, int sampleRate, float lowHz, float highHz, int numPoints)
         {
             float maxPower = 0;
             float step = (highHz - lowHz) / Math.Max(numPoints - 1, 1);
             for (int i = 0; i < numPoints; i++)
             {
                 float freq = lowHz + step * i;
-                float power = GoertzelSingle(samples, sampleRate, freq);
+                float power = GoertzelSingle(samples, length, sampleRate, freq);
                 maxPower = Math.Max(maxPower, power);
             }
             return maxPower;

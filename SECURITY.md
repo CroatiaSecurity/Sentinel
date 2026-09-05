@@ -4,7 +4,9 @@
 
 | Version | Supported |
 |---------|-----------|
-| 2.2.x   | Yes (current: 2.2.9) |
+| 2.4.x   | Yes (current: 2.4.5) |
+| 2.3.x   | Security fixes only |
+| 2.2.x   | Security fixes only |
 | 2.1.x   | Security fixes only |
 | 1.9.x   | Security fixes only |
 | 1.8.x   | Security fixes only |

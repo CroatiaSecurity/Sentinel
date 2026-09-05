@@ -200,6 +200,9 @@ namespace Sentinel.Core
             // For high-value events (NameCreate/NameDelete), the filename is in UserData.
             string filePath = TryExtractFilePath(evt);
             if (string.IsNullOrEmpty(filePath)) return;
+            // Kernel-File NameCreate of browser cache / .tmp is not correlation fuel.
+            // Storing it filled 500-event chains and paged the service (LatencyMon hard faults).
+            if (!SecurityFileScope.IsEtwFileEventRelevant(filePath)) return;
 
             var telemetry = new FileActivityTelemetry
             {
@@ -235,29 +238,9 @@ namespace Sentinel.Core
             }
 
             WmiHostRegistryHint.Record(pid, processName);
-
-            string opType = evt.EventId switch
-            {
-                RegSetValue => "SET_VALUE",
-                RegCreateKey => "CREATE_KEY",
-                RegDeleteKey => "DELETE_KEY",
-                RegDeleteValue => "DELETE_VALUE",
-                _ => "UNKNOWN"
-            };
-
-            // Key path extraction is complex (kernel registry events use key handles, not paths).
-            // For now, log the event with metadata and let existing RegistryMonitor correlate.
-            // This gives us the PID attribution that the current polling approach lacks.
-            var telemetry = new RegistryTelemetry
-            {
-                ProcessName = processName,
-                ProcessId = pid,
-                OperationType = opType,
-                Timestamp = evt.Timestamp
-            };
-
-            var context = _fusionEngine.FeedEvent(telemetry);
-            _detectionEngine.SubmitTelemetry(context);
+            // Kernel registry ETW has no key path here (handle-based). Feeding every
+            // SetValue on the machine into fusion was allocation-only noise — RegistryMonitor
+            // still correlates by path. Keep the PID hint; skip fusion/telemetry.
         }
 
         // ═══════════════════════════════════════════════════════════════
@@ -568,8 +551,9 @@ namespace Sentinel.Core
                 int remaining = maxBytes - offset;
                 if (remaining <= 0) return "";
 
-                // Read up to 4096 chars max
-                int maxChars = Math.Min(remaining / 2, 4096);
+                // Paths/DNS names: cap well under 4096 so a missed NUL cannot allocate 8 KB
+                // strings on every Kernel-File event.
+                int maxChars = Math.Min(remaining / 2, SecurityFileScope.MaxEtwPathChars);
                 var sb = new StringBuilder(maxChars);
 
                 for (int i = 0; i < maxChars; i++)

@@ -1,27 +1,25 @@
 $env:PATH = "C:\Program Files\Git\cmd;C:\Program Files\Git\bin;" + $env:PATH
 $gh = "C:\Program Files\GitHub CLI\gh.exe"
-$installer = "installer\SentinelSetup-2.4.2.exe"
+$installer = "installer\SentinelSetup-2.4.5.exe"
 
 $notes = @"
-## v2.4.2 — restore working upgrade installer
+## v2.4.5 — hard pagefault / LatencyMon fix
 
-v2.3.9 slim-down dropped ``ResetInstallDirAcls``, so a hardened install
-(Users Deny-Write on the install dir) fails Inno overwrite of ``unins000.exe``
-with **Access is denied**.
+LatencyMon showed 1000+ hard pagefaults on ``Sentinel.Service`` in a few
+minutes (working set ~1.6 GB). Isolated scan kernels were not the source.
 
-2.4.2 restores the v2.3.7 unlock: takeown/icacls on ``unins000.*``, grant
-Administrators full control, remove Users Deny, and taskkill leftover
-Service/Agent. ``--prepare-upgrade`` also unlocks natively for later upgrades.
+- Raise memory priority, prefetch images, pin a 256 MB minimum working set
+- Kernel-File ETW: only modules/scripts/installers/images enter fusion
+- Kernel-Registry ETW: PID hint only (no path-less fusion flood)
+- Fusion retention 10 min → 2 min
+- WASAPI callback reuses buffers
+- ``--pagefault-diag`` for LatencyMon-equivalent HardFaultCount attribution
 
-2.4.0 and 2.4.1 remain published.
-
-## Installation
 Requires .NET Framework 4.8. Run as Administrator.
-Cancel any stuck 2.4.1 Setup wizard first, then run this installer.
 "@
 
 if (Test-Path $gh) {
-    & $gh release create v2.4.2 $installer --title "Sentinel 2.4.2" --notes $notes -R CroatiaSecurity/Sentinel
+    & $gh release create v2.4.5 $installer --title "Sentinel 2.4.5" --notes $notes -R CroatiaSecurity/Sentinel
 } else {
-    Write-Host "gh.exe not found - installer is at $installer and releases\2.4.2\"
+    Write-Host "gh.exe not found - installer is at $installer and releases\2.4.5\"
 }
