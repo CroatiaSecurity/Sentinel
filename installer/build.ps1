@@ -2,6 +2,7 @@
 # Minimum framework-dependent installer for net48-windows.
 # Requires .NET Framework 4.8 on the target machine (installer offers download if missing).
 # Usage: .\build.ps1
+# Upgrade ACLs / stop / rename live in setup.iss (ResetInstallDirAcls + --prepare-upgrade).
 
 $ErrorActionPreference = "Stop"
 
@@ -37,13 +38,21 @@ $issContent = $issContent -replace 'VersionInfoOriginalFileName=.*', "VersionInf
 $issContent = $issContent -replace 'OutputBaseFilename=SentinelSetup-.*', "OutputBaseFilename=SentinelSetup-$Version"
 [System.IO.File]::WriteAllText($SetupScript, $issContent)
 
-# 1. Clean previous publish folder
+# 1. Clean previous publish folder + leftover Setup EXEs from older versions
 $PublishDir = Join-Path $PSScriptRoot "..\publish"
 $SrcDir = Join-Path $PSScriptRoot "..\src"
 Write-Host "Cleaning publish outputs..." -ForegroundColor Yellow
 if (Test-Path $PublishDir) {
     Remove-Item -Path $PublishDir -Recurse -Force -ErrorAction SilentlyContinue
 }
+Get-ChildItem $PSScriptRoot -Filter "SentinelSetup-*.exe" -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -ne "SentinelSetup-$Version.exe" } |
+    ForEach-Object {
+        Write-Host "Removing old installer $($_.Name)" -ForegroundColor Yellow
+        Remove-Item $_.FullName -Force
+    }
+Get-ChildItem $PSScriptRoot -Filter "*.old" -ErrorAction SilentlyContinue |
+    ForEach-Object { Remove-Item $_.FullName -Force }
 
 $Dotnet = "C:\Program Files\dotnet\dotnet.exe"
 if (-not (Test-Path $Dotnet)) { $Dotnet = "dotnet" }

@@ -52,6 +52,8 @@ SLA.
 
 - `ProductInfo.Version` → `2.4.6`
 - Installer → `SentinelSetup-2.4.6.exe`
+- `installer/build.ps1` deletes leftover `SentinelSetup-*.exe` except the
+  current version. Upgrade ACL unlock stays in `setup.iss`.
 
 
 ## [2.4.5] - 2026-09-05
