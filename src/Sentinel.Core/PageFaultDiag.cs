@@ -18,6 +18,52 @@ namespace Sentinel.Core
     /// </summary>
     public static class PageFaultDiag
     {
+        /// <summary>
+        /// Sample a live process: <c>Sentinel.Service.exe --pagefault-watch &lt;pid&gt; [seconds]</c>
+        /// Default 60s, 5s interval. Does not start monitors.
+        /// </summary>
+        public static int Watch(string[] args)
+        {
+            if (args.Length < 2 || !int.TryParse(args[1], out int pid) || pid <= 0)
+            {
+                Console.Error.WriteLine("usage: Sentinel.Service.exe --pagefault-watch <pid> [seconds]");
+                return 1;
+            }
+
+            int seconds = 60;
+            if (args.Length >= 3 && int.TryParse(args[2], out int s) && s > 0)
+                seconds = Math.Min(s, 600);
+
+            const int intervalMs = 5000;
+            Console.WriteLine($"Watching PID {pid} for {seconds}s (HardFaultCount, 5s samples)");
+            Console.WriteLine("Does not start Sentinel. Ctrl+C to stop.");
+            Console.WriteLine("");
+            Console.WriteLine($"{"sec",4} {"hard",8} {"dHard",6} {"WS_MB",8}");
+
+            uint prev = 0;
+            bool havePrev = false;
+            var sw = Stopwatch.StartNew();
+            while (sw.Elapsed.TotalSeconds <= seconds)
+            {
+                if (!HardFaultProbe.TryGetHardFaultCount(pid, out uint hard))
+                {
+                    Console.WriteLine($"t={sw.Elapsed.TotalSeconds:F0}s  failed to read HardFaultCount (process gone?)");
+                    return 2;
+                }
+
+                long ws = 0;
+                try { ws = Process.GetProcessById(pid).WorkingSet64; } catch { /* gone */ }
+
+                uint delta = havePrev && hard >= prev ? hard - prev : 0;
+                Console.WriteLine($"{(int)sw.Elapsed.TotalSeconds,4} {hard,8} {delta,6} {(ws / (1024.0 * 1024.0)),8:F1}");
+                prev = hard;
+                havePrev = true;
+                Thread.Sleep(intervalMs);
+            }
+
+            return 0;
+        }
+
         public static int Run(string[] args)
         {
             var sb = new StringBuilder();
@@ -194,8 +240,8 @@ namespace Sentinel.Core
             });
 
             Line("");
-            Line("Steady-state: MemoryBehaviorAnalyzer shape (GetProcesses + EnumModules + identity), 6 cycles @ 5s.");
-            Line("This is what the service does every 5s. No DllUnload / no kill.");
+            Line("Historical MBA shape (GetProcesses + EnumModules + identity), 6 cycles @ 5s.");
+            Line("Pre-2.4.6 poll — live MBA is one baseline then ImageLoad. No DllUnload / no kill.");
             for (int cycle = 1; cycle <= 6; cycle++)
             {
                 int cycleCapture = cycle;

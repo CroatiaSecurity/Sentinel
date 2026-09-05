@@ -21,6 +21,24 @@ namespace Sentinel.Tests
         }
 
         [Fact]
+        public void MemoryBehaviorAnalyzer_Still_Invokes_DllUnload_On_Timer()
+        {
+            var src = typeof(MemoryBehaviorAnalyzer).Assembly.Location;
+            Assert.False(string.IsNullOrEmpty(src));
+            var mba = typeof(MemoryBehaviorAnalyzer).GetMethod(
+                "ScanMemory",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            Assert.NotNull(mba);
+            var unload = typeof(DllUnloadEngine).GetMethod(nameof(DllUnloadEngine.CheckAndUnloadAsync));
+            Assert.NotNull(unload);
+            var prune = typeof(DllUnloadEngine).GetMethod(
+                nameof(DllUnloadEngine.PruneStalePidCaches),
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance
+                | System.Reflection.BindingFlags.Public);
+            Assert.NotNull(prune);
+        }
+
+        [Fact]
         public void SentinelConfig_Has_No_Switch_To_Disable_DllUnload()
         {
             var names = typeof(SentinelConfig)

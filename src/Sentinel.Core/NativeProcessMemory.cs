@@ -130,7 +130,45 @@ namespace Sentinel.Core
                 }
             }
             catch { }
+            MappedModuleCache.Replace(pid, list);
             return list;
+        }
+    }
+
+    /// <summary>
+    /// Image ranges from the one-shot EnumModules baseline + ETW ImageLoad.
+    /// EtwThreatIntelMonitor must not EnumModules every 5s.
+    /// </summary>
+    internal static class MappedModuleCache
+    {
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, List<(ulong Base, ulong End)>> Ranges = new();
+
+        public static void Replace(int pid, List<(string Name, string Path, IntPtr Base, int Size)> modules)
+        {
+            var list = new List<(ulong, ulong)>(modules.Count);
+            foreach (var m in modules)
+            {
+                if (m.Base == IntPtr.Zero) continue;
+                ulong b = (ulong)m.Base;
+                list.Add((b, b + (ulong)Math.Max(m.Size, 1)));
+            }
+            Ranges[pid] = list;
+        }
+
+        public static void Add(int pid, ulong imageBase, ulong imageSize)
+        {
+            if (imageBase == 0) return;
+            var list = Ranges.GetOrAdd(pid, _ => new List<(ulong, ulong)>());
+            lock (list)
+                list.Add((imageBase, imageBase + Math.Max(imageSize, 1UL)));
+        }
+
+        public static List<(ulong Base, ulong End)> Get(int pid)
+        {
+            if (!Ranges.TryGetValue(pid, out var list) || list == null)
+                return new List<(ulong, ulong)>();
+            lock (list)
+                return new List<(ulong, ulong)>(list);
         }
     }
 }

@@ -73,23 +73,10 @@ namespace Sentinel.Core
 
         private async Task RunScanLoopAsync(CancellationToken ct)
         {
-            int cycle = 0;
-            while (!ct.IsCancellationRequested)
-            {
-                try
-                {
-                    await Task.Delay(ScanInterval, ct);
-                    await ScanThreadsAsync(ct);
-                    cycle++;
-                    if (cycle % 3 == 0)
-                        await ScanForRemoteInjectionPatternsAsync(ct);
-                }
-                catch (OperationCanceledException) { break; }
-                catch (Exception ex)
-                {
-                    _logger.LogDebug(ex, "[EtwThreatIntelMonitor] Scan error");
-                }
-            }
+            // Kernel-Process ImageLoad + Threat-Intelligence ETW cover injection.
+            // Polling EnumModules/threads/RWX every 5s was a hard-page-fault source.
+            try { await Task.Delay(Timeout.Infinite, ct); }
+            catch (OperationCanceledException) { }
         }
 
         private async Task ScanThreadsAsync(CancellationToken ct)
@@ -116,13 +103,13 @@ namespace Sentinel.Core
                         continue;
                     }
 
-                    var modules = NativeProcessMemory.EnumModules(proc.Id);
-                    if (modules.Count == 0) { proc.Dispose(); continue; }
-
-                    var ranges = modules
-                        .Where(m => m.Base != IntPtr.Zero)
-                        .Select(m => (Base: (ulong)m.Base, End: (ulong)m.Base + (ulong)Math.Max(m.Size, 1)))
-                        .ToList();
+                    var ranges = MappedModuleCache.Get(proc.Id);
+                    if (ranges.Count == 0)
+                    {
+                        var modules = NativeProcessMemory.EnumModules(proc.Id);
+                        ranges = MappedModuleCache.Get(proc.Id);
+                    }
+                    if (ranges.Count == 0) { proc.Dispose(); continue; }
 
                     foreach (ProcessThread thread in proc.Threads)
                     {
@@ -269,11 +256,12 @@ namespace Sentinel.Core
         private static List<(long Address, long Size)> FindUnbackedRwx(IntPtr hProcess, int pid)
         {
             var results = new List<(long, long)>();
-            var modules = NativeProcessMemory.EnumModules(pid);
-            var ranges = modules
-                .Where(m => m.Base != IntPtr.Zero)
-                .Select(m => (Base: (ulong)m.Base, End: (ulong)m.Base + (ulong)Math.Max(m.Size, 1)))
-                .ToList();
+            var ranges = MappedModuleCache.Get(pid);
+            if (ranges.Count == 0)
+            {
+                NativeProcessMemory.EnumModules(pid);
+                ranges = MappedModuleCache.Get(pid);
+            }
 
             IntPtr address = IntPtr.Zero;
             int scanned = 0;

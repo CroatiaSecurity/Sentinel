@@ -28,6 +28,8 @@ namespace Sentinel.Core
         private readonly DetectionEngine _detectionEngine;
         private readonly ILogger<SyscallStubMonitor> _logger;
         private byte[]? _baselineNtdllHash;
+        private DateTime _ntdllStamp = DateTime.MinValue;
+        private long _ntdllLength = -1;
         private readonly System.Collections.Concurrent.ConcurrentDictionary<int, DateTimeOffset> _syscallAlertedPids = new();
         private static readonly TimeSpan SyscallAlertCooldown = TimeSpan.FromMinutes(5);
 
@@ -41,6 +43,9 @@ namespace Sentinel.Core
             {
                 try
                 {
+                    var info = new FileInfo(ntdllPath);
+                    _ntdllStamp = info.LastWriteTimeUtc;
+                    _ntdllLength = info.Length;
                     using var fs = new FileStream(ntdllPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
                     _baselineNtdllHash = System.Security.Cryptography.Sha256Net48.HashData(fs);
                 }
@@ -56,11 +61,24 @@ namespace Sentinel.Core
 
                     if (_baselineNtdllHash != null && File.Exists(ntdllPath))
                     {
+                        // Re-hash only when the file stamp changes. Reading ntdll.dll from disk
+                        // every 30s is a burst of hard pagefaults when the standby list dropped it.
+                        var info = new FileInfo(ntdllPath);
+                        if (info.LastWriteTimeUtc == _ntdllStamp && info.Length == _ntdllLength)
+                        {
+                            cycleCount++;
+                            if (cycleCount % 2 == 0)
+                                await ScanForIndirectSyscallPatternsAsync(ct);
+                            continue;
+                        }
+
                         byte[] currentHash;
-                        using (var fs = new FileStream(ntdllPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                        using (var fs = new FileStream(ntdllPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
                         {
                             currentHash = System.Security.Cryptography.Sha256Net48.HashData(fs);
                         }
+                        _ntdllStamp = info.LastWriteTimeUtc;
+                        _ntdllLength = info.Length;
                         if (!currentHash.SequenceEqual(_baselineNtdllHash))
                         {
                             await _detectionEngine.EmitAsync(new DetectionEvent

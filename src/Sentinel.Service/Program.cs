@@ -57,6 +57,12 @@ namespace Sentinel.Service
                 Environment.ExitCode = PageFaultDiag.Run(args);
                 return;
             }
+            // Sample HardFaultCount of a live PID (LatencyMon-equivalent). Does not start Sentinel.
+            if (args.Length >= 2 && args[0].Equals("--pagefault-watch", StringComparison.OrdinalIgnoreCase))
+            {
+                Environment.ExitCode = PageFaultDiag.Watch(args);
+                return;
+            }
 
             // v2.0.4: Handle --set-config before anything else (CLI config management)
             if (args.Length >= 2 && args[0].Equals("--set-config", StringComparison.OrdinalIgnoreCase))

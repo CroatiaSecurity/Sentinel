@@ -190,7 +190,6 @@ namespace Sentinel.Service
             try
             {
             _logger.LogInformation("Sentinel Service starting...");
-            WorkingSetGuard.ApplyEarly(_logger);
 
             // Startup Self-Test
             if (!RunStartupSelfTest())
@@ -247,7 +246,6 @@ namespace Sentinel.Service
             }
 
             _logger.LogInformation("Sentinel Service successfully started.");
-            WorkingSetGuard.PinMinimumWorkingSet(_logger);
 
             await _eventLogger.LogEventAsync("service_start", new
             {
@@ -269,7 +267,6 @@ namespace Sentinel.Service
             try
             {
                 _logger.LogInformation("Entering main keep-alive loop. StoppingToken cancelled: {Cancelled}", stoppingToken.IsCancellationRequested);
-                int heartbeatTicks = 0;
                 while (!stoppingToken.IsCancellationRequested)
                 {
                     await Task.Delay(5000, stoppingToken);
@@ -277,8 +274,6 @@ namespace Sentinel.Service
                     // Heartbeat the monitors this service owns so the registry watchdog
                     // keeps them marked Running (they don't self-heartbeat).
                     HeartbeatOwnedMonitors();
-                    if ((++heartbeatTicks % 12) == 0)
-                        WorkingSetGuard.Refresh(_logger);
                 }
             }
             catch (OperationCanceledException) { }

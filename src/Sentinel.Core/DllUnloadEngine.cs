@@ -31,6 +31,10 @@ namespace Sentinel.Core
         private readonly ILogger<DllUnloadEngine> _logger;
         private readonly ConcurrentDictionary<string, DateTimeOffset> _alertHistory = new();
         private readonly ConcurrentDictionary<string, DateTimeOffset> _remediationHistory = new();
+        // MBA runs every 5s. Re-Authenticode of the same mapped PE was the LatencyMon
+        // hard-fault source (mba-hf.log: 30–107 faults/cycle). Evaluate+WinVerifyTrust
+        // only on first sight of a path in that PID. New mapped modules still run identity.
+        private readonly ConcurrentDictionary<int, PidModuleCache> _pidModules = new();
         private int _remediationsThisMinute;
         private DateTimeOffset _minuteStart = DateTimeOffset.UtcNow;
         private readonly object _rateLock = new();
@@ -106,6 +110,42 @@ namespace Sentinel.Core
         /// </summary>
         public Task<DllUnloadResult> CheckAndUnloadAsync(int processId, string processName)
             => ScanProcessAsync(processId, processName, allowRemediateOnProvenLoad: true);
+
+        /// <summary>
+        /// ETW ImageLoad path: identity-check one mapped PE without EnumModules of the whole process.
+        /// </summary>
+        public Task NotifyMappedModuleAsync(int processId, string? processName, string? modulePath)
+        {
+            if (processId <= 4 || string.IsNullOrEmpty(modulePath))
+                return Task.CompletedTask;
+
+            try
+            {
+                var imagePath = SecurityValidation.GetProcessImagePath(processId);
+                if (!NativeProcessMemory.CanInspect(processId, imagePath))
+                    return Task.CompletedTask;
+                if (string.Equals(modulePath, imagePath, StringComparison.OrdinalIgnoreCase))
+                    return Task.CompletedTask;
+
+                var cache = _pidModules.GetOrAdd(processId, _ => new PidModuleCache());
+                cache.LastSeenUtc = DateTime.UtcNow;
+                bool firstSight;
+                lock (cache.Paths)
+                    firstSight = cache.Paths.Add(modulePath!);
+                if (!firstSight)
+                    return Task.CompletedTask;
+
+                var verdict = ModuleIdentity.Evaluate(imagePath, modulePath, IsMicrosoftFamilySigned);
+                if (verdict.Allowed)
+                    return Task.CompletedTask;
+
+                return ScanProcessAsync(processId, processName ?? "", allowRemediateOnProvenLoad: true, forceRemediate: true);
+            }
+            catch
+            {
+                return Task.CompletedTask;
+            }
+        }
 
         /// <summary>
         /// Response path after AdvancedResponseEngine Tier1 (already proven malicious chain).
@@ -263,9 +303,17 @@ namespace Sentinel.Core
                 if (ModuleIdentity.IsOsServicingPath(procDir) || ModuleIdentity.IsOsServicingPath(imagePath))
                     return result;
 
-                var hostileDisk = string.IsNullOrEmpty(procDir)
-                    ? new List<string>()
-                    : FindHostileSideloadDlls(procDir!);
+                var cache = _pidModules.GetOrAdd(processId, _ => new PidModuleCache());
+                cache.LastSeenUtc = DateTime.UtcNow;
+
+                var hostileDisk = new List<string>();
+                if (forceRemediate || !cache.DiskPlantsChecked)
+                {
+                    hostileDisk = string.IsNullOrEmpty(procDir)
+                        ? new List<string>()
+                        : FindHostileSideloadDlls(procDir!);
+                    cache.DiskPlantsChecked = true;
+                }
                 var hostileLoaded = new List<(string Path, IntPtr Base, int Size)>();
 
                 if (NativeProcessMemory.CanInspect(processId, imagePath))
@@ -274,6 +322,12 @@ namespace Sentinel.Core
                     {
                         if (string.IsNullOrEmpty(mod.Path)) continue;
                         if (string.Equals(mod.Path, imagePath, StringComparison.OrdinalIgnoreCase))
+                            continue;
+
+                        bool firstSight;
+                        lock (cache.Paths)
+                            firstSight = cache.Paths.Add(mod.Path);
+                        if (!firstSight && !forceRemediate)
                             continue;
 
                         var verdict = ModuleIdentity.Evaluate(
@@ -527,6 +581,16 @@ namespace Sentinel.Core
             }
         }
 
+        internal void PruneStalePidCaches()
+        {
+            var cutoff = DateTime.UtcNow.AddMinutes(-3);
+            foreach (var kv in _pidModules)
+            {
+                if (kv.Value.LastSeenUtc < cutoff)
+                    _pidModules.TryRemove(kv.Key, out _);
+            }
+        }
+
         public void Dispose()
         {
             var cutoff = DateTimeOffset.UtcNow.AddHours(-1);
@@ -534,6 +598,14 @@ namespace Sentinel.Core
                 if (kv.Value < cutoff) _alertHistory.TryRemove(kv.Key, out _);
             foreach (var kv in _remediationHistory)
                 if (kv.Value < cutoff) _remediationHistory.TryRemove(kv.Key, out _);
+            _pidModules.Clear();
+        }
+
+        private sealed class PidModuleCache
+        {
+            public readonly HashSet<string> Paths = new(StringComparer.OrdinalIgnoreCase);
+            public DateTime LastSeenUtc;
+            public bool DiskPlantsChecked;
         }
 
         private static bool IsWindowsSystemDirectory(string directory)

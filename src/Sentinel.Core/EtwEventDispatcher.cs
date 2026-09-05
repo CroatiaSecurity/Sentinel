@@ -28,11 +28,13 @@ namespace Sentinel.Core
         private readonly DetectionEngine _detectionEngine;
         private readonly ProcessAncestryCache _ancestryCache;
         private readonly BehavioralBaselineService? _baseline;
+        private readonly DllUnloadEngine? _dllUnloadEngine;
         private readonly ILogger<EtwEventDispatcher> _logger;
 
         // Event IDs for Microsoft-Windows-Kernel-Process
         private const ushort ProcessStart = 1;
         private const ushort ProcessStop = 2;
+        private const ushort ImageLoad = 5;
 
         // Event IDs for Microsoft-Windows-Kernel-File
         private const ushort FileCreate = 12;
@@ -76,12 +78,14 @@ namespace Sentinel.Core
             DetectionEngine detectionEngine,
             ProcessAncestryCache ancestryCache,
             ILogger<EtwEventDispatcher> logger,
-            BehavioralBaselineService? baseline = null)
+            BehavioralBaselineService? baseline = null,
+            DllUnloadEngine? dllUnloadEngine = null)
         {
             _fusionEngine = fusionEngine;
             _detectionEngine = detectionEngine;
             _ancestryCache = ancestryCache;
             _baseline = baseline;
+            _dllUnloadEngine = dllUnloadEngine;
             _logger = logger;
         }
 
@@ -112,8 +116,36 @@ namespace Sentinel.Core
             if (evt.EventId == ProcessStart)
             {
                 HandleProcessStart(evt);
+                return;
             }
-            // ProcessStop can be used for ancestry cache cleanup
+            if (evt.EventId == ImageLoad)
+                HandleImageLoad(evt);
+        }
+
+        private void HandleImageLoad(EtwRawEvent evt)
+        {
+            if (_dllUnloadEngine == null) return;
+            int pid = evt.ProcessId;
+            if (pid <= 4) return;
+
+            if (evt.UserData == IntPtr.Zero || evt.UserDataLength < IntPtr.Size + 4) return;
+            ulong imageBase = (ulong)Marshal.ReadIntPtr(evt.UserData, 0);
+            uint imageSize = unchecked((uint)Marshal.ReadInt32(evt.UserData, IntPtr.Size));
+            if (imageBase != 0)
+                MappedModuleCache.Add(pid, imageBase, imageSize);
+
+            int nameOff = IntPtr.Size == 8 ? 32 : 20;
+            if (evt.UserDataLength <= nameOff) return;
+            string path = TryExtractUnicodeString(evt.UserData, nameOff, evt.UserDataLength - nameOff);
+            if (string.IsNullOrEmpty(path) || (path.IndexOf('\\') < 0 && path.IndexOf('/') < 0))
+                return;
+            if (path.StartsWith(@"\??\", StringComparison.Ordinal))
+                path = path.Substring(4);
+
+            string name = "";
+            try { name = _ancestryCache.GetProcessInfo(pid).name; } catch { /* ImageLoad is enough */ }
+
+            _ = _dllUnloadEngine.NotifyMappedModuleAsync(pid, name, path);
         }
 
         private void HandleProcessStart(EtwRawEvent evt)
@@ -155,6 +187,30 @@ namespace Sentinel.Core
 
             var context = _fusionEngine.FeedEvent(telemetry);
             _detectionEngine.SubmitTelemetry(context);
+
+            if (!string.IsNullOrEmpty(imagePath) &&
+                !imagePath.StartsWith(@"\\") &&
+                imagePath.Length > 3 &&
+                !File.Exists(imagePath))
+            {
+                _ = _detectionEngine.EmitAsync(new DetectionEvent
+                {
+                    RuleName = "Process Hollowing: Image File Missing",
+                    Evidence = $"Process '{processName}' (PID {pid}) image path '{imagePath}' does not exist on disk",
+                    Reasoning = "Possible hollowing indicator (T1055.012). Observe-first LogOnly until " +
+                                "corroborating behavioral signals prove malice.",
+                    Confidence = 0.75,
+                    Tier = DetectionTier.Tier2Indicator,
+                    AuthorizedResponse = ResponseAction.LogOnly,
+                    ProcessName = processName,
+                    ProcessId = pid,
+                    Metadata = new Dictionary<string, string>
+                    {
+                        ["WeakObserveSeed"] = "true",
+                        ["ImagePath"] = imagePath
+                    }
+                });
+            }
         }
 
         // ═══════════════════════════════════════════════════════════════
@@ -163,10 +219,9 @@ namespace Sentinel.Core
 
         private void OnKernelFileEvent(EtwRawEvent evt)
         {
-            // File events we care about: Create, Delete, Rename
-            if (evt.EventId != FileNameCreate && evt.EventId != FileNameDelete &&
-                evt.EventId != FileRename && evt.EventId != FileCreate &&
-                evt.EventId != FileDelete)
+            // NameCreate/NameDelete carry the path. FileCreate/Rename/Delete are
+            // FileObject-only and still caused extract+alloc traffic (hard faults).
+            if (evt.EventId != FileNameCreate && evt.EventId != FileNameDelete)
                 return;
 
             if (evt.UserData == IntPtr.Zero || evt.UserDataLength < 4) return;
@@ -200,8 +255,6 @@ namespace Sentinel.Core
             // For high-value events (NameCreate/NameDelete), the filename is in UserData.
             string filePath = TryExtractFilePath(evt);
             if (string.IsNullOrEmpty(filePath)) return;
-            // Kernel-File NameCreate of browser cache / .tmp is not correlation fuel.
-            // Storing it filled 500-event chains and paged the service (LatencyMon hard faults).
             if (!SecurityFileScope.IsEtwFileEventRelevant(filePath)) return;
 
             var telemetry = new FileActivityTelemetry
@@ -238,9 +291,8 @@ namespace Sentinel.Core
             }
 
             WmiHostRegistryHint.Record(pid, processName);
-            // Kernel registry ETW has no key path here (handle-based). Feeding every
-            // SetValue on the machine into fusion was allocation-only noise — RegistryMonitor
-            // still correlates by path. Keep the PID hint; skip fusion/telemetry.
+            // No key path in this provider payload (handle-based). Path-less SetValue
+            // filled fusion and paged the service. RegistryMonitor still has paths.
         }
 
         // ═══════════════════════════════════════════════════════════════
@@ -551,8 +603,6 @@ namespace Sentinel.Core
                 int remaining = maxBytes - offset;
                 if (remaining <= 0) return "";
 
-                // Paths/DNS names: cap well under 4096 so a missed NUL cannot allocate 8 KB
-                // strings on every Kernel-File event.
                 int maxChars = Math.Min(remaining / 2, SecurityFileScope.MaxEtwPathChars);
                 var sb = new StringBuilder(maxChars);
 

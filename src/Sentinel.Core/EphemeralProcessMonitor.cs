@@ -122,18 +122,14 @@ namespace Sentinel.Core
                 }
             }
 
-            // Periodic scan as backup (catches cases where FSW misses)
-            while (!ct.IsCancellationRequested)
+            // FileSystemWatcher + Kernel-Process ETW cover new prefetch / process-start.
+            // Polling Prefetch + Security.evtx every 5s was a hard-page-fault source
+            // (directory enum + event-log mapping).
+            try
             {
-                try
-                {
-                    await Task.Delay(ScanInterval, ct);
-                    await ScanPrefetchDelta(ct);
-                    await ScanSecurityEventLog(ct);
-                }
-                catch (OperationCanceledException) { break; }
-                catch (Exception ex) { _logger.LogDebug(ex, "[EphemeralProcessMonitor] Error"); }
+                await Task.Delay(Timeout.Infinite, ct);
             }
+            catch (OperationCanceledException) { }
 
             _prefetchWatcher?.Dispose();
         }

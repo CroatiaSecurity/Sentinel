@@ -251,6 +251,18 @@ namespace Sentinel.Core
                 return;
             }
 
+            // Non-module/script files: no File.Exists, no Restart Manager, no fusion.
+            // Opening/stat'ing every user-profile write was a hard-fault firehose.
+            bool maybeDir = e.ChangeType == WatcherChangeTypes.Created
+                && string.IsNullOrEmpty(Path.GetExtension(e.FullPath));
+            if (!maybeDir
+                && !DllUnloadEngine.IsSideloadTargetFileName(e.FullPath)
+                && !SecurityFileScope.IsEtwFileEventRelevant(e.FullPath)
+                && !IsProtectedOsDirectory(pathLower))
+            {
+                return;
+            }
+
             // v1.4.1: Detect junction/symlink creation targeting or within monitored directories.
             // An attacker can create junctions to redirect monitored paths or to make excluded
             // paths point to sensitive areas. Detect any reparse point creation.
@@ -345,8 +357,7 @@ namespace Sentinel.Core
                 {
                     if (File.Exists(e.FullPath))
                     {
-                        if (SecurityValidation.VerifyAuthenticodeSignature(e.FullPath) ||
-                            _signerTrust.IsSignedFile(e.FullPath))
+                        if (_signerTrust.IsSignedFile(e.FullPath))
                         {
                             SubmitEvent(e.FullPath, e.ChangeType.ToString().ToUpperInvariant(), null, 0, "System (Trusted File)");
                             return;
@@ -356,7 +367,12 @@ namespace Sentinel.Core
                 catch { }
             }
 
-            var processInfo = GetProcessUsingFile(e.FullPath);
+            // Opening every user-profile file (Restart Manager + FileStream) hard-faults
+            // cache pages into this process. Only do it for modules/scripts/OS writes.
+            bool needWriter = DllUnloadEngine.IsSideloadTargetFileName(e.FullPath)
+                || IsProtectedOsDirectory(pathLower)
+                || SecurityFileScope.IsEtwFileEventRelevant(e.FullPath);
+            var processInfo = needWriter ? GetProcessUsingFile(e.FullPath) : (pid: 0, name: "unknown");
 
             // System-wide DLL sideload plant: known system DLL names written outside System32
             if ((e.ChangeType == WatcherChangeTypes.Created || e.ChangeType == WatcherChangeTypes.Changed) &&
@@ -435,6 +451,14 @@ namespace Sentinel.Core
 
             if (IsNoisyAppDataPath(pathLower))
             {
+                return;
+            }
+
+            if (!DllUnloadEngine.IsSideloadTargetFileName(e.FullPath)
+                && !SecurityFileScope.IsEtwFileEventRelevant(e.FullPath)
+                && !IsProtectedOsDirectory(pathLower))
+            {
+                _ransomwareIoMonitor?.RecordRename(0, "unknown");
                 return;
             }
 

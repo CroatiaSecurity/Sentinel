@@ -137,7 +137,6 @@ namespace Sentinel.Core
             var samples = _scratchSamples;
             Buffer.BlockCopy(e.Buffer, 0, samples, 0, e.BytesRecorded);
 
-            // Convert to mono for analysis
             int frameCount = sampleCount / channels;
             if (_scratchMono.Length < frameCount)
                 _scratchMono = new float[frameCount];
@@ -150,7 +149,6 @@ namespace Sentinel.Core
                 mono[i] = sum / channels;
             }
 
-            // Analyze for threats (pass frameCount — scratch buffers may be larger)
             var threat = AnalyzeForThreats(mono, frameCount, format.SampleRate);
 
             if (threat != null)
@@ -222,7 +220,6 @@ namespace Sentinel.Core
         private AcousticThreat? AnalyzeForThreats(float[] mono, int length, int sampleRate)
         {
             if (length <= 0) return null;
-            // 1. Check infrasound band (1-20Hz) — should NEVER be present at significant amplitude
             float infrasoundPower = GoertzelBand(mono, length, sampleRate, InfrasoundLow, InfrasoundHigh, 10);
             if (infrasoundPower > InfrasoundThreshold)
             {

@@ -6,7 +6,7 @@ Sentinel is for **gamers, creators, and high-profile targets**. It hunts real at
 
 **You can browse and play.** Default mode must not break Chrome/Edge/Firefox, Microsoft Store, Xbox, Steam, Epic, DirectX/VC++ redists, Game Bar, or creator tools such as OBS Studio. Controllers, wheels, and HOTAS stay usable. Installing a game or a GPU/runtime redist is work, not an incident.
 
-**Current version: 2.4.5**
+**Current version: 2.4.6**
 
 ### Honest mission
 
@@ -27,7 +27,7 @@ It does **not** claim nation-state invincibility or kernel omniscience. A local 
 - **Windows Event Log trail (v1.9.5):** critical events also written to Application / source `Sentinel` (IDs 1000–1500) when Event Log exists. **Self-disables** on barebone/custom Windows where Event Log is stripped — JSONL remains primary. Config: `Sentinel:WindowsEventLog`.
 - **Graceful degradation:** missing ETW → WMI/poll; missing Event Log → JSONL only; monitor start failures isolated; never crash the host for optional telemetry.
 - **Weak observe seeds never chain-nuke alone:** LAN Cast observe, module-count growth, UX heuristics, outbound-whitelist noise, etc. Surveillance legs can still **feed composites**.
-- **DLL unloaders stay armed** (`DllUnloadEngine`): system-wide module identity every 5s. Foreign mapped PEs are FreeLibrary immediately. Hijack-name plants (`dbghelp.dll`, `version.dll`, …) are **quarantined on drop** so the loader never binds them — including next to games. Sentinel still does not open game process memory (Denuvo). Permanent Tier1. No config switch.
+- **DLL unloaders stay armed** (`DllUnloadEngine`): system-wide module identity (startup `EnumModules` baseline + Kernel-Process ImageLoad). Foreign mapped PEs are FreeLibrary immediately. Hijack-name plants (`dbghelp.dll`, `version.dll`, …) are **quarantined on drop** so the loader never binds them — including next to games. Sentinel still does not open game process memory (Denuvo). Permanent Tier1. No config switch.
 - **Not an attack:** Steam DirectX, Vulkan/CUDA, GPU driver redistributables writing System32/SysWOW64 (and PID‑0 writer races) → LogOnly, never a kill seed.
 - **Silent observe** (`SilentObserve: true`): no peeps until chain-confirmed.
 - **Games / Denuvo:** skip process-memory handles only (`CanInspect` fail-closed when path unresolved) — not a global disable.

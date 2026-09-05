@@ -424,6 +424,19 @@ namespace Sentinel.Core
             return !string.IsNullOrEmpty(a) && string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
         }
 
+        // WinVerifyTrust / catalog hash maps the PE. Uncached calls on the 5s
+        // file-watcher and module scan were the remaining hard pagefaults after WS pin.
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTime Write, long Length, bool Signed)> AuthenticodeCache =
+            new(StringComparer.OrdinalIgnoreCase);
+
+        private static void CacheAuthenticode(string path, DateTime writeUtc, long length, bool signed)
+        {
+            if (string.IsNullOrEmpty(path) || length < 0) return;
+            AuthenticodeCache[path] = (writeUtc, length, signed);
+            if (AuthenticodeCache.Count > 20000)
+                AuthenticodeCache.Clear();
+        }
+
         /// <summary>
         /// Returns true only if the signature is valid AND chains to a trusted root.
         /// </summary>
@@ -431,6 +444,22 @@ namespace Sentinel.Core
         {
             if (string.IsNullOrEmpty(filePath) || !File.Exists(filePath))
                 return false;
+
+            DateTime writeUtc = DateTime.MinValue;
+            long length = -1;
+            try
+            {
+                var info = new FileInfo(filePath);
+                writeUtc = info.LastWriteTimeUtc;
+                length = info.Length;
+                if (AuthenticodeCache.TryGetValue(filePath, out var cached) &&
+                    cached.Write == writeUtc && cached.Length == length)
+                    return cached.Signed;
+            }
+            catch
+            {
+                /* fall through to verify */
+            }
 
             IntPtr fileInfoPtr = IntPtr.Zero;
             try
@@ -460,7 +489,11 @@ namespace Sentinel.Core
                 var actionId = WINTRUST_ACTION_GENERIC_VERIFY_V2;
                 int result = WinVerifyTrust(IntPtr.Zero, ref actionId, ref trustData);
 
-                if (result == 0) return true;
+                if (result == 0)
+                {
+                    CacheAuthenticode(filePath, writeUtc, length, true);
+                    return true;
+                }
 
                 // FIX v1.5.6: Embedded Authenticode check failed — try catalog signature verification.
                 // Many Windows system binaries (explorer.exe, powershell.exe, cmd.exe, conhost.exe,
@@ -472,11 +505,14 @@ namespace Sentinel.Core
                 // SECURITY: This is a pure native P/Invoke path — no shell commands, no PATH
                 // dependency, no risk of poisoning. The catalog store is protected by Windows
                 // and only writable by TrustedInstaller.
-                return VerifyCatalogSignature(filePath, logger);
+                bool catalog = VerifyCatalogSignature(filePath, logger);
+                CacheAuthenticode(filePath, writeUtc, length, catalog);
+                return catalog;
             }
             catch (Exception ex)
             {
                 logger?.LogDebug(ex, "[SecurityValidation] Authenticode verification failed for '{Path}'", filePath);
+                CacheAuthenticode(filePath, writeUtc, length, false);
                 return false;
             }
             finally

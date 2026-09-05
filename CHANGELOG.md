@@ -2,6 +2,58 @@
 
 
 
+## [2.4.6] - 2026-09-05
+
+Revert the v2.4.5 WorkingSetGuard guess (image prefetch + 256 MB
+`SetProcessWorkingSetSizeEx` / `VirtualLock`). That pin was not
+attributed to a live PID: `SeIncreaseQuotaPrivilege` was not enabled,
+min WS was below the live peak, and locking trimmed pages **caused**
+hard faults. Isolated scan kernels were already ~0 HF. After the I/O
+cuts below, live `--pagefault-watch` still showed ~16–79 HardFaultCount
+per 5 s — leftover, not zero. This release does **not** claim a 0-HPF
+SLA.
+
+### Removed
+
+- `WorkingSetGuard` (prefetch loaded images, 256 MB minimum working
+  set, `VirtualLock`, EcoQoS / memory-priority pin). Do not ship
+  working-set lock tricks.
+
+### Fixed
+
+- **MBA Authenticode** — `ModuleIdentity.Evaluate` / WinVerifyTrust
+  only on first sight of a mapped path in that PID, not every 5 s.
+- **MBA EnumModules** — one startup baseline, then Kernel-Process
+  ImageLoad (`event 5`) via `DllUnloadEngine.NotifyMappedModuleAsync`.
+  Timer keeps `PruneStalePidCaches` only.
+- **DllUnloadEngine** — per-PID path cache; skip re-Evaluate of known
+  modules; disk hijack-name plants once per PID.
+- **Kernel-File ETW** — `NameCreate` / `NameDelete` only;
+  `SecurityFileScope` still drops browser cache / `.tmp` from fusion.
+- **FileActivityMonitor** — ignore paths that are not PE / script /
+  installer / OS-dir (same scope as ETW).
+- **EtwThreatIntelMonitor** — 5 s EnumModules / thread / RWX poll
+  disabled (TI ETW remains; `MappedModuleCache` if poll is revived).
+- **EphemeralProcessMonitor** — no 5 s Prefetch / `Security.evtx`
+  poll (FileSystemWatcher + process-start ETW).
+
+### Added
+
+- `--pagefault-watch <pid> [seconds]` — sample a live process
+  `HardFaultCount` (LatencyMon-equivalent) without starting Sentinel.
+
+### Not claimed
+
+- Live HardFaultCount is not ~0. Remaining ~5 s HF (ancestry refresh,
+  keep-alive, shared PE trim) is not attributed in this build. Do not
+  treat 2.4.6 as a hard-pagefault kill.
+
+### Changed
+
+- `ProductInfo.Version` → `2.4.6`
+- Installer → `SentinelSetup-2.4.6.exe`
+
+
 ## [2.4.5] - 2026-09-05
 
 LatencyMon was attributing 1000+ hard pagefaults per few minutes to

@@ -41,7 +41,7 @@ Monitors → TelemetryFusionEngine → DetectionEngine → AdvancedResponseEngin
 | `OpsMetricsPublisher` | Writes `%ProgramData%\Sentinel\ops_metrics.json` |
 | `SelfPathGuard` | Hardlink-aware install self-exclusion |
 | `EncryptedConfigStore` | DPAPI-encrypted per-deployment config (`config.enc`); replaces plaintext appsettings.json |
-| `ProductInfo.Version` | `2.4.5` |
+| `ProductInfo.Version` | `2.4.6` |
 
 All components are wired via Microsoft.Extensions.DependencyInjection. No static mutable state anywhere.
 
@@ -219,14 +219,14 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 | Component | Mechanism | Notes |
 |-----------|-----------|-------|
 | `EtwProcessMonitor` | ETW kernel provider (Kernel-Process); IMonitor interface | Falls back to WMI |
-| `EtwThreatIntelMonitor` | Microsoft-Windows-Threat-Intelligence ETW provider; VirtualQueryEx-based unbacked RWX detection every 3rd cycle | Requires elevation |
+| `EtwThreatIntelMonitor` | Microsoft-Windows-Threat-Intelligence ETW provider; 5s EnumModules/thread/RWX poll disabled (v2.4.6) | Requires elevation |
 | `DnsQueryMonitor` | Microsoft-Windows-DNS-Client ETW provider; IMonitor | Requires elevation |
 | `WmiProcessMonitor` | Win32_ProcessStartTrace WMI event subscription | Disabled when ETW active |
 | `FileActivityMonitor` | FileSystemWatcher on user profile + dynamic paths | Singleton |
 | `NetworkMonitor` | GetExtendedTcpTable/UdpTable P/Invoke, IPv4+IPv6 | Singleton |
 | `LsassDumpCanaryMonitor` | Scans system-wide process handles for unauthorized lsass.exe read access | 30s |
 | `RouteTableMonitor` | GetIpForwardTable P/Invoke; detects route injection, default route hijack | 15s |
-| `MemoryBehaviorAnalyzer` | Module identity (path+signer) every 5s; foreign modules unloaded via DllUnloadEngine; hollowing observe | 5s |
+| `MemoryBehaviorAnalyzer` | Module identity (path+signer): one EnumModules baseline then Kernel-Process ImageLoad; prune PID caches every 5s; foreign modules unloaded via DllUnloadEngine | 5s prune / ImageLoad |
 | `TokenIntegrityMonitor` | GetTokenInformation(TokenIntegrityLevel); detects Medium→High without UAC | 45s |
 | `CredentialCanaryMonitor` | Plants/monitors honeypot credentials in Windows Credential Manager | periodic |
 | `LocalServerMonitor` | Detects suspicious processes listening on localhost (mounted ISO/VHD origins) | 20s |
@@ -266,7 +266,7 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 | `ResponsePolicy` | Observe-until-chain classifier: terminal outcomes, benign System32 redistributable noise, multi-signal PID buffers, silent-observe gates. |
 | `TelemetryFusionEngine` | Correlates raw telemetry across all sources into per-process event chains. Produces `FusedTelemetryContext` with behavioral metrics. |
 | `EventGraph` | In-memory graph of processes, files, and network endpoints with temporal/causal edges. Supports incident timeline queries. |
-| `MemoryBehaviorAnalyzer` | Scans mapped modules every 5s (permanent). `ModuleIdentity` allow/deny. Foreign modules unloaded immediately via DllUnloadEngine; detection stays Tier1. Count growth is not a signal. Missing image path remains Tier2 observe. |
+| `MemoryBehaviorAnalyzer` | Scans mapped modules (permanent): startup EnumModules baseline + Kernel-Process ImageLoad. `ModuleIdentity` allow/deny on first sight of a path in that PID. Foreign modules unloaded immediately via DllUnloadEngine; detection stays Tier1. Count growth is not a signal. Missing image path remains Tier2 observe. |
 | `ProcessAncestryCache` | `CreateToolhelp32Snapshot` refreshed every 5s (WMI fallback for Server Core/IoT). Provides parent name resolution. |
 | `BehavioralCorrelationEngine` | Time-windowed (60s) multi-signal correlator. Fires composite `DetectionEvent`s via `IDetectionEngine.EmitAsync`. |
 | `BeaconingDetector` | Statistical C2 beacon detection. Tracks inter-connection intervals. Fires when CV < 0.40 with 5+ observations. Multi-factor Authenticode trust verification. |
