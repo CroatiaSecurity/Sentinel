@@ -123,11 +123,14 @@ namespace Sentinel.Core
                             {
                                 RuleName = "Evasion: Indirect Syscall / Hell's Gate Pattern Detected",
                                 Evidence = $"Process '{name}' (PID {proc.Id}) contains {scan.WellFormedStubs} well-formed " +
-                                           $"syscall stub(s) ({scan.DistinctSsns} distinct SSNs) in non-image executable memory. " +
-                                           "Pattern: mov r10,rcx; mov eax,SSN; syscall; ret.",
-                                Reasoning = "A table of compact, ret-terminated syscall stubs with multiple SSNs in private " +
-                                            "executable memory indicates Hell's Gate / SysWhispers-style EDR bypass " +
-                                            "(MITRE T1106, T1562.001). Sparse 0F 05 bytes in JIT code are ignored.",
+                                           $"syscall stub(s) ({scan.DistinctSsns} distinct SSNs) in a small private executable " +
+                                           "memory region. Pattern: mov r10,rcx; mov eax,SSN; syscall; ret — densely packed, " +
+                                           "valid SSN range (0x0001–0x01FF), single private allocation.",
+                                Reasoning = "A densely-packed table of compact syscall stubs with 3+ distinct valid SSNs in a " +
+                                            "small private (VirtualAlloc'd) executable region indicates Hell's Gate / " +
+                                            "SysWhispers-style EDR bypass (MITRE T1106, T1562.001). " +
+                                            "JIT engines (V8, CLR) are excluded by region-size cap (64 KB), MEM_PRIVATE " +
+                                            "requirement, stub density check, and SSN range validation.",
                                 Confidence = 0.92,
                                 Tier = DetectionTier.Tier1Behavioral,
                                 AuthorizedResponse = ResponseAction.KillProcessTree,
@@ -157,10 +160,35 @@ namespace Sentinel.Core
             }
         }
 
+        // ── Hell's Gate structural constraints ──────────────────────────────────
+        // A real Hell's Gate / SysWhispers stub TABLE has all of these properties:
+        //
+        //   1. PRIVATE memory (MEM_PRIVATE = 0x20000): allocated with VirtualAlloc.
+        //      Never MEM_IMAGE (DLL sections) or MEM_MAPPED (file-backed views).
+        //      V8 JIT regions on some Chrome builds are MEM_MAPPED — this rejects them.
+        //
+        //   2. SMALL region: a full SysWhispers table for all ~500 syscalls is ~5 KB.
+        //      Cap at 64 KB. V8/CLR/JVM JIT regions are 256 KB–4 MB — this rejects them.
+        //
+        //   3. DENSE packing: consecutive stubs are 11 or 21 bytes each. In a real table
+        //      they are back-to-back with at most an alignment NOP between them (≤ 48 bytes
+        //      between stub starts). V8 JIT prologues are hundreds of bytes apart.
+        //
+        //   4. VALID SSN range: Windows syscall numbers are 0x0001–0x01FF (fewer than 512
+        //      syscalls exist on all Windows versions). An immediate outside that range is
+        //      a compiler constant or attacker garbage, not a real syscall number.
+        //
+        //   5. ALL stubs in ONE region: a deployed table is a single contiguous allocation.
+        //      Counting stubs across separate regions allows 3 unrelated JIT prologues in
+        //      3 different regions to combine into a false positive.
+        private const long MaxHellsGateRegionBytes = 64 * 1024;  // 64 KB
+        private const int  MaxStubSpacingBytes      = 48;         // packed: 11-byte stub + ≤37 bytes padding
+        private const int  MinValidSsn              = 0x0001;
+        private const int  MaxValidSsn              = 0x01FF;
+        private const uint MemPrivate               = 0x20000;
+
         private static HellsGateScanResult ScanProcessForSyscallStubs(IntPtr hProcess)
         {
-            int stubCount = 0;
-            var ssns = new HashSet<int>();
             IntPtr address = IntPtr.Zero;
             int regionsScanned = 0;
 
@@ -171,23 +199,23 @@ namespace Sentinel.Core
                 if (bytesReturned == 0) break;
 
                 long regionSize = (long)mbi.RegionSize;
+
+                // Constraint 1 + 2: committed, private, executable, small.
                 if (mbi.State == NativeProcessMemory.MEM_COMMIT &&
-                    mbi.Type != NativeProcessMemory.MEM_IMAGE &&
+                    mbi.Type  == MemPrivate &&
                     NativeProcessMemory.IsExecutableProtection(mbi.Protect) &&
-                    regionSize > 0 && regionSize <= 4 * 1024 * 1024)
+                    regionSize > 0 && regionSize <= MaxHellsGateRegionBytes)
                 {
-                    int readSize = (int)Math.Min(regionSize, 4096);
-                    byte[] buffer = new byte[readSize];
+                    int readSize = (int)regionSize;
+                    var buffer   = new byte[readSize];
                     if (NativeProcessMemory.CopyRemote(hProcess, mbi.BaseAddress, buffer, out int bytesRead) &&
                         bytesRead > 16)
                     {
-                        foreach (var hit in FindSyscallStubs(buffer, bytesRead))
-                        {
-                            stubCount++;
-                            ssns.Add(hit.Ssn);
-                            if (stubCount >= 3 && ssns.Count >= 3)
-                                return new HellsGateScanResult(stubCount, ssns.Count);
-                        }
+                        // Constraint 3 + 4: dense packing + valid SSN range, within ONE region.
+                        var hits      = FindSyscallStubs(buffer, bytesRead);
+                        var denseHits = FilterByDensity(hits, MaxStubSpacingBytes);
+                        if (IsHellsGateEvidence(denseHits))
+                            return new HellsGateScanResult(denseHits.Count, CountDistinctSsns(denseHits));
                     }
                 }
 
@@ -196,13 +224,62 @@ namespace Sentinel.Core
                 address = (IntPtr)nextAddr;
             }
 
-            return new HellsGateScanResult(stubCount, ssns.Count);
+            return new HellsGateScanResult(0, 0);
         }
 
         /// <summary>
-        /// Compact Hell's Gate / SysWhispers stub, or a copied ntdll prologue.
-        /// Does not count a lone <c>syscall</c> floating near <c>mov r10,rcx; mov eax,imm</c>
-        /// — that is the V8 / Chromium JIT false positive.
+        /// Returns the largest dense cluster of stubs where each consecutive pair of stub
+        /// start offsets is within <paramref name="maxSpacing"/> bytes.
+        /// Requires ≥ 3 stubs in the cluster. Eliminates scattered JIT prologues.
+        /// </summary>
+        /// <summary>Test hook — exposes FilterByDensity for unit tests.</summary>
+        internal static List<SyscallStubHit> FilterByDensityPublic(List<SyscallStubHit> hits, int maxSpacing)
+            => FilterByDensity(hits, maxSpacing);
+
+        private static List<SyscallStubHit> FilterByDensity(List<SyscallStubHit> hits, int maxSpacing)
+        {
+            if (hits.Count < 3) return new List<SyscallStubHit>();
+
+            int bestStart = 0, bestLen = 1;
+            int curStart  = 0, curLen  = 1;
+
+            for (int i = 1; i < hits.Count; i++)
+            {
+                if (hits[i].Offset - hits[i - 1].Offset <= maxSpacing)
+                {
+                    curLen++;
+                    if (curLen > bestLen) { bestLen = curLen; bestStart = curStart; }
+                }
+                else
+                {
+                    curStart = i;
+                    curLen   = 1;
+                }
+            }
+
+            return bestLen >= 3 ? hits.GetRange(bestStart, bestLen) : new List<SyscallStubHit>();
+        }
+
+        private static int CountDistinctSsns(List<SyscallStubHit> hits)
+        {
+            var s = new HashSet<int>();
+            foreach (var h in hits) s.Add(h.Ssn);
+            return s.Count;
+        }
+
+        /// <summary>
+        /// Finds well-formed Hell's Gate / SysWhispers syscall stubs in a memory buffer.
+        ///
+        /// Two patterns matched:
+        ///   1. Compact stub (11 bytes):  mov r10,rcx; mov eax,SSN; syscall; ret
+        ///      4C 8B D1  B8 lo hi 00 00  0F 05  C3
+        ///
+        ///   2. Copied ntdll prologue (21 bytes): mov r10,rcx; mov eax,SSN;
+        ///      test byte ptr [SharedUserData+0x308],1; jne +3; syscall; ret
+        ///      4C 8B D1  B8 lo hi 00 00  F6 04 25 08 03 FE 7F 01  75 03  0F 05  C3
+        ///
+        /// SSNs outside 0x0001–0x01FF are rejected: they are compiler-generated immediates
+        /// or attacker garbage, not real Windows syscall numbers.
         /// </summary>
         internal static List<SyscallStubHit> FindSyscallStubs(byte[] buffer, int length)
         {
@@ -212,15 +289,23 @@ namespace Sentinel.Core
 
             for (int i = 0; i <= lim - 11; i++)
             {
-                if (buffer[i] != 0x4C || buffer[i + 1] != 0x8B ||
+                // mov r10,rcx (4C 8B D1) + mov eax,imm32 (B8 lo hi 00 00)
+                if (buffer[i]     != 0x4C || buffer[i + 1] != 0x8B ||
                     buffer[i + 2] != 0xD1 || buffer[i + 3] != 0xB8)
                     continue;
+
+                // High word of imm32 must be zero — SSN fits in 16 bits
                 if (buffer[i + 6] != 0x00 || buffer[i + 7] != 0x00)
                     continue;
 
                 int ssn = buffer[i + 4] | (buffer[i + 5] << 8);
 
-                // mov r10,rcx; mov eax,SSN; syscall; ret
+                // Valid Windows syscall range: 0x0001–0x01FF.
+                // Rejects SSN=0 (no real stub), compiler constants, and out-of-range values.
+                if (ssn < MinValidSsn || ssn > MaxValidSsn)
+                    continue;
+
+                // Pattern 1: compact — syscall (0F 05) immediately followed by ret (C3)
                 if (i + 10 < lim &&
                     buffer[i + 8] == 0x0F && buffer[i + 9] == 0x05 && buffer[i + 10] == 0xC3)
                 {
@@ -229,9 +314,9 @@ namespace Sentinel.Core
                     continue;
                 }
 
-                // Copied ntdll: test byte ptr [SharedUserData+0x308],1 / jne +3 / syscall / ret
+                // Pattern 2: copied ntdll prologue with SharedUserData hypervisor check
                 if (i + 20 < lim &&
-                    buffer[i + 8] == 0xF6 && buffer[i + 9] == 0x04 && buffer[i + 10] == 0x25 &&
+                    buffer[i +  8] == 0xF6 && buffer[i +  9] == 0x04 && buffer[i + 10] == 0x25 &&
                     buffer[i + 11] == 0x08 && buffer[i + 12] == 0x03 && buffer[i + 13] == 0xFE &&
                     buffer[i + 14] == 0x7F && buffer[i + 15] == 0x01 &&
                     buffer[i + 16] == 0x75 && buffer[i + 17] == 0x03 &&
