@@ -1,16 +1,16 @@
 [Setup]
 AppName=Sentinel
-AppVersion=2.4.2
+AppVersion=2.4.3
 AppPublisher=Gorstak
 AppPublisherURL=https://gorstak.eu
 AppCopyright=Copyright (C) 2026 Gorstak
-VersionInfoVersion=2.4.2.0
+VersionInfoVersion=2.4.3.0
 VersionInfoCompany=Gorstak
 VersionInfoDescription=Sentinel Endpoint Detection and Response Setup
 VersionInfoCopyright=Copyright (C) 2026 Gorstak
 VersionInfoProductName=Sentinel EDR
-VersionInfoProductVersion=2.4.2.0
-VersionInfoOriginalFileName=SentinelSetup-2.4.2.exe
+VersionInfoProductVersion=2.4.3.0
+VersionInfoOriginalFileName=SentinelSetup-2.4.3.exe
 SourceDir=.
 DefaultDirName={autopf}\Sentinel
 DefaultGroupName=Sentinel
@@ -19,7 +19,7 @@ UninstallDisplayIcon={app}\Sentinel.ico
 Compression=lzma/max
 SolidCompression=no
 OutputDir=.
-OutputBaseFilename=SentinelSetup-2.4.2
+OutputBaseFilename=SentinelSetup-2.4.3
 PrivilegesRequired=admin
 SetupMutex=Global\SentinelSetupMutex
 UsePreviousAppDir=yes
@@ -37,9 +37,6 @@ Name: "{group}\Sentinel Agent"; Filename: "{app}\Sentinel.Agent.exe"; IconFilena
 [Run]
 Filename: "{app}\Sentinel.Service.exe"; Parameters: "--install"; Flags: runhidden waituntilterminated; StatusMsg: "Starting Sentinel..."
 Filename: "{sys}\cmd.exe"; Parameters: "/c del /f /q ""{app}\*.old"" 2>nul & exit /b 0"; Flags: runhidden waituntilterminated
-
-[UninstallRun]
-Filename: "{app}\Sentinel.Service.exe"; Parameters: "--uninstall-cleanup"; Flags: runhidden; RunOnceId: "SentinelCleanup"
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}"
@@ -171,10 +168,30 @@ end;
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   ResultCode: Integer;
+  Taskkill, Svc: String;
 begin
   if CurUninstallStep = usUninstall then
   begin
+    // Stop and kill service + agent before files are removed.
+    // Without this the processes stay running and file deletion fails silently,
+    // leaving both binaries on disk and the service registered.
+    Svc := ExpandConstant('{app}\Sentinel.Service.exe');
+    if FileExists(Svc) then
+    begin
+      Exec(Svc, '--uninstall-cleanup', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+      Sleep(800);
+    end;
+
+    Taskkill := SysNative('taskkill.exe');
+    Exec(Taskkill, '/F /IM "Sentinel.Service.exe"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec(Taskkill, '/F /IM "Sentinel.Agent.exe"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Sleep(1000);
+
+    // Remove IPSec policy and firewall rule created by Sentinel
     Exec(ExpandConstant('{sys}\netsh.exe'), 'ipsec static delete policy name=GSecurity', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     Exec(ExpandConstant('{sys}\netsh.exe'), 'advfirewall firewall delete rule name="Sentinel-Block-Remote-RPC-Ephemeral"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+    // Remove agent autorun key
+    RegDeleteValue(HKLM, 'SOFTWARE\Microsoft\Windows\CurrentVersion\Run', 'SentinelAgent');
   end;
 end;
