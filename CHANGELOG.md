@@ -2,6 +2,26 @@
 
 
 
+## [2.4.9] - 2026-09-06
+
+Patch on the 2.4.8 protocol coverage.
+
+### Fixed
+
+- **ETW category vs Network\*** — `CategorizeDetection` no longer uses
+  `Contains("etw")` (that matched the letters inside "network") and no longer
+  `StartsWith("etw")` alone (that dropped mid-string names like
+  `process etw bypass`). Token match skips the `n-etw-ork` false positive.
+- **UDP ETW PID** — payload offset-0 PID is used only when `evt.ProcessId`
+  is missing (≤ 4). A live event PID is never overwritten with payload
+  garbage.
+
+### Changed
+
+- `ProductInfo.Version` → `2.4.9`
+- Installer → `SentinelSetup-2.4.9.exe`
+
+
 ## [2.4.8] - 2026-09-06
 
 Userland protocol coverage: UDP, ICMP, WFP net-event subscription, and VoIP

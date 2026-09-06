@@ -78,6 +78,27 @@ namespace Sentinel.Tests
             Assert.Equal(expected, category);
         }
 
+        [Theory]
+        [InlineData("ETW Tampering: Provider Disabled", DetectionCategory.SecurityEvasion)]
+        [InlineData("process etw bypass", DetectionCategory.SecurityEvasion)]
+        [InlineData("Self-Protection: Unexpected ETW Patch", DetectionCategory.SecurityEvasion)]
+        [InlineData("Network UDP: LOLBin Datagram", DetectionCategory.NetworkAnomaly)]
+        [InlineData("Network ICMP: Redirect Inbound", DetectionCategory.NetworkAnomaly)]
+        [InlineData("Covert Mesh: Userspace Overlay Tool", DetectionCategory.NetworkAnomaly)]
+        public void CategorizeDetection_EtwToken_DoesNotEatNetworkRules(string ruleName, DetectionCategory expected)
+        {
+            Assert.Equal(expected, ScoringEngine.CategorizeDetection(ruleName));
+        }
+
+        [Fact]
+        public void ContainsEtwToken_SkipsLettersInsideNetwork()
+        {
+            Assert.False(ScoringEngine.ContainsEtwToken("network udp: lolbin datagram"));
+            Assert.True(ScoringEngine.ContainsEtwToken("etw tampering: provider disabled"));
+            Assert.True(ScoringEngine.ContainsEtwToken("process etw bypass"));
+            Assert.True(ScoringEngine.ContainsEtwToken("anti-tamper: etw session disabled"));
+        }
+
         #endregion
 
         #region Scoring Logic

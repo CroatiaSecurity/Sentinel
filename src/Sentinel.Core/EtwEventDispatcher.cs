@@ -534,7 +534,8 @@ namespace Sentinel.Core
 
         /// <summary>
         /// UdpIp_TypeGroup1: PID(4) size(4) daddr(4) saddr(4) dport(2) sport(2) …
-        /// PID in the payload is authoritative (session PID is often 0 for kernel-network).
+        /// Kernel-Network often reports session PID 0; the payload PID is then the
+        /// only attribution. Never clobber a real evt.ProcessId with offset-0 garbage.
         /// </summary>
         private void HandleUdpNetworkEvent(EtwRawEvent evt)
         {
@@ -542,10 +543,11 @@ namespace Sentinel.Core
             if (ipv6 && evt.UserDataLength < 40) return;
 
             int pid = evt.ProcessId;
-            if (evt.UserDataLength >= 4)
+            if (pid <= 4 && evt.UserDataLength >= 4)
             {
                 int payloadPid = Marshal.ReadInt32(evt.UserData, 0);
-                if (payloadPid > 0) pid = payloadPid;
+                if (payloadPid > 4)
+                    pid = payloadPid;
             }
 
             string remoteAddr;

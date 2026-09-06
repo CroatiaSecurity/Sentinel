@@ -14,7 +14,7 @@ namespace Sentinel.Tests
         [Fact]
         public void ProductInfo_Version_Is228()
         {
-            Assert.Equal("2.4.8", ProductInfo.Version);
+            Assert.Equal("2.4.9", ProductInfo.Version);
         }
 
         [Fact]

@@ -368,9 +368,7 @@ namespace Sentinel.Core
             if (r.Contains("reverse shell") || r.Contains("reverseshell") || r.Contains("c2") || r.Contains("callback")) return DetectionCategory.ReverseShell;
             if (r.Contains("injection") || r.Contains("hollowing") || r.Contains("threatintel")) return DetectionCategory.ProcessInjection;
             if (r.Contains("ransomware") || r.Contains("shadow copy")) return DetectionCategory.Ransomware;
-            if (r.Contains("evasion") || r.Contains("tampering") || r.Contains("amsi") ||
-                r.Contains("etw tamper") || r.Contains("etw patch") || r.Contains("etw provider") ||
-                r.Contains("etw session") || r.StartsWith("etw"))
+            if (r.Contains("evasion") || r.Contains("tampering") || r.Contains("amsi") || ContainsEtwToken(r))
                 return DetectionCategory.SecurityEvasion;
             if (r.Contains("persistence") || r.Contains("scheduled task")) return DetectionCategory.Persistence;
             if (r.Contains("privilege") || r.Contains("uac bypass")) return DetectionCategory.PrivilegeEscalation;
@@ -391,6 +389,29 @@ namespace Sentinel.Core
         private static DetectionCategory CategorizeDetection(DetectionEvent detection)
         {
             return CategorizeDetection(detection.RuleName);
+        }
+
+        /// <summary>
+        /// ETW as a token, not the letters inside "network" (n-etw-ork).
+        /// Restores Contains("etw") for mid-string names ("process etw bypass")
+        /// without recategorizing every Network* rule as SecurityEvasion.
+        /// </summary>
+        internal static bool ContainsEtwToken(string r)
+        {
+            if (string.IsNullOrEmpty(r)) return false;
+            int i = 0;
+            while ((i = r.IndexOf("etw", i, StringComparison.Ordinal)) >= 0)
+            {
+                bool insideNetwork = i >= 1 && i + 6 <= r.Length
+                    && r[i - 1] == 'n'
+                    && r[i + 3] == 'o'
+                    && r[i + 4] == 'r'
+                    && r[i + 5] == 'k';
+                if (!insideNetwork)
+                    return true;
+                i += 3;
+            }
+            return false;
         }
 
         private static Verdict DetermineVerdict(double score) => score switch
