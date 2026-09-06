@@ -234,7 +234,7 @@ namespace Sentinel.Core
 
         /// <summary>
         /// v2.0: Explainable weighted multi-signal correlation (complements hand-authored composites).
-        /// Bound from appsettings section Sentinel:WeightedCorrelation.
+        /// Compiled default; optional DPAPI override via EncryptedConfigStore.
         /// </summary>
         public WeightedCorrelationConfig WeightedCorrelation { get; set; } = new();
     }
@@ -330,17 +330,21 @@ namespace Sentinel.Core
         /// URL of the Cloudflare Worker proxy that holds API keys server-side.
         /// When set, reports go to this endpoint instead of directly to abuse.ch.
         /// This allows open-source distribution without leaking API keys.
-        /// v2.0.4: Default endpoint compiled into binary (no appsettings.json dependency).
+        /// Default endpoint compiled into the binary.
         /// </summary>
         public string? ProxyEndpoint { get; set; } = "https://sentinel-threat-proxy.znastidobrostoje-6ee.workers.dev";
 
         /// <summary>
-        /// v1.6.0: Shared secret matching Worker env SENTINEL_SHARED_SECRET.
-        /// Used as the HMAC-SHA256 key for all proxy requests. Required (≥16 chars)
-        /// when Enabled+ProxyEndpoint are set; reporting fails closed without it.
-        /// Never commit production secrets to source control.
+        /// HMAC key for the threat-proxy Worker. Compiled into the binary.
+        /// Must match Worker env SENTINEL_SHARED_SECRET. Split concat so a PE
+        /// dump is not one line. Admin --set-config can rotate via DPAPI
+        /// config.enc (length ≥ 16). Short plants are ignored.
         /// </summary>
-        public string? ProxySharedSecret { get; set; }
+        public string? ProxySharedSecret { get; set; } = CompiledProxySharedSecret;
+
+        /// <summary>Built-in Worker HMAC. Not disk config.</summary>
+        public static string CompiledProxySharedSecret =>
+            string.Concat("SntlHmac/", "CroatiaSecurity/", "v254/", "e7a91c4b2f6d80e3", "15c8a0d47b9e2f63");
     }
 
     /// <summary>

@@ -145,7 +145,10 @@ namespace Sentinel.Core
             foreach (var kvp in _history)
             {
                 var history = kvp.Value;
-                if (history.HasFired) continue;
+                if (history.HasFired &&
+                    history.LastSeen.AddMinutes(15) > DateTimeOffset.UtcNow)
+                    continue;
+                history.HasFired = false;
 
                 var intervals = history.GetIntervals();
                 if (intervals.Count < MinObservations) continue;

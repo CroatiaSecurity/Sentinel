@@ -73,183 +73,159 @@ namespace Sentinel.Core
 
         private async Task RunScanLoopAsync(CancellationToken ct)
         {
-            // Kernel-Process ImageLoad + Threat-Intelligence ETW cover injection.
-            // Polling EnumModules/threads/RWX every 5s was a hard-page-fault source.
-            try { await Task.Delay(Timeout.Infinite, ct); }
-            catch (OperationCanceledException) { }
-        }
-
-        private async Task ScanThreadsAsync(CancellationToken ct)
-        {
-            foreach (var proc in Process.GetProcesses())
+            // Only PIDs that just did remote TI — not a full-system 5s walk
+            // (that was the LatencyMon hard-fault source).
+            while (!ct.IsCancellationRequested)
             {
-                if (ct.IsCancellationRequested) break;
-                if (proc.Id <= 4) { proc.Dispose(); continue; }
-
                 try
                 {
-                    var name = proc.ProcessName;
-                    var imagePath = SecurityValidation.GetProcessImagePath(proc.Id);
-                    if (!NativeProcessMemory.CanInspect(proc.Id, imagePath))
-                    {
-                        proc.Dispose();
-                        continue;
-                    }
-
-                    if (_alertedPids.TryGetValue(proc.Id, out var last) &&
-                        DateTimeOffset.UtcNow - last < AlertCooldown)
-                    {
-                        proc.Dispose();
-                        continue;
-                    }
-
-                    var ranges = MappedModuleCache.Get(proc.Id);
-                    if (ranges.Count == 0)
-                    {
-                        var modules = NativeProcessMemory.EnumModules(proc.Id);
-                        ranges = MappedModuleCache.Get(proc.Id);
-                    }
-                    if (ranges.Count == 0) { proc.Dispose(); continue; }
-
-                    foreach (ProcessThread thread in proc.Threads)
-                    {
-                        if (ct.IsCancellationRequested) break;
-                        IntPtr start;
-                        try { start = thread.StartAddress; }
-                        catch { continue; }
-                        if (start == IntPtr.Zero) continue;
-
-                        ulong sa = (ulong)start;
-                        bool inside = ranges.Any(r => sa >= r.Base && sa < r.End);
-                        if (inside) continue;
-                        if (!LooksLikeUnbackedShellcode(proc.Id, start))
-                            continue;
-
-                        _alertedPids[proc.Id] = DateTimeOffset.UtcNow;
-                        await _detectionEngine.EmitAsync(new DetectionEvent
-                        {
-                            RuleName = "Evasion: Unmapped Thread Start Address",
-                            Evidence = $"Thread {thread.Id} in '{name}' (PID {proc.Id}) started at unmapped 0x{start:X}.",
-                            Reasoning = "Thread entrypoint outside any loaded module indicates shellcode injection / thread hijacking.",
-                            Confidence = 0.90,
-                            Tier = DetectionTier.Tier1Behavioral,
-                            AuthorizedResponse = ResponseAction.KillProcessTree,
-                            ProcessName = name,
-                            ProcessId = proc.Id,
-                            SignalType = SignalType.AntiTamper,
-                            Metadata = new Dictionary<string, string>
-                            {
-                                ["ThreadId"] = thread.Id.ToString(),
-                                ["StartAddress"] = $"0x{start:X}",
-                                ["ImagePath"] = imagePath ?? ""
-                            }
-                        });
-
-                        _contextBus?.Publish(new InjectionSignal
-                        {
-                            ProcessId = proc.Id,
-                            ProcessName = name,
-                            SourceMonitor = "EtwThreatIntelMonitor",
-                            ThreadId = thread.Id,
-                            StartAddress = $"0x{start:X}",
-                            ImagePath = imagePath ?? ""
-                        });
-                        break;
-                    }
+                    await ScanSuspectPidsAsync(ct).ConfigureAwait(false);
                 }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
                 catch { }
-                finally
-                {
-                    try { proc.Dispose(); } catch { }
-                }
+                try { await Task.Delay(TimeSpan.FromSeconds(8), ct).ConfigureAwait(false); }
+                catch (OperationCanceledException) { break; }
             }
         }
 
-        private async Task ScanForRemoteInjectionPatternsAsync(CancellationToken ct)
+        private async Task ScanSuspectPidsAsync(CancellationToken ct)
         {
-            foreach (var proc in Process.GetProcesses())
+            foreach (var pid in InjectionSuspectBoard.Snapshot())
             {
                 if (ct.IsCancellationRequested) break;
-                if (proc.Id <= 4) { proc.Dispose(); continue; }
-
+                if (pid <= 4) continue;
                 try
                 {
-                    var name = proc.ProcessName;
-                    if (!IsHighValueTarget(name)) { proc.Dispose(); continue; }
-
-                    var imagePath = SecurityValidation.GetProcessImagePath(proc.Id);
-                    if (!NativeProcessMemory.CanInspect(proc.Id, imagePath))
-                    {
-                        proc.Dispose();
-                        continue;
-                    }
-
-                    if (_alertedPids.TryGetValue(proc.Id, out var last) &&
-                        DateTimeOffset.UtcNow - last < AlertCooldown)
-                    {
-                        proc.Dispose();
-                        continue;
-                    }
-
-                    uint access = NativeProcessMemory.PROCESS_QUERY_INFORMATION | NativeProcessMemory.PROCESS_VM_READ;
-                    IntPtr h = NativeProcessMemory.OpenRemoteHandle(access, proc.Id);
-                    if (h == IntPtr.Zero) { proc.Dispose(); continue; }
-
-                    try
-                    {
-                        var rwx = FindUnbackedRwx(h, proc.Id);
-                        if (rwx.Count == 0) continue;
-
-                        // .NET / Chromium JIT is private RWX without an MZ. 2.2.5 treated
-                        // that as ALLOCVM_REMOTE, ran DllUnloadEngine, and Ceprkac died
-                        // with CLR 80131506 at the same timestamp as the event.
-                        var mzRegions = new List<(long Address, long Size)>();
-                        foreach (var region in rwx)
-                        {
-                            if (NativeProcessMemory.LooksLikeMzPe(proc.Id, new IntPtr(region.Address)))
-                                mzRegions.Add(region);
-                        }
-                        if (mzRegions.Count == 0)
-                        {
-                            proc.Dispose();
-                            continue;
-                        }
-
-                        if (_dllUnload != null)
-                            await _dllUnload.CheckAndUnloadAsync(proc.Id, name);
-
-                        _alertedPids[proc.Id] = DateTimeOffset.UtcNow;
-                        await _detectionEngine.EmitAsync(new DetectionEvent
-                        {
-                            RuleName = "Threat Intel: Remote Memory Injection (ALLOCVM_REMOTE + PROTECTVM_REMOTE)",
-                            Evidence = $"Process '{name}' (PID {proc.Id}) has {rwx.Count} unbacked RWX region(s) with injected MZ header, " +
-                                       $"total {rwx.Sum(r => r.Size):N0} bytes.",
-                            Reasoning = "Unbacked RWX with MZ header indicates remote memory injection / hollowed payload (T1055). " +
-                                        "Process contained and response triggered.",
-                            Confidence = 0.95,
-                            Tier = DetectionTier.Tier1Behavioral,
-                            AuthorizedResponse = ResponseAction.KillProcessTree,
-                            ProcessName = name,
-                            ProcessId = proc.Id,
-                            SignalType = SignalType.ProcessInjection,
-                            Metadata = new Dictionary<string, string>
-                            {
-                                ["RwxRegionCount"] = rwx.Count.ToString(),
-                                ["TotalRwxSize"] = rwx.Sum(r => r.Size).ToString(),
-                                ["ImagePath"] = imagePath ?? ""
-                            }
-                        });
-                    }
-                    finally
-                    {
-                        NativeProcessMemory.CloseHandle(h);
-                    }
+                    using var proc = Process.GetProcessById(pid);
+                    await ScanOneProcessThreadsAsync(proc, ct).ConfigureAwait(false);
+                    if (IsHighValueTarget(proc.ProcessName))
+                        await ScanOneProcessRwxAsync(proc, ct).ConfigureAwait(false);
                 }
                 catch { }
-                finally
+            }
+        }
+
+        private async Task ScanOneProcessThreadsAsync(Process proc, CancellationToken ct)
+        {
+            var name = proc.ProcessName;
+            var imagePath = SecurityValidation.GetProcessImagePath(proc.Id);
+            if (!NativeProcessMemory.CanInspect(proc.Id, imagePath))
+                return;
+            if (_alertedPids.TryGetValue(proc.Id, out var last) &&
+                DateTimeOffset.UtcNow - last < AlertCooldown)
+                return;
+
+            var ranges = MappedModuleCache.Get(proc.Id);
+            if (ranges.Count == 0)
+            {
+                NativeProcessMemory.EnumModules(proc.Id);
+                ranges = MappedModuleCache.Get(proc.Id);
+            }
+            if (ranges.Count == 0) return;
+
+            foreach (ProcessThread thread in proc.Threads)
+            {
+                if (ct.IsCancellationRequested) break;
+                IntPtr start;
+                try { start = thread.StartAddress; }
+                catch { continue; }
+                if (start == IntPtr.Zero) continue;
+
+                ulong sa = (ulong)start;
+                bool inside = ranges.Any(r => sa >= r.Base && sa < r.End);
+                if (inside) continue;
+                if (!LooksLikeUnbackedShellcode(proc.Id, start))
+                    continue;
+
+                _alertedPids[proc.Id] = DateTimeOffset.UtcNow;
+                await _detectionEngine.EmitAsync(new DetectionEvent
                 {
-                    try { proc.Dispose(); } catch { }
+                    RuleName = "Evasion: Unmapped Thread Start Address",
+                    Evidence = $"Thread {thread.Id} in '{name}' (PID {proc.Id}) started at unmapped 0x{start:X}.",
+                    Reasoning = "Thread entrypoint outside any loaded module indicates shellcode injection / thread hijacking.",
+                    Confidence = 0.90,
+                    Tier = DetectionTier.Tier1Behavioral,
+                    AuthorizedResponse = ResponseAction.KillProcessTree,
+                    ProcessName = name,
+                    ProcessId = proc.Id,
+                    SignalType = SignalType.AntiTamper,
+                    Metadata = new Dictionary<string, string>
+                    {
+                        ["ThreadId"] = thread.Id.ToString(),
+                        ["StartAddress"] = $"0x{start:X}",
+                        ["ImagePath"] = imagePath ?? ""
+                    }
+                });
+
+                _contextBus?.Publish(new InjectionSignal
+                {
+                    ProcessId = proc.Id,
+                    ProcessName = name,
+                    SourceMonitor = "EtwThreatIntelMonitor",
+                    ThreadId = thread.Id,
+                    StartAddress = $"0x{start:X}",
+                    ImagePath = imagePath ?? ""
+                });
+                break;
+            }
+        }
+
+        private async Task ScanOneProcessRwxAsync(Process proc, CancellationToken ct)
+        {
+            if (ct.IsCancellationRequested) return;
+            var name = proc.ProcessName;
+            var imagePath = SecurityValidation.GetProcessImagePath(proc.Id);
+            if (!NativeProcessMemory.CanInspect(proc.Id, imagePath))
+                return;
+            if (_alertedPids.TryGetValue(proc.Id, out var last) &&
+                DateTimeOffset.UtcNow - last < AlertCooldown)
+                return;
+
+            uint access = NativeProcessMemory.PROCESS_QUERY_INFORMATION | NativeProcessMemory.PROCESS_VM_READ;
+            IntPtr h = NativeProcessMemory.OpenRemoteHandle(access, proc.Id);
+            if (h == IntPtr.Zero) return;
+
+            try
+            {
+                var rwx = FindUnbackedRwx(h, proc.Id);
+                if (rwx.Count == 0) return;
+
+                var mzRegions = new List<(long Address, long Size)>();
+                foreach (var region in rwx)
+                {
+                    if (NativeProcessMemory.LooksLikeMzPe(proc.Id, new IntPtr(region.Address)))
+                        mzRegions.Add(region);
                 }
+                if (mzRegions.Count == 0)
+                    return;
+
+                if (_dllUnload != null)
+                    await _dllUnload.CheckAndUnloadAsync(proc.Id, name);
+
+                _alertedPids[proc.Id] = DateTimeOffset.UtcNow;
+                await _detectionEngine.EmitAsync(new DetectionEvent
+                {
+                    RuleName = "Threat Intel: Remote Memory Injection (ALLOCVM_REMOTE + PROTECTVM_REMOTE)",
+                    Evidence = $"Process '{name}' (PID {proc.Id}) has {rwx.Count} unbacked RWX region(s) with injected MZ header, " +
+                               $"total {rwx.Sum(r => r.Size):N0} bytes.",
+                    Reasoning = "Unbacked RWX with MZ header indicates remote memory injection / hollowed payload (T1055).",
+                    Confidence = 0.95,
+                    Tier = DetectionTier.Tier1Behavioral,
+                    AuthorizedResponse = ResponseAction.KillProcessTree,
+                    ProcessName = name,
+                    ProcessId = proc.Id,
+                    SignalType = SignalType.ProcessInjection,
+                    Metadata = new Dictionary<string, string>
+                    {
+                        ["RwxRegionCount"] = rwx.Count.ToString(),
+                        ["TotalRwxSize"] = rwx.Sum(r => r.Size).ToString(),
+                        ["ImagePath"] = imagePath ?? ""
+                    }
+                });
+            }
+            finally
+            {
+                NativeProcessMemory.CloseHandle(h);
             }
         }
 

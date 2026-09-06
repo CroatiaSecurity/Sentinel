@@ -79,6 +79,9 @@ namespace Sentinel.Service
             // v1.3.2: Wire orchestrator into detection engine
             detectionEngine.SetOrchestrator(orchestrator);
 
+            // v2.6.0: Wire ancestry cache into ResponsePolicy for cross-PID chain correlation.
+            ResponsePolicy.SetAncestryCache(ancestryCache);
+
             // v1.5.5 (WIRE-2): Validate all late-bindings were established.
             // If any SetXxx() call was accidentally removed during refactoring,
             // this logs CRITICAL at startup rather than silently degrading.

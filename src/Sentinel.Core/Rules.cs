@@ -162,16 +162,6 @@ namespace Sentinel.Core
     {
         public string Name => "ThreatIntelInjectionRule";
 
-        // Suspicious API patterns from EtwThreatIntelMonitor kernel callbacks.
-        // Plain literals — split-string assembly is an AV evasion heuristic (Kaspersky/Defender ML).
-        private static readonly string[] InjectionAPIs = new[]
-        {
-            "NtAllocateVirtualMemory", "VirtualAllocEx", "NtWriteVirtualMemory",
-            "WriteProcessMemory", "NtMapViewOfSection", "MapViewOfSection",
-            "QueueUserAPC", "NtQueueApcThread", "SetThreadContext",
-            "NtSetContextThread", "RtlCreateUserThread", "CreateRemoteThread"
-        };
-
         // Browsers legitimately use cross-process memory APIs for their sandbox model
         // (broker process allocates memory in renderer/tab processes). Skip to avoid FP kills.
         private static readonly HashSet<string> KnownBrowserProcesses = new(StringComparer.OrdinalIgnoreCase)
@@ -182,47 +172,60 @@ namespace Sentinel.Core
 
         public DetectionEvent? Evaluate(FusedTelemetryContext context)
         {
-            if (context.TriggeringEvent is ThreatIntelTelemetry tit)
+            if (context.TriggeringEvent is not ThreatIntelTelemetry tit)
+                return null;
+
+            if (!ThreatIntelMap.IsRemoteInjection(tit.ApiName))
+                return null;
+
+            // Browser sandbox: chrome→chrome is normal. chrome→lsass is not.
+            if (KnownBrowserProcesses.Contains(tit.ProcessName) &&
+                tit.TargetProcessId != 4 &&
+                !IsSensitiveTargetName(tit.TargetProcessId))
+                return null;
+
+            var imagePath = SecurityValidation.GetProcessImagePath(tit.ProcessId);
+            if (SecurityValidation.IsGameOrAntiCheatPath(imagePath))
+                return null;
+
+            InjectionSuspectBoard.Mark(tit.ProcessId);
+            if (tit.TargetProcessId > 4)
+                InjectionSuspectBoard.Mark(tit.TargetProcessId);
+
+            var label = ThreatIntelMap.Describe(tit.ApiName);
+            return new DetectionEvent
             {
-                // Skip browsers — they legitimately use injection APIs for sandboxing
-                if (KnownBrowserProcesses.Contains(tit.ProcessName))
-                    return null;
-
-                // UnifiedEtwSession currently labels TI events as ThreatIntel_EventId_N,
-                // not the real API name. That string never contains VirtualAllocEx etc.
-                if (string.IsNullOrEmpty(tit.ApiName) ||
-                    tit.ApiName.StartsWith("ThreatIntel_EventId_", StringComparison.Ordinal))
-                    return null;
-
-                var imagePath = SecurityValidation.GetProcessImagePath(tit.ProcessId);
-                if (SecurityValidation.IsGameOrAntiCheatPath(imagePath))
-                    return null;
-
-                foreach (var api in InjectionAPIs)
+                RuleName = Name,
+                ProcessName = tit.ProcessName,
+                ProcessId = tit.ProcessId,
+                SignalType = SignalType.ProcessInjection,
+                Confidence = 0.90,
+                Tier = DetectionTier.Tier1Behavioral,
+                AuthorizedResponse = ResponseAction.QuarantineAndKill,
+                Evidence = $"Injection TI {label} by {tit.ProcessName} (PID {tit.ProcessId}) targeting PID {tit.TargetProcessId}",
+                Reasoning = "Kernel Threat-Intelligence observed a remote memory/thread API (T1055).",
+                Metadata = new Dictionary<string, string>
                 {
-                    if (tit.ApiName.Contains(api))
-                    {
-                        return new DetectionEvent
-                        {
-                            RuleName = Name,
-                            ProcessName = tit.ProcessName,
-                            ProcessId = tit.ProcessId,
-                            SignalType = SignalType.ProcessInjection,
-                            Confidence = 0.90,
-                            Tier = DetectionTier.Tier1Behavioral,
-                            AuthorizedResponse = ResponseAction.QuarantineAndKill,
-                            Evidence = $"Injection API invoked: {tit.ApiName} by {tit.ProcessName} (PID {tit.ProcessId}) targeting process PID {tit.TargetProcessId}",
-                            Reasoning = "Process invoked a kernel-observed memory injection API targeting another process, indicating code injection (T1055).",
-                            Metadata = new Dictionary<string, string>
-                            {
-                                { "TargetProcessId", tit.TargetProcessId.ToString() },
-                                { "ApiName", tit.ApiName }
-                            }
-                        };
-                    }
+                    { "TargetProcessId", tit.TargetProcessId.ToString() },
+                    { "ApiName", tit.ApiName },
+                    { "TiLabel", label }
                 }
+            };
+        }
+
+        private static bool IsSensitiveTargetName(int pid)
+        {
+            try
+            {
+                using var p = System.Diagnostics.Process.GetProcessById(pid);
+                var n = p.ProcessName ?? "";
+                return n.Equals("lsass", StringComparison.OrdinalIgnoreCase)
+                    || n.Equals("winlogon", StringComparison.OrdinalIgnoreCase)
+                    || n.Equals("csrss", StringComparison.OrdinalIgnoreCase)
+                    || n.Equals("services", StringComparison.OrdinalIgnoreCase)
+                    || n.Equals("smss", StringComparison.OrdinalIgnoreCase);
             }
-            return null;
+            catch { return false; }
         }
     }
 

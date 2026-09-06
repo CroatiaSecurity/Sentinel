@@ -6,7 +6,7 @@ namespace Sentinel.Agent
 {
     /// <summary>
     /// User-editable complainant defaults for police filing UI.
-    /// Stored under LocalAppData so upgrades never wipe identity fields in appsettings.
+    /// Stored under LocalAppData so upgrades never wipe identity fields.
     /// </summary>
     public sealed class UserReportPrefs
     {

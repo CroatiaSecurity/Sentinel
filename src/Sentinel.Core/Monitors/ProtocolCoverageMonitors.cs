@@ -44,6 +44,10 @@ namespace Sentinel.Core
             "mshta", "wscript", "cscript", "rundll32", "regsvr32",
             "bash", "sh", "wmic", "bitsadmin", "certutil",
             "python", "pythonw", "py", "node", "cmd.exe",
+            "msiexec", "installutil", "regasm", "regsvcs", "odbcconf",
+            "cmstp", "hh", "wsl", "wslhost", "forfiles", "msdt",
+            "pcalua", "presentationhost", "mavinject", "ieexec",
+            "xwizard", "dnscmd", "diskshadow", "expand", "ftp", "tftp",
         };
 
         internal static readonly HashSet<string> KnownCommsProcesses = new(StringComparer.OrdinalIgnoreCase)
@@ -1198,6 +1202,7 @@ namespace Sentinel.Core
         private IntPtr _subscription;
         private FwpmNative.NetEventCallback? _callback;
         private bool _subscribed;
+        private DateTime _wfpLastEventUtc;
 
         public WfpNetEventMonitor(
             DetectionEngine detectionEngine,
@@ -1227,6 +1232,12 @@ namespace Sentinel.Core
                 {
                     if (!_subscribed)
                         TrySubscribe();
+                    else if (DateTime.UtcNow - _wfpLastEventUtc > TimeSpan.FromMinutes(8) &&
+                             _wfpLastEventUtc != default)
+                    {
+                        Unsubscribe();
+                        TrySubscribe();
+                    }
                     await PollUnknownProtosAsync().ConfigureAwait(false);
                     PruneDropWindow();
                 }
@@ -1279,6 +1290,7 @@ namespace Sentinel.Core
                 }
 
                 _subscribed = true;
+                _wfpLastEventUtc = DateTime.UtcNow;
                 _logger.LogInformation("[WfpNetEventMonitor] Subscribed to WFP net events");
             }
             catch (Exception ex)
@@ -1311,6 +1323,7 @@ namespace Sentinel.Core
         private void OnNetEvent(IntPtr context, IntPtr netEvent)
         {
             if (netEvent == IntPtr.Zero) return;
+            _wfpLastEventUtc = DateTime.UtcNow;
             try
             {
                 if (!FwpmNative.TryParseHeader(netEvent, out var parsed)) return;

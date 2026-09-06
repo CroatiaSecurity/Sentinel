@@ -32,12 +32,39 @@ namespace Sentinel.Core
             "C2Beacon",
             "WmiPersistence",
             "Evasion",
+            "Injection",
         };
 
         /// <summary>Minimum confidence for a kill-grade family to stay Tier1 (default 0.85).</summary>
         public const double DefaultMinTier1Confidence = 0.85;
 
         private static readonly ConcurrentDictionary<int, PidSignalBuffer> PidBuffers = new();
+
+        // v2.6.0: Cross-PID ancestry buffer — catches staged attacks that spawn a fresh
+        // process per malicious action so each PID starts at zero per-PID signals.
+        // Keyed by the non-system root ancestor PID; all children sharing that root
+        // contribute to the same buffer.  System/browser/IDE hosts are excluded as roots
+        // to avoid cross-contamination between unrelated processes under explorer.exe.
+        private static readonly ConcurrentDictionary<int, PidSignalBuffer> RootBuffers = new();
+
+        /// <summary>
+        /// Injected once at service start-up by the DI container.
+        /// Static so RegisterAndEvaluateChain (also static) can read ancestry without
+        /// a per-call parameter change that would touch every call-site.
+        /// </summary>
+        private static ProcessAncestryCache? _ancestryCache;
+
+        public static void SetAncestryCache(ProcessAncestryCache? cache) => _ancestryCache = cache;
+
+        /// <summary>
+        /// Excluded ancestry root names.  Processes with these names are so widely shared
+        /// that keying a root buffer on them would cross-contaminate unrelated processes.
+        /// </summary>
+        private static readonly HashSet<string> ExcludedAncestryRoots = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "system", "smss", "csrss", "wininit", "services", "lsass",
+            "winlogon", "explorer", "svchost", "dwm", "sihost",
+        };
 
         private static readonly string[] DllUnloadRuleFragments =
         {
@@ -113,6 +140,12 @@ namespace Sentinel.Core
                 "Hell's Gate",
                 "Unmapped Thread Start Address",
                 "ETW/Event Log Manipulation",
+            }),
+            ("Injection", new[]
+            {
+                "ThreatIntelInjectionRule",
+                "Remote Memory Injection",
+                "ALLOCVM_REMOTE",
             }),
             // v2.2.8 — executable WMI consumers / policy rewrite via provider host
             ("WmiPersistence", new[]
@@ -639,7 +672,9 @@ namespace Sentinel.Core
                 || r.IndexOf("Indirect Syscall", StringComparison.OrdinalIgnoreCase) >= 0
                 || r.IndexOf("Hell's Gate", StringComparison.OrdinalIgnoreCase) >= 0
                 || r.IndexOf("AMSI Bypass Detected", StringComparison.OrdinalIgnoreCase) >= 0
-                || r.IndexOf("ETW/Event Log Manipulation", StringComparison.OrdinalIgnoreCase) >= 0;
+                || r.IndexOf("ETW/Event Log Manipulation", StringComparison.OrdinalIgnoreCase) >= 0
+                || r.Equals("ThreatIntelInjectionRule", StringComparison.OrdinalIgnoreCase)
+                || r.IndexOf("Remote Memory Injection", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
         public static bool IsNukeComposite(DetectionEvent detection)
@@ -718,57 +753,30 @@ namespace Sentinel.Core
             // v2.0.3: lazy sweep to evict stale PID buffers (prevents recycled-PID false chains)
             TryLazySweep(windowSec);
 
-            var buffer = PidBuffers.GetOrAdd(pid, _ => new PidSignalBuffer());
-            lock (buffer)
+            var signalEntry = BuildSignalEntry(detection, minTerminalConf);
+
+            // ── Per-PID buffer (original path) ───────────────────────────────────
+            if (EvaluateBuffer(PidBuffers, pid, signalEntry, window, minSignals, minTerminalConf,
+                    detection, out var pidOutcome))
             {
-                var now = DateTime.UtcNow;
-                buffer.Entries.RemoveAll(e => now - e.When > window);
-                buffer.LastActivity = now;
+                TagChainConfirmed(detection, pidOutcome!);
+                return true;
+            }
 
-                var outcome = ClassifyTerminalOutcome(detection);
-                double conf = detection.Confidence;
-                if (conf <= 0 && detection.Metadata != null &&
-                    detection.Metadata.TryGetValue("ThreatScore", out var scoreStr) &&
-                    double.TryParse(scoreStr, out var score))
+            // ── v2.6.0: Cross-PID ancestry buffer ────────────────────────────────
+            // Catches staged attacks that spawn a fresh process per malicious action.
+            // Each fresh child PID starts at zero in the per-PID buffer, but all children
+            // that share a non-system root ancestor accumulate in the root buffer.
+            // Example: loader.exe (pid=100) spawns stage1.exe (pid=200) then stage2.exe
+            // (pid=201). Each child's signals land in loader.exe's root buffer; when the
+            // buffer hits minSignals + terminal, the CURRENT detection is chain-confirmed.
+            int rootPid = GetAttackRootPid(pid);
+            if (rootPid > 4 && rootPid != pid)
+            {
+                if (EvaluateBuffer(RootBuffers, rootPid, signalEntry, window, minSignals, minTerminalConf,
+                        detection, out var rootOutcome))
                 {
-                    conf = score > 1.0 ? score / 100.0 : score;
-                }
-
-                // Low-confidence terminal labels are observe fuel only — do not store as terminal.
-                if (outcome != null && conf < minTerminalConf)
-                    outcome = null;
-
-                buffer.Entries.Add(new SignalEntry(
-                    detection.RuleName ?? "unknown",
-                    outcome,
-                    conf,
-                    now));
-
-                var distinctRules = buffer.Entries
-                    .Select(e => e.RuleName)
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .Count();
-                var terminal = buffer.Entries
-                    .Where(e => e.Outcome != null && e.Confidence >= minTerminalConf)
-                    .Select(e => e.Outcome)
-                    .FirstOrDefault(o => o != null);
-
-                if (distinctRules >= minSignals && terminal != null)
-                {
-                    TagChainConfirmed(detection, terminal!);
-                    return true;
-                }
-
-                // Two+ high-confidence terminal-family signals of different families
-                // (e.g. token + reverse shell) — still require min confidence each.
-                var terminalFamilies = buffer.Entries
-                    .Where(e => e.Outcome != null && e.Confidence >= minTerminalConf)
-                    .Select(e => e.Outcome!)
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .ToList();
-                if (terminalFamilies.Count >= 2)
-                {
-                    TagChainConfirmed(detection, string.Join("+", terminalFamilies));
+                    TagChainConfirmed(detection, rootOutcome!);
                     return true;
                 }
             }
@@ -919,23 +927,25 @@ namespace Sentinel.Core
         {
             var cutoff = DateTime.UtcNow.AddSeconds(-(chainWindowSeconds + 60));
             int removed = 0;
-            foreach (var kvp in PidBuffers)
+            foreach (var dict in new[] { PidBuffers, RootBuffers })
             {
-                var buffer = kvp.Value;
-                bool stale;
-                lock (buffer)
+                foreach (var kvp in dict)
                 {
-                    stale = buffer.LastActivity < cutoff && buffer.Entries.Count == 0
-                            || buffer.LastActivity < cutoff;
-                    if (stale)
+                    var buffer = kvp.Value;
+                    bool stale;
+                    lock (buffer)
                     {
-                        // Double-check: remove entries outside window before declaring stale
-                        buffer.Entries.RemoveAll(e => e.When < cutoff);
-                        stale = buffer.Entries.Count == 0;
+                        stale = buffer.LastActivity < cutoff && buffer.Entries.Count == 0
+                                || buffer.LastActivity < cutoff;
+                        if (stale)
+                        {
+                            buffer.Entries.RemoveAll(e => e.When < cutoff);
+                            stale = buffer.Entries.Count == 0;
+                        }
                     }
+                    if (stale && dict.TryRemove(kvp.Key, out _))
+                        removed++;
                 }
-                if (stale && PidBuffers.TryRemove(kvp.Key, out _))
-                    removed++;
             }
             return removed;
         }
@@ -944,6 +954,117 @@ namespace Sentinel.Core
         /// Lazy sweep: called within RegisterAndEvaluateChain to bound dictionary growth
         /// without requiring external periodic invocation.
         /// </summary>
+        /// <summary>
+        /// Builds a <see cref="SignalEntry"/> from a detection, capping low-confidence
+        /// terminal labels to observe-fuel only (no terminal outcome stored).
+        /// </summary>
+        private static SignalEntry BuildSignalEntry(DetectionEvent detection, double minTerminalConf)
+        {
+            var outcome = ClassifyTerminalOutcome(detection);
+            double conf = detection.Confidence;
+            if (conf <= 0 && detection.Metadata != null &&
+                detection.Metadata.TryGetValue("ThreatScore", out var scoreStr) &&
+                double.TryParse(scoreStr, out var score))
+            {
+                conf = score > 1.0 ? score / 100.0 : score;
+            }
+            if (outcome != null && conf < minTerminalConf)
+                outcome = null;
+            return new SignalEntry(detection.RuleName ?? "unknown", outcome, conf, DateTime.UtcNow);
+        }
+
+        /// <summary>
+        /// Adds <paramref name="entry"/> to the buffer keyed by <paramref name="bufferKey"/>
+        /// and evaluates whether the chain threshold is met.
+        /// Returns true when confirmed; <paramref name="outcome"/> carries the terminal family.
+        /// </summary>
+        private static bool EvaluateBuffer(
+            ConcurrentDictionary<int, PidSignalBuffer> buffers,
+            int bufferKey,
+            SignalEntry entry,
+            TimeSpan window,
+            int minSignals,
+            double minTerminalConf,
+            DetectionEvent detection,
+            out string? outcome)
+        {
+            outcome = null;
+            var buffer = buffers.GetOrAdd(bufferKey, _ => new PidSignalBuffer());
+            lock (buffer)
+            {
+                var now = DateTime.UtcNow;
+                buffer.Entries.RemoveAll(e => now - e.When > window);
+                buffer.LastActivity = now;
+                buffer.Entries.Add(entry);
+
+                var distinctRules = buffer.Entries
+                    .Select(e => e.RuleName)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Count();
+                var terminal = buffer.Entries
+                    .Where(e => e.Outcome != null && e.Confidence >= minTerminalConf)
+                    .Select(e => e.Outcome)
+                    .FirstOrDefault(o => o != null);
+
+                if (distinctRules >= minSignals && terminal != null)
+                {
+                    outcome = terminal;
+                    return true;
+                }
+
+                // Two+ distinct terminal families — still require min confidence each.
+                var terminalFamilies = buffer.Entries
+                    .Where(e => e.Outcome != null && e.Confidence >= minTerminalConf)
+                    .Select(e => e.Outcome!)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                if (terminalFamilies.Count >= 2)
+                {
+                    outcome = string.Join("+", terminalFamilies);
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Walks the ancestry cache upward from <paramref name="pid"/> to find the
+        /// highest non-system, non-excluded ancestor within a depth limit of 8.
+        /// Returns the root PID, or 0 if no suitable root is found.
+        ///
+        /// This root PID is used as the key for the cross-PID ancestry buffer so that
+        /// all sibling / cousin processes spawned by the same attacker-controlled loader
+        /// accumulate their signals together.
+        /// </summary>
+        private static int GetAttackRootPid(int startPid)
+        {
+            var cache = _ancestryCache;
+            if (cache == null) return 0;
+
+            int current = startPid;
+            int candidate = 0;
+            var visited = new HashSet<int> { current };
+
+            for (int depth = 0; depth < 8; depth++)
+            {
+                var (parentId, parentName) = cache.GetParent(current);
+                if (parentId <= 4) break;
+                if (visited.Contains(parentId)) break; // cycle guard
+                visited.Add(parentId);
+
+                // Stop walking at widely-shared system ancestors — these would cross-
+                // contaminate unrelated processes.
+                if (ExcludedAncestryRoots.Contains(parentName))
+                    break;
+
+                // Accept this as a candidate root (non-excluded, non-trivial PID).
+                candidate = parentId;
+                current = parentId;
+            }
+
+            return candidate;
+        }
+
         private static void TryLazySweep(int chainWindowSeconds)
         {
             long now = Environment.TickCount;
@@ -959,6 +1080,10 @@ namespace Sentinel.Core
         }
 
         /// <summary>Test helper — clear PID buffers between tests.</summary>
-        internal static void ResetForTests() => PidBuffers.Clear();
+        internal static void ResetForTests()
+        {
+            PidBuffers.Clear();
+            RootBuffers.Clear();
+        }
     }
 }

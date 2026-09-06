@@ -91,7 +91,7 @@ namespace Sentinel.Tests
         }
 
         [Fact]
-        public void ThreatIntelInjection_IgnoresSyntheticEventIdLabel()
+        public void ThreatIntelInjection_IgnoresLocalWriteEventId()
         {
             var rule = new ThreatIntelInjectionRule();
             var ctx = new FusedTelemetryContext
@@ -108,9 +108,28 @@ namespace Sentinel.Tests
         }
 
         [Fact]
+        public void ThreatIntelInjection_FiresRemoteWriteEventId()
+        {
+            var rule = new ThreatIntelInjectionRule();
+            var ctx = new FusedTelemetryContext
+            {
+                TriggeringEvent = new ThreatIntelTelemetry
+                {
+                    ProcessName = "malware",
+                    ProcessId = 4242,
+                    TargetProcessId = 1000,
+                    ApiName = "ThreatIntel_EventId_14"
+                }
+            };
+            var d = rule.Evaluate(ctx);
+            Assert.NotNull(d);
+            Assert.Equal(ResponseAction.QuarantineAndKill, d!.AuthorizedResponse);
+        }
+
+        [Fact]
         public void ProductInfo_MatchesTwoOneTwo()
         {
-            Assert.Equal("2.5.3", ProductInfo.Version);
+            Assert.Equal("2.5.4", ProductInfo.Version);
         }
 
         [Theory]

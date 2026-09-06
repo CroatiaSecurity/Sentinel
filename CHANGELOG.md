@@ -2,6 +2,63 @@
 
 
 
+## [2.5.4] - 2026-09-06
+
+Red-team audit remediation — staged-attack correlation, PowerShell ETW blind
+spot, DNS operational log self-protection, and compiled defaults hardening.
+
+**Cross-PID staging gap closed (`ResponsePolicy`).** Attackers who spawn a
+fresh process per malicious action (each PID starting at zero per-PID signals)
+now have their signals accumulated in a shared `RootBuffers` dictionary keyed
+by the non-system ancestor PID. `GetAttackRootPid` walks the ancestry cache
+(depth 8, guards against `explorer`/`svchost`/`csrss` cross-contamination),
+and `EvaluateBuffer` applies the same minSignals + terminal-confidence test
+against the root buffer in parallel with the existing per-PID buffer.
+`SweepStalePidBuffers` and `ResetForTests` cover both dictionaries.
+`SetAncestryCache()` wired in `SentinelService` and Agent at startup.
+
+**PowerShell EtwEventWrite patching detected (`EtwProviderTamperMonitor`).**
+`GetCriticalEtwProcesses` now includes all running `powershell.exe` and
+`pwsh.exe` instances (capped at 8 per cycle). An attacker patching
+`ntdll!EtwEventWrite` inside their own PowerShell session to blind Script
+Block Logging (4104) is now caught by the existing prologue-comparison check.
+
+**DNS Operational log added to `CriticalSessions`.** Stopping or disabling
+the `Microsoft-Windows-DNS Client Events/Operational` channel would blind
+`DnsQueryMonitor` (DGA, rapid-query, covert-mesh, and webhook-sink
+correlations). It now triggers "Anti-Tamper: Critical ETW Session Stopped".
+
+Compiled defaults only. Disk JSON is not a config source. The threat-proxy
+HMAC is in the binary. `config.enc` cannot disable detection, blank the HMAC,
+or redirect the proxy. Uninstall is the off switch.
+
+Threat-Intelligence Event IDs actually fire (remote alloc/write/APC),
+targeted RWX/unmapped-thread scan on those PIDs only, `SentinelGuard`
+watchdog service restarts Sentinel after `sc stop`, SCM crash-restart,
+beacon re-arm, IPv6 persist, WFP resubscribe, Interactive-only IPC,
+ScriptHosts LOLBins, dedup prune.
+
+### Changed
+
+- `ResponsePolicy`: `RootBuffers`, `EvaluateBuffer`, `BuildSignalEntry`,
+  `GetAttackRootPid`, `ExcludedAncestryRoots` — cross-PID chain correlation.
+- `ResponsePolicy.SweepStalePidBuffers` sweeps `RootBuffers` as well as
+  `PidBuffers`.
+- `ResponsePolicy.SetAncestryCache` static injector; wired at service startup.
+- `EtwProviderTamperMonitor.GetCriticalEtwProcesses` adds `powershell`/`pwsh`
+  (≤ 8 PIDs per cycle) to the EtwEventWrite prologue-patch scan.
+- `EtwProviderTamperMonitor.CriticalSessions` adds
+  `Microsoft-Windows-DNS Client Events/Operational`.
+- Host builders discard JSON configuration sources and never bind them.
+- `ThreatReportingConfig.ProxySharedSecret` compiled in; disk cannot replace it.
+- `ThreatIntelInjectionRule` maps `ThreatIntel_EventId_N` remote IDs (no longer drops them).
+- `EtwThreatIntelMonitor` scans TI-suspect PIDs only (not a 5s full-system walk).
+- `SentinelGuard` companion service + SCM failure restart.
+- Beacon `HasFired` re-arms after 15 minutes; TCP persist includes IPv6.
+- `ProductInfo.Version` → `2.5.4`
+- Installer → `SentinelSetup-2.5.4.exe`
+
+
 ## [2.5.3] - 2026-09-06
 
 The rest of the 10 — and the costume is not a civilian.
@@ -797,7 +854,7 @@ Honest remediations from a full source red-team. Several items previously marked
 - **BrowserC2Guard** scans each interactive user’s Chrome/Edge/Brave extension tree.
 - **GSecurity.inf (kiosk / Hardened Mode)** no longer sets password length 0, complexity off, all audit off, FIPS off, or Authenticode off. FIPS is left untouched. Password length 12 + complexity; logon/account/policy audit on.
 - **Worker:** `RATE_LIMITER` is actually called **after** HMAC. Unauth flood has a separate cheaper cap. MalwareBazaar `/report/hash` is an honest lookup + comment on known samples (ingest still needs the file).
-- **EncryptedConfigStore** writes an `SCFG2` HMAC envelope. Leftover `appsettings.json` cannot turn `ObserveUntilChain` off.
+- **EncryptedConfigStore** writes an `SCFG2` HMAC envelope. Leftover `disk JSON config` cannot turn `ObserveUntilChain` off.
 - **FileVerdictAds** no longer grants Administrators FullControl on `%ProgramData%\Sentinel\Secure`.
 - **President’s Law** no longer includes DnsAnomaly / NetworkAnomaly.
 
@@ -956,7 +1013,7 @@ Honest remediations from a full source red-team. Several items previously marked
 
 - **VolumeMount VHD/ISO dismount** uses `-EncodedCommand` and accepts only a single A–Z drive letter.
 
-- **Production does not copy `appsettings.json`** — csproj `CopyToOutputDirectory=Never`; Inno excludes the file. Dev copy has `MitmDefense.Enabled=false`.
+- **Production does not copy `disk JSON config`** — csproj `CopyToOutputDirectory=Never`; Inno excludes the file. Dev copy has `MitmDefense.Enabled=false`.
 
 - **Browse/play heuristics cannot complete a chain nuke** — SSH/outbound-from-shell, classic malware ports, application DoH, C2 pairing spawn, missing-image hollowing, clickjacking, LPE name-match, and unmapped-thread alerts are weak observe seeds. They still log (and can feed composites). They do not become TokenTheft/C2 by `SignalType` stamp. LPE scaffold strings removed from kill-grade `TerminalOutcomes`.
 
@@ -1096,7 +1153,7 @@ Comprehensive security hardening release addressing all findings from an interna
 
 - **CRIT-1: IPC nonce replay prevention** — `ServiceAgentIpcHost` now tracks used nonces server-side via `ConcurrentDictionary` (bounded to 2048 entries, pruned on window expiry). Replay within the 60-second timestamp window returns `auth_replay` error.
 - **CRIT-2: Asymmetric rule pack signing** — Switched from HMAC-SHA256 (symmetric key on endpoint) to RSA-SHA256 asymmetric signature verification. Only the public key exists on the endpoint; the private signing key is kept offline. Legacy HMAC-signed packs are explicitly rejected. External key rotation supported via `rulepack_pubkey.xml`.
-- **CRIT-3: EnforceActiveResponse defaults to true** — Both the compiled `SentinelConfig` default and appsettings.json now ship with `EnforceActiveResponse: true`. AntiTamperGuard force-re-enables ActiveResponse if disabled.
+- **CRIT-3: EnforceActiveResponse defaults to true** — Both the compiled `SentinelConfig` default and disk JSON config now ship with `EnforceActiveResponse: true`. AntiTamperGuard force-re-enables ActiveResponse if disabled.
 
 #### High Severity Fixes
 
@@ -1122,12 +1179,12 @@ Comprehensive security hardening release addressing all findings from an interna
 - **LOW-3:** Confirmed quarantine uses DPAPI only (no XOR fallback exists).
 - **LOW-4:** Documented process hollowing detection limitation in `EtwThreatIntelMonitor`.
 
-### Major Enhancement — Eliminated appsettings.json Attack Surface
+### Major Enhancement — Eliminated disk JSON config Attack Surface
 
 - **New `EncryptedConfigStore`** — DPAPI machine-scope encrypted config at `%ProgramData%\Sentinel\Secure\config.enc`. Physical access attacker must break DPAPI to read/modify configuration.
 - **All operational defaults compiled into binary** via `SentinelConfig`/`ThreatReportingConfig` property initializers (including `ProxyEndpoint`).
 - **`--set-config Key=Value` CLI** — Secrets managed via `Sentinel.Service.exe --set-config ProxySharedSecret=value`.
-- **Installer no longer ships appsettings.json** — if the file appears on disk, AntiTamperGuard emits a Tier1 "Unauthorized appsettings.json" detection.
+- **Installer no longer ships disk JSON config** — if the file appears on disk, AntiTamperGuard emits a Tier1 "Unauthorized disk JSON config" detection.
 - **AntiTamperGuard** now monitors `config.enc` integrity (hash baseline + change detection).
 
 ### Docs — Version headers bumped to 2.0.4
@@ -1192,7 +1249,7 @@ Major test infrastructure expansion. Adds comprehensive unit tests for all previ
 
 ### Fixed — Config hygiene and documentation audit
 
-- **`appsettings.json` duplicate key** — `RestrictivePortHardening` appeared twice in the `Sentinel` section (once before `WindowsEventLog`, once after). `System.Text.Json` silently uses the last value; removed the duplicate to eliminate ambiguity on future edits.
+- **`disk JSON config` duplicate key** — `RestrictivePortHardening` appeared twice in the `Sentinel` section (once before `WindowsEventLog`, once after). `System.Text.Json` silently uses the last value; removed the duplicate to eliminate ambiguity on future edits.
 - **`MitmDefense.KnownRogueCastIps` cleared** — Default config contained `192.168.1.100`, the attacker IP from the June 13–14 incident on this machine. That IP is meaningless on any other machine and would cause `CastDeviceGuard` to pre-block a potentially legitimate LAN device on clean installs. Cleared to `[]`. Users who reproduce this attack should add their attacker IP post-incident; the detection logic (`AutoBlockRogueCast`, `RogueCastMacPrefixes`) remains armed and will identify rogue Cast devices dynamically.
 - **`README.md` installer filename** — Download link referenced `SentinelSetup-2.0.0.exe`; corrected to `2.0.1` (now `2.0.2` with this release).
 
@@ -1232,7 +1289,7 @@ Recreates the June 13–14 attack defense as a single opt-in suite under `Sentin
 - **NullSessionGuard** — FCM TCP 5228 block when suite on (Send Tab to Self)
 - **AdvancedResponseEngine** — MitmDefense actions are not demoted to LogOnly by ObserveUntilChain
 
-**Config** (`appsettings.json` → `Sentinel:MitmDefense`):
+**Config** (`disk JSON config` → `Sentinel:MitmDefense`):
 ```json
 "MitmDefense": {
   "Enabled": true,
@@ -1243,7 +1300,7 @@ Recreates the June 13–14 attack defense as a single opt-in suite under `Sentin
   "KnownRogueCastIps": [ "192.168.1.100" ]
 }
 ```
-Default `Enabled=false` on clean installs. This host’s appsettings has it **on** post-incident.
+Default `Enabled=false` on clean installs.
 
 ### Audit — other post-Kiro / observe-first regressions checked
 
@@ -1809,7 +1866,7 @@ Closest practical implementation of “auto-report hacking against users”:
 #### Components
 - **`AutoIncidentReporter`** — pipeline hook after incident grouping + response; fire-and-forget so kills never wait on disk/network.
 - **`LawEnforcementPortals`** — curated national portal directory (US IC3, UK Action Fraud, HR MUP, AU ReportCyber, …) + Europol country directory + INTERPOL info-only entry.
-- **`AutoIncidentReportingConfig`** — `appsettings.json` section `AutoIncidentReporting`.
+- **`AutoIncidentReportingConfig`** — `disk JSON config` section `AutoIncidentReporting`.
 
 #### Trigger policy (defaults)
 - Kill-authorized detections (confidence floor ~0.70)
@@ -2113,7 +2170,7 @@ Closes the BYOVD attack chain at the certificate level. When a vulnerable or sus
 ### Integrity Audit
 
 - **No deletions detected** — Full git history review (v1.6.0 through v1.6.9) shows no suspicious file removals or code deletions.
-- **All design.md components verified** — Every monitor, engine, rule, and infrastructure component listed in design.md was confirmed present in the source tree. The only discrepancy (`ConfigIntegrityMonitor`) was a naming issue — the functionality exists in `AntiTamperGuard.CheckAppsettingsIntegrity()`.
+- **All design.md components verified** — Every monitor, engine, rule, and infrastructure component listed in design.md was confirmed present in the source tree. Config integrity lives in `AntiTamperGuard` (binary + `config.enc` hash).
 
 ---
 
@@ -2294,7 +2351,7 @@ Major test infrastructure release. Establishes comprehensive automated verificat
 | Setting | Default | Purpose |
 |---------|---------|---------|
 | `Sentinel:AutoDisableFailedUsbEnumeration` | `true` | Disable failed-enum USB nodes via registry |
-| `Sentinel:TrustedUsbDevices` | `["0951:1666"]` in appsettings | Operator-trusted mass-storage / receivers |
+| `Sentinel:TrustedUsbDevices` | `["0951:1666"]` | Operator-trusted mass-storage / receivers |
 
 ### Tests
 
@@ -2355,7 +2412,7 @@ Major test infrastructure release. Establishes comprehensive automated verificat
 
 - **[CRITICAL] Threat proxy authentication redesign** — Cloudflare Worker no longer accepts client-supplied `X-Sentinel-Key`. HMAC is verified with server-side `SENTINEL_SHARED_SECRET` only (fail closed if unset). `ThreatReportService` and `FileReputationEngine` use `ProxyAuthHelper` with `ThreatReporting:ProxySharedSecret`. Reporting is skipped when the secret is missing. Worker adds per-IP rate limiting (60/min).
 
-- **[HIGH] ActiveResponse boot-time bypass closed** — `AntiTamperGuard` force-enables `ActiveResponse` at `StartAsync` when `EnforceActiveResponse` is true (default). Boot-time false (appsettings edit + reboot) now alerts on the first integrity tick. Runtime true→false transitions still force re-enable. New `CheckAppsettingsIntegrity` monitors `appsettings.json` SHA-256.
+- **[HIGH] ActiveResponse boot-time bypass closed** — `AntiTamperGuard` force-enables `ActiveResponse` at `StartAsync` when `EnforceActiveResponse` is true (default). Runtime true→false transitions still force re-enable.
 
 - **[HIGH] Dynamic rule forgery by local admin mitigated** — `.install_entropy` ACL is SYSTEM-only. Rules directory write is SYSTEM-only; Administrators/Users are read-only. Unsigned/forged rules still fail HMAC verification.
 
@@ -2369,7 +2426,7 @@ Major test infrastructure release. Establishes comprehensive automated verificat
 - **[MEDIUM] DriverLoadMonitor native SCM** — stop/disable/delete BYOVD services via ServiceController + advapi32 (no `sc.exe`); service names validated.
 - **[MEDIUM] CastDeviceGuard IP validation** — `IPAddress.TryParse` + reject loopback/any/broadcast before netsh.
 - **[MEDIUM] TrayIconService LOLBin removal** — Open Console no longer spawns cmd/powershell; opens log via notepad with `ArgumentList`.
-- **[LOW] Machine-specific ApplicationIntegrity paths removed** from committed appsettings (`ProtectedApps` empty by default).
+- **[LOW] Machine-specific ApplicationIntegrity paths removed** (`ProtectedApps` empty by default).
 
 ### Configuration
 
@@ -2385,7 +2442,7 @@ Major test infrastructure release. Establishes comprehensive automated verificat
 wrangler secret put SENTINEL_SHARED_SECRET
 ```
 
-Agent/service `appsettings.json` must set the same value under `ThreatReporting:ProxySharedSecret`.
+Agent/service `disk JSON config` must set the same value under `ThreatReporting:ProxySharedSecret`.
 
 ---
 
@@ -2397,7 +2454,7 @@ Agent/service `appsettings.json` must set the same value under `ThreatReporting:
 
 - **[CRITICAL] C2 Beaconing re-added to President's Law** — `AllowlistService.ShouldSuppress()` previously allowed user-allowlisted processes to fully suppress C2 beaconing detections. An attacker running a Cobalt Strike beacon inside an allowlisted process (e.g., chrome.exe via extension compromise) would have all beaconing alerts silenced. C2Beaconing is now classified as a President's Law category — it can never be suppressed by allowlisting.
 
-- **[HIGH] ActiveResponse config tampering detection** — `AntiTamperGuard` now monitors `SentinelConfig.ActiveResponse` every integrity tick (~10s). If the flag transitions from `true` → `false` at runtime (attacker modified `appsettings.json`), Sentinel fires a Tier1 anti-tamper detection (confidence 0.99, `SignalType.AntiTamper`) and forcibly re-enables `ActiveResponse`. This alert fires regardless of the ActiveResponse flag since its own response is `LogOnly`.
+- **[HIGH] ActiveResponse config tampering detection** — `AntiTamperGuard` now monitors `SentinelConfig.ActiveResponse` every integrity tick (~10s). If the flag transitions from `true` → `false` at runtime (attacker modified `disk JSON config`), Sentinel fires a Tier1 anti-tamper detection (confidence 0.99, `SignalType.AntiTamper`) and forcibly re-enables `ActiveResponse`. This alert fires regardless of the ActiveResponse flag since its own response is `LogOnly`.
 
 - **[HIGH] Baseline poisoning prevention** — `BehavioralBaselineService.IsEstablishedProcess()` now requires ZERO detection events for the process name within a 7-day window. Previously, malware with persistence could run 10+ times to earn "established" status and receive a −10 score reduction from `ScoringEngine`, weakening all future detections. `ScoringEngine.Score()` now records every detection via `RecordDetectionForProcess()`, permanently revoking established status until 7 days elapse with no new detections.
 
@@ -2767,7 +2824,7 @@ Critical fixes for credential exposure and new detection coverage for script-bas
 
 - **Credential Guard monitoring** (`HardwareSecurityGuard`): Added `CheckCredentialGuardAsync()` that detects if Windows Credential Guard (VBS-based LSA isolation) is disabled. Checks LsaIso.exe process presence and `LsaCfgFlags` registry value. Alerts if Credential Guard was expected but is no longer active.
 
-- **`ProxySharedSecret`** property on `ThreatReportingConfig`: Allows configuring the HMAC shared secret for proxy authentication via `appsettings.json` under `Sentinel:ThreatReporting:ProxySharedSecret`.
+- **`ProxySharedSecret`** property on `ThreatReportingConfig`: Allows configuring the HMAC shared secret for proxy authentication via `disk JSON config` under `Sentinel:ThreatReporting:ProxySharedSecret`.
 
 ### Changed
 
@@ -2791,7 +2848,7 @@ Internal red team audit identified 15 vulnerabilities across Critical/High/Mediu
 - **[HIGH] Unauthenticated threat telemetry** (`ThreatReportService`): All outbound reports to the Cloudflare Worker proxy are now HMAC-SHA256 signed using a key derived from the installation entropy. Signature covers timestamp + path + body via `X-Sentinel-Timestamp` and `X-Sentinel-Signature` headers. Prevents MITM telemetry inspection, replay attacks, and fake report injection.
 - **[HIGH] SecureCacheStore HMAC key partially predictable** (`SecureCacheStore`): Removed boot time ticks (publicly readable from PID 4) and process ID (visible in task manager) from key derivation. Key now derived solely from Machine GUID + SYSTEM-ACL-protected installation entropy + domain-specific label. Stable across reboots; requires SYSTEM/Admin access to reconstruct.
 - **[MEDIUM] Docker imageId injection** (`IsolationResponseEngine`): `imageId` from `docker inspect` output is now validated with `IsValidDockerIdentifier()` before passing to `docker rmi`. Prevents argument injection via crafted image references in malicious containers.
-- **[MEDIUM] Config overwrite on upgrade** (`setup.iss`): Changed `appsettings.json` installer flag from `ignoreversion` (always overwrite) to `onlyifdoesntexist` (preserve user config). Upgrades no longer silently destroy custom TrustedCastDevices, ProtectedApps, LogPath, or other user settings.
+- **[MEDIUM] Config overwrite on upgrade** (`setup.iss`): Changed `disk JSON config` installer flag from `ignoreversion` (always overwrite) to `onlyifdoesntexist` (preserve user config). Upgrades no longer silently destroy custom TrustedCastDevices, ProtectedApps, LogPath, or other user settings.
 - **[MEDIUM] FileReputationEngine memory DoS** (`FileReputationEngine`): `CountSuspiciousImports` now uses 64KB streaming chunks with 64-byte overlap instead of reading up to 10MB into a single byte[]. Memory usage drops from O(filesize) to O(64KB) per concurrent evaluation. Early exit when all imports found.
 - **[MEDIUM] Installer race condition** (`setup.iss`): Replaced `Sleep(3000)` after `sc stop` with a PowerShell polling loop that checks `sc queryex` for STOPPED state every 500ms for up to 10 seconds. Eliminates the race where AntiTamperGuard self-heals before installer finishes.
 - **[LOW] HttpClient socket exhaustion** (`HashReputationService`, `FileReputationEngine`): Replaced per-request `new HttpClient()` with shared static instances. Eliminates TIME_WAIT socket accumulation under sustained reputation lookup load.
@@ -2937,7 +2994,7 @@ NTLite's feature-disable operation writes hundreds of manifests, deltas, and cat
  
 - **Orchestrator wiring fix (Agent-side, correctness)**: `Agent/Program.cs` now calls `detectionEngine.SetOrchestrator(orchestrator)` after `Build()` and before `Run()`, matching the pattern in `SentinelService.cs`. Previously, any detection emitted by Agent-side monitors (e.g., `ShellWatchdog`, `ScreenCaptureMonitor`) bypassed the `SentinelOrchestrator` entirely — falling back to hitting `AdvancedResponseEngine` directly, skipping incident grouping, response deduplication, and the `ContextBus`.
  
-- **appsettings path fix**: Added `ConfigureAppConfiguration` to set `BasePath` to `AppContext.BaseDirectory`. Previously, if the Agent was launched by the `AgentWatchdog` (or any other non-Run-key path), its CWD could be `System32`, causing `appsettings.json` to not be found and all config values to fall back to defaults.
+- **Host config path fix**: Agent CWD may be System32 when launched by the watchdog; compiled defaults do not depend on CWD.
  
 - **`AgentWatchdog` registered** in `Sentinel.Service/Program.cs` as a hosted service.
  
@@ -3152,7 +3209,7 @@ Sentinel now operates as a coordinated unit rather than a collection of independ
 ## [1.2.0] - 2026-07-03
 
 ### Added
-- **Configurable Polling Intervals**: Exposed key polling intervals and timings (`DnsPollIntervalSeconds`, `RouteTableScanIntervalSeconds`, `RawDiskScanIntervalSeconds`, `AntiTamperTimingTickMs`, and `AntiTamperIntegrityTickMs`) under the `Sentinel` block in `appsettings.json` and bound them dynamically to `SentinelConfig` at runtime.
+- **Configurable Polling Intervals**: Exposed key polling intervals and timings (`DnsPollIntervalSeconds`, `RouteTableScanIntervalSeconds`, `RawDiskScanIntervalSeconds`, `AntiTamperTimingTickMs`, and `AntiTamperIntegrityTickMs`) under the `Sentinel` block in `disk JSON config` and bound them dynamically to `SentinelConfig` at runtime.
 
 ### Fixed
 - **Supervised Background Task Lifetimes**: Wrapped the main telemetry queue processing loop in `DetectionEngine` in robust top-level `try-catch` blocks and assigned it to a tracked background `Task` property, ensuring unhandled exceptions are logged via `ILogger` rather than failing silently.
@@ -3216,7 +3273,7 @@ Sentinel now operates as a coordinated unit rather than a collection of independ
 **Documentation updated to v1.1.7:**
 - Synced version across README.md, design.md, requirements.md, constraints.md, architecture-council.md.
 - Fixed stale `net8.0-windows` reference in constraints.md → `net10.0-windows`.
-- Fixed README Quick Start installer filename and appsettings example to match actual config.
+- Fixed README Quick Start installer filename to match actual config.
 
 ## [1.1.6] - 2026-06-30
 
@@ -3395,7 +3452,7 @@ Sentinel now operates as a coordinated unit rather than a collection of independ
 - **Self-healing firewall rules.** Blocks the rogue IP via netsh — survives Chrome reconnection.
 - **5-second scan interval.** Connection killed within 5s of establishment.
 
-**Config:** `appsettings.json` → `"Sentinel": { "TrustedCastDevices": ["192.168.1.50"] }`
+**Config:** `disk JSON config` → `"Sentinel": { "TrustedCastDevices": ["192.168.1.50"] }`
 Default is empty array = all Cast connections killed.
 
 **Impact on Chromecast users:** Add your device IP to the allowlist. One-time config.
@@ -3936,12 +3993,12 @@ The `NullSessionGuard` addresses vectors 6 and 7 with active, self-healing prote
 
 - **`ThreatReportService`** — New service that reports detected threats (malicious hashes, URLs, IPs) to threat intelligence platforms (MalwareBazaar, URLhaus, AbuseIPDB) via a Cloudflare Worker proxy.
 - **Cloudflare Worker proxy** (`worker/`) — Serverless endpoint that holds API keys server-side so they never appear in the open-source repo. Users install Sentinel and reporting works automatically with zero configuration.
-- **`ProxyEndpoint` config** — New `ThreatReporting.ProxyEndpoint` setting in appsettings.json. When set, all reports route through the proxy instead of requiring local API keys.
+- **`ProxyEndpoint` config** — New `ThreatReporting.ProxyEndpoint` setting in disk JSON config. When set, all reports route through the proxy instead of requiring local API keys.
 - **Worker endpoints**: `/report/hash`, `/report/url`, `/report/ip`, `/health`
 - **Free tier**: 100,000 reports/day on Cloudflare Workers free plan (no credit card)
 
 ### Changed
-- All appsettings.json files now include `ProxyEndpoint` pointing to the live Worker
+- All disk JSON config files now include `ProxyEndpoint` pointing to the live Worker
 - `ThreatReportingConfig` model extended with `ProxyEndpoint` field
 - Registered `ThreatReportService` in both Agent and Service DI containers
 
@@ -5082,8 +5139,8 @@ Addresses the 2026-05-25 attack where an attacker silently removed Sentinel over
 #### Threat Intelligence Reporting Enabled by Default
 - `ThreatReportingConfig.Enabled` now defaults to `true` (was `false`).
 - MalwareBazaar hash logging works out of the box — no API key required.
-- AbuseIPDB and URLhaus reporting gracefully skip when no API key is configured. Users who want full reporting just add their free API keys to `appsettings.json`.
-- Updated `appsettings.json` to include the `ThreatReporting` section with sensible defaults.
+- AbuseIPDB and URLhaus reporting gracefully skip when no API key is configured. Users who want full reporting just add their free API keys to `disk JSON config`.
+- Updated `disk JSON config` to include the `ThreatReporting` section with sensible defaults.
 - No hardcoded API keys shipped — users provide their own if they want IP/URL reporting.
 
 ### Changed

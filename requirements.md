@@ -199,7 +199,7 @@ Every `DetectionEvent` must include:
 
 ### FR-9: Configuration & CLI
 
-- Primary configuration: `appsettings.json` (`Sentinel` + `ThreatReporting` + `AutoIncidentReporting` + `ApplicationIntegrity` sections)
+- Primary configuration: compiled defaults in the binary. Optional DPAPI `config.enc` for Hardened Mode / victim identity only. Disk JSON is not loaded.
 - CLI may support:
   - `--active-response` — force-enable Tier1 destructive actions (does not replace default-true config)
   - `--log <path>` — override log file path

@@ -16,6 +16,7 @@ namespace Sentinel.Core
     public static class InstallBootstrap
     {
         public const string ServiceName = "Sentinel";
+        public const string WatchdogServiceName = "SentinelGuard";
         public const string AgentRunValueName = "SentinelAgent";
 
         private const uint ScManagerAllAccess = 0xF003F;
@@ -95,6 +96,7 @@ namespace Sentinel.Core
                     return 2;
 
                 EnsureService(serviceExe);
+                EnsureWatchdogService(serviceExe);
                 EnsureAgentRunKey(agentExe);
                 HardeningModule.RegisterForSafeModePublic();
                 TryStartService();
@@ -117,6 +119,7 @@ namespace Sentinel.Core
         {
             try
             {
+                TryStopNamedService(WatchdogServiceName, waitMs: 4000);
                 TryStopService(waitMs: 8000);
                 TryKillProcess("Sentinel.Agent");
 
@@ -160,6 +163,8 @@ namespace Sentinel.Core
         {
             try
             {
+                TryStopNamedService(WatchdogServiceName, waitMs: 4000);
+                TryDeleteNamedService(WatchdogServiceName);
                 TryStopService(waitMs: 8000);
                 TryDeleteService();
                 TryDeleteAgentRunKey();
@@ -210,6 +215,7 @@ namespace Sentinel.Core
                     ChangeServiceConfig(
                         svc, ServiceNoChange, ServiceAutoStart, ServiceNoChange,
                         quoted, null, IntPtr.Zero, null, null, null, "Sentinel");
+                    ApplyCrashRestart(svc);
                 }
                 finally
                 {
@@ -359,6 +365,141 @@ namespace Sentinel.Core
                     $@"SYSTEM\CurrentControlSet\Control\SafeBoot\Network\{ServiceName}", throwOnMissingSubKey: false);
             }
             catch { }
+        }
+
+        public static void EnsureWatchdogService(string serviceExePath)
+        {
+            var full = Path.GetFullPath(serviceExePath);
+            var quoted = (full.Contains(" ") ? $"\"{full}\"" : full) + " --watchdog";
+            var scm = OpenSCManager(null, null, ScManagerAllAccess);
+            if (scm == IntPtr.Zero) return;
+            try
+            {
+                var svc = OpenService(scm, WatchdogServiceName, ServiceAllAccess);
+                if (svc == IntPtr.Zero)
+                {
+                    svc = CreateService(
+                        scm, WatchdogServiceName, "Sentinel Guard",
+                        ServiceAllAccess, ServiceWin32OwnProcess, ServiceAutoStart, ServiceErrorNormal,
+                        quoted, null, IntPtr.Zero, null, null, null);
+                }
+                if (svc == IntPtr.Zero) return;
+                try
+                {
+                    ChangeServiceConfig(
+                        svc, ServiceNoChange, ServiceAutoStart, ServiceNoChange,
+                        quoted, null, IntPtr.Zero, null, null, null, "Sentinel Guard");
+                    ApplyCrashRestart(svc);
+                }
+                finally { CloseServiceHandle(svc); }
+
+                var start = OpenService(scm, WatchdogServiceName, ServiceStart | ServiceQueryStatus);
+                if (start != IntPtr.Zero)
+                {
+                    try
+                    {
+                        var status = new SERVICE_STATUS();
+                        if (!QueryServiceStatus(start, ref status) || status.dwCurrentState != 4)
+                            StartService(start, 0, IntPtr.Zero);
+                    }
+                    finally { CloseServiceHandle(start); }
+                }
+            }
+            finally { CloseServiceHandle(scm); }
+        }
+
+        public static void TryStopNamedService(string name, int waitMs = 4000)
+        {
+            var scm = OpenSCManager(null, null, ScManagerAllAccess);
+            if (scm == IntPtr.Zero) return;
+            try
+            {
+                var svc = OpenService(scm, name, ServiceStop | ServiceQueryStatus);
+                if (svc == IntPtr.Zero) return;
+                try
+                {
+                    var status = new SERVICE_STATUS();
+                    if (!QueryServiceStatus(svc, ref status) || status.dwCurrentState == 1)
+                        return;
+                    ControlService(svc, ServiceControlStop, ref status);
+                    var sw = Stopwatch.StartNew();
+                    while (sw.ElapsedMilliseconds < waitMs)
+                    {
+                        if (QueryServiceStatus(svc, ref status) && status.dwCurrentState == 1)
+                            return;
+                        System.Threading.Thread.Sleep(200);
+                    }
+                }
+                finally { CloseServiceHandle(svc); }
+            }
+            finally { CloseServiceHandle(scm); }
+        }
+
+        public static void TryDeleteNamedService(string name)
+        {
+            var scm = OpenSCManager(null, null, ScManagerAllAccess);
+            if (scm == IntPtr.Zero) return;
+            try
+            {
+                var svc = OpenService(scm, name, ServiceAllAccess);
+                if (svc == IntPtr.Zero) return;
+                try { DeleteService(svc); }
+                finally { CloseServiceHandle(svc); }
+            }
+            finally { CloseServiceHandle(scm); }
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct SC_ACTION
+        {
+            public uint Type;
+            public uint Delay;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct SERVICE_FAILURE_ACTIONS
+        {
+            public uint dwResetPeriod;
+            public IntPtr lpRebootMsg;
+            public IntPtr lpCommand;
+            public uint cActions;
+            public IntPtr lpsaActions;
+        }
+
+        [DllImport("advapi32.dll", SetLastError = true)]
+        private static extern bool ChangeServiceConfig2(IntPtr hService, uint dwInfoLevel, IntPtr lpInfo);
+
+        private static void ApplyCrashRestart(IntPtr svc)
+        {
+            var actions = new SC_ACTION[3];
+            for (int i = 0; i < 3; i++)
+            {
+                actions[i].Type = 1;
+                actions[i].Delay = 2000;
+            }
+            int actionSize = Marshal.SizeOf<SC_ACTION>();
+            IntPtr pActions = Marshal.AllocHGlobal(actionSize * 3);
+            try
+            {
+                for (int i = 0; i < 3; i++)
+                    Marshal.StructureToPtr(actions[i], IntPtr.Add(pActions, i * actionSize), false);
+                var fa = new SERVICE_FAILURE_ACTIONS
+                {
+                    dwResetPeriod = 86400,
+                    lpRebootMsg = IntPtr.Zero,
+                    lpCommand = IntPtr.Zero,
+                    cActions = 3,
+                    lpsaActions = pActions
+                };
+                IntPtr pFa = Marshal.AllocHGlobal(Marshal.SizeOf<SERVICE_FAILURE_ACTIONS>());
+                try
+                {
+                    Marshal.StructureToPtr(fa, pFa, false);
+                    ChangeServiceConfig2(svc, 2, pFa);
+                }
+                finally { Marshal.FreeHGlobal(pFa); }
+            }
+            finally { Marshal.FreeHGlobal(pActions); }
         }
     }
 }

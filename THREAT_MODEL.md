@@ -466,13 +466,13 @@ See [design.md](design.md) for the full component inventory (all MonitorGroups +
 
 ### B10: ActiveResponse config tampering (FIXED in v1.5.9 / v1.6.0)
 
-**Attack:** Attacker modifies `appsettings.json` or injects config to set `ActiveResponse=false`, neutering all kill/quarantine/isolate responses while Sentinel continues running (appearing functional but inert). Includes reboot with `ActiveResponse=false` already set.
+**Attack:** Attacker injects config to set `ActiveResponse=false`, neutering all kill/quarantine/isolate responses while Sentinel continues running (appearing functional but inert).
 
 **Mitigation (v1.5.9+ / v1.6.0):**
 - `AntiTamperGuard` monitors `ActiveResponse` flag every ~10s
 - Transition from true→false fires Tier1 anti-tamper detection (confidence 0.99)
 - **v1.6.0:** Boot-time `ActiveResponse=false` is force-enabled in `StartAsync` and alerted on first integrity tick
-- **v1.6.0:** `appsettings.json` content hash monitored; modifications emit anti-tamper detection
+- Disk JSON is not a config source (compiled defaults + `config.enc` only)
 - **v1.6.0:** `EnforceActiveResponse` (default true) policy; set false only for intentional observation mode
 - ActiveResponse is forcibly re-enabled immediately upon detection
 - The alert is immune to the ActiveResponse flag (uses LogOnly response type)
@@ -644,7 +644,7 @@ See CHANGELOG.md for full history. Key fixes:
 - **v1.6.3:** OS self-DoS closed: `QuarantineManager` + `IncidentResponseService` hard-refuse OS-critical paths (production FP deleted System32 `powershell.exe` after AMSI false positive). System PowerShell AMSI demotion to LogOnly. Failed USB enumeration Tier1 + auto-disable; `TrustedUsbDevices` allowlist.
 - **v1.6.2:** Installer/shell false-positive remediation (ProgramData evidence): PPID spoof no longer kills Inno Setup extractors; Raw Disk Access never kills explorer/taskhostw under Windows; ChainTracer preserves critical hosts with empty path and signed installer ancestors; QuarantineManager refuses Authenticode-signed files by default; EphemeralProcessMonitor ignores installer prefetch noise; shared InstallerHeuristics
 - **v1.6.1:** EtwSessionGuard (heal stopped ETW session), NetworkIsolate rate limit + budget Tier1 alerts, ClickFix/FakeCAPTCHA rule expansion, NpmSupplyChainRule
-- **v1.6.0:** Audit remediation: threat-proxy server-side HMAC (no client key), ActiveResponse boot-time force + appsettings integrity, SYSTEM-only entropy, rules dir write SYSTEM-only, kill rate limit, protected AV processes, native SCM driver disable, Cast IP validation, tray LOLBin removal
+- **v1.6.0:** Audit remediation: threat-proxy server-side HMAC (no client key), ActiveResponse boot-time force, SYSTEM-only entropy, rules dir write SYSTEM-only, kill rate limit, protected AV processes, native SCM driver disable, Cast IP validation, tray LOLBin removal
 - **v1.5.9:** 7 false-positive/false-negative fixes: supply-chain beaconing gap (C2 never LogOnly), signed injector quarantine prevention, C2 back in President's Law, ActiveResponse tamper detection, baseline poisoning prevention, dynamic rules fail-closed, svchost correlation bypass
 - **v1.4.5:** LSA secret storage for auto-logon, Credential Guard monitoring, ScriptExecutionMonitor (PowerShell/AMSI/SAM/script drops), Tier1+Tier2 correlation fix, Agent code placement cleanup
 - **v1.4.4:** 15 red-team findings fixed (command injection, handle leaks, HMAC weakness, socket exhaustion, installer race conditions)

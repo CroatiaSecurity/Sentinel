@@ -78,6 +78,9 @@ namespace Sentinel.Agent
             var orchestrator    = host.Services.GetRequiredService<SentinelOrchestrator>();
             detectionEngine.SetOrchestrator(orchestrator);
 
+            // v2.6.0: Wire ancestry cache into ResponsePolicy for cross-PID chain correlation.
+            ResponsePolicy.SetAncestryCache(host.Services.GetRequiredService<ProcessAncestryCache>());
+
             // v2.0.3: Clear restart marker on successful startup — host built and wired
             ClearRestartMarker();
 
@@ -276,25 +279,19 @@ namespace Sentinel.Agent
 
         public static IHostBuilder CreateHostBuilder(string[] args) =>
             Host.CreateDefaultBuilder(args)
-                .ConfigureAppConfiguration((_, config) =>
-                {
-                    // Resolve appsettings relative to the exe directory, not CWD.
-                    // This matters when the process is launched by the AgentWatchdog
-                    // or a scheduled task where CWD may be System32.
-                    config.SetBasePath(AppContext.BaseDirectory);
-                })
+                .ConfigureAppConfiguration((_, cfg) => HostDiskJson.RemoveJsonSources(cfg))
                 .ConfigureServices((hostContext, services) =>
                 {
                     var config = new SentinelConfig();
-                    hostContext.Configuration.GetSection("Sentinel").Bind(config);
-                    services.AddSingleton(config);
-
                     var threatReportingConfig = new ThreatReportingConfig();
-                    hostContext.Configuration.GetSection("ThreatReporting").Bind(threatReportingConfig);
-                    services.AddSingleton(threatReportingConfig);
-
                     var autoIncidentReportingConfig = new AutoIncidentReportingConfig();
-                    hostContext.Configuration.GetSection("AutoIncidentReporting").Bind(autoIncidentReportingConfig);
+                    var store = new EncryptedConfigStore();
+                    store.ApplyOverrides(config, threatReportingConfig, autoIncidentReportingConfig);
+                    config.ObserveUntilChain = true;
+                    if (!ProxyAuthHelper.HasSharedSecret(threatReportingConfig))
+                        threatReportingConfig.ProxySharedSecret = ThreatReportingConfig.CompiledProxySharedSecret;
+                    services.AddSingleton(config);
+                    services.AddSingleton(threatReportingConfig);
                     services.AddSingleton(autoIncidentReportingConfig);
 
                     // Infrastructure required by monitors

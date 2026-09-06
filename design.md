@@ -40,8 +40,8 @@ Monitors → TelemetryFusionEngine → DetectionEngine → AdvancedResponseEngin
 | `ServiceAgentIpcHost` / `ServiceAgentIpcClient` | HMAC authenticated named pipe with nonce replay prevention (ops/health/scan) |
 | `OpsMetricsPublisher` | Writes `%ProgramData%\Sentinel\ops_metrics.json` |
 | `SelfPathGuard` | Hardlink-aware install self-exclusion |
-| `EncryptedConfigStore` | DPAPI-encrypted per-deployment config (`config.enc`); replaces plaintext appsettings.json |
-| `ProductInfo.Version` | `2.5.3` |
+| `EncryptedConfigStore` | DPAPI `config.enc` for Hardened Mode / victim identity only; cannot disable detection or rewrite compiled HMAC |
+| `ProductInfo.Version` | `2.5.4` |
 
 All components are wired via Microsoft.Extensions.DependencyInjection. No static mutable state anywhere.
 
@@ -322,7 +322,7 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 | `HardeningModule` | Native C# hardening: service disabling, registry security settings, LGPO policy, ACL enforcement. |
 | `UnifiedEtwSession` | Single real-time ETW session subscribing to 9 kernel/system providers via raw P/Invoke. |
 | `EtwEventDispatcher` | Routes raw ETW events by provider GUID to typed telemetry objects. |
-| Config integrity | **Not a separate type.** Runtime SHA-256 of `appsettings.json` + executable integrity live inside `AntiTamperGuard` (`CheckAppsettingsIntegrity` / binary checks). |
+| Config integrity | `AntiTamperGuard` hashes `config.enc` + own binary. Disk JSON is not a config source. |
 | `ProxyAuthHelper` | HMAC-SHA256 of `{timestamp}.{path}.{body}` with `ThreatReporting:ProxySharedSecret` (server-side secret; **not** install entropy). Headers: `X-Sentinel-Timestamp`, `X-Sentinel-Signature` only — never send the secret. |
 | `ParentPidSpoofDetector` | Detects PPID spoofing via CreateToolhelp32Snapshot parent-child validation. |
 | `SafeProcessExemptionRegistry` | Tracks processes confirmed safe by VerdictGateRule to prevent redundant scanning. |

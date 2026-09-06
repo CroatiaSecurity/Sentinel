@@ -1,6 +1,6 @@
 # Sentinel — Constraints
 
-**Version: 2.5.3**
+**Version: 2.5.4**
 
 ---
 
@@ -47,7 +47,7 @@
 | Minimum-privilege process handles | `OpenProcess` calls MUST request only the access rights actually used. Never open with `PROCESS_ALL_ACCESS` unless every right is exercised. |
 | Signed threat report requests | All outbound threat intelligence reports MUST be HMAC-signed with the installation entropy key. Unsigned requests to the proxy are forbidden. |
 | Validate all external process output | Data from `Process.Start` stdout (docker inspect, netsh, sc.exe, etc.) is untrusted. MUST be validated before use in subsequent commands or logic. |
-| Installer preserves user config | `appsettings.json` MUST use `onlyifdoesntexist` flag — upgrades never overwrite user customizations. |
+| Compiled config only | Operational defaults and the threat-proxy HMAC live in the binary. Disk JSON is not loaded. Uninstall is the off switch. |
 
 ---
 

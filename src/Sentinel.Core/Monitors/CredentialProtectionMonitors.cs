@@ -800,7 +800,7 @@ namespace Sentinel.Core
 
     // ──────────────────────────────────────────────
     // Password Rotation Guard — rotates the local account password every 10 minutes
-    // and enforces UAC ConsentPromptBehaviorAdmin = 5 (prompt for credentials).
+    // and enforces UAC ConsentPromptBehaviorAdmin = 5 (consent, not a password prompt).
     //
     // Design constraints:
     //   - User must be able to log in at boot, restart, hibernate, and lock screen
@@ -829,8 +829,9 @@ namespace Sentinel.Core
 
         private static readonly TimeSpan RotationInterval = TimeSpan.FromMinutes(10);
 
-        // UAC: 5 = Prompt for credentials on the secure desktop (maximum security)
-        private const int UacPromptForCredentials = 5;
+        // 5 = consent for non-Windows binaries. The human does not know the
+        // rotated password, so a credential prompt would lock them out.
+        private const int UacConsentNonWindows = 5;
 
         public PasswordRotationGuard(DetectionEngine de, ILogger<PasswordRotationGuard> l)
         {
@@ -1116,10 +1117,8 @@ namespace Sentinel.Core
         }
 
         /// <summary>
-        /// Enforces UAC to prompt for credentials (not just consent).
-        /// ConsentPromptBehaviorAdmin = 5: prompt for credentials on secure desktop.
-        /// Since the password is random and unknown to any attacker with code execution,
-        /// they cannot complete the elevation prompt.
+        /// Consent for non-Windows binaries. The owner does not know the rotated
+        /// password, so a credential prompt would lock them out.
         /// </summary>
         private void EnforceUacPolicy()
         {
@@ -1130,9 +1129,9 @@ namespace Sentinel.Core
                 if (key == null) return;
 
                 var current = key.GetValue("ConsentPromptBehaviorAdmin");
-                if (current == null || (int)current != UacPromptForCredentials)
+                if (current == null || (int)current != UacConsentNonWindows)
                 {
-                    key.SetValue("ConsentPromptBehaviorAdmin", UacPromptForCredentials, RegistryValueKind.DWord);
+                    key.SetValue("ConsentPromptBehaviorAdmin", UacConsentNonWindows, RegistryValueKind.DWord);
                     _logger.LogWarning("[PasswordRotationGuard] Enforced ConsentPromptBehaviorAdmin=5 (was {Old})", current);
                 }
 

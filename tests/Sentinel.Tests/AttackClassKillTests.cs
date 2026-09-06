@@ -144,6 +144,14 @@ namespace Sentinel.Tests
         }
 
         [Fact]
+        public void ThreatIntelInjection_Kills()
+        {
+            ResponsePolicy.ResetForTests();
+            AssertKills(Attack("ThreatIntelInjectionRule", process: "injector",
+                signal: SignalType.ProcessInjection), "Injection");
+        }
+
+        [Fact]
         public void EtwManipulation_Kills()
         {
             ResponsePolicy.ResetForTests();

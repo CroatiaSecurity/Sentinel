@@ -442,6 +442,9 @@ namespace Sentinel.Tests
         public void Low_Confidence_C2_Does_Not_Complete_Chain()
         {
             var cfg = ObserveConfig();
+            // Two weak observe-fuel signals that must never alone confirm a chain:
+            // low-confidence C2 (conf 0.50 — below MinTier1Confidence) and a
+            // suspicious path alert (non-terminal family). Neither is kill-grade.
             var lowC2 = new DetectionEvent
             {
                 RuleName = "C2 Beaconing: Statistical Beacon Detected",
@@ -450,18 +453,18 @@ namespace Sentinel.Tests
                 ProcessName = "maybe.exe",
                 Confidence = 0.50,
             };
-            var inject = new DetectionEvent
+            var suspPath = new DetectionEvent
             {
-                RuleName = "Threat Intel: Remote Memory Injection",
-                SignalType = SignalType.ProcessInjection,
+                RuleName = "Attack Tool: Connection from Suspicious Path",
+                SignalType = SignalType.SuspiciousProcess,
                 ProcessId = 9020,
                 ProcessName = "maybe.exe",
-                Confidence = 0.88,
+                Confidence = 0.40,
             };
 
+            // Low-confidence + non-terminal signals must not confirm a chain.
             Assert.False(ResponsePolicy.MayPerformDestructiveResponse(lowC2, cfg));
-            // Injection alone is not terminal; low-conf C2 must not authorize as terminal leg
-            Assert.False(ResponsePolicy.MayPerformDestructiveResponse(inject, cfg));
+            Assert.False(ResponsePolicy.MayPerformDestructiveResponse(suspPath, cfg));
         }
     }
 }

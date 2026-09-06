@@ -14,8 +14,8 @@ namespace Sentinel.Core
     /// <summary>
     /// v2.0.4: DPAPI-encrypted configuration store for per-deployment secrets and overrides.
     ///
-    /// Eliminates appsettings.json as an attack surface. All operational defaults are compiled
-    /// into the binary (via SentinelConfig/ThreatReportingConfig property initializers).
+    /// All operational defaults are compiled into the binary
+    /// (SentinelConfig / ThreatReportingConfig property initializers).
     /// Only per-deployment values that MUST vary (secrets, trusted devices, victim info)
     /// are stored in a DPAPI-encrypted file at %ProgramData%\Sentinel\Secure\config.enc
     ///
@@ -26,8 +26,9 @@ namespace Sentinel.Core
     ///     Legacy blobs (no SCFG2 header) still decrypt via DPAPI alone.
     ///   - No plaintext config on disk: physical access attacker must break DPAPI
     ///
-    /// To set secrets, use: Sentinel.Service.exe --set-config ProxySharedSecret=value
-    /// Or programmatically via SetOverride() then Save().
+    /// Opt-in host surface (Hardened Mode, victim identity) via
+    /// Sentinel.Service.exe --set-config Key=Value. Cannot disable detection
+    /// or rewrite the compiled threat-proxy HMAC.
     /// </summary>
     public sealed class EncryptedConfigStore
     {
@@ -179,22 +180,8 @@ namespace Sentinel.Core
             {
                 switch (kvp.Key)
                 {
-                    // ThreatReporting secrets
-                    case "ProxySharedSecret":
-                        if (threatConfig != null) threatConfig.ProxySharedSecret = kvp.Value;
-                        break;
-                    case "ProxyEndpoint":
-                        if (threatConfig != null) threatConfig.ProxyEndpoint = kvp.Value;
-                        break;
-                    case "AbuseIpDbApiKey":
-                        if (threatConfig != null) threatConfig.AbuseIpDbApiKey = kvp.Value;
-                        break;
-                    case "UrlhausAuthToken":
-                        if (threatConfig != null) threatConfig.UrlhausAuthToken = kvp.Value;
-                        break;
-                    case "MalwareBazaarApiKey":
-                        if (threatConfig != null) threatConfig.MalwareBazaarApiKey = kvp.Value;
-                        break;
+                    // Threat-proxy HMAC and endpoint are compiled into the binary.
+                    // Disk overrides cannot redirect or blank reporting.
 
                     // Sentinel per-deployment
                     case "TrustedUsbDevices":

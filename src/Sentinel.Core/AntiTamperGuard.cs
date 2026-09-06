@@ -45,17 +45,14 @@ namespace Sentinel.Core
         private bool _serviceAlertSuppressed; // Only alert once about missing service registration
         private bool _systemJustResumed;
         // HARDENING v1.5.9: Track ActiveResponse state to detect tampering.
-        // If ActiveResponse transitions from true to false at runtime, it means
-        // an attacker modified appsettings.json or injected config — fire anti-tamper alert.
+        // If ActiveResponse transitions from true to false at runtime, fire anti-tamper.
         private bool _activeResponseLastKnown;
         // v1.6.0: Boot-time ActiveResponse=false was force-enabled; alert pending on first integrity tick
 #pragma warning disable CS0169
         private bool _bootActiveResponseForcePending;
         private bool _bootActiveResponseAlerted;
 #pragma warning restore CS0169
-        // v1.6.0: SHA-256 of appsettings.json at first successful read (config integrity)
-        private string? _appsettingsHash;
-        private bool _appsettingsTamperAlerted;
+        private string? _encryptedConfigHash;
 
         // v2.1.7 RT-2026-H3: SHA-256 hash of own binary at startup for replacement detection
         private readonly string? _ownBinaryBaselineHash;
@@ -126,7 +123,7 @@ namespace Sentinel.Core
             QueryPerformanceCounter(out _lastPerfCount);
 
             // v2.0.4: Capture initial encrypted config hash for integrity monitoring
-            _appsettingsHash = TryHashEncryptedConfig();
+            _encryptedConfigHash = TryHashEncryptedConfig();
 
             // v2.1.7 RT-2026-H3: Capture SHA-256 hash of own binary at startup
             _ownBinaryBaselineHash = TryHashOwnBinary();
@@ -253,7 +250,7 @@ namespace Sentinel.Core
                         await CheckBinaryIntegrity();
                         await CheckServiceRegistration();
                         await CheckActiveResponseConfig();
-                        await CheckAppsettingsIntegrity();
+                        await CheckEncryptedConfigIntegrity();
                         await CheckAndEnforceQosPolicies();
                         // v2.0.4 HIGH-4: Removed EnforceFipsDisabled() — an EDR must not
                         // weaken system cryptographic posture.
@@ -350,62 +347,30 @@ namespace Sentinel.Core
         }
 
         /// <summary>
-        /// v1.6.0: Detects on-disk appsettings.json modification (hash change).
-        /// Does not auto-rewrite the file (ACL may prevent); enforces ActiveResponse in memory
-        /// and emits a Tier1 anti-tamper detection.
+        /// Monitors DPAPI config.enc hash. Disk JSON host files are not loaded
+        /// and are not a config source.
         /// </summary>
-        private async Task CheckAppsettingsIntegrity()
+        private async Task CheckEncryptedConfigIntegrity()
         {
-            // v2.0.4: Monitor encrypted config store instead of plaintext appsettings.json.
-            // If appsettings.json exists on disk (leftover from upgrade or attacker plant),
-            // detect that as suspicious. The encrypted config.enc is the authoritative source.
             try
             {
-                // Alert if appsettings.json appears on disk (should not exist in v2.0.4+)
-                var appsettingsPath = Path.Combine(AppContext.BaseDirectory, "appsettings.json");
-                if (File.Exists(appsettingsPath) && !_appsettingsTamperAlerted)
-                {
-                    _appsettingsTamperAlerted = true;
-                    _logger.LogWarning("[AntiTamperGuard] appsettings.json found on disk — this file should not exist in v2.0.4+. Possible tamper/downgrade attempt.");
-                    await _detectionEngine.EmitAsync(new DetectionEvent
-                    {
-                        RuleName = "Anti-Tamper: Unauthorized appsettings.json",
-                        Evidence = "appsettings.json exists in install directory. v2.0.4+ uses DPAPI-encrypted config only.",
-                        Reasoning = "The plaintext configuration file appsettings.json was found on disk. " +
-                                    "Since v2.0.4, Sentinel uses compiled defaults + DPAPI-encrypted config store. " +
-                                    "An attacker may have planted this file to inject malicious configuration on next restart.",
-                        Confidence = 0.85,
-                        Tier = DetectionTier.Tier1Behavioral,
-                        AuthorizedResponse = ResponseAction.LogOnly,
-                        ProcessName = "SYSTEM",
-                        ProcessId = 0,
-                        SignalType = SignalType.AntiTamper,
-                        Metadata = new Dictionary<string, string>
-                        {
-                            ["TamperType"] = "UnauthorizedAppsettingsJson",
-                            ["FilePath"] = appsettingsPath
-                        }
-                    });
-                }
-
-                // Monitor encrypted config store integrity
                 var currentHash = TryHashEncryptedConfig();
                 if (currentHash == null) return;
 
-                if (_appsettingsHash == null)
+                if (_encryptedConfigHash == null)
                 {
-                    _appsettingsHash = currentHash;
+                    _encryptedConfigHash = currentHash;
                     return;
                 }
 
-                if (!string.Equals(_appsettingsHash, currentHash))
+                if (!string.Equals(_encryptedConfigHash, currentHash))
                 {
                     _logger.LogWarning("[AntiTamperGuard] config.enc hash changed (encrypted config modified on disk).");
 
                     await _detectionEngine.EmitAsync(new DetectionEvent
                     {
                         RuleName = "Anti-Tamper: Encrypted Config Modified",
-                        Evidence = $"config.enc hash changed from {_appsettingsHash[..Math.Min(16, _appsettingsHash.Length)]}... to {currentHash[..Math.Min(16, currentHash.Length)]}...",
+                        Evidence = $"config.enc hash changed from {_encryptedConfigHash[..Math.Min(16, _encryptedConfigHash.Length)]}... to {currentHash[..Math.Min(16, currentHash.Length)]}...",
                         Reasoning = "Sentinel DPAPI-encrypted configuration was modified while the service is running. " +
                                     "If not initiated by an administrator via --set-config, this may indicate tampering.",
                         Confidence = 0.80,
@@ -417,12 +382,12 @@ namespace Sentinel.Core
                         Metadata = new Dictionary<string, string>
                         {
                             ["TamperType"] = "EncryptedConfigModified",
-                            ["PreviousHashPrefix"] = _appsettingsHash[..Math.Min(16, _appsettingsHash.Length)],
+                            ["PreviousHashPrefix"] = _encryptedConfigHash[..Math.Min(16, _encryptedConfigHash.Length)],
                             ["CurrentHashPrefix"] = currentHash[..Math.Min(16, currentHash.Length)]
                         }
                     });
 
-                    _appsettingsHash = currentHash;
+                    _encryptedConfigHash = currentHash;
                 }
             }
             catch (Exception ex)

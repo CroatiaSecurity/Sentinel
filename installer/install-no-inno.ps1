@@ -51,24 +51,11 @@ Get-Process -Name "Sentinel.Agent","Sentinel.Service" -ErrorAction SilentlyConti
 Start-Sleep -Seconds 1
 
 New-Item -ItemType Directory -Path $AppDir -Force | Out-Null
-# Preserve user appsettings if present
-$existingCfg = Join-Path $AppDir "appsettings.json"
-$cfgBackup = $null
-if (Test-Path $existingCfg) {
-    $cfgBackup = Join-Path $env:TEMP ("sentinel_appsettings_backup_" + [guid]::NewGuid().ToString("N") + ".json")
-    Copy-Item $existingCfg $cfgBackup -Force
-    Write-Host "Backed up appsettings.json"
-}
 
 Write-Host "Copying service..."
 Copy-Item -Path (Join-Path $ServiceSrc "*") -Destination $AppDir -Recurse -Force
 Write-Host "Copying agent..."
 Copy-Item -Path (Join-Path $AgentSrc "*") -Destination $AppDir -Recurse -Force
-
-if ($cfgBackup -and (Test-Path $cfgBackup)) {
-    Copy-Item $cfgBackup $existingCfg -Force
-    Write-Host "Restored appsettings.json"
-}
 
 $svcExe = Join-Path $AppDir "Sentinel.Service.exe"
 $agentExe = Join-Path $AppDir "Sentinel.Agent.exe"

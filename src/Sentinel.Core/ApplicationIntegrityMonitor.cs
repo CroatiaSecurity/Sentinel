@@ -51,7 +51,7 @@ namespace Sentinel.Core
 
     /// <summary>
     /// Configuration section for the Application Integrity Monitor.
-    /// Bound from appsettings.json "ApplicationIntegrity" section.
+    /// Compiled defaults for the Application Integrity Monitor.
     /// </summary>
     public class ApplicationIntegrityConfig
     {

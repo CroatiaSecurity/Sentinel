@@ -49,7 +49,11 @@ namespace Sentinel.Core
         {
             "EventLog-Security", "EventLog-System", "EventLog-Application",
             "SentinelUnifiedTrace", "DiagTrack", "Circular Kernel Context Logger",
-            "UBPM", "NetTrace", "NtfsLog", "WdiContextLog"
+            "UBPM", "NetTrace", "NtfsLog", "WdiContextLog",
+            // v2.6.0: DNS Client Operational log — DnsQueryMonitor reads event IDs 3006/3008 from
+            // this session. An attacker disabling it blinds all DNS-layer detections (DGA, rapid
+            // query, covert mesh, webhook sink correlations).
+            "Microsoft-Windows-DNS Client Events/Operational",
         };
 
         // Command patterns indicating ETW manipulation
@@ -228,17 +232,37 @@ namespace Sentinel.Core
             var pids = new List<int>();
             try
             {
+                // lsass — credential telemetry + LSASS audit events
                 foreach (var proc in Process.GetProcessesByName("lsass"))
                 {
                     pids.Add(proc.Id);
                     proc.Dispose();
                 }
+
+                // EventLog service host — runs in a svchost; supplies Security/System/Application logs
                 using var searcher = new System.Management.ManagementObjectSearcher(
                     "SELECT ProcessId FROM Win32_Service WHERE Name = 'EventLog' AND State = 'Running'");
                 foreach (System.Management.ManagementObject obj in searcher.Get())
                 {
                     int pid = Convert.ToInt32(obj["ProcessId"]);
                     if (pid > 4 && !pids.Contains(pid)) pids.Add(pid);
+                }
+
+                // v2.6.0: All powershell.exe / pwsh.exe instances.
+                // An attacker can patch EtwEventWrite inside their own PowerShell process to
+                // blind 4104 Script Block Logging for that session without touching lsass or
+                // the EventLog service. EtwProviderTamperMonitor previously missed this path.
+                // We cap at 8 PowerShell PIDs per cycle to bound scan time.
+                int psCount = 0;
+                foreach (var psName in new[] { "powershell", "pwsh" })
+                {
+                    foreach (var proc in Process.GetProcessesByName(psName))
+                    {
+                        if (psCount++ >= 8) { proc.Dispose(); break; }
+                        if (!pids.Contains(proc.Id))
+                            pids.Add(proc.Id);
+                        proc.Dispose();
+                    }
                 }
             }
             catch { }

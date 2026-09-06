@@ -29,6 +29,7 @@ namespace Sentinel.Core
                 SingleWriter = false
             });
         private readonly ConcurrentDictionary<(string, int), DateTime> _dedupCache = new();
+        private int _dedupOps;
         private readonly SentinelMetrics _metrics;
         private readonly JsonlEventLogger _eventLogger;
         private readonly AdvancedResponseEngine _responseEngine;
@@ -371,6 +372,15 @@ namespace Sentinel.Core
             if (lastTime != now)
             {
                 return; // Suppressed by existing recent entry
+            }
+
+            if ((++_dedupOps & 0x3F) == 0)
+            {
+                foreach (var kv in _dedupCache)
+                {
+                    if (now - kv.Value > TimeSpan.FromMinutes(2))
+                        _dedupCache.TryRemove(kv.Key, out _);
+                }
             }
 
             // Apply threat scoring

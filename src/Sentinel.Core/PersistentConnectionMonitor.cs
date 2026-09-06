@@ -465,7 +465,67 @@ namespace Sentinel.Core
                 Marshal.FreeHGlobal(buffer);
             }
 
+            AppendIpv6Connections(results);
             return results;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct MIB_TCP6ROW_OWNER_PID
+        {
+            public uint state;
+            [MarshalAs(UnmanagedType.ByValArray, SizeConst = 16)]
+            public byte[] localAddr;
+            public uint localScopeId;
+            public uint localPort;
+            [MarshalAs(UnmanagedType.ByValArray, SizeConst = 16)]
+            public byte[] remoteAddr;
+            public uint remoteScopeId;
+            public uint remotePort;
+            public uint owningPid;
+        }
+
+        private void AppendIpv6Connections(List<ActiveConnection> results)
+        {
+            int size = 0;
+            uint ret = GetExtendedTcpTable(IntPtr.Zero, ref size, true, 23, TCP_TABLE_CLASS.OWNER_PID_ALL, 0);
+            if (ret != 122 || size <= 0) return;
+            IntPtr buffer = Marshal.AllocHGlobal(size);
+            try
+            {
+                ret = GetExtendedTcpTable(buffer, ref size, true, 23, TCP_TABLE_CLASS.OWNER_PID_ALL, 0);
+                if (ret != 0) return;
+                int numEntries = Marshal.ReadInt32(buffer);
+                int structSize = Marshal.SizeOf<MIB_TCP6ROW_OWNER_PID>();
+                int myPid = System.Net48Environment.ProcessId;
+                for (int i = 0; i < numEntries; i++)
+                {
+                    IntPtr rowPtr = IntPtr.Add(buffer, 4 + i * structSize);
+                    var row = Marshal.PtrToStructure<MIB_TCP6ROW_OWNER_PID>(rowPtr);
+                    if (row.state != 5) continue;
+                    if (row.owningPid <= 4 || (int)row.owningPid == myPid) continue;
+                    if (row.remoteAddr == null || row.remoteAddr.Length < 16) continue;
+                    var remoteIp = new IPAddress(row.remoteAddr).ToString();
+                    if (remoteIp == "::1" || remoteIp.StartsWith("fe80", StringComparison.OrdinalIgnoreCase))
+                        continue;
+                    var remotePort = (int)((row.remotePort & 0xFF) << 8 | (row.remotePort & 0xFF00) >> 8);
+                    string processName = "unknown";
+                    try
+                    {
+                        using var p = Process.GetProcessById((int)row.owningPid);
+                        processName = p.ProcessName;
+                    }
+                    catch { }
+                    results.Add(new ActiveConnection
+                    {
+                        Pid = (int)row.owningPid,
+                        ProcessName = processName,
+                        RemoteIp = remoteIp,
+                        RemotePort = remotePort
+                    });
+                }
+            }
+            catch { }
+            finally { Marshal.FreeHGlobal(buffer); }
         }
 
         private void PruneStaleEntries()

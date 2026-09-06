@@ -45,7 +45,30 @@ namespace Sentinel.Tests
             Assert.True(config.ReportToMalwareBazaar);
             Assert.True(config.ReportToUrlhaus);
             Assert.Equal("https://sentinel-threat-proxy.znastidobrostoje-6ee.workers.dev", config.ProxyEndpoint);
-            Assert.Null(config.ProxySharedSecret);
+            Assert.True(ProxyAuthHelper.HasSharedSecret(config));
+            Assert.Equal(ThreatReportingConfig.CompiledProxySharedSecret, config.ProxySharedSecret);
+            Assert.True(config.ProxySharedSecret!.Length >= 16);
+        }
+
+        [Fact]
+        public void EncryptedStore_ShortSecret_DoesNotWipeCompiledHmac()
+        {
+            var store = new EncryptedConfigStore(customPath: Path.Combine(Path.GetTempPath(),
+                "sentinel-hmac-" + Guid.NewGuid().ToString("N") + ".enc"));
+            store.SetOverride("ProxySharedSecret", "short");
+            var threat = new ThreatReportingConfig();
+            var compiled = threat.ProxySharedSecret;
+            store.ApplyOverrides(new SentinelConfig(), threat);
+            Assert.Equal(compiled, threat.ProxySharedSecret);
+            Assert.True(ProxyAuthHelper.HasSharedSecret(threat));
+        }
+
+        [Fact]
+        public void HostDiskJson_EmptyBuilder_StaysEmpty()
+        {
+            var b = new Microsoft.Extensions.Configuration.ConfigurationBuilder();
+            HostDiskJson.RemoveJsonSources(b);
+            Assert.Empty(b.Sources);
         }
 
         [Fact]

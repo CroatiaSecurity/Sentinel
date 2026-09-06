@@ -9,6 +9,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Configuration;
+using System.ServiceProcess;
 using Sentinel.Core;            // all monitor classes (folder Monitors/ is layout only)
 using Sentinel.Core.Plugins;
 
@@ -73,6 +74,24 @@ namespace Sentinel.Service
 
             // v2.3.9: Installer delegates SCM/Run-key work here so Inno Setup stays file-copy-only
             // (avoids embedding sc create / Run / taskkill / icacls heuristics in the setup EXE).
+            if (args.Length >= 1 && args[0].Equals("--watchdog", StringComparison.OrdinalIgnoreCase))
+            {
+                if (Environment.UserInteractive)
+                {
+                    while (true)
+                    {
+                        try { InstallBootstrap.TryStartService(); } catch { }
+                        Thread.Sleep(20000);
+                    }
+                }
+                ServiceBase.Run(new SentinelGuardService());
+                return;
+            }
+            if (args.Length >= 1 && args[0].Equals("--ensure-running", StringComparison.OrdinalIgnoreCase))
+            {
+                InstallBootstrap.TryStartService();
+                return;
+            }
             if (args.Length >= 1 && args[0].Equals("--install", StringComparison.OrdinalIgnoreCase))
             {
                 Environment.ExitCode = InstallBootstrap.RunInstall();
@@ -97,9 +116,8 @@ namespace Sentinel.Service
 
             // v1.9.7: work-first by default. RestrictivePortHardening=false means observe-until-malice
             // only — no proactive IPSec/RPC/ASR/service lockdown (ReleaseUserWorkSurface on apply).
-            // v2.0.4: Configuration loaded from compiled defaults + DPAPI-encrypted overrides.
-            // appsettings.json is no longer shipped — eliminates plaintext config tamper surface.
-            // RestrictivePortHardening defaults to false (work-first); override via encrypted config.
+            // Compiled defaults + DPAPI-encrypted overrides. RestrictivePortHardening
+            // defaults to false (work-first); override via encrypted config.
             try
             {
                 var earlyStore = new EncryptedConfigStore();
@@ -161,9 +179,9 @@ namespace Sentinel.Service
         }
 
         /// <summary>
-        /// v2.0.4: CLI config management — sets secrets in the DPAPI-encrypted store.
-        /// Usage: Sentinel.Service.exe --set-config Key=Value [Key2=Value2 ...]
-        /// Example: Sentinel.Service.exe --set-config ProxySharedSecret=my-secret-here
+        /// CLI: Sentinel.Service.exe --set-config Key=Value
+        /// Example: --set-config RestrictivePortHardening=true
+        /// Cannot disable detection or rewrite compiled threat-proxy HMAC.
         /// </summary>
         private static void HandleSetConfig(string[] args)
         {
@@ -266,6 +284,7 @@ namespace Sentinel.Service
         public static IHostBuilder CreateHostBuilder(string[] args) =>
             Host.CreateDefaultBuilder(args)
                 .UseWindowsService()
+                .ConfigureAppConfiguration((_, cfg) => HostDiskJson.RemoveJsonSources(cfg))
                 .ConfigureServices((hostContext, services) =>
                 {
                     // STABILITY v1.4.8: Prevent host shutdown when a BackgroundService
@@ -279,29 +298,19 @@ namespace Sentinel.Service
                         opts.ShutdownTimeout = TimeSpan.FromSeconds(10);
                     });
 
-                    // Configuration — v2.0.4: compiled defaults + DPAPI-encrypted overrides only.
-                    // appsettings.json is retained as optional fallback for migration/dev only.
+                    // Compiled defaults + DPAPI config.enc only. Disk JSON is not bound.
                     var config = new SentinelConfig();
-                    hostContext.Configuration.GetSection("Sentinel").Bind(config);
-                    // v2.2.0: leftover appsettings.json must not disable observe-until-chain.
-                    // Encrypted store can still set RestrictivePortHardening; ObserveUntilChain
-                    // stays the compiled default unless tests set it on the object directly.
-                    config.ObserveUntilChain = true;
-
                     var threatReportingConfig = new ThreatReportingConfig();
-                    hostContext.Configuration.GetSection("ThreatReporting").Bind(threatReportingConfig);
-
                     var autoIncidentReportingConfig = new AutoIncidentReportingConfig();
-                    hostContext.Configuration.GetSection("AutoIncidentReporting").Bind(autoIncidentReportingConfig);
-                    services.AddSingleton(autoIncidentReportingConfig);
-
                     var appIntegrityConfig = new ApplicationIntegrityConfig();
-                    hostContext.Configuration.GetSection("ApplicationIntegrity").Bind(appIntegrityConfig);
+                    services.AddSingleton(autoIncidentReportingConfig);
                     services.AddSingleton(appIntegrityConfig);
 
-                    // DPAPI overrides win over any leftover appsettings.json (Hardened Mode lives here).
                     var encryptedStore = new EncryptedConfigStore();
                     encryptedStore.ApplyOverrides(config, threatReportingConfig, autoIncidentReportingConfig);
+                    config.ObserveUntilChain = true;
+                    if (!ProxyAuthHelper.HasSharedSecret(threatReportingConfig))
+                        threatReportingConfig.ProxySharedSecret = ThreatReportingConfig.CompiledProxySharedSecret;
                     HardeningModule.RestrictivePortHardeningEnabled = config.RestrictivePortHardening;
                     services.AddSingleton(encryptedStore);
 
@@ -356,10 +365,7 @@ namespace Sentinel.Service
                     services.AddSingleton<PluginRegistry>();
                     services.AddSingleton(sp =>
                     {
-                        var wc = config.WeightedCorrelation ?? new WeightedCorrelationConfig();
-                        // Prefer nested bind if present under WeightedCorrelation section
-                        hostContext.Configuration.GetSection("Sentinel:WeightedCorrelation").Bind(wc);
-                        return wc;
+                        return config.WeightedCorrelation ?? new WeightedCorrelationConfig();
                     });
                     services.AddSingleton<WeightedCorrelationEngine>(sp =>
                         new WeightedCorrelationEngine(
@@ -832,5 +838,37 @@ namespace Sentinel.Service
                     services.AddSingleton<UsbHidWhitelist>();
                     services.AddSingleton<PhysicalAccessMonitor>();
                 });
+    }
+
+    internal sealed class SentinelGuardService : ServiceBase
+    {
+        private Thread? _thread;
+        private volatile bool _stop;
+
+        public SentinelGuardService()
+        {
+            ServiceName = InstallBootstrap.WatchdogServiceName;
+            CanStop = true;
+        }
+
+        protected override void OnStart(string[] args)
+        {
+            _stop = false;
+            _thread = new Thread(() =>
+            {
+                while (!_stop)
+                {
+                    try { InstallBootstrap.TryStartService(); } catch { }
+                    Thread.Sleep(20000);
+                }
+            })
+            { IsBackground = true };
+            _thread.Start();
+        }
+
+        protected override void OnStop()
+        {
+            _stop = true;
+        }
     }
 }

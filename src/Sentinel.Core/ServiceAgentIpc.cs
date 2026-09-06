@@ -347,15 +347,16 @@ namespace Sentinel.Core
 
         private static NamedPipeServerStream CreatePipe()
         {
-            // Allow Authenticated Users to connect; SYSTEM owns the server end.
-            // net48: PipeSecurity ctor overload (NamedPipeServerStreamAcl is .NET 5+ only).
             var security = new PipeSecurity();
             var system = new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null);
             security.AddAccessRule(new PipeAccessRule(
                 system, PipeAccessRights.FullControl, AccessControlType.Allow));
-            var authUsers = new SecurityIdentifier(WellKnownSidType.AuthenticatedUserSid, null);
+            var interactive = new SecurityIdentifier(WellKnownSidType.InteractiveSid, null);
             security.AddAccessRule(new PipeAccessRule(
-                authUsers, PipeAccessRights.ReadWrite, AccessControlType.Allow));
+                interactive, PipeAccessRights.ReadWrite, AccessControlType.Allow));
+            var admins = new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null);
+            security.AddAccessRule(new PipeAccessRule(
+                admins, PipeAccessRights.ReadWrite, AccessControlType.Allow));
 
             return new NamedPipeServerStream(
                 ServiceAgentIpc.InstancePipeName,

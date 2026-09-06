@@ -297,7 +297,7 @@ The "President's Law" closed list ensures only confirmed behavioral detections (
 
 ### BT-STRONG-12: Installer Preserves User Configuration
 
-`appsettings.json` uses `Flags: onlyifdoesntexist` in the Inno Setup script, preventing upgrades from overwriting user customizations. This is both a usability and security feature (prevents config regression to less-secure defaults).
+Operational defaults are compiled into the binary. Disk JSON is not loaded. Uninstall is the off switch.
 
 ---
 
@@ -354,7 +354,7 @@ The installer registers Sentinel in both `SafeBoot\Minimal` and `SafeBoot\Networ
 
 1. **Goal:** Disable Sentinel's response capabilities
 2. **Approach:**
-   - Edit `appsettings.json` to set `ActiveResponse: false` → **Detected + force-re-enabled** by AntiTamperGuard
+   - Set `ActiveResponse: false` in memory/config → **Detected + force-re-enabled** by AntiTamperGuard
    - Delete `.install_entropy` → Dynamic rules fail-closed (rejected), cache HMAC fails → caches purged. But core detection is unaffected
    - Modify `Sentinel.Service.exe` on disk → Detected by binary integrity check (file deleted alert). But attacker can't replace while running (locked).
    - Set service StartType to Disabled → **Detected + force-reverted** by AntiTamperGuard
