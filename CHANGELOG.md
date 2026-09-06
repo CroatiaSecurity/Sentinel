@@ -2,6 +2,23 @@
 
 
 
+## [2.5.1] - 2026-09-06
+
+Patch on 2.5.0 webhook DNS events.
+
+### Fixed
+
+- **`DnsQueryMonitor` process name** — webhook, mesh, and ThreatFox DNS
+  events resolve the live process name when PID > 4 instead of hardcoding
+  `"unknown"` / `"SYSTEM"`. PID ≤ 4 stays SYSTEM; an exited PID stays
+  unknown.
+
+### Changed
+
+- `ProductInfo.Version` → `2.5.1`
+- Installer → `SentinelSetup-2.5.1.exe`
+
+
 ## [2.5.0] - 2026-09-06
 
 Webhook-shaped exfil without TLS intercept.

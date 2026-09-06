@@ -177,19 +177,21 @@ namespace Sentinel.Core
             CovertMeshSightings.NoteDomain(domain);
             CovertWebhookSightings.NoteDomain(domain, pid);
 
+            string processName = ResolveDnsProcessName(pid);
+
             if (UserlandProtocolHeuristics.IsDedicatedWebhookSink(domain))
             {
                 _ = _detectionEngine.EmitAsync(new DetectionEvent
                 {
                     RuleName = "Covert Webhook: Disposable Sink Lookup",
-                    Evidence = $"DNS query for disposable webhook sink '{domain}' PID={pid}",
+                    Evidence = $"DNS query for disposable webhook sink '{domain}' PID={pid} process='{processName}'",
                     Reasoning = "A lookup for webhook.site / interact.sh / requestbin / canarytokens-class " +
                                 "hosts is the DNS step of stealer callback exfil. LogOnly; the process " +
                                 "monitor correlates HTTPS from script hosts.",
                     Confidence = 0.64,
                     Tier = DetectionTier.Tier2Indicator,
                     AuthorizedResponse = ResponseAction.LogOnly,
-                    ProcessName = pid > 4 ? "unknown" : "SYSTEM",
+                    ProcessName = processName,
                     ProcessId = pid,
                     SignalType = SignalType.Generic,
                     Metadata = new Dictionary<string, string>
@@ -206,14 +208,14 @@ namespace Sentinel.Core
                 _ = _detectionEngine.EmitAsync(new DetectionEvent
                 {
                     RuleName = "Covert Mesh: DERP/tailcat DNS",
-                    Evidence = $"DNS query for mesh bootstrap host '{domain}'",
+                    Evidence = $"DNS query for mesh bootstrap host '{domain}' PID={pid} process='{processName}'",
                     Reasoning = "A lookup for tailcat.dev or a Tailscale DERP relay from a process that is not " +
                                 "the installed Tailscale client is the bootstrap of a userspace magicsock overlay " +
                                 "(tailcat and copycats). LogOnly observe fuel.",
                     Confidence = 0.62,
                     Tier = DetectionTier.Tier2Indicator,
                     AuthorizedResponse = ResponseAction.LogOnly,
-                    ProcessName = "SYSTEM",
+                    ProcessName = processName,
                     ProcessId = pid,
                     SignalType = SignalType.Generic,
                     Metadata = new Dictionary<string, string>
@@ -238,7 +240,7 @@ namespace Sentinel.Core
                     Confidence        = Math.Min(1.0, tfVerdict.Confidence / 100.0),
                     Tier              = DetectionTier.Tier1Behavioral,
                     AuthorizedResponse = ResponseAction.NetworkIsolate,
-                    ProcessName       = "SYSTEM",
+                    ProcessName       = processName,
                     ProcessId         = pid,
                     Metadata          = new Dictionary<string, string>
                     {
@@ -370,6 +372,24 @@ namespace Sentinel.Core
         {
             var parts = domain.TrimEnd('.').Split('.');
             return parts.Length >= 2 ? $"{parts[^2]}.{parts[^1]}" : domain;
+        }
+
+        /// <summary>
+        /// DNS Client event log often has PID 0. When PID is real, resolve the
+        /// live name so webhook/mesh/ThreatFox events match other DNS detections.
+        /// </summary>
+        internal static string ResolveDnsProcessName(int pid)
+        {
+            if (pid <= 4) return "SYSTEM";
+            try
+            {
+                using var p = Process.GetProcessById(pid);
+                var name = p.ProcessName;
+                if (!string.IsNullOrWhiteSpace(name))
+                    return name;
+            }
+            catch { /* process already exited */ }
+            return "unknown";
         }
 
         public async Task StopAsync()

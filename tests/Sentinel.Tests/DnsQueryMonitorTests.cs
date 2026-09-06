@@ -18,6 +18,30 @@ namespace Sentinel.Tests
             Assert.Equal(2, (int)DnsAnomalyType.DoHBypass);
         }
 
+        [Theory]
+        [InlineData(0)]
+        [InlineData(4)]
+        public void ResolveDnsProcessName_LowPid_IsSystem(int pid)
+        {
+            Assert.Equal("SYSTEM", DnsQueryMonitor.ResolveDnsProcessName(pid));
+        }
+
+        [Fact]
+        public void ResolveDnsProcessName_CurrentProcess_IsNotUnknown()
+        {
+            int pid = System.Diagnostics.Process.GetCurrentProcess().Id;
+            var name = DnsQueryMonitor.ResolveDnsProcessName(pid);
+            Assert.False(string.IsNullOrWhiteSpace(name));
+            Assert.NotEqual("SYSTEM", name);
+            Assert.NotEqual("unknown", name);
+        }
+
+        [Fact]
+        public void ResolveDnsProcessName_DeadPid_IsUnknown()
+        {
+            Assert.Equal("unknown", DnsQueryMonitor.ResolveDnsProcessName(int.MaxValue - 7));
+        }
+
         [Fact]
         public void DnsAnomalySignal_Properties_SetCorrectly()
         {
