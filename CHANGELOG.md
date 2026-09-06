@@ -2,6 +2,67 @@
 
 
 
+## [2.5.3] - 2026-09-06
+
+The rest of the 10 — and the costume is not a civilian.
+
+Skip lists now require identity (install path or Authenticode). A binary
+named `discord.exe` in Temp is the attack, not Discord. Potato, kernel-EoP
+loaders, ClickFix, Hell's Gate, CS pipes, classic RAT ports, ngrok/chisel,
+impostor AMSI, mesh and webhook stealers are kill-grade: one attributed
+PID at ≥ 0.85 confirms the chain.
+
+Potato / PrintSpoofer / winPEAS, kernel-EoP loaders, ClickFix encoded Run,
+unmapped-thread shellcode, Hell's Gate, Cobalt Strike named pipes, classic
+RAT ports (4444/31337/… — games and browsers skipped), ngrok/chisel/frpc/
+tailcat tunnels, and impostor-PowerShell AMSI bypass / wevtutil ETW wipe
+are kill-grade: one attributed PID at ≥ 0.85 confirms the chain.
+
+Still observe (the 90): Discord/Chrome/games/official Tailscale, TeamViewer/
+AnyDesk/mstsc/cloudflared, powershell SSH, high-entropy named pipes, UDP/ICMP/
+WFP/VoIP, DoH, MOTW/VSIX/disk-image delivery, SeImpersonate-alone, PPID,
+scheduled tasks, PID 0, statistical C2 beacon.
+
+### Changed
+
+- `ResponsePolicy.IsAttackClassTerminal` — solo chain-confirm for the
+  attack-class list (includes 2.5.2 covert mesh/webhook).
+- BYOVD fragment `AsIO` no longer matches the letters inside `Evasion`
+  (Hell's Gate / unmapped thread were mis-tagged BYOVD).
+- Skip lists require **identity**: name + install path (or Authenticode).
+  `discord.exe` / `steam.exe` / `tailscale.exe` in Temp, `C:\Users\attacker\epic games\`,
+  and `FakeOverlay.exe` are not civilians. Real Discord/Chrome/Steam/Tailscale still skip.
+- `LpeScaffoldMonitor` named tools, `CveClassCoverageMonitor` kernel loader
+  + ClickFix, TCP classic malware ports, Known-C2 pipes, tunneling tools
+  → Tier1 `KillProcessTree`.
+- `ProductInfo.Version` → `2.5.3`
+- Installer → `SentinelSetup-2.5.3.exe`
+
+
+## [2.5.2] - 2026-09-06
+
+The 10 murderers, not the 90 civilians.
+
+v2.4.8–2.5.1 logged tailcat-class mesh and webhook stealers as WeakChainOnly
+Tier2 — they could never enter a kill chain. Discord/Chrome/games were
+skipped so your voice chat would not fill Events. That skip stays. The
+**attacks** (tailcat, Temp overlay, powershell → webhook.site / Discord
+webhook URL) are now kill-grade C2: one attributed PID at ≥ 0.85 confirms
+the chain and `KillProcessTree` is authorized.
+
+Official `tailscale.exe` / `discord.exe` / browsers / games still do not
+emit these rules. PID 0 DNS stays observe.
+
+### Changed
+
+- `CovertMeshMonitor` / `CovertWebhookMonitor` / attributed DNS → Tier1
+  `NetworkC2` / `KillProcessTree`.
+- `ResponsePolicy.IsCovertChannelTerminal` — solo chain-confirm for those
+  rules when PID > 4.
+- `ProductInfo.Version` → `2.5.2`
+- Installer → `SentinelSetup-2.5.2.exe`
+
+
 ## [2.5.1] - 2026-09-06
 
 Patch on 2.5.0 webhook DNS events.

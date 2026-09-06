@@ -869,7 +869,8 @@ namespace Sentinel.Core
                 lower.Contains(@"\appdata\local\temp\"))
                 return false;
 
-            return lower.Contains(@"\steamapps\common\") ||
+            bool fragment =
+                   lower.Contains(@"\steamapps\common\") ||
                    lower.Contains(@"\steamapps\workshop\") ||
                    lower.Contains(@"\steam\steamapps\") ||
                    lower.Contains(@"\program files (x86)\steam\") ||
@@ -907,7 +908,39 @@ namespace Sentinel.Core
                    lower.Contains(@"\vanguard\") ||
                    lower.Contains(@"\denuvo\") ||
                    lower.Contains(@"\common redist\") ||
-                   lower.Contains(@"\steamworks shared\");
+                   lower.Contains(@"\steamworks shared\") ||
+                   lower.Contains(@"\world of warcraft\") ||
+                   lower.Contains(@"\blizzard entertainment\");
+            if (!fragment)
+                return false;
+
+            // v2.5.3: C:\Users\attacker\epic games\malware.exe is not Epic.
+            // Steam libraries under the user profile still have \steamapps\common\.
+            // AppData\Roaming\steamapps is an impostor (reputation tests).
+            if (lower.Contains(@"\appdata\") &&
+                !lower.Contains(@"\appdata\local\programs\"))
+                return false;
+            if (lower.Contains(@"\users\") &&
+                !lower.Contains(@"\steamapps\common\") &&
+                !lower.Contains(@"\xboxgames\") &&
+                !lower.Contains(@"\windowsapps\") &&
+                !lower.Contains(@"\appdata\local\programs\"))
+                return false;
+
+            return true;
+        }
+
+        /// <summary>
+        /// True when the image is the real System32/SysWOW64 copy — not svchost.exe in Temp.
+        /// </summary>
+        public static bool IsWindowsSystemImage(string? path)
+        {
+            if (string.IsNullOrEmpty(path)) return false;
+            var lower = path!.ToLowerInvariant();
+            if (lower.Contains(@"\temp\") || lower.Contains(@"\downloads\"))
+                return false;
+            return lower.Contains(@"\windows\system32\") ||
+                   lower.Contains(@"\windows\syswow64\");
         }
 
         /// <summary>

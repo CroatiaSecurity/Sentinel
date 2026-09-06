@@ -245,7 +245,7 @@ namespace Sentinel.Core
 
             return r.Contains("Reverse Shell: Suspicious Outbound") ||
                    r.Contains("Connection on Blocked Port") ||
-                   r.Contains("Classic Malware Port") ||
+                   r.Contains("Network UDP: Classic Malware Port") ||
                    r.Contains("Attack Tool: Connection from Suspicious Path") ||
                    r.Contains("Network Policy: Unusual Destination") ||
                    r.Contains("SeImpersonatePrivilege from Suspicious Path") ||

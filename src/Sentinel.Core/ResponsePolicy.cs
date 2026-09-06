@@ -31,6 +31,7 @@ namespace Sentinel.Core
             "ReverseShell",
             "C2Beacon",
             "WmiPersistence",
+            "Evasion",
         };
 
         /// <summary>Minimum confidence for a kill-grade family to stay Tier1 (default 0.85).</summary>
@@ -62,7 +63,7 @@ namespace Sentinel.Core
             ("BYOVD", new[]
             {
                 "BYOVD", "Vulnerable Driver", "kdmapper", "DBUtil",
-                "RTCore", "AsIO", "WinRing0", "capcom.sys", "gdrv", "iqvw64e",
+                "RTCore", "AsIO.sys", "AsIO64", "AsIO2", "WinRing0", "capcom.sys", "gdrv.sys", "iqvw64e",
                 "Vulnerable Kernel", "Bring Your Own",
             }),
             ("CredentialDump", new[]
@@ -78,11 +79,13 @@ namespace Sentinel.Core
                 "Potato", "JuicyPotato", "RoguePotato", "SharpEfsPotato",
                 "FudModule", "LegacyHive",
                 "Kernel Exploit Loader", "Installer EoP", "AlwaysInstallElevated",
+                "LPE Scaffold: Privilege Escalation Tool",
             }),
             ("ReverseShell", new[]
             {
                 "Reverse Shell", "Bind Shell", "Interactive Shell", "pty.spawn",
                 "socket.dup", "nc -e", "ncat", "revshell", "mete" + "rpreter",
+                "ClickFix Encoded",
             }),
             ("Exfil", new[]
             {
@@ -97,6 +100,19 @@ namespace Sentinel.Core
                 "Injected C2", "Confirmed C2", "Covert C2", "C2 Channel",
                 "Periodic Callback", "Statistical Beacon",
                 "Lazarus Dream Job", "Dream Job: C2",
+                "Covert Mesh", "Covert Webhook",
+                "Classic Malware Port",
+                "Named Pipe: Known C2",
+                "Tunneling Tool Detected",
+            }),
+            // v2.5.3 — attributed AMSI/ETW patch, Hell's Gate, unmapped thread (the 10)
+            ("Evasion", new[]
+            {
+                "AMSI Bypass Detected",
+                "Indirect Syscall",
+                "Hell's Gate",
+                "Unmapped Thread Start Address",
+                "ETW/Event Log Manipulation",
             }),
             // v2.2.8 — executable WMI consumers / policy rewrite via provider host
             ("WmiPersistence", new[]
@@ -172,32 +188,30 @@ namespace Sentinel.Core
             "Named Pipe: High-Entropy Name",
             // v2.1.2: browse/play heuristics — observe fuel only, never a chain seed
             "Suspicious Outbound Connection",
-            "Classic Malware Port",
             "Application-Level DoH",
             "DNS Bypass:",
             "C2 Pairing: Defensive Process Spawn",
             "Image File Missing",
             "Clickjacking",
             "Junction/Symlink",
-            "LPE Scaffold: Privilege Escalation Tool",
-            "Unmapped Thread Start Address",
-            "CVE Class: Kernel Exploit Loader",
+            // v2.5.3: LPE named tools, kernel EoP loader, ClickFix, unmapped thread,
+            // classic malware ports, Known-C2 pipes are kill-grade. High-entropy
+            // pipes, MOTW/disk-image/VSIX delivery, DoH, SSH-from-shell stay weak.
             "CVE Class: PE Missing Mark-of-the-Web",
             "CVE Class: Disk Image in Delivery",
             "CVE Class: AppInstaller Package",
             "CVE Class: VSIX in Delivery",
             "CVE Class: RDP File in Delivery",
-            "CVE Class: ClickFix Encoded",
             "CVE Class: Package Manager EoP",
             "CVE Class: VS Code Encoded",
             "Patch Posture: Missed Patch Tuesday",
-            // v2.4.8: userland protocol coverage — observe fuel, never a chain seed
+            // v2.4.8: ambient protocol noise — never a chain seed
             "Network UDP:",
             "Network ICMP:",
             "Network WFP:",
             "Network VoIP:",
-            "Covert Mesh:",
-            "Covert Webhook:",
+            // DNS lookups with no PID stay observe (PID 0). Process-attributed
+            // Covert Mesh / Covert Webhook are kill-grade C2 as of v2.5.2.
             // Surveillance: composite fuel for coercion toolkit; never sole chain seed
             "Screen Capture",
             "DXGI Desktop Duplication",
@@ -577,6 +591,57 @@ namespace Sentinel.Core
         public static bool IsNonCorrelatingObserveNoise(DetectionEvent detection)
             => detection == null || IsBenignInstallerNoise(detection) || IsPureUxObserveNoise(detection);
 
+        /// <summary>
+        /// Tailcat / userspace WG overlay / webhook-sink stealers attributed to a
+        /// real PID. Not Discord.exe, not Chrome, not official Tailscale — those
+        /// never emit these rule names. Solo chain-confirm when confidence is kill-grade.
+        /// </summary>
+        public static bool IsCovertChannelTerminal(DetectionEvent? detection)
+        {
+            if (detection == null || detection.ProcessId <= 4)
+                return false;
+            if (detection.Metadata != null &&
+                detection.Metadata.TryGetValue("WeakObserveSeed", out var flag) &&
+                string.Equals(flag, "true", StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            var r = detection.RuleName ?? "";
+            return r.StartsWith("Covert Mesh:", StringComparison.OrdinalIgnoreCase)
+                || r.StartsWith("Covert Webhook:", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// v2.5.3: the 10 — attributed attack-class rules that are the act, not
+        /// ambient noise. Discord/Chrome/games/official Tailscale never emit these.
+        /// PID ≤ 4 stays observe. High-entropy pipes, SSH-from-shell, DoH, MOTW
+        /// delivery, SeImpersonate-alone, TeamViewer presence are not this list.
+        /// </summary>
+        public static bool IsAttackClassTerminal(DetectionEvent? detection)
+        {
+            if (detection == null || detection.ProcessId <= 4)
+                return false;
+            if (detection.Metadata != null &&
+                detection.Metadata.TryGetValue("WeakObserveSeed", out var flag) &&
+                string.Equals(flag, "true", StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            if (IsCovertChannelTerminal(detection))
+                return true;
+
+            var r = detection.RuleName ?? "";
+            return r.StartsWith("LPE Scaffold: Privilege Escalation Tool", StringComparison.OrdinalIgnoreCase)
+                || r.StartsWith("CVE Class: Kernel Exploit Loader", StringComparison.OrdinalIgnoreCase)
+                || r.StartsWith("CVE Class: ClickFix Encoded", StringComparison.OrdinalIgnoreCase)
+                || r.IndexOf("Unmapped Thread Start Address", StringComparison.OrdinalIgnoreCase) >= 0
+                || r.IndexOf("Network Indicator: Classic Malware Port", StringComparison.OrdinalIgnoreCase) >= 0
+                || r.StartsWith("Named Pipe: Known C2", StringComparison.OrdinalIgnoreCase)
+                || r.StartsWith("Remote Access: Tunneling Tool", StringComparison.OrdinalIgnoreCase)
+                || r.IndexOf("Indirect Syscall", StringComparison.OrdinalIgnoreCase) >= 0
+                || r.IndexOf("Hell's Gate", StringComparison.OrdinalIgnoreCase) >= 0
+                || r.IndexOf("AMSI Bypass Detected", StringComparison.OrdinalIgnoreCase) >= 0
+                || r.IndexOf("ETW/Event Log Manipulation", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
         public static bool IsNukeComposite(DetectionEvent detection)
         {
             if (detection == null) return false;
@@ -628,6 +693,19 @@ namespace Sentinel.Core
                 // No reliable process attribution — never authorize host mutation from PID 0 noise
                 // (this is exactly how Steam DirectX / dxsetup races look).
                 return false;
+            }
+
+            // v2.5.2/2.5.3: the 10 (mesh, webhook, potato, kernel EoP loader,
+            // ClickFix, Hell's Gate, unmapped thread, CS pipes, classic RAT
+            // ports, ngrok/chisel, impostor AMSI) ARE the attack. Civilians
+            // stay skipped in the monitors. One high-confidence hit is enough.
+            if (IsAttackClassTerminal(detection) &&
+                detection.Confidence >= (config.MinTier1Confidence > 0
+                    ? config.MinTier1Confidence
+                    : DefaultMinTier1Confidence))
+            {
+                TagChainConfirmed(detection, ClassifyTerminalOutcome(detection) ?? "C2Beacon");
+                return true;
             }
 
             int minSignals = Math.Max(2, config.ChainConfirmMinSignals);

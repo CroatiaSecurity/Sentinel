@@ -1,6 +1,8 @@
 // Generic CVE-class coverage (v2.2.4). Catches the userland shape of new
 // kernel EoP / MSI EoP / winget / MOTW / VS Code / unionfs bugs without
-// waiting for a named campaign pack. Observe-until-chain: Tier2 LogOnly.
+// waiting for a named campaign pack.
+// v2.5.3: kernel EoP loader and ClickFix encoded-run are kill-grade.
+// MOTW / disk-image / VSIX / winget / VS Code encoded stay observe.
 
 using System;
 using System.Collections.Generic;
@@ -123,10 +125,10 @@ namespace Sentinel.Core
                                     "CVE Class: Kernel Exploit Loader",
                                     $"Process '{name}' (PID {pid}) matches kernel-EoP loader shape path='{path ?? "?"}' cmd='{Truncate(cmd, 160)}'",
                                     "Userland loader for kernel elevation-of-privilege (AFD/WinSock, isolation FS, HTTP.sys-class). " +
-                                    "Does not patch the kernel race — stops the exploit host. Observe fuel for token/LPE composites. " +
+                                    "Does not patch the kernel race — stops the exploit host. Kill-grade. " +
                                     $"Covers {CveCoverageHeuristics.CveAfdAlt1}/{CveCoverageHeuristics.CveAfdAlt2} class, not just named campaigns.",
-                                    staging ? 0.86 : 0.78, name, pid, path, parentName, parentPid,
-                                    SignalType.SecurityEvasion).ConfigureAwait(false);
+                                    staging ? 0.90 : 0.86, name, pid, path, parentName, parentPid,
+                                    SignalType.SecurityEvasion, killGrade: true).ConfigureAwait(false);
                             }
                         }
 
@@ -180,9 +182,9 @@ namespace Sentinel.Core
                                 "CVE Class: ClickFix Encoded Run",
                                 $"explorer spawned '{name}' (PID {pid}) with encoded PowerShell/IEX cmd='{Truncate(cmd, 160)}'",
                                 "ClickFix / fake-CAPTCHA social engineering: user is talked into Win+R / Run dialog paste of encoded PowerShell. " +
-                                "Parent explorer + encoded command is the host trace. Observe-until-chain with C2/script.",
-                                0.87, name, pid, path, parentName, parentPid,
-                                SignalType.SuspiciousProcess).ConfigureAwait(false);
+                                "Parent explorer + encoded command is the host trace. Kill-grade — that process is the attack.",
+                                0.90, name, pid, path, parentName, parentPid,
+                                SignalType.SuspiciousProcess, killGrade: true).ConfigureAwait(false);
                         }
 
                         if (CveCoverageHeuristics.IsMidiServiceProcess(name) &&
@@ -245,10 +247,20 @@ namespace Sentinel.Core
         private async Task EmitAsync(
             string rule, string evidence, string reasoning, double conf,
             string name, int pid, string? path, string parentName, int parentPid,
-            SignalType signal)
+            SignalType signal, bool killGrade = false)
         {
             var key = rule + ":" + pid;
             if (!ShouldAlert(key)) return;
+
+            var meta = new Dictionary<string, string>
+            {
+                ["ImagePath"] = path ?? "",
+                ["ParentProcess"] = parentName,
+                ["ParentPid"] = parentPid.ToString(),
+                ["CveClass"] = "true",
+            };
+            if (!killGrade)
+                meta["WeakObserveSeed"] = "true";
 
             await _detectionEngine.EmitAsync(new DetectionEvent
             {
@@ -256,19 +268,12 @@ namespace Sentinel.Core
                 Evidence = evidence,
                 Reasoning = reasoning,
                 Confidence = conf,
-                Tier = DetectionTier.Tier2Indicator,
-                AuthorizedResponse = ResponseAction.LogOnly,
+                Tier = killGrade ? DetectionTier.Tier1Behavioral : DetectionTier.Tier2Indicator,
+                AuthorizedResponse = killGrade ? ResponseAction.KillProcessTree : ResponseAction.LogOnly,
                 ProcessName = name,
                 ProcessId = pid,
                 SignalType = signal,
-                Metadata = new Dictionary<string, string>
-                {
-                    ["WeakObserveSeed"] = "true",
-                    ["ImagePath"] = path ?? "",
-                    ["ParentProcess"] = parentName,
-                    ["ParentPid"] = parentPid.ToString(),
-                    ["CveClass"] = "true",
-                }
+                Metadata = meta
             }).ConfigureAwait(false);
         }
 

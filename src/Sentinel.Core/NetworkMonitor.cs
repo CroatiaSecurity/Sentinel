@@ -307,41 +307,49 @@ namespace Sentinel.Core
                             });
                         }
 
-                        // C. Attack-only ports (Telnet, Meterpreter defaults, etc.) — LogOnly indicator.
-                        // IPSec already blocks these; traffic here means bypass/tamper or residual.
+                        // C. Attack-only ports (Telnet, Meterpreter defaults, etc.).
+                        // Games (Unreal 7777) and browsers are civilians — skip.
+                        // Remaining process on 4444/31337/… is the attack (v2.5.3).
                         if (KnownMaliciousPorts.Contains(remotePort) || KnownMaliciousPorts.Contains(localPort))
                         {
-                            int suspiciousPort = KnownMaliciousPorts.Contains(remotePort) ? remotePort : localPort;
-                            bool isOutbound = KnownMaliciousPorts.Contains(remotePort);
-                            string direction = isOutbound ? "outbound to" : "inbound from";
-                            string targetAddr = isOutbound ? remoteIp : localIp;
-
-                            _ = _detectionEngine.EmitAsync(new DetectionEvent
+                            if (IsKnownBrowser(processName, imagePath) ||
+                                SecurityValidation.IsGameOrAntiCheatPath(imagePath))
                             {
-                                RuleName = "Network Indicator: Classic Malware Port",
-                                Evidence = $"Process '{processName}' (PID {owningPid}) has {direction} {targetAddr}:{suspiciousPort}. " +
-                                           $"Full connection: {localIp}:{localPort} → {remoteIp}:{remotePort}",
-                                Reasoning = $"Port {suspiciousPort} ({GetPortDescription(suspiciousPort)}) is in the attack-only " +
-                                            "block set (legacy shells / classic RAT ports). Logged as a weak indicator; " +
-                                            "kill requires corroborating attack signals.",
-                                Confidence = 0.55,
-                                Tier = DetectionTier.Tier2Indicator,
-                                AuthorizedResponse = ResponseAction.LogOnly,
-                                ProcessName = processName,
-                                ProcessId = owningPid,
-                                SignalType = SignalType.SuspiciousProcess,
-                                Metadata = new Dictionary<string, string>
+                                // skip the 90
+                            }
+                            else
+                            {
+                                int suspiciousPort = KnownMaliciousPorts.Contains(remotePort) ? remotePort : localPort;
+                                bool isOutbound = KnownMaliciousPorts.Contains(remotePort);
+                                string direction = isOutbound ? "outbound to" : "inbound from";
+                                string targetAddr = isOutbound ? remoteIp : localIp;
+
+                                _ = _detectionEngine.EmitAsync(new DetectionEvent
                                 {
-                                    { "WeakObserveSeed", "true" },
-                                    { "RemoteAddress", remoteIp },
-                                    { "RemotePort", remotePort.ToString() },
-                                    { "LocalAddress", localIp },
-                                    { "LocalPort", localPort.ToString() },
-                                    { "SuspiciousPort", suspiciousPort.ToString() },
-                                    { "Direction", isOutbound ? "Outbound" : "Inbound" },
-                                    { "TargetIP", isOutbound ? remoteIp : localIp }
-                                }
-                            });
+                                    RuleName = "Network Indicator: Classic Malware Port",
+                                    Evidence = $"Process '{processName}' (PID {owningPid}) has {direction} {targetAddr}:{suspiciousPort}. " +
+                                               $"Full connection: {localIp}:{localPort} → {remoteIp}:{remotePort}",
+                                    Reasoning = $"Port {suspiciousPort} ({GetPortDescription(suspiciousPort)}) is in the attack-only " +
+                                                "block set (legacy shells / classic RAT ports). Games and browsers are skipped. " +
+                                                "This process is not that — kill-grade C2.",
+                                    Confidence = 0.86,
+                                    Tier = DetectionTier.Tier1Behavioral,
+                                    AuthorizedResponse = ResponseAction.KillProcessTree,
+                                    ProcessName = processName,
+                                    ProcessId = owningPid,
+                                    SignalType = SignalType.NetworkC2,
+                                    Metadata = new Dictionary<string, string>
+                                    {
+                                        { "RemoteAddress", remoteIp },
+                                        { "RemotePort", remotePort.ToString() },
+                                        { "LocalAddress", localIp },
+                                        { "LocalPort", localPort.ToString() },
+                                        { "SuspiciousPort", suspiciousPort.ToString() },
+                                        { "Direction", isOutbound ? "Outbound" : "Inbound" },
+                                        { "TargetIP", isOutbound ? remoteIp : localIp }
+                                    }
+                                });
+                            }
                         }
 
                         // 3. Submit network telemetry context to telemetry pipeline

@@ -191,26 +191,18 @@ namespace Sentinel.Core
                     if (pid <= 4) return true;
 
                     string procName = "unknown";
-                    try { using var p = Process.GetProcessById((int)pid); procName = p.ProcessName; } catch { }
+                    string? imagePath = null;
+                    try
+                    {
+                        using var p = Process.GetProcessById((int)pid);
+                        procName = p.ProcessName;
+                        imagePath = SecurityValidation.GetProcessImagePath((int)pid);
+                    }
+                    catch { }
 
-                    // Skip known-good overlay creators
-                    if (procName.Equals("dwm") ||
-                        procName.Equals("explorer") ||
-                        procName.Equals("GeForceOverlay") ||
-                        procName.Equals("GameBar") ||
-                        procName.Equals("Discord") ||
-                        procName.Contains("Overlay") ||
-                        // v1.5.5: IDEs use layered topmost windows for autocomplete, tooltips,
-                        // debugging overlays, and notification panels.
-                        procName.Equals("Code") ||
-                        procName.Equals("kiro") ||
-                        procName.Equals("cursor") ||
-                        procName.Equals("windsurf") ||
-                        procName.Equals("devenv") ||
-                        procName.Contains("rider") ||
-                        procName.Contains("idea") ||
-                        procName.Contains("webstorm") ||
-                        procName.Contains("pycharm"))
+                    // v2.5.3: skip real civilians only. FakeOverlay.exe and
+                    // discord.exe in Temp are the attack — name is not identity.
+                    if (IsVerifiedOverlayCivilian(procName, imagePath))
                         return true;
 
                     // Check alpha transparency
@@ -256,6 +248,49 @@ namespace Sentinel.Core
         }
 
         #endregion
+
+        /// <summary>
+        /// Real DWM/explorer (System32), real Discord/Chrome, real games, real IDEs.
+        /// FakeOverlay.exe and discord.exe in Temp are not this.
+        /// </summary>
+        internal static bool IsVerifiedOverlayCivilian(string? procName, string? imagePath)
+        {
+            if (string.IsNullOrEmpty(procName)) return false;
+            var n = procName!;
+
+            if (n.Equals("dwm", StringComparison.OrdinalIgnoreCase) ||
+                n.Equals("explorer", StringComparison.OrdinalIgnoreCase))
+                return SecurityValidation.IsWindowsSystemImage(imagePath);
+
+            if (UserlandProtocolHeuristics.IsKnownCommsIdentity(n, imagePath))
+                return true;
+            if (SecurityValidation.IsGameOrAntiCheatPath(imagePath))
+                return true;
+            if (ChainTracer.IsLegitimateIdeHost(imagePath, n))
+                return true;
+
+            if (n.Equals("GeForceOverlay", StringComparison.OrdinalIgnoreCase) ||
+                n.Equals("NVIDIA Share", StringComparison.OrdinalIgnoreCase) ||
+                n.Equals("GameBar", StringComparison.OrdinalIgnoreCase))
+            {
+                if (string.IsNullOrEmpty(imagePath)) return false;
+                var lower = imagePath!.ToLowerInvariant();
+                if (lower.Contains(@"\temp\") || lower.Contains(@"\downloads\"))
+                    return false;
+                if (lower.Contains(@"\nvidia corporation\") ||
+                    lower.Contains(@"\gamebar\") ||
+                    lower.Contains(@"\windowsapps\"))
+                    return true;
+                try
+                {
+                    return System.IO.File.Exists(imagePath) &&
+                           SecurityValidation.VerifyAuthenticodeSignature(imagePath);
+                }
+                catch { return false; }
+            }
+
+            return false;
+        }
 
         #region Fake UAC / Credential Prompt Detection
 

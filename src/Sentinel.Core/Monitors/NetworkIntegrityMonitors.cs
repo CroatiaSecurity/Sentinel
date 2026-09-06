@@ -813,9 +813,9 @@ namespace Sentinel.Core
         // Per-PID dedup: once we alert on a PID, don't alert again until the process exits
         private readonly ConcurrentDictionary<int, DateTime> _alertedPids = new();
 
-        // 35+ known remote access tools — both legitimate and commonly abused
-        // Detection is Tier2 (LogOnly) because running these isn't proof of compromise.
-        // Trust model: detect presence, let correlation engine decide if suspicious context exists.
+        // 35+ known remote access tools — both legitimate and commonly abused.
+        // TeamViewer / AnyDesk / mstsc / cloudflared stay LogOnly (the 90).
+        // ngrok / chisel / frpc / tailcat-class tunnels are kill-grade (v2.5.3).
         private static readonly string[] RemoteAccessProcessNames =
         {
             // Commercial remote desktop/support
@@ -877,25 +877,25 @@ namespace Sentinel.Core
                                 // Skip if we already alerted on this PID
                                 if (_alertedPids.ContainsKey(proc.Id)) continue;
                                 _alertedPids[proc.Id] = DateTime.UtcNow;
-                                // Higher confidence for tunneling tools (ngrok, frpc, chisel)
-                                // — these are almost never legitimate on endpoints
+                                // Tunneling tools (ngrok, frpc, chisel, tailcat) ARE the attack.
+                                // cloudflared is a homelab civilian — log only, like TeamViewer.
                                 bool isTunnel = name.Contains("ngrok") || name.Contains("frpc") ||
                                                 name.Contains("chisel") || name.Contains("rathole") ||
-                                                name.Contains("bore") || name.Contains("cloudflared") ||
+                                                name.Contains("bore") ||
                                                 name.Contains("tailcat") || name.Contains("wireproxy") ||
                                                 name.Contains("onetun") || name.Contains("boringtun") ||
-                                                name.Contains("innernet") || name.Contains("derper");
+                                                name.Contains("innernet") || name.Contains("derper") ||
+                                                name.Contains("sliver");
 
                                 string? imagePath = null;
                                 try { imagePath = SecurityValidation.GetProcessImagePath(proc.Id); } catch { }
 
-                                // Tunneling from Temp/Downloads = very suspicious
                                 bool fromSuspiciousPath = imagePath != null &&
                                     (imagePath.Contains(@"\Temp\") ||
                                      imagePath.Contains(@"\Downloads\"));
 
-                                var confidence = isTunnel ? (fromSuspiciousPath ? 0.85 : 0.75) : 0.55;
-                                var tier = (isTunnel && fromSuspiciousPath)
+                                var confidence = isTunnel ? (fromSuspiciousPath ? 0.90 : 0.86) : 0.55;
+                                var tier = isTunnel
                                     ? DetectionTier.Tier1Behavioral
                                     : DetectionTier.Tier2Indicator;
 
@@ -906,12 +906,14 @@ namespace Sentinel.Core
                                         : "Remote Access: Known RAT Process Running",
                                     Evidence = $"Process '{proc.ProcessName}' (PID {proc.Id}) running{(imagePath != null ? $" from '{imagePath}'" : "")}",
                                     Reasoning = isTunnel
-                                        ? "A reverse tunneling tool was detected. These are rarely legitimate on endpoints and are commonly used to bypass firewalls for C2 or unauthorized access."
-                                        : "A remote access tool process was detected. While some are legitimate, they are commonly abused for unauthorized access.",
+                                        ? "A reverse tunneling tool was detected (ngrok/chisel/frpc/tailcat-class). " +
+                                          "Official Tailscale and cloudflared are not this rule. Kill-grade C2."
+                                        : "A remote access tool process was detected. TeamViewer/AnyDesk/RDP are civilians — log only.",
                                     Confidence = confidence, Tier = tier,
-                                    AuthorizedResponse = (isTunnel && fromSuspiciousPath)
+                                    AuthorizedResponse = isTunnel
                                         ? ResponseAction.KillProcessTree
                                         : ResponseAction.LogOnly,
+                                    SignalType = isTunnel ? SignalType.NetworkC2 : SignalType.SuspiciousProcess,
                                     ProcessName = proc.ProcessName, ProcessId = proc.Id
                                 });
                             }

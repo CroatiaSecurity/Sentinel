@@ -4,6 +4,7 @@ using Sentinel.Core;
 
 namespace Sentinel.Tests
 {
+    [Collection("ResponsePolicy")]
     public class ResponsePolicyTests
     {
         public ResponsePolicyTests()

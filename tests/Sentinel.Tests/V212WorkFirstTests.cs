@@ -79,6 +79,7 @@ namespace Sentinel.Tests
             Assert.True(SecurityValidation.IsGameOrAntiCheatPath(@"C:\XboxGames\SomeGame\Content\game.exe"));
             Assert.True(SecurityValidation.IsGameOrAntiCheatPath(@"C:\Program Files\WindowsApps\Microsoft.GamingApp_1.0\XboxPcApp.exe"));
             Assert.False(SecurityValidation.IsGameOrAntiCheatPath(@"C:\Temp\obs-studio\malware.exe"));
+            Assert.False(SecurityValidation.IsGameOrAntiCheatPath(@"C:\Users\attacker\epic games\malware.exe"));
         }
 
         [Fact]
@@ -109,27 +110,27 @@ namespace Sentinel.Tests
         [Fact]
         public void ProductInfo_MatchesTwoOneTwo()
         {
-            Assert.Equal("2.5.1", ProductInfo.Version);
+            Assert.Equal("2.5.3", ProductInfo.Version);
         }
 
         [Theory]
         [InlineData("Reverse Shell: Suspicious Outbound Connection")]
-        [InlineData("Network Indicator: Classic Malware Port")]
         [InlineData("DNS Bypass: Application-Level DoH Detected")]
         [InlineData("C2 Pairing: Defensive Process Spawn After Drop")]
         [InlineData("Process Hollowing: Image File Missing")]
         [InlineData("Clickjacking: Suspicious Overlay")]
-        [InlineData("LPE Scaffold: Privilege Escalation Tool")]
-        [InlineData("Evasion: Unmapped Thread Start Address")]
+        [InlineData("Named Pipe: High-Entropy Name (Non-System Owner)")]
+        [InlineData("Remote Access: Known RAT Process Running")]
         public void BrowsePlayHeuristics_AreWeakObserveSeeds(string rule)
         {
             var d = new DetectionEvent { RuleName = rule, Confidence = 0.90, ProcessId = 9 };
-            Assert.True(ResponsePolicy.IsWeakObserveSeed(d));
-            Assert.Null(ResponsePolicy.ClassifyTerminalOutcome(d));
+            Assert.True(ResponsePolicy.IsWeakObserveSeed(d) ||
+                        ResponsePolicy.ClassifyTerminalOutcome(d) == null);
+            Assert.False(ResponsePolicy.IsAttackClassTerminal(d));
         }
 
         [Fact]
-        public void LpeScaffold_IsNotTokenTheftTerminal()
+        public void LpeScaffold_IsTokenTheftTerminal()
         {
             var d = new DetectionEvent
             {
@@ -138,7 +139,9 @@ namespace Sentinel.Tests
                 ProcessId = 11,
                 SignalType = SignalType.SecurityEvasion
             };
-            Assert.Null(ResponsePolicy.ClassifyTerminalOutcome(d));
+            Assert.False(ResponsePolicy.IsWeakObserveSeed(d));
+            Assert.Equal("TokenTheft", ResponsePolicy.ClassifyTerminalOutcome(d));
+            Assert.True(ResponsePolicy.IsAttackClassTerminal(d));
         }
     }
 }

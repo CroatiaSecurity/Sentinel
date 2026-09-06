@@ -60,21 +60,6 @@ namespace Sentinel.Core
         // Ignore local/private ranges for persistent tracking (unless to specific ports)
         private static readonly HashSet<int> WebhookPorts = new() { 80, 443, 8080, 8443, 4443, 8009, 5228, 5229, 5230 };
 
-        // Processes that legitimately hold long connections (browsers, updaters, etc.)
-        private static readonly HashSet<string> LegitimateProcesses = new(StringComparer.OrdinalIgnoreCase)
-        {
-            "chrome", "msedge", "firefox", "brave", "opera", "vivaldi",
-            "steam", "steamwebhelper", "discord", "spotify", "teams",
-            "onedrive", "dropbox", "googledrive",
-            "svchost", "SearchHost", "Sentinel.Service",
-            "Sentinel.Agent", "Code", "kiro",
-            // Games: MMOs and multiplayer titles routinely drop and reconnect to
-            // multiple game servers during zone transitions / instance switches.
-            "GameClient", "StarTrekOnline", "WowClassic", "Wow",
-            "FortniteClient-Win64-Shipping", "EscapeFromTarkov",
-            "VALORANT-Win64-Shipping", "r5apex", "eldenring"
-        };
-
         // Dedup: don't fire the same alert for the same process+endpoint repeatedly
         private readonly ConcurrentDictionary<string, DateTime> _alertDedup = new();
 
@@ -401,8 +386,27 @@ namespace Sentinel.Core
         {
             if (string.IsNullOrEmpty(processName)) return false;
 
-            // Fast path: known-good process names (system, browsers, dev tools)
-            if (LegitimateProcesses.Contains(processName!)) return true;
+            string? path = null;
+            if (pid > 0)
+            {
+                try { path = SecurityValidation.GetProcessImagePath(pid); } catch { }
+            }
+
+            var n = processName!;
+            if (n.Equals("svchost", StringComparison.OrdinalIgnoreCase) ||
+                n.Equals("SearchHost", StringComparison.OrdinalIgnoreCase))
+                return SecurityValidation.IsWindowsSystemImage(path);
+
+            if (n.Equals("Sentinel.Service", StringComparison.OrdinalIgnoreCase) ||
+                n.Equals("Sentinel.Agent", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            if (UserlandProtocolHeuristics.IsKnownCommsIdentity(n, path))
+                return true;
+            if (SecurityValidation.IsGameOrAntiCheatPath(path))
+                return true;
+            if (ChainTracer.IsLegitimateIdeHost(path, n))
+                return true;
 
             return false;
         }

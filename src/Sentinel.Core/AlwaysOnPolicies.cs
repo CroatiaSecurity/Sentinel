@@ -81,14 +81,10 @@ namespace Sentinel.Core
         {
             if (detection == null) return false;
 
-            bool isGame = false;
-
-            if (!string.IsNullOrEmpty(imagePath) && IsProtectedGamePath(imagePath))
-                isGame = true;
-            else if (detection.ProcessId > 0 && IsProtectedGameProcess(detection.ProcessId, imagePath))
-                isGame = true;
-
-            if (!isGame) return false;
+            // v2.5.3: path identity only. steam.exe in Temp is not a game.
+            // Name-only skip stays in CanInspect (Denuvo handle safety), never here.
+            if (string.IsNullOrEmpty(imagePath) || !IsProtectedGamePath(imagePath))
+                return false;
 
             // Force LogOnly — game processes are NEVER subject to destructive response.
             detection.Tier = DetectionTier.Tier2Indicator;

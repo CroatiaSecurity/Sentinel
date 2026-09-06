@@ -1,6 +1,7 @@
 // Phase A coverage expansion (v2.1.0) — LPE scaffolding, initial-access paths,
-// persistence surfaces (COM/IFEO/accessibility/Winlogon). Observe-until-chain:
-// Tier2 LogOnly by default; composites / ResponsePolicy authorize nukes.
+// persistence surfaces (COM/IFEO/accessibility/Winlogon).
+// v2.5.3: named LPE tools (potato / PrintSpoofer / winPEAS) are kill-grade.
+// Elevated-from-staging and persistence surfaces stay observe-until-chain.
 
 using System;
 using System.Collections.Generic;
@@ -20,7 +21,7 @@ namespace Sentinel.Core
     /// <summary>
     /// Detects post-foothold LPE scaffolding: potato-class tools, exploit hosts from
     /// staging paths, unexpected elevation of user shells to high integrity.
-    /// Signals are Tier2/LogOnly alone; chain with network/token for kill authority.
+    /// Named LPE tools are kill-grade (v2.5.3). Staging elevation stays observe fuel.
     /// </summary>
     public sealed class LpeScaffoldMonitor : BackgroundService
     {
@@ -123,18 +124,16 @@ namespace Sentinel.Core
                                 Evidence = $"Process '{name}' (PID {pid}) matches LPE toolkit pattern '{matched}' path='{path ?? "?"}'",
                                 Reasoning =
                                     "Binary name/path matches known local privilege-escalation tooling " +
-                                    "(potato-class, PrintSpoofer, winPEAS, etc.). Alone this is observe fuel; " +
-                                    "with token theft or C2 it forms a post-exploitation LPE campaign chain. " +
-                                    "Does not patch kernel races (e.g. afd.sys) — stops userland scaffolding.",
-                                Confidence = staging ? 0.88 : 0.82,
-                                Tier = DetectionTier.Tier2Indicator,
-                                AuthorizedResponse = ResponseAction.LogOnly,
+                                    "(potato-class, PrintSpoofer, winPEAS, etc.). That process is the attack — " +
+                                    "kill-grade. Does not patch kernel races (e.g. afd.sys) — stops userland scaffolding.",
+                                Confidence = staging ? 0.90 : 0.86,
+                                Tier = DetectionTier.Tier1Behavioral,
+                                AuthorizedResponse = ResponseAction.KillProcessTree,
                                 ProcessName = name,
                                 ProcessId = pid,
                                 SignalType = SignalType.SecurityEvasion,
                                 Metadata = new Dictionary<string, string>
                                 {
-                                    ["WeakObserveSeed"] = "true",
                                     ["LpeTool"] = matched ?? "",
                                     ["StagingPath"] = staging ? "true" : "false",
                                     ["ImagePath"] = path ?? ""

@@ -181,47 +181,50 @@ namespace Sentinel.Core
 
             if (UserlandProtocolHeuristics.IsDedicatedWebhookSink(domain))
             {
+                bool attributed = pid > 4;
                 _ = _detectionEngine.EmitAsync(new DetectionEvent
                 {
                     RuleName = "Covert Webhook: Disposable Sink Lookup",
                     Evidence = $"DNS query for disposable webhook sink '{domain}' PID={pid} process='{processName}'",
-                    Reasoning = "A lookup for webhook.site / interact.sh / requestbin / canarytokens-class " +
-                                "hosts is the DNS step of stealer callback exfil. LogOnly; the process " +
-                                "monitor correlates HTTPS from script hosts.",
-                    Confidence = 0.64,
-                    Tier = DetectionTier.Tier2Indicator,
-                    AuthorizedResponse = ResponseAction.LogOnly,
+                    Reasoning = attributed
+                        ? "This PID resolved a disposable webhook sink (webhook.site / interact.sh / …). Stealer DNS. Kill-grade C2."
+                        : "Unattributed DNS for a disposable webhook sink. Observe only until a process PID is known.",
+                    Confidence = attributed ? 0.86 : 0.55,
+                    Tier = attributed ? DetectionTier.Tier1Behavioral : DetectionTier.Tier2Indicator,
+                    AuthorizedResponse = attributed ? ResponseAction.KillProcessTree : ResponseAction.LogOnly,
                     ProcessName = processName,
                     ProcessId = pid,
-                    SignalType = SignalType.Generic,
+                    SignalType = attributed ? SignalType.NetworkC2 : SignalType.Generic,
                     Metadata = new Dictionary<string, string>
                     {
                         ["Domain"] = domain,
                         ["Protocol"] = "DNS",
-                        ["WeakObserveSeed"] = pid <= 4 ? "true" : "false",
+                        ["WeakObserveSeed"] = attributed ? "false" : "true",
                     }
                 });
             }
 
             if (UserlandProtocolHeuristics.IsCovertMeshDomain(domain))
             {
+                bool attributed = pid > 4;
                 _ = _detectionEngine.EmitAsync(new DetectionEvent
                 {
                     RuleName = "Covert Mesh: DERP/tailcat DNS",
                     Evidence = $"DNS query for mesh bootstrap host '{domain}' PID={pid} process='{processName}'",
-                    Reasoning = "A lookup for tailcat.dev or a Tailscale DERP relay from a process that is not " +
-                                "the installed Tailscale client is the bootstrap of a userspace magicsock overlay " +
-                                "(tailcat and copycats). LogOnly observe fuel.",
-                    Confidence = 0.62,
-                    Tier = DetectionTier.Tier2Indicator,
-                    AuthorizedResponse = ResponseAction.LogOnly,
+                    Reasoning = attributed
+                        ? "This PID resolved a DERP/tailcat bootstrap host and is not official Tailscale. Kill-grade C2."
+                        : "Unattributed DERP/tailcat DNS. Observe only until a process PID is known.",
+                    Confidence = attributed ? 0.86 : 0.55,
+                    Tier = attributed ? DetectionTier.Tier1Behavioral : DetectionTier.Tier2Indicator,
+                    AuthorizedResponse = attributed ? ResponseAction.KillProcessTree : ResponseAction.LogOnly,
                     ProcessName = processName,
                     ProcessId = pid,
-                    SignalType = SignalType.Generic,
+                    SignalType = attributed ? SignalType.NetworkC2 : SignalType.Generic,
                     Metadata = new Dictionary<string, string>
                     {
                         ["Domain"] = domain,
                         ["Protocol"] = "DNS",
+                        ["WeakObserveSeed"] = attributed ? "false" : "true",
                     }
                 });
             }

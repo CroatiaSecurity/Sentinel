@@ -4,6 +4,7 @@ using Sentinel.Core;
 
 namespace Sentinel.Tests.Monitors
 {
+    [Collection("ResponsePolicy")]
     public class ProtocolCoverageMonitorsTests
     {
         [Fact]
@@ -380,19 +381,29 @@ namespace Sentinel.Tests.Monitors
         }
 
         [Fact]
-        public void CovertMesh_Signal_IsWeakChainOnly()
+        public void CovertMesh_Signal_IsKillGradeC2()
         {
+            ResponsePolicy.ResetForTests();
             var d = new DetectionEvent
             {
-                RuleName = "Covert Mesh: User-Writable UDP+HTTPS Overlay",
-                Confidence = 0.72,
-                Tier = DetectionTier.Tier2Indicator,
-                AuthorizedResponse = ResponseAction.LogOnly,
+                RuleName = "Covert Mesh: Userspace Overlay Tool",
+                Confidence = 0.90,
+                Tier = DetectionTier.Tier1Behavioral,
+                AuthorizedResponse = ResponseAction.KillProcessTree,
                 ProcessId = 4242,
-                ProcessName = "svc32",
+                ProcessName = "tailcat",
+                SignalType = SignalType.NetworkC2,
             };
-            Assert.True(ResponsePolicy.IsWeakObserveSeed(d));
-            Assert.Null(ResponsePolicy.ClassifyTerminalOutcome(d));
+            Assert.False(ResponsePolicy.IsWeakObserveSeed(d));
+            Assert.Equal("C2Beacon", ResponsePolicy.ClassifyTerminalOutcome(d));
+            Assert.True(ResponsePolicy.IsCovertChannelTerminal(d));
+            Assert.True(ResponsePolicy.MayPerformDestructiveResponse(d, new SentinelConfig
+            {
+                ActiveResponse = true,
+                ObserveUntilChain = true,
+                ChainConfirmMinSignals = 2,
+                MinTier1Confidence = 0.85,
+            }));
             Assert.Equal(DetectionCategory.NetworkAnomaly, ScoringEngine.CategorizeDetection(d.RuleName));
         }
 
@@ -488,22 +499,66 @@ namespace Sentinel.Tests.Monitors
         }
 
         [Fact]
-        public void CovertWebhook_IsWeakChainOnly_AndExfilCategory()
+        public void CovertWebhook_IsKillGradeC2()
         {
+            ResponsePolicy.ResetForTests();
             var d = new DetectionEvent
             {
                 RuleName = "Covert Webhook: Disposable Sink",
-                Confidence = 0.76,
-                Tier = DetectionTier.Tier2Indicator,
-                AuthorizedResponse = ResponseAction.LogOnly,
+                Confidence = 0.88,
+                Tier = DetectionTier.Tier1Behavioral,
+                AuthorizedResponse = ResponseAction.KillProcessTree,
                 ProcessId = 4242,
                 ProcessName = "powershell",
+                SignalType = SignalType.NetworkC2,
             };
-            Assert.True(ResponsePolicy.IsWeakObserveSeed(d));
-            Assert.Null(ResponsePolicy.ClassifyTerminalOutcome(d));
+            Assert.False(ResponsePolicy.IsWeakObserveSeed(d));
+            Assert.Equal("C2Beacon", ResponsePolicy.ClassifyTerminalOutcome(d));
+            Assert.True(ResponsePolicy.IsCovertChannelTerminal(d));
+            Assert.True(ResponsePolicy.MayPerformDestructiveResponse(d, new SentinelConfig
+            {
+                ActiveResponse = true,
+                ObserveUntilChain = true,
+                ChainConfirmMinSignals = 2,
+                MinTier1Confidence = 0.85,
+            }));
             Assert.Equal(DetectionCategory.DataExfiltration, ScoringEngine.CategorizeDetection(d.RuleName));
             var techs = AttackTechniqueMap.Resolve(d.RuleName);
             Assert.Contains("T1041", techs);
+        }
+
+        [Fact]
+        public void CovertChannel_PidZero_DoesNotNuke()
+        {
+            ResponsePolicy.ResetForTests();
+            var d = new DetectionEvent
+            {
+                RuleName = "Covert Webhook: Disposable Sink Lookup",
+                Confidence = 0.86,
+                ProcessId = 0,
+                ProcessName = "SYSTEM",
+                SignalType = SignalType.NetworkC2,
+                AuthorizedResponse = ResponseAction.KillProcessTree,
+            };
+            Assert.False(ResponsePolicy.IsCovertChannelTerminal(d));
+            Assert.False(ResponsePolicy.MayPerformDestructiveResponse(d, new SentinelConfig
+            {
+                ActiveResponse = true,
+                ObserveUntilChain = true,
+            }));
+        }
+
+        [Fact]
+        public void Discord_StillSkipped_ForWebhookAndMesh()
+        {
+            Assert.Equal(UserlandProtocolHeuristics.WebhookKind.None,
+                UserlandProtocolHeuristics.ClassifyWebhook(
+                    "discord", @"C:\Users\x\AppData\Local\Discord\app.exe",
+                    hasHttps: true, dedicatedDnsRecently: true, commsDnsRecently: true, urlInContent: true));
+            Assert.Equal(UserlandProtocolHeuristics.CovertMeshKind.None,
+                UserlandProtocolHeuristics.ClassifyCovertMesh(
+                    "discord", @"C:\Users\x\AppData\Local\Discord\app.exe",
+                    nonAmbientUdpBinds: 8, hasStunPort: true, hasHttps: true, meshDnsRecently: true));
         }
     }
 }

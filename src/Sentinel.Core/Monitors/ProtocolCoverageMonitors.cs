@@ -123,6 +123,131 @@ namespace Sentinel.Core
             return n.Length > 0 && VpnOrIkeProcesses.Contains(n);
         }
 
+        /// <summary>
+        /// Install trees for the real comms/browser/Steam/OBS apps. Name-only
+        /// is not identity — discord.exe in Temp is the attack.
+        /// </summary>
+        internal static readonly string[] CommsInstallPathFragments =
+        {
+            @"\appdata\local\discord\",
+            @"\appdata\local\discordptb\",
+            @"\appdata\local\discordcanary\",
+            @"\appdata\local\discorddevelopment\",
+            @"\appdata\roaming\discord\",
+            @"\program files\google\chrome\",
+            @"\program files (x86)\google\chrome\",
+            @"\appdata\local\google\chrome\",
+            @"\program files\mozilla firefox\",
+            @"\program files (x86)\mozilla firefox\",
+            @"\appdata\local\microsoft\edge\",
+            @"\program files (x86)\microsoft\edge\",
+            @"\program files\microsoft\edge\",
+            @"\appdata\local\bravesoftware\",
+            @"\program files\brave\",
+            @"\appdata\local\vivaldi\",
+            @"\appdata\local\opera software\",
+            @"\program files\steam\",
+            @"\program files (x86)\steam\",
+            @"\steamapps\common\",
+            @"\appdata\roaming\telegram desktop\",
+            @"\appdata\roaming\zoom\",
+            @"\program files\zoom\",
+            @"\appdata\roaming\slack\",
+            @"\appdata\local\slack\",
+            @"\appdata\local\microsoft\teams\",
+            @"\appdata\local\microsoft\teamsmeetingaddin\",
+            @"\windowsapps\",
+            @"\program files\obs-studio\",
+            @"\appdata\local\programs\obs-studio\",
+            @"\appdata\roaming\spotify\",
+            @"\program files\windowsapps\",
+            @"\appdata\local\programs\signal\",
+            @"\appdata\roaming\whatsapp\",
+        };
+
+        internal static readonly string[] VpnInstallPathFragments =
+        {
+            @"\program files\tailscale\",
+            @"\program files\wireguard\",
+            @"\program files\openvpn\",
+            @"\program files\nordvpn\",
+            @"\program files\expressvpn\",
+            @"\program files\surfshark\",
+            @"\program files\protonvpn\",
+            @"\program files\cloudflare\",
+            @"\program files\zerotier\",
+            @"\program files\palo alto networks\",
+            @"\globalprotect\",
+        };
+
+        internal static readonly HashSet<string> WindowsVpnServiceNames = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "svchost", "ikeext", "rasman", "rasmans", "rasphone",
+        };
+
+        /// <summary>
+        /// Real Discord/Chrome/Steam — name AND install path (or live Authenticode).
+        /// Missing path, Temp/Downloads, or unsigned plant in a stolen folder: not a civilian.
+        /// </summary>
+        public static bool IsKnownCommsIdentity(string? processName, string? imagePath)
+            => IsVerifiedInstallIdentity(processName, imagePath, KnownCommsProcesses, CommsInstallPathFragments);
+
+        /// <summary>
+        /// Real Tailscale/WireGuard/IKE — not tailscale.exe in Temp, not fake svchost.
+        /// </summary>
+        public static bool IsVpnOrIkeIdentity(string? processName, string? imagePath)
+        {
+            var n = NormalizeProcessName(processName);
+            if (n.Length == 0 || !VpnOrIkeProcesses.Contains(n))
+                return false;
+            if (WindowsVpnServiceNames.Contains(n))
+                return SecurityValidation.IsWindowsSystemImage(imagePath);
+            return IsVerifiedInstallIdentity(processName, imagePath, VpnOrIkeProcesses, VpnInstallPathFragments);
+        }
+
+        public static bool IsVerifiedInstallIdentity(
+            string? processName,
+            string? imagePath,
+            HashSet<string> names,
+            string[] pathFragments)
+        {
+            var n = NormalizeProcessName(processName);
+            if (n.Length == 0 || !names.Contains(n))
+                return false;
+            if (string.IsNullOrEmpty(imagePath))
+                return false;
+            if (IsSuspiciousPath(imagePath))
+                return false;
+
+            var lower = imagePath!.ToLowerInvariant();
+            bool pathOk = false;
+            foreach (var f in pathFragments)
+            {
+                if (lower.Contains(f))
+                {
+                    pathOk = true;
+                    break;
+                }
+            }
+
+            bool exists = false;
+            try { exists = System.IO.File.Exists(imagePath); } catch { }
+
+            if (!pathOk)
+            {
+                if (!exists) return false;
+                try { return SecurityValidation.VerifyAuthenticodeSignature(imagePath); }
+                catch { return false; }
+            }
+
+            // Path looks civilian. If the file is on disk, it must still be signed —
+            // unsigned plant in AppData\Local\Discord is the costume.
+            if (!exists)
+                return true;
+            try { return SecurityValidation.VerifyAuthenticodeSignature(imagePath); }
+            catch { return false; }
+        }
+
         public static bool IsSuspiciousPath(string? path)
         {
             if (string.IsNullOrEmpty(path)) return false;
@@ -215,9 +340,9 @@ namespace Sentinel.Core
 
         public static bool ShouldSkipWorkSurface(string? processName, string? imagePath)
         {
-            if (IsKnownCommsProcess(processName)) return true;
+            if (IsKnownCommsIdentity(processName, imagePath)) return true;
+            if (IsVpnOrIkeIdentity(processName, imagePath)) return true;
             if (AlwaysOnPolicies.IsProtectedGamePath(imagePath)) return true;
-            if (AlwaysOnPolicies.IsProtectedGameProcessName(processName)) return true;
             if (InstallerHeuristics.IsDirectXOrRuntimeRedist(processName, imagePath)) return true;
             if (InstallerHeuristics.IsBenignPortableWorkContext(processName, imagePath)) return true;
             return false;
@@ -302,7 +427,7 @@ namespace Sentinel.Core
             if (IsUnusualIpProtocol(ipProtocol))
             {
                 if ((ipProtocol == ProtoEsp || ipProtocol == ProtoAh || ipProtocol == ProtoGre) &&
-                    IsVpnOrIkeProcess(processName))
+                    IsVpnOrIkeIdentity(processName, imagePath))
                     return WfpVerdictKind.None;
                 return WfpVerdictKind.UnusualIpProtocol;
             }
@@ -326,11 +451,10 @@ namespace Sentinel.Core
         {
             if (ShouldSkipWorkSurface(processName, imagePath))
                 return VoipVerdictKind.None;
-            if (IsVpnOrIkeProcess(processName))
-                return VoipVerdictKind.None;
 
             var n = NormalizeProcessName(processName);
-            if (n.Equals("svchost", StringComparison.OrdinalIgnoreCase))
+            if (n.Equals("svchost", StringComparison.OrdinalIgnoreCase) &&
+                SecurityValidation.IsWindowsSystemImage(imagePath))
                 return VoipVerdictKind.None;
 
             if (signalingPort && IsSipPort(port))
@@ -458,15 +582,14 @@ namespace Sentinel.Core
         {
             if (ShouldSkipWorkSurface(processName, imagePath))
                 return CovertMeshKind.None;
-            if (IsVpnOrIkeProcess(processName))
-                return CovertMeshKind.None;
             if (BulkTransferNoise.IsBulkTransferProcessName(processName))
                 return CovertMeshKind.None;
 
             var n = NormalizeProcessName(processName);
-            if (n.Equals("svchost", StringComparison.OrdinalIgnoreCase) ||
-                n.Equals("system", StringComparison.OrdinalIgnoreCase) ||
-                n.Equals("lsass", StringComparison.OrdinalIgnoreCase))
+            if ((n.Equals("svchost", StringComparison.OrdinalIgnoreCase) ||
+                 n.Equals("system", StringComparison.OrdinalIgnoreCase) ||
+                 n.Equals("lsass", StringComparison.OrdinalIgnoreCase)) &&
+                SecurityValidation.IsWindowsSystemImage(imagePath))
                 return CovertMeshKind.None;
 
             if (LooksLikeCovertMeshName(processName))
@@ -494,10 +617,10 @@ namespace Sentinel.Core
 
         public static double ConfidenceFor(CovertMeshKind k) => k switch
         {
-            CovertMeshKind.NamedTool => 0.82,
-            CovertMeshKind.DerpRelay => 0.74,
-            CovertMeshKind.UserWritableOverlay => 0.72,
-            CovertMeshKind.StunHolePunch => 0.68,
+            CovertMeshKind.NamedTool => 0.90,
+            CovertMeshKind.DerpRelay => 0.88,
+            CovertMeshKind.UserWritableOverlay => 0.88,
+            CovertMeshKind.StunHolePunch => 0.86,
             _ => 0,
         };
 
@@ -618,18 +741,19 @@ namespace Sentinel.Core
             bool commsDnsRecently,
             bool urlInContent)
         {
-            if (IsKnownCommsProcess(processName) ||
+            // Identity skip (real Discord/Chrome/games). URL-in-content still
+            // wins for curl/IWR in Downloads — those are not comms identity.
+            if (IsKnownCommsIdentity(processName, imagePath) ||
+                IsVpnOrIkeIdentity(processName, imagePath) ||
                 AlwaysOnPolicies.IsProtectedGamePath(imagePath) ||
-                AlwaysOnPolicies.IsProtectedGameProcessName(processName) ||
                 InstallerHeuristics.IsDirectXOrRuntimeRedist(processName, imagePath))
-                return WebhookKind.None;
-            if (IsVpnOrIkeProcess(processName))
                 return WebhookKind.None;
 
             var n = NormalizeProcessName(processName);
-            if (n.Equals("svchost", StringComparison.OrdinalIgnoreCase) ||
-                n.Equals("system", StringComparison.OrdinalIgnoreCase) ||
-                n.Equals("lsass", StringComparison.OrdinalIgnoreCase))
+            if ((n.Equals("svchost", StringComparison.OrdinalIgnoreCase) ||
+                 n.Equals("system", StringComparison.OrdinalIgnoreCase) ||
+                 n.Equals("lsass", StringComparison.OrdinalIgnoreCase)) &&
+                SecurityValidation.IsWindowsSystemImage(imagePath))
                 return WebhookKind.None;
 
             // URL on the command line / script wins even for portable Downloads tools (curl IWR).
@@ -652,9 +776,9 @@ namespace Sentinel.Core
 
         public static double ConfidenceFor(WebhookKind k) => k switch
         {
-            WebhookKind.UrlInContent => 0.80,
-            WebhookKind.DedicatedSink => 0.76,
-            WebhookKind.CommsPlatformAbuse => 0.70,
+            WebhookKind.UrlInContent => 0.90,
+            WebhookKind.DedicatedSink => 0.88,
+            WebhookKind.CommsPlatformAbuse => 0.86,
             _ => 0,
         };
     }
@@ -1629,27 +1753,24 @@ namespace Sentinel.Core
                 {
                     UserlandProtocolHeuristics.CovertMeshKind.NamedTool =>
                         "A userspace mesh/overlay binary (tailcat, wireproxy, boringtun, sliver WG, innernet, …) " +
-                        "is running. These speak WireGuard in-process with no Wintun/TAP adapter and no Tailscale " +
-                        "control plane — netcat-over-WG, SOCKS, SSH, and exec all fit. Official tailscale.exe is skipped. " +
-                        "Name is enrichment; LogOnly until a chain.",
+                        "is running. WireGuard in-process, no TAP/Wintun, no Tailscale control plane — covert C2. " +
+                        "Official tailscale.exe is not this rule. Kill-grade C2.",
                     UserlandProtocolHeuristics.CovertMeshKind.DerpRelay =>
-                        "UDP overlay plus a recent DNS lookup for a DERP/tailcat bootstrap host " +
-                        "(tailcat.dev / derp*.tailscale.com). That is magicsock's NAT-traversal relay. " +
-                        "Installed Tailscale is skipped. LogOnly.",
+                        "UDP overlay plus DERP/tailcat bootstrap DNS from this PID. Magicsock C2, not the " +
+                        "installed Tailscale client. Kill-grade C2.",
                     UserlandProtocolHeuristics.CovertMeshKind.StunHolePunch =>
-                        "STUN/TURN together with UDP (and usually HTTPS) from a process that is not a " +
-                        "browser, game, or comms app. magicsock hole-punch for a userspace tunnel. LogOnly.",
+                        "STUN/TURN plus UDP from a process that is not a browser, game, or comms app. " +
+                        "Userspace hole-punch tunnel. Kill-grade C2.",
                     UserlandProtocolHeuristics.CovertMeshKind.UserWritableOverlay =>
-                        "A Temp/Downloads/script-host process holds a UDP overlay and an HTTPS session. " +
-                        "tailcat and copycats bootstrap DERP on 443 then upgrade to peer UDP. LogOnly.",
+                        "Temp/Downloads/script-host UDP overlay with HTTPS — tailcat-class bootstrap. Kill-grade C2.",
                     _ => "Userspace mesh overlay.",
                 },
                 Confidence = UserlandProtocolHeuristics.ConfidenceFor(kind),
-                Tier = DetectionTier.Tier2Indicator,
-                AuthorizedResponse = ResponseAction.LogOnly,
+                Tier = DetectionTier.Tier1Behavioral,
+                AuthorizedResponse = ResponseAction.KillProcessTree,
                 ProcessName = name,
                 ProcessId = pid,
-                SignalType = SignalType.SuspiciousProcess,
+                SignalType = SignalType.NetworkC2,
                 Metadata = ProtocolEmitMeta.Create(path, "mesh", udpN, weak: false, "UDP+HTTPS"),
             }).ConfigureAwait(false);
         }
@@ -1776,24 +1897,21 @@ namespace Sentinel.Core
                 Reasoning = kind switch
                 {
                     UserlandProtocolHeuristics.WebhookKind.DedicatedSink =>
-                        "A non-browser process resolved or contacted a disposable HTTP callback host " +
-                        "(webhook.site, interact.sh, requestbin, canarytokens, …). Stealers use these as " +
-                        "one-shot exfil sinks. TLS path is invisible without intercept. LogOnly.",
+                        "A non-browser process contacted a disposable HTTP callback host " +
+                        "(webhook.site, interact.sh, requestbin, canarytokens). Stealer exfil sink. Kill-grade C2.",
                     UserlandProtocolHeuristics.WebhookKind.CommsPlatformAbuse =>
-                        "A script host or Temp/Downloads binary has HTTPS while Discord/Telegram/Slack " +
-                        "bot-API DNS was recent. Official Discord/Telegram/Slack apps are skipped. " +
-                        "The /api/webhooks path is encrypted; host+process is the userland signal. LogOnly.",
+                        "Script host or Temp/Downloads binary has HTTPS after Discord/Telegram/Slack bot-API DNS " +
+                        "from this PID. Official Discord/Telegram/Slack apps never emit this rule. Kill-grade C2.",
                     UserlandProtocolHeuristics.WebhookKind.UrlInContent =>
-                        "A webhook URL (Discord/Telegram/Slack or a disposable sink) is on the process " +
-                        "command line. That is the curl/IWR stealer shape CampaignIocRule also covers. LogOnly.",
+                        "A webhook URL is on the command line (curl/IWR stealer). Kill-grade C2.",
                     _ => "Webhook-shaped exfil.",
                 },
                 Confidence = UserlandProtocolHeuristics.ConfidenceFor(kind),
-                Tier = DetectionTier.Tier2Indicator,
-                AuthorizedResponse = ResponseAction.LogOnly,
+                Tier = DetectionTier.Tier1Behavioral,
+                AuthorizedResponse = ResponseAction.KillProcessTree,
                 ProcessName = name,
                 ProcessId = pid,
-                SignalType = SignalType.SuspiciousProcess,
+                SignalType = SignalType.NetworkC2,
                 Metadata = ProtocolEmitMeta.Create(path, "webhook", 443, weak: false, "HTTPS"),
             }).ConfigureAwait(false);
         }

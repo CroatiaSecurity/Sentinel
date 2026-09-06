@@ -200,7 +200,7 @@ namespace Sentinel.Core
                         RuleName = "Named Pipe: Known C2/Lateral Movement Pattern",
                         Evidence = $"Suspicious named pipe detected: '\\\\.\\.\\pipe\\{pipeName}' (owner PID {ownerPid} [{ownerName}]). Matched pattern: {matchedPattern}",
                         Reasoning = "A named pipe matching a known C2 framework or lateral movement tool pattern was created. This is commonly used by Cobalt Strike, PsExec, Impacket, Metasploit, and other attack tools for inter-process communication.",
-                        Confidence = 0.82,
+                        Confidence = 0.86,
                         Tier = DetectionTier.Tier1Behavioral,
                         AuthorizedResponse = ResponseAction.KillProcessTree,
                         SignalType = SignalType.NetworkC2,

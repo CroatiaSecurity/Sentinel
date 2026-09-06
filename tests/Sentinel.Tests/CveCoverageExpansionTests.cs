@@ -316,19 +316,20 @@ namespace Sentinel.Tests
         }
 
         [Fact]
-        public void ResponsePolicy_KernelExploitLoader_IsWeakChainSeed_CompositeIsNuke()
+        public void ResponsePolicy_KernelExploitLoader_IsKillGrade_CompositeIsNuke()
         {
             var seed = new DetectionEvent
             {
                 RuleName = "CVE Class: Kernel Exploit Loader",
                 Confidence = 0.86,
-                Tier = DetectionTier.Tier2Indicator,
+                Tier = DetectionTier.Tier1Behavioral,
                 ProcessId = 9,
                 ProcessName = "eop",
-                AuthorizedResponse = ResponseAction.LogOnly,
-                Metadata = new Dictionary<string, string> { ["WeakObserveSeed"] = "true" }
+                AuthorizedResponse = ResponseAction.KillProcessTree,
             };
-            Assert.True(ResponsePolicy.IsWeakObserveSeed(seed));
+            Assert.False(ResponsePolicy.IsWeakObserveSeed(seed));
+            Assert.True(ResponsePolicy.IsAttackClassTerminal(seed));
+            Assert.Equal("TokenTheft", ResponsePolicy.ClassifyTerminalOutcome(seed));
             Assert.False(ResponsePolicy.IsNukeComposite(seed));
 
             var composite = new DetectionEvent
