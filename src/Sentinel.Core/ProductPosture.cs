@@ -3,18 +3,15 @@ using System;
 namespace Sentinel.Core
 {
     /// <summary>
-    /// Standing product law (v1.9.7+). Read this before adding any host mutation.
+    /// Standing product law (v2.6.0+). Read this before adding any host mutation.
     ///
-    /// <para><b>DEFAULT = OBSERVE / WORK-FIRST.</b> Users must be free to browse, game, and
-    /// install Store / Xbox / Steam / DirectX / OBS and other creator tools. Also NTLite, RDP,
-    /// installers, Office macros, USB tools, casting, DISM/RPC, games, etc.</para>
+    /// <para><b>HARDENING IS ALWAYS-ON.</b> All proactive OS protections (IPSec, firewall blocks,
+    /// service lockdown, ASR Block, registry hardening, credential hardening, browser hardening,
+    /// LGPO security policy) run unconditionally on every Sentinel startup. There is no
+    /// work-first / observe-only mode. The <c>RestrictivePortHardening</c> config toggle has
+    /// been removed.</para>
     ///
-    /// <para>Proactive OS reshaping (IPSec, firewall blocks, service disable, ASR Block re-arm,
-    /// RDP force-logoff, USB auto-disable, deleting Windows firewall rules, …) is forbidden
-    /// unless the user explicitly enables kiosk lockdown via
-    /// <see cref="SentinelConfig.RestrictivePortHardening"/>.</para>
-    ///
-    /// <para>Allowed without that flag:</para>
+    /// <para>Always allowed:</para>
     /// <list type="bullet">
     /// <item>Self-protect Sentinel (DLL path, install ACLs, Safe Mode registration)</item>
     /// <item>Detect + log to events.jsonl</item>
@@ -23,12 +20,8 @@ namespace Sentinel.Core
     /// <item>Module identity unload is always on. Foreign mapped PEs are FreeLibrary'd.
     ///       Hijack-name plants are quarantined on drop (file only, never kill the host).
     ///       Games are not VM_READ. Never OS servicing. No config flag may disable this.</item>
-    /// <item>Undo our own prior lockdown leftovers (<see cref="HardeningModule.ReleaseUserWorkSurface"/>)</item>
+    /// <item>All proactive hardening unconditionally applied at startup.</item>
     /// </list>
-    ///
-    /// <para>If you are about to block a port, disable a service, force-logoff a session,
-    /// or re-arm ASR Block by default — <b>stop</b>. Put it behind
-    /// <see cref="AllowsProactiveHostLockdown"/> or you will re-break user work and violate constraints.md.</para>
     /// </summary>
     public static class ProductPosture
     {
@@ -41,32 +34,19 @@ namespace Sentinel.Core
         public const bool ModuleIdentityUnloadAlwaysOn = true;
 
         /// <summary>
-        /// True only when the operator opted into kiosk / restrictive lockdown.
-        /// Default false = observe-only host surface.
+        /// v2.6.0: Always returns true — hardening is unconditionally enabled.
+        /// The config parameter is accepted for call-site compatibility but ignored.
         /// </summary>
-        public static bool AllowsProactiveHostLockdown(SentinelConfig? config)
-        {
-            if (config != null)
-                return config.RestrictivePortHardening;
-            return HardeningModule.RestrictivePortHardeningEnabled;
-        }
+        public static bool AllowsProactiveHostLockdown(SentinelConfig? config) => true;
 
         /// <summary>
-        /// Call at the start of any new proactive host-mutation feature.
-        /// Returns false in default observe mode — caller must LogOnly / skip.
+        /// v2.6.0: Always succeeds — hardening is unconditionally enabled.
+        /// The config parameter is accepted for call-site compatibility but ignored.
         /// </summary>
         public static bool TryProactiveHostLockdown(SentinelConfig? config, out string denyReason)
         {
-            if (AllowsProactiveHostLockdown(config))
-            {
-                denyReason = "";
-                return true;
-            }
-
-            denyReason =
-                "ProductPosture: proactive host lockdown denied (default observe/work-first). " +
-                "Set RestrictivePortHardening=true for kiosk mode, or respond only via chain-confirmed detection.";
-            return false;
+            denyReason = "";
+            return true;
         }
 
         /// <summary>
@@ -83,7 +63,7 @@ namespace Sentinel.Core
         /// <summary>
         /// v1.9.10: Narrow post-incident MITM suite (cert remove, FCM Send-Tab-to-Self block,
         /// rogue Cast / fake Chromecast firewall). Explicit operator opt-in via
-        /// <see cref="MitmDefenseConfig.Enabled"/> — does not enable full kiosk lockdown.
+        /// <see cref="MitmDefenseConfig.Enabled"/> — independent of hardening always-on.
         /// </summary>
         public static bool AllowsMitmDefenseMutations(SentinelConfig? config)
         {

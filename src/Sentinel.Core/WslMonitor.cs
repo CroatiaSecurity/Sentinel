@@ -21,6 +21,12 @@ namespace Sentinel.Core
     /// - Network connections originating from WSL2 VM
     /// - Suspicious command execution inside WSL (curl to C2, reverse shells)
     /// - WSL distribution installs/imports at runtime
+    /// - All shell variant reverse shells (sh, ash, zsh, ksh, dash, tcsh, etc.)
+    /// - Language-based shells (Python, Perl, Ruby, PHP, Lua, Awk, Go, Node, Java, Groovy, OpenSSL)
+    /// - Renamed-binary / evasion patterns (/tmp/ execution, chmod+x, static binary downloads)
+    /// - Post-exploitation recon tools (linpeas, pspy, linenum, unix-privesc-check, gtfobins)
+    /// - Modern C2 frameworks (Sliver, Havoc, Villain, Ligolo-ng, Chisel, pwncat-cs)
+    /// - Sensitive host file reads via /mnt/c/ (credentials, SSH keys, browser stores)
     ///
     /// WSL2 runs in a lightweight Hyper-V VM — Sentinel has NO visibility into
     /// processes running inside the Linux kernel. This monitor observes the
@@ -28,6 +34,9 @@ namespace Sentinel.Core
     /// and network traffic from the WSL virtual adapter.
     ///
     /// v1.0.1: New monitor.
+    /// v2.6.0: Expanded SuspiciousPatterns to cover all documented reverse-shell techniques,
+    ///         language-based shells, evasion/renamed-binary patterns, post-exploitation recon
+    ///         tools, modern C2 frameworks, and sensitive host read detection via /mnt/c/.
     /// </summary>
     public sealed class WslMonitor : BackgroundService
     {
@@ -41,26 +50,207 @@ namespace Sentinel.Core
 
         private static readonly TimeSpan ScanInterval = TimeSpan.FromSeconds(10);
 
-        // Suspicious commands that indicate malicious WSL usage
+        // ── Suspicious commands that indicate malicious WSL usage ────────────────
+        //
+        // v2.6.0: Expanded from original 20 patterns to comprehensive coverage across
+        // five categories. Patterns are lowercase; matching is done on lowercased cmdline.
+        //
+        // Design notes:
+        //   • Shell variant patterns use " -i" suffix to require interactive flag, which
+        //     is the reliable signal for a reverse shell regardless of shell binary name.
+        //   • Language shells match the minimal one-liner invocation flags (-c, -e, -r)
+        //     that have no legitimate non-interactive use and are the standard payload form.
+        //   • Evasion patterns target the /tmp/ execution + chmod combo — the canonical
+        //     "download static binary, make executable, run" chain used by every major
+        //     attacker toolkit (Sliver, Metasploit stager, linpeas dropper, etc.).
+        //   • Recon tool names are matched as substrings so renamed copies (e.g. "lpe.sh"
+        //     containing "linpeas" inside) still match.
+        //   • C2 framework names use split-string concat to avoid appearing as contiguous
+        //     PE string-table entries that ML AV scores as evasion (same pattern as Rules.cs).
+        //   • Sensitive /mnt/c/ read paths are kept here for command-line detection;
+        //     the broader host-filesystem read detection is in DetectWslHostFilesystemReads.
+        //
         private static readonly string[] SuspiciousPatterns = new[]
         {
-            "nc -", "ncat ", "socat ", "/dev/tcp/", "bash -i",
-            "curl http", "wget http", "python -c", "python3 -c",
-            "perl -e", "ruby -e", "php -r",
-            "/etc/shadow", "/etc/passwd", "mimi" + "katz", "sekur" + "lsa",
-            "mete" + "rpreter", "reverse_tcp", "bind_shell",
-            "base64 -d", "openssl enc",
-            "iptables", "tcpdump", "nmap ", "masscan",
-            "/mnt/c/windows/system32", "/mnt/c/users"
+            // ── Category 1: Reverse shells — all shell variants ──────────────────────
+            // Bash (original patterns retained)
+            "bash -i", "/dev/tcp/", "/dev/udp/",
+            // sh / dash / ash — attacker uses these when bash is absent or to evade "bash" match
+            "sh -i >", "sh -i >&", "0<&196;exec 196<>",
+            // Other interactive shell variants used in reverse shell one-liners
+            "zsh -i ", "ksh -i ", "tcsh -i ", "mksh -i ", "dash -i ",
+            // Explicit reverse shell tools
+            "nc -", "nc.traditional ", "ncat ", "socat ",
+            // Netcat variants without the dash (some distros: "netcat -e", "nc.openbsd")
+            "netcat -", "nc.openbsd ",
+            // Busybox nc (common in minimal Alpine/embedded distros used in attack containers)
+            "busybox nc", "busybox sh",
+
+            // ── Category 2: Language-based reverse shells ────────────────────────────
+            // Python — both py2 and py3; "-c" is the one-liner execution flag
+            "python -c", "python2 -c", "python3 -c",
+            // Perl — socket-based shell is the most common perl reverse shell form
+            "perl -e", "perl -MIO ", "perl -MPOSIX ",
+            // Ruby — "-rsocket" is the canonical ruby reverse shell opener
+            "ruby -e", "ruby -rsocket",
+            // PHP — one-liner shell execution
+            "php -r",
+            // Lua — socket-based shell
+            "lua -e", "lua5",
+            // Awk — gawk/awk tcp reverse shell (well-documented on GTFOBins)
+            "awk 'begin{s=\"/inet/tcp/",
+            // Node.js / JavaScript
+            "node -e", "nodejs -e",
+            // Golang — compiled or 'go run' reverse shells; increasingly used for evasion
+            "go run ", "go build ",
+            // Java — Runtime.exec() shell and groovy one-liners
+            "java -jar ", "groovy -e",
+            // OpenSSL — encrypted reverse shell via s_client (bypasses plaintext detection)
+            "openssl s_client", "mkfifo /tmp/",
+
+            // ── Category 3: Evasion / renamed-binary patterns ────────────────────────
+            // The canonical "download → make executable → run from /tmp/" chain
+            // used by Metasploit stagers, Sliver droppers, and linpeas alike.
+            "chmod +x /tmp/", "chmod 777 /tmp/", "chmod u+x /tmp/",
+            "/tmp/ &&", "/tmp/ ;",
+            // Direct execution of files placed in /tmp/ (./binary pattern)
+            "cd /tmp && ./", "cd /tmp;./",
+            // wget/curl downloading directly to /tmp/ or /dev/shm/ (RAM-only, no disk write)
+            "wget -q ", "wget --quiet ",
+            "curl -s ", "curl --silent ",
+            "-o /tmp/", "-o /dev/shm/",
+            "curl http", "wget http",
+            // Static binary download pattern (andrew-d/static-binaries is the canonical repo)
+            "static-binaries", "static_binaries",
+            // Base64 decode-and-execute (common one-liner obfuscation)
+            "base64 -d", "base64 --decode",
+            "echo * | base64", "|base64 -d|",
+            // openssl base64 decode variant
+            "openssl base64 -d",
+
+            // ── Category 4: Post-exploitation recon / enumeration tools ──────────────
+            // LinPEAS — most widely used Linux privilege escalation enumeration script
+            "linpeas", "linpeas.sh",
+            // LinEnum — older but still widely distributed
+            "linenum", "linenum.sh",
+            // pspy — process spy without root, used to watch cron jobs and privileged processes
+            "pspy", "pspy32", "pspy64",
+            // unix-privesc-check
+            "unix-privesc-check", "unix_privesc_check",
+            // LSE (Linux Smart Enumeration)
+            "lse.sh",
+            // LES (Linux Exploit Suggester)
+            "les.sh", "linux-exploit-suggester",
+            // GTFOBins abuse indicators — direct sudo/suid exploitation patterns
+            "sudo -l", "find / -perm -4000", "find / -perm -u=s",
+            "find / -writable", "find / -perm -o+w",
+            // Process and credential recon
+            "/proc/net/tcp", "/proc/net/udp", "/proc/net/fib_trie",
+            "cat /proc/", "/proc/self/",
+            // WSL environment fingerprinting (BRIDGEHEAD npm campaign, June 2026):
+            // malware reads /proc/version to detect WSL before targeting /mnt/c/Users/
+            "/proc/version", "cat /proc/version", "is_wsl", "get_wu()",
+            // Network recon tools
+            "nmap ", "masscan", "tcpdump", "iptables",
+            "arp -a", "ip neigh", "netstat -", "ss -",
+            // SMB/AD recon from Linux
+            "crackmapexec", "cme ", "impacket",
+            "smbclient", "rpcclient", "ldapsearch",
+            "enum4linux", "nbtscan",
+
+            // ── Category 5: Modern C2 frameworks ────────────────────────────────────
+            // Sliver — open-source cross-platform C2; increasingly common in APT ops
+            "sli" + "ver",
+            // Havoc — modern C2 framework with evasion-focused implants
+            "hav" + "oc",
+            // Villain — open-source C2, shell-handler focused
+            "vill" + "ain",
+            // Ligolo-ng — tunneling/proxy tool used heavily for internal network pivoting
+            "ligolo",
+            // Chisel — fast TCP/UDP tunnel over HTTP, widely used for pivoting
+            "chisel",
+            // pwncat-cs — advanced reverse/bind shell handler with post-exploitation
+            "pwncat",
+            // Metasploit (retained from original)
+            "mete" + "rpreter", "msf" + "venom", "reverse_tcp", "bind_shell",
+            // Cobalt Strike (retained)
+            "co" + "balt", "beac" + "on.dll",
+
+            // ── Category 6: Credential theft ─────────────────────────────────────────
+            // /etc/shadow and /etc/passwd (retained)
+            "/etc/shadow", "/etc/passwd",
+            // Mimikatz variants (retained)
+            "mimi" + "katz", "sekur" + "lsa",
+            // Sensitive Windows credential paths via /mnt/c/
+            "/mnt/c/users",
+            "/mnt/c/windows/system32",
+            // SSH private key access
+            "id_rsa", "id_ecdsa", "id_ed25519",
+            "/.ssh/",
+            // Browser credential databases (Chrome, Edge, Firefox, Brave)
+            "login data", "login_data",
+            "cookies", "web data",
+            // Windows credential manager files
+            "microsoft/credentials",
+            "microsoft/protect",
+            // Token/ticket theft
+            "krb5cc", ".ccache",
         };
 
-        // Legitimate WSL uses that should not alert
+        // ── Legitimate WSL patterns that suppress suspicious-pattern alerts ─────────
+        //
+        // These are checked AFTER SuspiciousPatterns. A command must match a suspicious
+        // pattern AND NOT match any legitimate pattern to trigger an alert.
+        //
+        // Design notes:
+        //   • "go test", "go mod", "go install" are all legitimate Go dev workflows.
+        //     "go run" and "go build" are suspicious in the context of a reverse shell
+        //     but the legitimate suppression for those is handled by path context — a
+        //     developer running "go run main.go" in ~/projects is fine; we rely on the
+        //     broader command context not matching other suspicious indicators.
+        //   • "node " is legitimate (npm scripts, build tools); "nodejs -e" with a socket
+        //     payload will still fire because the exact pattern "nodejs -e" is more specific.
+        //   • "find / -name" is legitimate file searching; "find / -perm -4000" is SUID
+        //     scanning and should NOT be suppressed — it is intentionally absent here.
+        //   • "cat " is removed: legitimate cat usage is fine on its own, but
+        //     "cat /proc/" and "cat /etc/shadow" are in SuspiciousPatterns and must fire.
+        //
         private static readonly string[] LegitimatePatterns = new[]
         {
-            "git ", "npm ", "node ", "docker ", "kubectl ",
-            "apt ", "apt-get ", "pip ", "cargo ", "make ",
-            "code ", "vim ", "nano ", "ls ", "cd ", "cat ",
-            "grep ", "find ", "sed ", "awk "
+            // Source control
+            "git ",
+            // Package managers and build tools
+            "npm ", "npm run", "npm install", "npm test",
+            "yarn ", "pnpm ",
+            "pip ", "pip3 ", "pip install",
+            "cargo ", "cargo build", "cargo test",
+            "apt ", "apt-get ", "apt-cache ",
+            "dpkg ", "rpm ", "yum ", "dnf ", "pacman ",
+            "make ", "cmake ", "ninja ",
+            // Runtimes / interpreters in non-shell-exec contexts
+            "node ", "node_modules",
+            "docker build", "docker run", "docker pull", "docker push", "docker ps",
+            "kubectl ", "helm ", "terraform ", "ansible ",
+            // Editors and IDEs
+            "code ", "vim ", "nvim ", "nano ", "emacs ", "micro ",
+            // Safe shell built-ins (non-exec forms)
+            "ls ", "ls -", "cd ", "pwd", "echo ",
+            "grep ", "grep -", "rg ",
+            "sed ", "awk -F", "awk '{print",
+            // Safe Go dev workflows (not "go run" / "go build" with suspicious context)
+            "go test", "go mod", "go install", "go get", "go vet", "go fmt",
+            // Safe python dev workflows (not "-c" one-liner form)
+            "python setup.py", "python -m pytest", "python -m pip",
+            "python3 -m pytest", "python3 -m pip", "python3 manage.py",
+            // Safe ruby dev workflows
+            "bundle install", "bundle exec", "rake ",
+            // Safe perl dev workflows
+            "perl -w ", "perl -T ", "perldoc",
+            // Safe java dev workflows
+            "java -version", "javac ", "mvn ", "gradle ",
+            // File ops that are benign
+            "tar -", "zip ", "unzip ", "gzip ", "gunzip ",
+            "rsync ", "scp ",
         };
 
         public WslMonitor(
@@ -372,13 +562,16 @@ namespace Sentinel.Core
         }
 
         /// <summary>
-        /// Detects WSL processes writing to sensitive Windows host paths via /mnt/c/ mapping.
-        /// This catches attackers using WSL to modify Windows system files, drop payloads,
-        /// or edit startup/autorun locations from within the Linux environment.
+        /// Detects WSL processes reading OR writing to sensitive Windows host paths via /mnt/c/.
+        ///
+        /// v2.6.0: Expanded from write-only detection to also cover sensitive reads.
+        /// Credential theft (SAM, NTDS, cached domain creds, browser login stores, SSH keys)
+        /// is a pure read operation — the original write-only check missed the entire
+        /// credential harvesting attack class. Both operations are now flagged with
+        /// appropriate confidence levels (reads = 0.80, writes = 0.85).
         /// </summary>
         private async Task DetectWslHostFilesystemWrites(CancellationToken ct)
         {
-            // Check for wsl.exe/bash.exe processes with commands targeting sensitive host paths
             foreach (var kvp in _trackedWslProcesses)
             {
                 if (ct.IsCancellationRequested) break;
@@ -386,31 +579,21 @@ namespace Sentinel.Core
                 var info = kvp.Value;
                 var cmdLower = info.CommandLine.ToLowerInvariant();
 
-                // Detect writes to sensitive Windows paths from WSL
-                var sensitiveHostPaths = new[]
-                {
-                    "/mnt/c/windows/system32",
-                    "/mnt/c/windows/syswow64",
-                    "/mnt/c/programdata",
-                    "/mnt/c/users/*/appdata/roaming/microsoft/windows/start menu/programs/startup",
-                    "/mnt/c/users/*/ntuser.dat",
-                    @"\\\\wsl.*\\.*\\windows",
-                };
-
-                // Check for write operations targeting host paths
+                // ── Write detection (original logic) ────────────────────────────────
                 bool isWriteOperation = cmdLower.Contains(">") || cmdLower.Contains("tee ") ||
                                         cmdLower.Contains("cp ") || cmdLower.Contains("mv ") ||
                                         cmdLower.Contains("dd ") || cmdLower.Contains("install ") ||
                                         cmdLower.Contains("wget -o") || cmdLower.Contains("curl -o");
 
-                bool targetsSensitivePath = cmdLower.Contains("/mnt/c/windows") ||
-                                            cmdLower.Contains("/mnt/c/programdata") ||
-                                            cmdLower.Contains("/mnt/c/program files") ||
-                                            (cmdLower.Contains("/mnt/c/users") && cmdLower.Contains("startup"));
+                bool targetsSensitiveWritePath =
+                    cmdLower.Contains("/mnt/c/windows") ||
+                    cmdLower.Contains("/mnt/c/programdata") ||
+                    cmdLower.Contains("/mnt/c/program files") ||
+                    (cmdLower.Contains("/mnt/c/users") && cmdLower.Contains("startup"));
 
-                if (isWriteOperation && targetsSensitivePath)
+                if (isWriteOperation && targetsSensitiveWritePath)
                 {
-                    string alertKey = $"wsl_lateral_{info.Pid}_{cmdLower.GetHashCode()}";
+                    string alertKey = $"wsl_lateral_write_{info.Pid}_{cmdLower.GetHashCode()}";
                     if (_alertedLateralPaths.Contains(alertKey)) continue;
                     _alertedLateralPaths.Add(alertKey);
 
@@ -433,7 +616,86 @@ namespace Sentinel.Core
                         Metadata = new Dictionary<string, string>
                         {
                             ["CommandLine"] = Truncate(info.CommandLine, 500),
-                            ["Technique"] = "T1611-ContainerEscape"
+                            ["Technique"] = "T1611-ContainerEscape",
+                            ["Operation"] = "Write"
+                        }
+                    });
+                }
+
+                // ── Read detection (v2.6.0: new) ─────────────────────────────────────
+                // Credential theft is a pure read operation — the attacker never needs to
+                // write anything to harvest SAM hives, SSH keys, browser login databases,
+                // or cached domain credentials. This was the primary gap in the original
+                // write-only implementation.
+                bool isReadOperation =
+                    cmdLower.Contains("cat ") || cmdLower.Contains("cat\t") ||
+                    cmdLower.Contains("strings ") || cmdLower.Contains("hexdump ") ||
+                    cmdLower.Contains("xxd ") || cmdLower.Contains("od ") ||
+                    cmdLower.Contains("less ") || cmdLower.Contains("more ") ||
+                    cmdLower.Contains("head ") || cmdLower.Contains("tail ") ||
+                    cmdLower.Contains("cp ") ||   // cp src /tmp/ — exfil staging
+                    cmdLower.Contains("scp ") ||  // direct exfil
+                    cmdLower.Contains("base64 "); // encode for exfil
+
+                // Sensitive Windows credential and key paths exposed via /mnt/c/
+                bool targetsSensitiveReadPath =
+                    // Windows credential hives (SAM, SECURITY, SYSTEM, NTDS)
+                    cmdLower.Contains("/mnt/c/windows/system32/config/sam") ||
+                    cmdLower.Contains("/mnt/c/windows/system32/config/security") ||
+                    cmdLower.Contains("/mnt/c/windows/system32/config/system") ||
+                    cmdLower.Contains("/mnt/c/windows/ntds") ||
+                    cmdLower.Contains("ntds.dit") ||
+                    // Cached domain / Windows credential manager
+                    cmdLower.Contains("/mnt/c/users") && cmdLower.Contains("credentials") ||
+                    cmdLower.Contains("/mnt/c/users") && cmdLower.Contains("microsoft/protect") ||
+                    // SSH private keys
+                    cmdLower.Contains("/mnt/c/users") && (
+                        cmdLower.Contains("id_rsa") ||
+                        cmdLower.Contains("id_ecdsa") ||
+                        cmdLower.Contains("id_ed25519") ||
+                        cmdLower.Contains("/.ssh/")) ||
+                    // Browser credential databases
+                    cmdLower.Contains("login data") ||      // Chrome/Edge/Brave SQLite DB
+                    cmdLower.Contains("login_data") ||
+                    cmdLower.Contains("/mnt/c/users") && cmdLower.Contains("cookies") ||
+                    cmdLower.Contains("/mnt/c/users") && cmdLower.Contains("web data") ||
+                    // Firefox profiles (logins.json, key4.db, cert9.db)
+                    cmdLower.Contains("logins.json") ||
+                    cmdLower.Contains("key4.db") ||
+                    cmdLower.Contains("cert9.db") ||
+                    // DPAPI master keys
+                    cmdLower.Contains("masterkey") ||
+                    // Kerberos tickets
+                    cmdLower.Contains("krb5cc") ||
+                    cmdLower.Contains(".ccache");
+
+                if (isReadOperation && targetsSensitiveReadPath)
+                {
+                    string alertKey = $"wsl_lateral_read_{info.Pid}_{cmdLower.GetHashCode()}";
+                    if (_alertedLateralPaths.Contains(alertKey)) continue;
+                    _alertedLateralPaths.Add(alertKey);
+
+                    await _detectionEngine.EmitAsync(new DetectionEvent
+                    {
+                        RuleName = "WSL: Credential Theft — Host Sensitive File Read via /mnt/",
+                        Evidence = $"WSL process '{info.ProcessName}' (PID {info.Pid}) reading sensitive Windows credential " +
+                                   $"or key material via /mnt/ mount. Command: {Truncate(info.CommandLine, 250)}",
+                        Reasoning = "A process running inside WSL is reading a sensitive Windows credential store, SSH private key, " +
+                                    "browser login database, or Windows credential manager file via the /mnt/ mount point. " +
+                                    "WSL has full read access to the Windows filesystem, allowing attackers to harvest credentials " +
+                                    "silently — the read operation generates no Windows API calls that Windows-native EDR would " +
+                                    "instrument, making this a primary evasion vector (MITRE T1552, T1555, T1003).",
+                        Confidence = 0.80,
+                        Tier = DetectionTier.Tier1Behavioral,
+                        AuthorizedResponse = ResponseAction.KillProcessTree,
+                        SignalType = SignalType.SuspiciousProcess,
+                        ProcessName = info.ProcessName,
+                        ProcessId = info.Pid,
+                        Metadata = new Dictionary<string, string>
+                        {
+                            ["CommandLine"] = Truncate(info.CommandLine, 500),
+                            ["Technique"] = "T1552-UnsecuredCredentials/T1555-BrowserCreds/T1003-CredDump",
+                            ["Operation"] = "Read"
                         }
                     });
                 }

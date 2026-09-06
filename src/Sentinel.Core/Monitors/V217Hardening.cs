@@ -530,7 +530,11 @@ namespace Sentinel.Core
                     fileName.IndexOf("dbutil", StringComparison.OrdinalIgnoreCase) >= 0 ||
                     fileName.IndexOf("gdrv", StringComparison.OrdinalIgnoreCase) >= 0 ||
                     fileName.IndexOf("capcom", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                    fileName.IndexOf("iqvw64e", StringComparison.OrdinalIgnoreCase) >= 0)
+                    fileName.IndexOf("iqvw64e", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    // v2.6.0: 2025-2026 ransomware campaign BYOVD drivers
+                    fileName.IndexOf("nseckrnl", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    fileName.IndexOf("ensrvr64", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    fileName.IndexOf("poisonx", StringComparison.OrdinalIgnoreCase) >= 0)
                 {
                     try
                     {

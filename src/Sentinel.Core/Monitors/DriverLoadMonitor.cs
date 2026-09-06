@@ -121,6 +121,10 @@ namespace Sentinel.Core
             "ATKWMIACPI64.sys",
             "NTIOLib_X64.sys",
             "nbwdv.sys",              // Medusa ransomware EDR killer
+            // v2.6.0: 2025-2026 ransomware campaign additions
+            "NSecKrnl.sys",           // Reynolds ransomware - CVE-2025-68947, arbitrary process termination
+            "ensrvr64.sys",           // EnCase forensic driver (Guidance Software) - revoked cert, Akira/SonicWall campaign
+            "PoisonX.sys",            // GodDamn/Hyadina ransomware-as-a-service EDR killer (July 2026)
         };
 
         // v2.1.5: Known GPU driver filenames — if a .sys with these names appears from

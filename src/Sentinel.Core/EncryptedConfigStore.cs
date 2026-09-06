@@ -194,8 +194,7 @@ namespace Sentinel.Core
                         config.WatchPath = kvp.Value;
                         break;
                     case "RestrictivePortHardening":
-                        if (bool.TryParse(kvp.Value, out var rph))
-                            config.RestrictivePortHardening = rph;
+                        // v2.6.0: hardening is always-on — this override is silently ignored.
                         break;
 
                     // Incident reporting identity

@@ -412,17 +412,17 @@ select.rp-input {{ font-family: 'Segoe UI', sans-serif; }}
                             </ol>
                         </div>
                     </div>
-                    <div class=""panel"" style=""background:rgba(253,214,99,0.04);border-color:#fdd663"">
-                        <div class=""panel-header""><h3 style=""color:#fdd663"">Hardened Mode</h3></div>
+                    <div class=""panel"" style=""background:rgba(129,201,149,0.06);border-color:#81c995"">
+                        <div class=""panel-header""><h3 style=""color:#81c995"">Hardening Status</h3></div>
                         <div class=""panel-body"">
-                            <p style=""font-size:12px;color:#9aa0a6;margin-bottom:10px"">
-                                Enables aggressive network lockdown: IPSec blocks all non-essential ports, ASR Block rules enforced, RPC/DCOM firewalled.
-                                <strong style=""color:#e8eaed"">USE THIS</strong> when under active attack or on an untrusted network.
+                            <p style=""font-size:12px;color:#9aa0a6;margin-bottom:8px"">
+                                Hardening is <strong style=""color:#81c995"">always active</strong> as of v2.6.0.
+                                IPSec port lockdown, ASR Block rules, RPC/DCOM firewall, credential hardening,
+                                and security policy are enforced on every startup and cannot be disabled.
                             </p>
-                            <button class=""btn btn-danger"" id=""btn-harden"" onclick=""toggleHardenedMode()"">Enable Hardened Mode</button>
-                            <span id=""harden-status"" style=""margin-left:10px;font-size:11px;color:#9aa0a6""></span>
-                            <p style=""font-size:10px;color:#9aa0a6;margin-top:6px"">
-                                Requires service restart. CLI: <code style=""color:#8ab4f8"">Sentinel.Service.exe --set-config RestrictivePortHardening=true</code>
+                            <p style=""font-size:11px;color:#9aa0a6;margin:0"">
+                                Privilege policy: SeDebugPrivilege, SeLoadDriverPrivilege, SeTakeOwnershipPrivilege,
+                                and SeCreateSymbolicLinkPrivilege restricted to Administrators/SYSTEM only.
                             </p>
                         </div>
                     </div>
@@ -1021,59 +1021,14 @@ function refreshDiagnostics() {{
     }});
 }}
 
-// ── Hardened Mode ──────────────────────────────────────────────────
+// ── Hardened Mode (v2.6.0: always-on, no toggle) ──────────────────
 function checkHardenedMode() {{
-    apiCall('/api/hardened', {{}}, function(res) {{
-        if (res && res.ok) {{
-            var btn = document.getElementById('btn-harden');
-            var status = document.getElementById('harden-status');
-            if (res.enabled) {{
-                btn.textContent = 'Disable Hardened Mode';
-                btn.className = 'btn';
-                btn.style.background = '#81c995';
-                btn.style.borderColor = '#81c995';
-                btn.style.color = '#202124';
-                status.textContent = 'ACTIVE \u2014 restrictive port hardening enabled';
-                status.style.color = '#fdd663';
-            }} else {{
-                btn.textContent = 'Enable Hardened Mode';
-                btn.className = 'btn btn-danger';
-                btn.style.background = '';
-                btn.style.borderColor = '';
-                btn.style.color = '';
-                status.textContent = 'Normal (work-first) mode';
-                status.style.color = '#81c995';
-            }}
-        }}
-    }});
-}}
-
-function toggleHardenedMode() {{
-    var btn = document.getElementById('btn-harden');
+    // Hardening is always active — nothing to fetch or toggle
     var status = document.getElementById('harden-status');
-    var enabling = btn.textContent.indexOf('Enable') >= 0;
-    var msg = enabling
-        ? 'ENABLE Hardened Mode?\n\nThis will block RDP, SMB, SSH, DISM, and some admin tools.\nBrowsers, apps, and games are unaffected.\n\nRequires service restart to take effect.'
-        : 'DISABLE Hardened Mode?\n\nReturn to work-first mode. Detection and response remain active.\n\nRequires service restart to take effect.';
-    if (!confirm(msg)) return;
-
-    btn.disabled = true;
-    ensureCsrf(function(token) {{
-        apiCall('/api/hardened/toggle', {{
-            method: 'POST',
-            headers: {{ 'X-CSRF-Token': token }}
-        }}, function(res) {{
-            btn.disabled = false;
-            if (res && res.ok) {{
-                status.textContent = res.message || 'Config saved \u2014 restart service to apply';
-                status.style.color = '#8ab4f8';
-                setTimeout(checkHardenedMode, 1000);
-            }} else {{
-                status.textContent = (res && res.error) || 'Failed \u2014 use elevated CLI instead';
-                status.style.color = '#f28b82';
-            }}
-        }});
-    }});
+    if (status) {{
+        status.textContent = 'Always active (v2.6.0)';
+        status.style.color = '#81c995';
+    }}
 }}
 
 // ── Init ───────────────────────────────────────────────────────────

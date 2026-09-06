@@ -19,11 +19,16 @@ namespace Sentinel.Core
         private const uint LOAD_LIBRARY_SEARCH_SYSTEM32 = 0x00000800;
 
         /// <summary>
-        /// v1.9.7: When false (default) — <b>work-first</b>: no proactive IPSec, RPC firewall,
-        /// service disable, ASR Block re-arm, RDP kill, browser/QUIC lockdown, etc.
-        /// Detection + chain-confirmed response still run. When true — locked-down / kiosk host.
+        /// v2.6.0: Hardening is always-on. This property is permanently true.
+        /// The setter is a no-op retained for binary compatibility only.
+        /// All proactive hardening (IPSec, RPC firewall, ASR Block, service lockdown, etc.)
+        /// now runs unconditionally on every Sentinel startup.
         /// </summary>
-        public static bool RestrictivePortHardeningEnabled { get; set; } = false;
+        public static bool RestrictivePortHardeningEnabled
+        {
+            get => true;
+            set { } // no-op — hardening cannot be disabled
+        }
 
         public static bool ApplyOrFail()
         {
@@ -38,21 +43,14 @@ namespace Sentinel.Core
                 bool res2 = SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32);
                 RegisterForSafeMode();
 
-                // STANDING LAW (ProductPosture / constraints.md):
-                // Default observe/work-first — NO proactive OS lockdown.
-                // New proactive blocks MUST go through ProductPosture.TryProactiveHostLockdown
-                // or they will ship as regressions (RPC, ASR, RDP, USB, Cast, …).
-                if (ProductPosture.AllowsProactiveHostLockdown(null))
-                {
-                    ApplyIPSecPolicy();
-                    BlockRemoteRpcEphemeralPorts();
-                    ApplyUserSetupScriptsHardening();
-                }
-                else
-                {
-                    // Undo aggressive defaults left by older Sentinel builds so upgrades restore work.
-                    ReleaseUserWorkSurface();
-                }
+                // v2.6.0: hardening is always-on — unconditionally apply full hardening.
+                // The work-first/observe default has been removed. All proactive host
+                // protections (IPSec, RPC firewall, ASR Block, service lockdown, registry
+                // hardening, credential hardening, browser hardening, LGPO policy) now run
+                // on every startup without any config gate.
+                ApplyIPSecPolicy();
+                BlockRemoteRpcEphemeralPorts();
+                ApplyUserSetupScriptsHardening();
 
                 return res1 && res2;
             }
@@ -239,9 +237,7 @@ namespace Sentinel.Core
         /// <summary>Ports currently enforced by IPSec (attack-only, or attack + restrictive extra).</summary>
         private static PortDef[] GetActivePortDefinitions()
         {
-            if (!RestrictivePortHardeningEnabled)
-                return AttackOnlyPortDefinitions;
-
+            // v2.6.0: hardening always-on — always return the full combined port set
             var list = new List<PortDef>(AttackOnlyPortDefinitions.Length + RestrictiveExtraPortDefinitions.Length);
             list.AddRange(AttackOnlyPortDefinitions);
             list.AddRange(RestrictiveExtraPortDefinitions);
@@ -311,14 +307,8 @@ namespace Sentinel.Core
         {
             try
             {
-                if (!RestrictivePortHardeningEnabled)
-                {
-                    RemoveIPSecPolicyIfPresent();
-                    return;
-                }
-
                 var ports = GetActivePortDefinitions();
-                const string mode = "restrictive lockdown (user opted in)";
+                const string mode = "always-on hardening (v2.6.0)";
 
                 // Delete and recreate — handles partial corruption and profile changes
                 RunNetsh("ipsec static delete policy name=GSecurity");
@@ -399,13 +389,7 @@ namespace Sentinel.Core
         /// </summary>
         public static void BlockRemoteRpcEphemeralPorts()
         {
-            // v1.9.7: only in restrictive/kiosk mode — default work-first surface stays open
-            if (!RestrictivePortHardeningEnabled)
-            {
-                RemoveFirewallRuleByName("Sentinel-Block-Remote-RPC-Ephemeral");
-                return;
-            }
-
+            // v2.6.0: hardening always-on — always apply the inbound RPC ephemeral block
             try
             {
                 const string ruleName = "Sentinel-Block-Remote-RPC-Ephemeral";
@@ -808,20 +792,19 @@ namespace Sentinel.Core
         #region Hardening: Service Disablement
 
         /// <summary>
-        /// v1.8.3: Default disables only services users almost never run that attackers abuse.
-        /// Does NOT disable RDP, SSH, WinRM, FTP, UPnP, TeamViewer/AnyDesk, etc.
-        /// Full lockdown list applies only when RestrictivePortHardeningEnabled is true.
+        /// v2.6.0: Hardening always-on — disables both attack-only AND previously-restrictive
+        /// remote access services on every startup.
         /// </summary>
         private static void DisableRemoteAccessServices()
         {
-            // Always: pure attack surface / legacy, not normal desktop use
+            // Always disabled: pure attack surface / legacy remote shells
             var attackOnlyServices = new[]
             {
                 ("TlntSvr",         "Telnet Server"),
                 ("RemoteRegistry",  "Remote Registry"), // lateral movement; rare legitimate use
             };
 
-            // Restrictive lockdown only — users may want these
+            // Also always disabled in v2.6.0 (previously restrictive-only)
             var restrictiveServices = new[]
             {
                 ("TermService",      "Remote Desktop Services"),
@@ -842,11 +825,8 @@ namespace Sentinel.Core
             foreach (var (name, _) in attackOnlyServices)
                 DisableServiceSafe(name);
 
-            if (RestrictivePortHardeningEnabled)
-            {
-                foreach (var (name, _) in restrictiveServices)
-                    DisableServiceSafe(name);
-            }
+            foreach (var (name, _) in restrictiveServices)
+                DisableServiceSafe(name);
         }
 
         private static void DisableServiceSafe(string serviceName)
@@ -892,13 +872,9 @@ namespace Sentinel.Core
             // Prevent LM hash storage (CIS 2.3.11.7, MITRE T1003.001)
             SetRegistryDword(@"SYSTEM\CurrentControlSet\Control\LSA", "NoLMHash", 1);
 
-            // --- Remote Access Restrictions (restrictive lockdown only) ---
-            // v1.8.3: Do not break remote WMI/WinRM for admins by default.
-            if (RestrictivePortHardeningEnabled)
-            {
-                SetRegistryDword(@"SOFTWARE\Microsoft\Wbem", "EnableRemoteWmi", 0);
-                SetRegistryDword(@"Software\Microsoft\Windows\CurrentVersion\WSMAN\Service", "allow_remote_requests", 0);
-            }
+            // --- Remote Access Restrictions (always-on v2.6.0) ---
+            SetRegistryDword(@"SOFTWARE\Microsoft\Wbem", "EnableRemoteWmi", 0);
+            SetRegistryDword(@"Software\Microsoft\Windows\CurrentVersion\WSMAN\Service", "allow_remote_requests", 0);
 
             // --- TLS Hardening ---
             // Enable TLS 1.3 client support
@@ -1104,12 +1080,7 @@ namespace Sentinel.Core
         {
             try
             {
-                if (!RestrictivePortHardeningEnabled)
-                {
-                    ReleaseAsrBlockPolicy();
-                    ApplyAsrOnlyExclusions();
-                    return;
-                }
+                // v2.6.0: hardening always-on — always enforce ASR Block rules
 
                 // Ensure policy tree exists
                 SetRegistryDword(AsrPolicyRoot, "ExploitGuard_ASR_Rules", 1);

@@ -114,23 +114,10 @@ namespace Sentinel.Service
             AppendDiagnostic("startup_trace.log",
                 $"[{DateTime.UtcNow:O}] Main() entered. Args: {string.Join(" ", args)}\n");
 
-            // v1.9.7: work-first by default. RestrictivePortHardening=false means observe-until-malice
-            // only — no proactive IPSec/RPC/ASR/service lockdown (ReleaseUserWorkSurface on apply).
-            // Compiled defaults + DPAPI-encrypted overrides. RestrictivePortHardening
-            // defaults to false (work-first); override via encrypted config.
-            try
-            {
-                var earlyStore = new EncryptedConfigStore();
-                var rhVal = earlyStore.GetOverride("RestrictivePortHardening");
-                HardeningModule.RestrictivePortHardeningEnabled =
-                    rhVal != null && bool.TryParse(rhVal, out var rh) && rh;
-            }
-            catch
-            {
-                HardeningModule.RestrictivePortHardeningEnabled = false;
-            }
+            // v2.6.0: hardening is always-on — RestrictivePortHardeningEnabled is permanently
+            // true. No early config read needed.
 
-            // Self-protect Sentinel process; lockdown only if RestrictivePortHardening=true
+            // Self-protect Sentinel process and apply always-on hardening
             HardeningModule.ApplyOrFail();
 
             // Secure Sentinel's installation directory permissions
@@ -311,7 +298,7 @@ namespace Sentinel.Service
                     config.ObserveUntilChain = true;
                     if (!ProxyAuthHelper.HasSharedSecret(threatReportingConfig))
                         threatReportingConfig.ProxySharedSecret = ThreatReportingConfig.CompiledProxySharedSecret;
-                    HardeningModule.RestrictivePortHardeningEnabled = config.RestrictivePortHardening;
+                    // v2.6.0: RestrictivePortHardeningEnabled is permanently true — no sync needed.
                     services.AddSingleton(encryptedStore);
 
                     // CLI flag overrides

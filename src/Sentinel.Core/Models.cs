@@ -201,12 +201,15 @@ namespace Sentinel.Core
         public bool BlockFcmPushChannel { get; set; } = false;
 
         /// <summary>
-        /// v1.9.7: When false (default) — <b>work-first</b>: no proactive IPSec, RPC firewall,
-        /// ASR Block re-arm, service disables, RDP force-logoff, USB auto-disable, etc.
-        /// Sentinel still detects and only kills on chain-confirmed malice.
-        /// When true — locked-down / kiosk host (IPSec, ASR Block, remote session kill, …).
+        /// v2.6.0: Hardening is always-on. This property is permanently true.
+        /// The setter is a no-op retained for deserialization compatibility only.
         /// </summary>
-        public bool RestrictivePortHardening { get; set; } = false;
+        [System.Obsolete("v2.6.0: Hardening is always-on. This property is a no-op.")]
+        public bool RestrictivePortHardening
+        {
+            get => true;
+            set { } // no-op — hardening cannot be disabled
+        }
 
         /// <summary>
         /// v1.6.3: Trusted USB devices as VID:PID (hex, e.g. "0951:1666" for Kingston DataTraveler).

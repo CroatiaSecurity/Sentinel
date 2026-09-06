@@ -45,17 +45,8 @@ namespace Sentinel.Core
 
         protected override async Task ExecuteAsync(CancellationToken ct)
         {
-            // v1.9.7: force-logoff RDP/remote sessions only in restrictive/kiosk mode.
-            // Default work-first: users may RDP into their own PC.
-            if (!_config.RestrictivePortHardening)
-            {
-                _logger.LogInformation(
-                    "[RemoteSessionGuard] Work-first mode — not terminating remote sessions " +
-                    "(set RestrictivePortHardening=true for kiosk force-logoff)");
-                try { await Task.Delay(Timeout.Infinite, ct); }
-                catch (OperationCanceledException) { }
-                return;
-            }
+            // v2.6.0: hardening always-on — always enforce remote session guard
+            _logger.LogInformation("[RemoteSessionGuard] Started — hardening always-on, remote session guard active");
 
             _logger.LogInformation(
                 "[RemoteSessionGuard] Restrictive mode — polling Terminal Services sessions every 5s");

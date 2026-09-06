@@ -2,6 +2,69 @@
 
 
 
+## [2.6.0] - 2026-09-06
+
+Hardening always-on, privilege tightening, new BYOVD drivers, WSL fingerprint detection.
+
+**Hardening is now unconditional.** The `RestrictivePortHardening` config toggle has been
+removed. IPSec port lockdown, ASR Block rules, RPC/DCOM firewall, remote session guard,
+registry hardening, credential hardening (LSASS PPL, WDigest off), browser hardening,
+and LGPO security policy now run on every Sentinel startup with no config gate. The
+work-first observe-only default is retired. `IPSecIntegrityGuard` and `AsrPolicyGuard`
+always self-heal; `RemoteSessionGuard` always enforces. The dashboard toggle is replaced
+with a static "Hardening Status: always active" panel.
+
+**GSecurity.inf privilege tightening (MITRE T1003 / T1068 / T1222 / T1134.002).**
+Six privileges previously assigned to `*S-1-2-1` (Console Logon — any interactive user)
+are now restricted:
+- `SeDebugPrivilege` → Administrators only (was: any interactive user)
+- `SeLoadDriverPrivilege` → Administrators only — closes BYOVD for non-admin attackers
+- `SeTakeOwnershipPrivilege` → Administrators only
+- `SeRestorePrivilege` → Administrators + Backup Operators
+- `SeCreateSymbolicLinkPrivilege` → SYSTEM + Administrators — closes symlink LPE
+- `SeDelegateSessionUserImpersonatePrivilege` → SYSTEM only — closes session hijacking
+
+**New BYOVD driver signatures (2025–2026 ransomware campaigns).**
+Added to `DriverLoadMonitor.VulnerableDriverNames`, `V217Hardening` baseline check,
+and `ResponsePolicy` BYOVD terminal-outcome fragments:
+- `NSecKrnl.sys` — Reynolds ransomware, CVE-2025-68947
+- `ensrvr64.sys` — EnCase forensic driver (revoked cert), Akira/SonicWall campaign early 2026
+- `PoisonX.sys` — GodDamn/Hyadina ransomware-as-a-service EDR killer, July 2026
+
+**WSL BRIDGEHEAD fingerprinting detection (WslMonitor).**
+Added `/proc/version`, `cat /proc/version`, `is_wsl`, `get_wu()` to `SuspiciousPatterns`.
+Catches the CloudSEK BRIDGEHEAD npm campaign (June 2026) which reads `/proc/version` to
+detect WSL presence before pivoting to `/mnt/c/Users/` credential harvesting.
+
+### Changed
+
+- `HardeningModule.RestrictivePortHardeningEnabled` — getter always returns `true`, setter is no-op.
+- `HardeningModule.ApplyOrFail` — unconditionally calls `ApplyIPSecPolicy`, `BlockRemoteRpcEphemeralPorts`, `ApplyUserSetupScriptsHardening`. Work-first branch removed.
+- `HardeningModule.GetActivePortDefinitions` — always returns combined attack+restrictive port set.
+- `HardeningModule.ReapplyIPSecPolicy` — work-first early-return removed.
+- `HardeningModule.BlockRemoteRpcEphemeralPorts` — work-first early-return removed.
+- `HardeningModule.DisableRemoteAccessServices` — restrictive-only flag guard removed; full service list always disabled.
+- `HardeningModule.ApplyRegistryHardening` — WMI/WinRM remote access blocks always applied.
+- `HardeningModule.ApplyAsrRules` — work-first release branch removed; always enforces Block mode.
+- `ProductPosture.AllowsProactiveHostLockdown` — always returns `true`.
+- `ProductPosture.TryProactiveHostLockdown` — always succeeds (denyReason = "").
+- `SentinelConfig.RestrictivePortHardening` — getter always returns `true`, setter is no-op, marked `[Obsolete]`.
+- `EncryptedConfigStore.ApplyOverrides` — `RestrictivePortHardening` case is now a silent no-op.
+- `Program.cs` — early config read block and DI sync line removed.
+- `IPSecIntegrityGuard` — work-first branch removed; always self-heals IPSec on startup and every 30s.
+- `AsrPolicyGuard` — work-first release branch removed; always self-heals ASR Block every 60s.
+- `RemoteSessionGuard` — work-first skip branch removed; always active.
+- `WebDashboardService` — `/api/hardened/toggle` returns HTTP 400 (cannot disable); `/api/hardened` returns `enabled=true, alwaysOn=true`.
+- `DashboardHtml` — "Hardened Mode" toggle panel replaced with "Hardening Status: always active" info panel. `toggleHardenedMode()` JS removed.
+- `ResponsePolicy.TerminalOutcomes` BYOVD family — added `NSecKrnl`, `ensrvr64`, `encase`, `PoisonX`.
+- `DriverLoadMonitor.VulnerableDriverNames` — added `NSecKrnl.sys`, `ensrvr64.sys`, `PoisonX.sys`.
+- `V217Hardening.KernelModuleAudit` baseline check — added `nseckrnl`, `ensrvr64`, `poisonx`.
+- `WslMonitor.SuspiciousPatterns` — added `/proc/version`, `cat /proc/version`, `is_wsl`, `get_wu()`.
+- `GSecurity.inf` (both publish/service and publish/agent copies) — privilege tightening applied.
+- `ProductInfo.Version` → `2.6.0`
+
+
+
 ## [2.5.4] - 2026-09-06
 
 Red-team audit remediation — staged-attack correlation, PowerShell ETW blind

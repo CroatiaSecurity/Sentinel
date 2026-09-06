@@ -91,6 +91,8 @@ namespace Sentinel.Core
             {
                 "BYOVD", "Vulnerable Driver", "kdmapper", "DBUtil",
                 "RTCore", "AsIO.sys", "AsIO64", "AsIO2", "WinRing0", "capcom.sys", "gdrv.sys", "iqvw64e",
+                // v2.6.0: 2025-2026 ransomware campaign drivers (NSecKrnl/Reynolds, EnCase/Akira, PoisonX/GodDamn)
+                "NSecKrnl", "ensrvr64", "encase", "PoisonX",
                 "Vulnerable Kernel", "Bring Your Own",
             }),
             ("CredentialDump", new[]
