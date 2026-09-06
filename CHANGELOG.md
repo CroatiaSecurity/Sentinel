@@ -2,6 +2,52 @@
 
 
 
+## [2.4.8] - 2026-09-06
+
+Userland protocol coverage: UDP, ICMP, WFP net-event subscription, and VoIP
+heuristics — no kernel driver, no WinDivert, no packet capture.
+
+### Added
+
+- **`UdpFlowMonitor`** (NetworkIntegrity) — `GetExtendedUdpTable` OWNER_PID
+  bind table plus Kernel-Network ETW UDP send/recv (events 42/43/56/57) into
+  fusion. Emits on LOLBin datagrams, Temp/Downloads UDP, classic malware UDP
+  ports, and UDP socket explosions. Discord/Teams/Zoom/Steam/browsers skipped.
+- **`IcmpAnomalyMonitor`** (NetworkIntegrity) — `GetIcmpStatisticsEx` IPv4+IPv6
+  type counters. Echo flood, inbound Redirect (MITM), unreachable storms.
+  Host-wide (ICMP has no PID in the IP helper table).
+- **`WfpNetEventMonitor`** (NetworkIntegrity) — live `FwpmNetEventSubscribe0`
+  on `fwpuclnt` (user-mode BFE). Covers GRE/ESP/AH/SCTP/L2TP/IPv6-encap and
+  classify-drop bursts / IPsec kernel drops. VPN IKE/ESP from `svchost` skipped.
+  Optional `FWPM_ENGINE_COLLECT_NET_EVENTS` so the subscription can receive
+  events; does **not** add WFP filters or enable audit policy. Falls back to
+  `GetIpStatisticsEx.dwInUnknownProtos` when BFE is missing.
+- **`VoipSessionMonitor`** (NetworkIntegrity) — SIP 5060/5061, STUN/TURN,
+  H.323, IAX, MGCP, and hidden RTP-like even-port binds from script hosts or
+  Temp/Downloads. Known comms apps never emit. No SIP payload parse (that
+  needs a driver).
+- **`CovertMeshMonitor`** (NetworkIntegrity) — tailcat-class userspace
+  overlays: WireGuard-in-process + magicsock STUN + DERP HTTPS with **no**
+  virtual NIC and **no** Tailscale control plane. Catches tailcat itself,
+  renamed copycats (UDP+HTTPS from Temp/Downloads), STUN hole-punch overlays,
+  and DERP DNS (`tailcat.dev`, `derp*.tailscale.com`). Same shape as
+  wireproxy, boringtun, sliver WG C2, innernet. Official `tailscale.exe` /
+  Discord / browsers / games are skipped. DNS hook in `DnsQueryMonitor`.
+  Also listed as a tunneling tool in `RemoteAccessMonitor`.
+
+All of these are Tier2 / LogOnly. Prefixes `Network UDP:` / `ICMP:` /
+`WFP:` / `VoIP:` / `Covert Mesh:` are weak-chain-only (may feed
+composites, never chain-nuke alone). Echo flood and unknown-proto
+counters are WeakObserveSeed.
+
+### Changed
+
+- `EtwEventDispatcher` now feeds UDP send/recv into `TelemetryFusionEngine`
+  (previously TCP connect/accept only).
+- `ProductInfo.Version` → `2.4.8`
+- Installer → `SentinelSetup-2.4.8.exe`
+
+
 ## [2.4.7] - 2026-09-05
 
 Two cache bugs introduced in v2.4.6.

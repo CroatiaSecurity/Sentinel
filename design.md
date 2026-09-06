@@ -41,7 +41,7 @@ Monitors → TelemetryFusionEngine → DetectionEngine → AdvancedResponseEngin
 | `OpsMetricsPublisher` | Writes `%ProgramData%\Sentinel\ops_metrics.json` |
 | `SelfPathGuard` | Hardlink-aware install self-exclusion |
 | `EncryptedConfigStore` | DPAPI-encrypted per-deployment config (`config.enc`); replaces plaintext appsettings.json |
-| `ProductInfo.Version` | `2.4.6` |
+| `ProductInfo.Version` | `2.4.8` |
 
 All components are wired via Microsoft.Extensions.DependencyInjection. No static mutable state anywhere.
 
@@ -162,6 +162,11 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 | `RemoteAccessMonitor` | Scans for 35+ remote access tools; Tier2 presence / Tier1 tunnels from staging paths | 60s |
 | `ThreatIntelFeedBlocker` | Spamhaus/Feodo/ET feeds in memory; **observe-only by default** (no proactive FW); reactive `NetworkIsolate` on live hit when `ActiveResponse`; optional `ThreatIntelProactiveFirewall` | 4h refresh / 30s conn |
 | `ForumHrWatchMonitor` | Dedicated forum.hr watch (site not blocked): non-browser DNS/TCP + persistent sessions → kill; browsers allowed | 10s / 15m DNS refresh |
+| `UdpFlowMonitor` | **v2.4.8.** `GetExtendedUdpTable` OWNER_PID + Kernel-Network UDP ETW. LOLBin/Temp/classic-port UDP. LogOnly | 2s |
+| `IcmpAnomalyMonitor` | **v2.4.8.** `GetIcmpStatisticsEx` IPv4+IPv6 type counters: echo flood, inbound Redirect, unreachable storm. LogOnly | 5s |
+| `WfpNetEventMonitor` | **v2.4.8.** `FwpmNetEventSubscribe0` (no callout driver). GRE/ESP/AH/SCTP/L2TP + drop bursts. Unknown-proto fallback | event / 15s |
+| `VoipSessionMonitor` | **v2.4.8.** SIP/STUN/H.323/IAX/MGCP + RTP-like binds from unexpected processes. Discord/Teams/Zoom/Steam skipped | 3s |
+| `CovertMeshMonitor` | **v2.4.8.** Userspace WG/DERP/STUN overlays (tailcat and copycats). Official Tailscale skipped. LogOnly | 3s |
 
 #### Group 5: SystemIntegrity (10s start delay, max 3 restarts)
 

@@ -843,6 +843,8 @@ namespace Sentinel.Core
             // Potentially unwanted — often deployed by attackers
             "ngrok", "frpc", "frps", "cloudflared", // Tunneling
             "chisel", "rathole", "bore", // Reverse tunnels
+            "tailcat", "derper", "wireproxy", "onetun", "boringtun", // userspace WG / magicsock
+            "innernet", "sliver",
             "mstsc", // Standard RDP client - context matters
         };
 
@@ -879,7 +881,10 @@ namespace Sentinel.Core
                                 // — these are almost never legitimate on endpoints
                                 bool isTunnel = name.Contains("ngrok") || name.Contains("frpc") ||
                                                 name.Contains("chisel") || name.Contains("rathole") ||
-                                                name.Contains("bore") || name.Contains("cloudflared");
+                                                name.Contains("bore") || name.Contains("cloudflared") ||
+                                                name.Contains("tailcat") || name.Contains("wireproxy") ||
+                                                name.Contains("onetun") || name.Contains("boringtun") ||
+                                                name.Contains("innernet") || name.Contains("derper");
 
                                 string? imagePath = null;
                                 try { imagePath = SecurityValidation.GetProcessImagePath(proc.Id); } catch { }

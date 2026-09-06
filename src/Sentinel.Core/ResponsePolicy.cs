@@ -191,6 +191,12 @@ namespace Sentinel.Core
             "CVE Class: Package Manager EoP",
             "CVE Class: VS Code Encoded",
             "Patch Posture: Missed Patch Tuesday",
+            // v2.4.8: userland protocol coverage — observe fuel, never a chain seed
+            "Network UDP:",
+            "Network ICMP:",
+            "Network WFP:",
+            "Network VoIP:",
+            "Covert Mesh:",
             // Surveillance: composite fuel for coercion toolkit; never sole chain seed
             "Screen Capture",
             "DXGI Desktop Duplication",

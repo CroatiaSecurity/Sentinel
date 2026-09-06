@@ -97,6 +97,15 @@ namespace Sentinel.Core
             ("VS Code Encoded", new[] { "T1059.001", "T1218" }),
             ("Isolation Filter Driver", new[] { "T1068", "T1611" }),
             ("Missed Patch Tuesday", new[] { "T1190" }),
+            ("Network UDP", new[] { "T1071", "T1095" }),
+            ("Network ICMP", new[] { "T1095", "T1046" }),
+            ("Network WFP", new[] { "T1095", "T1562" }),
+            ("Unusual IP Protocol", new[] { "T1095" }),
+            ("Network VoIP", new[] { "T1071", "T1123" }),
+            ("SIP from Unexpected", new[] { "T1071", "T1123" }),
+            ("Covert Mesh", new[] { "T1071", "T1095", "T1572" }),
+            ("Userspace Overlay", new[] { "T1095", "T1572" }),
+            ("DERP Relay", new[] { "T1090", "T1095" }),
         };
 
         /// <summary>

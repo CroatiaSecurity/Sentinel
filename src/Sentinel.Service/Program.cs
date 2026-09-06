@@ -661,7 +661,12 @@ namespace Sentinel.Service
                             ("RemoteAccessMonitor",             s => s.GetRequiredService<RemoteAccessMonitor>()),
                             ("ThreatIntelFeedBlocker",          s => s.GetRequiredService<ThreatIntelFeedBlocker>()),
                             ("ThreatFoxFeedService",            s => s.GetRequiredService<ThreatFoxFeedService>()),
-                            ("ForumHrWatchMonitor",             s => s.GetRequiredService<ForumHrWatchMonitor>())
+                            ("ForumHrWatchMonitor",             s => s.GetRequiredService<ForumHrWatchMonitor>()),
+                            ("UdpFlowMonitor",                  s => s.GetRequiredService<UdpFlowMonitor>()),
+                            ("IcmpAnomalyMonitor",              s => s.GetRequiredService<IcmpAnomalyMonitor>()),
+                            ("WfpNetEventMonitor",              s => s.GetRequiredService<WfpNetEventMonitor>()),
+                            ("VoipSessionMonitor",              s => s.GetRequiredService<VoipSessionMonitor>()),
+                            ("CovertMeshMonitor",               s => s.GetRequiredService<CovertMeshMonitor>())
                         );
                         return new MonitorGroup(
                             new MonitorGroupConfig
@@ -694,6 +699,11 @@ namespace Sentinel.Service
                     // GorstaksProtection-ported: ThreatFox hash/domain/IP feed (v2.4.0)
                     services.AddSingleton<ThreatFoxFeedService>();
                     services.AddSingleton<ForumHrWatchMonitor>();
+                    services.AddSingleton<UdpFlowMonitor>();
+                    services.AddSingleton<IcmpAnomalyMonitor>();
+                    services.AddSingleton<WfpNetEventMonitor>();
+                    services.AddSingleton<VoipSessionMonitor>();
+                    services.AddSingleton<CovertMeshMonitor>();
 
                     // ── Group 5: System Integrity ─────────────────────────────────────
                     // Starts delayed (10s). Monitors OS-level configuration drift.

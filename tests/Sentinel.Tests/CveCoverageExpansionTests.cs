@@ -23,6 +23,11 @@ namespace Sentinel.Tests
             Assert.Equal("Sentinel.Core", typeof(DecoyPipeMonitor).Namespace);
             Assert.Equal("Sentinel.Core", typeof(KernelModuleAuditMonitor).Namespace);
             Assert.Equal("Sentinel.Core", typeof(TokenPrivilegeAuditMonitor).Namespace);
+            Assert.Equal("Sentinel.Core", typeof(UdpFlowMonitor).Namespace);
+            Assert.Equal("Sentinel.Core", typeof(IcmpAnomalyMonitor).Namespace);
+            Assert.Equal("Sentinel.Core", typeof(WfpNetEventMonitor).Namespace);
+            Assert.Equal("Sentinel.Core", typeof(VoipSessionMonitor).Namespace);
+            Assert.Equal("Sentinel.Core", typeof(CovertMeshMonitor).Namespace);
         }
 
         [Theory]

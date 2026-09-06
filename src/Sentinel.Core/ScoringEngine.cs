@@ -368,7 +368,10 @@ namespace Sentinel.Core
             if (r.Contains("reverse shell") || r.Contains("reverseshell") || r.Contains("c2") || r.Contains("callback")) return DetectionCategory.ReverseShell;
             if (r.Contains("injection") || r.Contains("hollowing") || r.Contains("threatintel")) return DetectionCategory.ProcessInjection;
             if (r.Contains("ransomware") || r.Contains("shadow copy")) return DetectionCategory.Ransomware;
-            if (r.Contains("evasion") || r.Contains("tampering") || r.Contains("amsi") || r.Contains("etw")) return DetectionCategory.SecurityEvasion;
+            if (r.Contains("evasion") || r.Contains("tampering") || r.Contains("amsi") ||
+                r.Contains("etw tamper") || r.Contains("etw patch") || r.Contains("etw provider") ||
+                r.Contains("etw session") || r.StartsWith("etw"))
+                return DetectionCategory.SecurityEvasion;
             if (r.Contains("persistence") || r.Contains("scheduled task")) return DetectionCategory.Persistence;
             if (r.Contains("privilege") || r.Contains("uac bypass")) return DetectionCategory.PrivilegeEscalation;
             if (r.Contains("unsigned")) return DetectionCategory.UnsignedBinary;
@@ -380,7 +383,7 @@ namespace Sentinel.Core
             if (r.Contains("anti-tamper") || r.Contains("antitamper") || r.Contains("self-protection") || r.Contains("selfprotection") ||
                 r.Contains("verdictgate") || r.Contains("verdict gate") || r.Contains("chain-nuke") || r.Contains("composite")) return DetectionCategory.AntiTamper;
             if (r.Contains("dns") || r.Contains("dga")) return DetectionCategory.DnsAnomaly;
-            if (r.Contains("arp") || r.Contains("route") || r.Contains("tls") || r.Contains("badusb") || r.Contains("network")) return DetectionCategory.NetworkAnomaly;
+            if (r.Contains("arp") || r.Contains("route") || r.Contains("tls") || r.Contains("badusb") || r.Contains("network") || r.Contains("mesh") || r.Contains("derp")) return DetectionCategory.NetworkAnomaly;
             if (r.Contains("exfil")) return DetectionCategory.DataExfiltration;
             return DetectionCategory.Unknown;
         }

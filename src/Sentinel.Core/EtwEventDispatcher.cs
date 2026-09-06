@@ -68,10 +68,14 @@ namespace Sentinel.Core
         private const ushort FirewallRuleModified = 2005;
         private const ushort FirewallRuleDeleted = 2006;
 
-        // Event IDs for Kernel-Network (TCP/IP)
+        // Event IDs for Kernel-Network (TCP/IP + UDP)
         private const ushort TcpConnect = 12; // TcpIp/Connect
         private const ushort TcpDisconnect = 14;
         private const ushort TcpAccept = 15;
+        private const ushort UdpSendIpv4 = 42; // UdpIp/SendIPV4
+        private const ushort UdpRecvIpv4 = 43; // UdpIp/RecvIPV4
+        private const ushort UdpSendIpv6 = 56;
+        private const ushort UdpRecvIpv6 = 57;
 
         public EtwEventDispatcher(
             TelemetryFusionEngine fusionEngine,
@@ -480,54 +484,116 @@ namespace Sentinel.Core
 
         private void OnKernelNetworkEvent(EtwRawEvent evt)
         {
-            // TCP connect/accept events give us PID + remote endpoint
-            if (evt.EventId != TcpConnect && evt.EventId != TcpAccept) return;
+            bool udp = evt.EventId == UdpSendIpv4 || evt.EventId == UdpRecvIpv4 ||
+                       evt.EventId == UdpSendIpv6 || evt.EventId == UdpRecvIpv6;
+            bool tcp = evt.EventId == TcpConnect || evt.EventId == TcpAccept;
+            if (!udp && !tcp) return;
             if (evt.UserData == IntPtr.Zero || evt.UserDataLength < 16) return;
 
+            try
+            {
+                if (udp)
+                    HandleUdpNetworkEvent(evt);
+                else
+                    HandleTcpNetworkEvent(evt);
+            }
+            catch { /* ETW callback must never throw */ }
+        }
+
+        private void HandleTcpNetworkEvent(EtwRawEvent evt)
+        {
             int pid = evt.ProcessId;
+            string processName = ResolveEtwProcessName(pid);
+
+            // Layout (simplified): localAddr(4) + localPort(2) + remoteAddr(4) + remotePort(2)
+            byte b1 = Marshal.ReadByte(evt.UserData, 8);
+            byte b2 = Marshal.ReadByte(evt.UserData, 9);
+            byte b3 = Marshal.ReadByte(evt.UserData, 10);
+            byte b4 = Marshal.ReadByte(evt.UserData, 11);
+            string remoteAddr = $"{b1}.{b2}.{b3}.{b4}";
+
+            ushort remotePort = (ushort)Marshal.ReadInt16(evt.UserData, 12);
+            remotePort = (ushort)((remotePort >> 8) | (remotePort << 8));
+
+            if (remoteAddr == "0.0.0.0" || remoteAddr == "127.0.0.1") return;
+
+            var telemetry = new NetworkTelemetry
+            {
+                ProcessName = processName,
+                ProcessId = pid,
+                RemoteAddress = remoteAddr,
+                RemotePort = remotePort,
+                Protocol = "TCP",
+                State = evt.EventId == TcpConnect ? "CONNECT" : "ACCEPT",
+                Timestamp = evt.Timestamp
+            };
+
+            var context = _fusionEngine.FeedEvent(telemetry);
+            _detectionEngine.SubmitTelemetry(context);
+        }
+
+        /// <summary>
+        /// UdpIp_TypeGroup1: PID(4) size(4) daddr(4) saddr(4) dport(2) sport(2) …
+        /// PID in the payload is authoritative (session PID is often 0 for kernel-network).
+        /// </summary>
+        private void HandleUdpNetworkEvent(EtwRawEvent evt)
+        {
+            bool ipv6 = evt.EventId == UdpSendIpv6 || evt.EventId == UdpRecvIpv6;
+            if (ipv6 && evt.UserDataLength < 40) return;
+
+            int pid = evt.ProcessId;
+            if (evt.UserDataLength >= 4)
+            {
+                int payloadPid = Marshal.ReadInt32(evt.UserData, 0);
+                if (payloadPid > 0) pid = payloadPid;
+            }
+
+            string remoteAddr;
+            ushort remotePort;
+            if (ipv6)
+            {
+                var addr = new byte[16];
+                Marshal.Copy(IntPtr.Add(evt.UserData, 8), addr, 0, 16);
+                remoteAddr = new System.Net.IPAddress(addr).ToString();
+                remotePort = (ushort)Marshal.ReadInt16(evt.UserData, 40);
+            }
+            else
+            {
+                uint daddr = (uint)Marshal.ReadInt32(evt.UserData, 8);
+                remoteAddr = new System.Net.IPAddress(BitConverter.GetBytes(daddr)).ToString();
+                remotePort = (ushort)Marshal.ReadInt16(evt.UserData, 16);
+            }
+            remotePort = (ushort)((remotePort >> 8) | (remotePort << 8));
+
+            if (remoteAddr == "0.0.0.0" || remoteAddr == "127.0.0.1" || remoteAddr == "::" || remoteAddr == "::1")
+                return;
+
+            string processName = ResolveEtwProcessName(pid);
+            var telemetry = new NetworkTelemetry
+            {
+                ProcessName = processName,
+                ProcessId = pid,
+                RemoteAddress = remoteAddr,
+                RemotePort = remotePort,
+                Protocol = "UDP",
+                State = (evt.EventId == UdpSendIpv4 || evt.EventId == UdpSendIpv6) ? "SEND" : "RECV",
+                Timestamp = evt.Timestamp
+            };
+
+            var context = _fusionEngine.FeedEvent(telemetry);
+            _detectionEngine.SubmitTelemetry(context);
+        }
+
+        private string ResolveEtwProcessName(int pid)
+        {
             string processName = "";
             try { processName = _ancestryCache.GetProcessInfo(pid).name; } catch { }
-            if (string.IsNullOrEmpty(processName))
+            if (string.IsNullOrEmpty(processName) ||
+                processName.Equals("unknown", StringComparison.OrdinalIgnoreCase))
             {
                 try { processName = Process.GetProcessById(pid).ProcessName; } catch { }
             }
-
-            // TCP connection event payload layout varies; attempt basic IP extraction
-            // Layout (simplified): localAddr(4) + localPort(2) + remoteAddr(4) + remotePort(2)
-            // This is a best-effort parse — actual layout depends on Windows version
-            if (evt.UserDataLength >= 16)
-            {
-                try
-                {
-                    // Skip to typical offset for remote address
-                    byte b1 = Marshal.ReadByte(evt.UserData, 8);
-                    byte b2 = Marshal.ReadByte(evt.UserData, 9);
-                    byte b3 = Marshal.ReadByte(evt.UserData, 10);
-                    byte b4 = Marshal.ReadByte(evt.UserData, 11);
-                    string remoteAddr = $"{b1}.{b2}.{b3}.{b4}";
-
-                    ushort remotePort = (ushort)Marshal.ReadInt16(evt.UserData, 12);
-                    // Network byte order → host byte order
-                    remotePort = (ushort)((remotePort >> 8) | (remotePort << 8));
-
-                    if (remoteAddr == "0.0.0.0" || remoteAddr == "127.0.0.1") return;
-
-                    var telemetry = new NetworkTelemetry
-                    {
-                        ProcessName = processName,
-                        ProcessId = pid,
-                        RemoteAddress = remoteAddr,
-                        RemotePort = remotePort,
-                        Protocol = "TCP",
-                        State = evt.EventId == TcpConnect ? "CONNECT" : "ACCEPT",
-                        Timestamp = evt.Timestamp
-                    };
-
-                    var context = _fusionEngine.FeedEvent(telemetry);
-                    _detectionEngine.SubmitTelemetry(context);
-                }
-                catch { }
-            }
+            return processName ?? "";
         }
 
         // ═══════════════════════════════════════════════════════════════

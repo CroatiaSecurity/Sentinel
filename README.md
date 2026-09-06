@@ -6,7 +6,7 @@ Sentinel is for **gamers, creators, and high-profile targets**. It hunts real at
 
 **You can browse and play.** Default mode must not break Chrome/Edge/Firefox, Microsoft Store, Xbox, Steam, Epic, DirectX/VC++ redists, Game Bar, or creator tools such as OBS Studio. Controllers, wheels, and HOTAS stay usable. Installing a game or a GPU/runtime redist is work, not an incident.
 
-**Current version: 2.4.6**
+**Current version: 2.4.8**
 
 ### Honest mission
 
@@ -51,7 +51,7 @@ Sentinel is effective against:
 
 - **Physical access attacks** — BadUSB/Rubber Ducky (logged on default; HID auto-disable only in Hardened / kiosk mode so Xbox and other controllers keep working), post-idle hardware change detection, new Bluetooth devices, rogue USB drives.
 
-- **Network attacks** — ARP spoofing, DNS poisoning, rogue Wi-Fi, unauthorized Cast/screen-share devices, C2 beaconing (statistical), DNS tunneling/exfiltration, phantom network devices. Threat-intel feeds are **observe + reactive isolate** by default (`ThreatIntelProactiveFirewall: false`); optional proactive FW block. Unauthorized RDP/remote sessions can be force-logged-off (`RemoteSessionGuard`).
+- **Network attacks** — ARP spoofing, DNS poisoning, rogue Wi-Fi, unauthorized Cast/screen-share devices, C2 beaconing (statistical), DNS tunneling/exfiltration, phantom network devices. **v2.4.8 userland protocol coverage (no kernel driver):** UDP binds + Kernel-Network UDP ETW, ICMP type-counter floods/redirects, live WFP net-event subscription (GRE/ESP/AH/SCTP/L2TP and classify-drops), VoIP signaling (SIP/STUN), and **covert userspace mesh** (tailcat / magicsock / DERP / WireGuard-go with no virtual NIC — including renamed copycats that do UDP+HTTPS from Downloads). Discord/Teams/Zoom/Steam and official Tailscale are skipped. All of it is LogOnly observe fuel. Threat-intel feeds are **observe + reactive isolate** by default (`ThreatIntelProactiveFirewall: false`); optional proactive FW block. Unauthorized RDP/remote sessions can be force-logged-off (`RemoteSessionGuard`).
 
 - **Lateral movement & RPC probes (v2.1.6)** — Outbound connections to ports 135/445/5985/5986 from script hosts, Office, and LOLBins. Command-line patterns for WMI, PsExec, remote SCM, remote registry, WinRM. Detects `msg.exe /server:` as an RPC access probe — if someone can pop a remote message box on your machine, they have the same RPC channel used for full lateral movement.
 
@@ -148,7 +148,7 @@ Full transparency in [THREAT_MODEL.md](THREAT_MODEL.md).
 
 1. **Unified ETW Session** — A single real-time kernel trace session subscribes to 10 Windows providers (Kernel-Process, Kernel-File, Kernel-Registry, DNS-Client, Threat-Intelligence, PowerShell, Firewall, TaskScheduler, Kernel-Network, WMI-Activity). Detection latency is ~50ms — fast enough to catch droppers that execute and exit in under a second.
 
-2. **Monitors** — 80+ background monitors consume ETW telemetry and perform additional analysis (behavioral baselines, statistical beaconing detection, memory scanning, hardware state checks, certificate integrity). Monitors that previously polled every 5-30 seconds now react instantly via ETW events.
+2. **Monitors** — 80+ background monitors consume ETW telemetry and perform additional analysis (behavioral baselines, statistical beaconing detection, memory scanning, hardware state checks, certificate integrity). **v2.4.8** adds userland protocol coverage without a kernel driver: UDP bind table + Kernel-Network UDP ETW, ICMP type counters, live WFP net-event subscription (`fwpuclnt`), VoIP signaling heuristics, and covert userspace mesh (tailcat / magicsock / DERP). Monitors that previously polled every 5-30 seconds now react instantly via ETW events.
 
 3. **Detection engine** — Events are scored by the multi-factor ScoringEngine and classified into tiers. Tier 1 (behavioral) signals are high-confidence. Tier 2 (indicator) signals are corroborating evidence. Rules declare their detection category at compile time via attributes. **v2.0:** detections are tagged with MITRE ATT&CK technique IDs when mappable.
 

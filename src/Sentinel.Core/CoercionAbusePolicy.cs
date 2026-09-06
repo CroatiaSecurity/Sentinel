@@ -38,6 +38,7 @@ namespace Sentinel.Core
             "parsec", "toodesk", "sunloginclient", "oraybox",
             "quasar", "asyncrat", "njrat", "darkcomet", "nanocore", "remcos",
             "warzone", "netwire", "orcus", "luminositylink",
+            "tailcat", "wireproxy", "sliver", "chisel", "ngrok",
         };
 
         private static readonly string[] SurveillanceRuleFragments =

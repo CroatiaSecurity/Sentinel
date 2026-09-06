@@ -174,6 +174,30 @@ namespace Sentinel.Core
 
             _persistentConnMon?.RecordDnsQuery(pid, domain);
             _forumHrWatch?.RecordDnsQuery(pid, domain);
+            CovertMeshSightings.NoteDomain(domain);
+
+            if (UserlandProtocolHeuristics.IsCovertMeshDomain(domain))
+            {
+                _ = _detectionEngine.EmitAsync(new DetectionEvent
+                {
+                    RuleName = "Covert Mesh: DERP/tailcat DNS",
+                    Evidence = $"DNS query for mesh bootstrap host '{domain}'",
+                    Reasoning = "A lookup for tailcat.dev or a Tailscale DERP relay from a process that is not " +
+                                "the installed Tailscale client is the bootstrap of a userspace magicsock overlay " +
+                                "(tailcat and copycats). LogOnly observe fuel.",
+                    Confidence = 0.62,
+                    Tier = DetectionTier.Tier2Indicator,
+                    AuthorizedResponse = ResponseAction.LogOnly,
+                    ProcessName = "SYSTEM",
+                    ProcessId = pid,
+                    SignalType = SignalType.Generic,
+                    Metadata = new Dictionary<string, string>
+                    {
+                        ["Domain"] = domain,
+                        ["Protocol"] = "DNS",
+                    }
+                });
+            }
 
             // GorstaksProtection v2.4.0: ThreatFox domain IOC check — fast O(1) lookup
             if (_threatFoxFeed != null && _threatFoxFeed.IsMaliciousDomain(domain, out var tfVerdict))
