@@ -41,7 +41,7 @@ Monitors → TelemetryFusionEngine → DetectionEngine → AdvancedResponseEngin
 | `OpsMetricsPublisher` | Writes `%ProgramData%\Sentinel\ops_metrics.json` |
 | `SelfPathGuard` | Hardlink-aware install self-exclusion |
 | `EncryptedConfigStore` | DPAPI-encrypted per-deployment config (`config.enc`); replaces plaintext appsettings.json |
-| `ProductInfo.Version` | `2.4.9` |
+| `ProductInfo.Version` | `2.5.0` |
 
 All components are wired via Microsoft.Extensions.DependencyInjection. No static mutable state anywhere.
 
@@ -167,6 +167,7 @@ Organized by MonitorGroup. Each group has staggered startup, independent failure
 | `WfpNetEventMonitor` | **v2.4.8.** `FwpmNetEventSubscribe0` (no callout driver). GRE/ESP/AH/SCTP/L2TP + drop bursts. Unknown-proto fallback | event / 15s |
 | `VoipSessionMonitor` | **v2.4.8.** SIP/STUN/H.323/IAX/MGCP + RTP-like binds from unexpected processes. Discord/Teams/Zoom/Steam skipped | 3s |
 | `CovertMeshMonitor` | **v2.4.8.** Userspace WG/DERP/STUN overlays (tailcat and copycats). Official Tailscale skipped. LogOnly | 3s |
+| `CovertWebhookMonitor` | **v2.5.0.** Webhook/bot-API exfil (Discord/Telegram/Slack + disposable sinks) from script hosts / Temp. No TLS intercept. LogOnly | 4s |
 
 #### Group 5: SystemIntegrity (10s start delay, max 3 restarts)
 

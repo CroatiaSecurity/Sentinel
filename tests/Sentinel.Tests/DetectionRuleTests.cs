@@ -598,6 +598,8 @@ namespace Sentinel.Tests
         [Theory]
         [InlineData("pastebin.com/raw/abc123")]
         [InlineData("discord.com/api/webhooks/1234/token")]
+        [InlineData("https://webhook.site/uuid")]
+        [InlineData("https://api.telegram.org/bot123/sendMessage")]
         [InlineData("some.onion.link")]
         public void CampaignIocRule_Detects_C2Domains(string domain)
         {

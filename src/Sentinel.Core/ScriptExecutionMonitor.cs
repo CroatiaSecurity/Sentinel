@@ -61,6 +61,13 @@ namespace Sentinel.Core
             // Persistence
             "New-ScheduledTask", "Register-ScheduledTask",
             "HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run",
+            // Webhook exfil (path visible in 4104; TLS on the wire is not)
+            "discord.com/api/webhooks",
+            "discordapp.com/api/webhooks",
+            "api.telegram.org/bot",
+            "hooks.slack.com",
+            "webhook.site",
+            "interact.sh",
         };
 
         // Parent-child anomaly pairs: parent → suspicious children

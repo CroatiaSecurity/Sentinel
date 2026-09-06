@@ -407,6 +407,103 @@ namespace Sentinel.Tests.Monitors
         public void MonitorTypes_IncludeCovertMesh()
         {
             Assert.Equal("Sentinel.Core", typeof(CovertMeshMonitor).Namespace);
+            Assert.Equal("Sentinel.Core", typeof(CovertWebhookMonitor).Namespace);
+        }
+
+        [Theory]
+        [InlineData("webhook.site", true)]
+        [InlineData("https://webhook.site/abc", true)]
+        [InlineData("abc.interact.sh", true)]
+        [InlineData("canarytokens.com", true)]
+        [InlineData("discord.com", false)]
+        [InlineData("google.com", false)]
+        public void DedicatedWebhookSinks(string host, bool expected)
+        {
+            Assert.Equal(expected, UserlandProtocolHeuristics.IsDedicatedWebhookSink(host));
+        }
+
+        [Theory]
+        [InlineData("discord.com", true)]
+        [InlineData("api.telegram.org", true)]
+        [InlineData("hooks.slack.com", true)]
+        [InlineData("cdn.discordapp.com", false)]
+        public void CommsExfilHosts(string host, bool expected)
+        {
+            Assert.Equal(expected, UserlandProtocolHeuristics.IsCommsExfilHost(host));
+        }
+
+        [Theory]
+        [InlineData("curl https://discord.com/api/webhooks/1/token", true)]
+        [InlineData("IWR https://api.telegram.org/bot123/sendMessage", true)]
+        [InlineData("https://webhook.site/uuid", true)]
+        [InlineData("notepad C:\\temp\\readme.txt", false)]
+        public void WebhookUrlInContent(string text, bool expected)
+        {
+            Assert.Equal(expected, UserlandProtocolHeuristics.ContainsWebhookUrl(text));
+        }
+
+        [Fact]
+        public void DiscordApp_IsSkippedForWebhook()
+        {
+            var k = UserlandProtocolHeuristics.ClassifyWebhook(
+                "discord", @"C:\Users\x\AppData\Local\Discord\app.exe",
+                hasHttps: true, dedicatedDnsRecently: false, commsDnsRecently: true, urlInContent: false);
+            Assert.Equal(UserlandProtocolHeuristics.WebhookKind.None, k);
+        }
+
+        [Fact]
+        public void Powershell_WebhookSite_IsDedicatedSink()
+        {
+            var k = UserlandProtocolHeuristics.ClassifyWebhook(
+                "powershell", @"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+                hasHttps: true, dedicatedDnsRecently: true, commsDnsRecently: false, urlInContent: false);
+            Assert.Equal(UserlandProtocolHeuristics.WebhookKind.DedicatedSink, k);
+        }
+
+        [Fact]
+        public void TempStealer_DiscordDnsAndHttps_IsCommsAbuse()
+        {
+            var k = UserlandProtocolHeuristics.ClassifyWebhook(
+                "payload", @"C:\Users\x\Downloads\payload.exe",
+                hasHttps: true, dedicatedDnsRecently: false, commsDnsRecently: true, urlInContent: false);
+            Assert.Equal(UserlandProtocolHeuristics.WebhookKind.CommsPlatformAbuse, k);
+        }
+
+        [Fact]
+        public void Chrome_DiscordHttps_IsSkipped()
+        {
+            var k = UserlandProtocolHeuristics.ClassifyWebhook(
+                "chrome", @"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                hasHttps: true, dedicatedDnsRecently: true, commsDnsRecently: true, urlInContent: true);
+            Assert.Equal(UserlandProtocolHeuristics.WebhookKind.None, k);
+        }
+
+        [Fact]
+        public void Curl_WebhookUrl_IsUrlInContent()
+        {
+            var k = UserlandProtocolHeuristics.ClassifyWebhook(
+                "curl", @"C:\Users\x\Downloads\curl.exe",
+                hasHttps: true, dedicatedDnsRecently: false, commsDnsRecently: false, urlInContent: true);
+            Assert.Equal(UserlandProtocolHeuristics.WebhookKind.UrlInContent, k);
+        }
+
+        [Fact]
+        public void CovertWebhook_IsWeakChainOnly_AndExfilCategory()
+        {
+            var d = new DetectionEvent
+            {
+                RuleName = "Covert Webhook: Disposable Sink",
+                Confidence = 0.76,
+                Tier = DetectionTier.Tier2Indicator,
+                AuthorizedResponse = ResponseAction.LogOnly,
+                ProcessId = 4242,
+                ProcessName = "powershell",
+            };
+            Assert.True(ResponsePolicy.IsWeakObserveSeed(d));
+            Assert.Null(ResponsePolicy.ClassifyTerminalOutcome(d));
+            Assert.Equal(DetectionCategory.DataExfiltration, ScoringEngine.CategorizeDetection(d.RuleName));
+            var techs = AttackTechniqueMap.Resolve(d.RuleName);
+            Assert.Contains("T1041", techs);
         }
     }
 }

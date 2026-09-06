@@ -2,6 +2,29 @@
 
 
 
+## [2.5.0] - 2026-09-06
+
+Webhook-shaped exfil without TLS intercept.
+
+### Added
+
+- **`CovertWebhookMonitor`** (NetworkIntegrity) — stealers that POST to
+  Discord/Telegram/Slack webhooks or disposable sinks (`webhook.site`,
+  `interact.sh`, requestbin, canarytokens). Correlates dedicated-sink DNS
+  with HTTPS from script hosts / Temp/Downloads. Comms-platform DNS is
+  per-PID so Chrome looking up `discord.com` does not smear onto PowerShell.
+  Official Discord/Slack/Telegram and browsers skipped. Tier2 / LogOnly.
+- DNS emit `Covert Webhook: Disposable Callback Lookup`.
+- `CampaignIocRule` / `AttackToolsRule` / PowerShell 4104 patterns expanded
+  for webhook URL paths (visible in command lines and script blocks; not
+  on the TLS wire).
+
+### Changed
+
+- `ProductInfo.Version` → `2.5.0`
+- Installer → `SentinelSetup-2.5.0.exe`
+
+
 ## [2.4.9] - 2026-09-06
 
 Patch on the 2.4.8 protocol coverage.

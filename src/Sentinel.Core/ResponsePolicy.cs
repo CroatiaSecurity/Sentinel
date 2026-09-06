@@ -197,6 +197,7 @@ namespace Sentinel.Core
             "Network WFP:",
             "Network VoIP:",
             "Covert Mesh:",
+            "Covert Webhook:",
             // Surveillance: composite fuel for coercion toolkit; never sole chain seed
             "Screen Capture",
             "DXGI Desktop Duplication",

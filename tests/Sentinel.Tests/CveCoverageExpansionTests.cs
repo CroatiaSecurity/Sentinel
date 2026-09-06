@@ -28,6 +28,7 @@ namespace Sentinel.Tests
             Assert.Equal("Sentinel.Core", typeof(WfpNetEventMonitor).Namespace);
             Assert.Equal("Sentinel.Core", typeof(VoipSessionMonitor).Namespace);
             Assert.Equal("Sentinel.Core", typeof(CovertMeshMonitor).Namespace);
+            Assert.Equal("Sentinel.Core", typeof(CovertWebhookMonitor).Namespace);
         }
 
         [Theory]

@@ -175,6 +175,31 @@ namespace Sentinel.Core
             _persistentConnMon?.RecordDnsQuery(pid, domain);
             _forumHrWatch?.RecordDnsQuery(pid, domain);
             CovertMeshSightings.NoteDomain(domain);
+            CovertWebhookSightings.NoteDomain(domain, pid);
+
+            if (UserlandProtocolHeuristics.IsDedicatedWebhookSink(domain))
+            {
+                _ = _detectionEngine.EmitAsync(new DetectionEvent
+                {
+                    RuleName = "Covert Webhook: Disposable Sink Lookup",
+                    Evidence = $"DNS query for disposable webhook sink '{domain}' PID={pid}",
+                    Reasoning = "A lookup for webhook.site / interact.sh / requestbin / canarytokens-class " +
+                                "hosts is the DNS step of stealer callback exfil. LogOnly; the process " +
+                                "monitor correlates HTTPS from script hosts.",
+                    Confidence = 0.64,
+                    Tier = DetectionTier.Tier2Indicator,
+                    AuthorizedResponse = ResponseAction.LogOnly,
+                    ProcessName = pid > 4 ? "unknown" : "SYSTEM",
+                    ProcessId = pid,
+                    SignalType = SignalType.Generic,
+                    Metadata = new Dictionary<string, string>
+                    {
+                        ["Domain"] = domain,
+                        ["Protocol"] = "DNS",
+                        ["WeakObserveSeed"] = pid <= 4 ? "true" : "false",
+                    }
+                });
+            }
 
             if (UserlandProtocolHeuristics.IsCovertMeshDomain(domain))
             {

@@ -382,7 +382,7 @@ namespace Sentinel.Core
                 r.Contains("verdictgate") || r.Contains("verdict gate") || r.Contains("chain-nuke") || r.Contains("composite")) return DetectionCategory.AntiTamper;
             if (r.Contains("dns") || r.Contains("dga")) return DetectionCategory.DnsAnomaly;
             if (r.Contains("arp") || r.Contains("route") || r.Contains("tls") || r.Contains("badusb") || r.Contains("network") || r.Contains("mesh") || r.Contains("derp")) return DetectionCategory.NetworkAnomaly;
-            if (r.Contains("exfil")) return DetectionCategory.DataExfiltration;
+            if (r.Contains("exfil") || r.Contains("webhook")) return DetectionCategory.DataExfiltration;
             return DetectionCategory.Unknown;
         }
 

@@ -106,6 +106,8 @@ namespace Sentinel.Core
             ("Covert Mesh", new[] { "T1071", "T1095", "T1572" }),
             ("Userspace Overlay", new[] { "T1095", "T1572" }),
             ("DERP Relay", new[] { "T1090", "T1095" }),
+            ("Covert Webhook", new[] { "T1041", "T1567.004" }),
+            ("Disposable Sink", new[] { "T1041", "T1567" }),
         };
 
         /// <summary>

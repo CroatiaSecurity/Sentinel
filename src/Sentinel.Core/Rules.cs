@@ -402,6 +402,11 @@ namespace Sentinel.Core
             // === Exfiltration endpoints ===
             ("pastebin.com/raw", "Exfil:Pastebin"),
             ("discord.com/api/webhooks", "Exfil:Discord"),
+            ("discordapp.com/api/webhooks", "Exfil:Discord"),
+            ("api.telegram.org/bot", "Exfil:Telegram"),
+            ("hooks.slack.com", "Exfil:Slack"),
+            ("webhook.site", "Exfil:WebhookSink"),
+            ("interact.sh", "Exfil:WebhookSink"),
             (".onion.", "Exfil:Tor"),
             ("tor2web", "Exfil:Tor"),
         };
@@ -512,7 +517,10 @@ namespace Sentinel.Core
         private static readonly string[] MaliciousDomainPatterns = new[]
         {
             "pastebin.com/raw", "hastebin.com/raw",
-            "discord.com/api/webhooks", "telegram-bot",
+            "discord.com/api/webhooks", "discordapp.com/api/webhooks",
+            "api.telegram.org/bot", "hooks.slack.com",
+            "telegram-bot", "webhook.site", "interact.sh",
+            "requestbin.com", "canarytokens.com",
             ".onion.", ".tor2web.",
             "envell.xyz", "enveil.online", "uxtramine.org",
         };

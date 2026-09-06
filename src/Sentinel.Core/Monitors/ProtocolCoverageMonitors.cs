@@ -500,6 +500,163 @@ namespace Sentinel.Core
             CovertMeshKind.StunHolePunch => 0.68,
             _ => 0,
         };
+
+        /// <summary>
+        /// Purpose-built HTTP callback sinks. A browser visiting these is skipped
+        /// via <see cref="ShouldSkipWorkSurface"/>; a script host is a stealer.
+        /// </summary>
+        internal static readonly string[] DedicatedWebhookSinkHosts =
+        {
+            "webhook.site", "pipedream.net", "requestbin.com", "requestbin.net",
+            "hookbin.com", "beeceptor.com", "mockbin.org", "interact.sh",
+            "oast.fun", "oastify.com", "oast.pro", "canarytokens.com",
+            "canarytokens.org", "webhookrelay.com",
+        };
+
+        /// <summary>
+        /// Comms platforms stealers abuse as anonymous POST sinks.
+        /// Official Discord/Telegram/Slack apps are skipped by name.
+        /// </summary>
+        internal static readonly string[] CommsExfilHosts =
+        {
+            "discord.com", "discordapp.com", "api.telegram.org", "hooks.slack.com",
+        };
+
+        /// <summary>
+        /// Path / URL fragments visible in command lines and PowerShell 4104.
+        /// HTTPS on the wire never shows these without TLS intercept.
+        /// </summary>
+        internal static readonly string[] WebhookUrlFragments =
+        {
+            "discord.com/api/webhooks",
+            "discordapp.com/api/webhooks",
+            "api.telegram.org/bot",
+            "hooks.slack.com/",
+            "webhook.site/",
+            "telegram-bot",
+        };
+
+        public static string NormalizeHost(string? host)
+        {
+            if (string.IsNullOrWhiteSpace(host)) return "";
+            var h = host!.Trim().TrimEnd('.').ToLowerInvariant();
+            if (h.StartsWith("http://", StringComparison.Ordinal) ||
+                h.StartsWith("https://", StringComparison.Ordinal))
+            {
+                if (Uri.TryCreate(h, UriKind.Absolute, out var uri) && !string.IsNullOrEmpty(uri.Host))
+                    h = uri.Host;
+            }
+            if (h.StartsWith("www.", StringComparison.Ordinal))
+                h = h.Substring(4);
+            return h;
+        }
+
+        public static bool HostMatches(string host, string suffix)
+        {
+            if (string.IsNullOrEmpty(host) || string.IsNullOrEmpty(suffix)) return false;
+            return host.Equals(suffix, StringComparison.Ordinal) ||
+                   host.EndsWith("." + suffix, StringComparison.Ordinal);
+        }
+
+        public static bool IsDedicatedWebhookSink(string? host)
+        {
+            var h = NormalizeHost(host);
+            if (h.Length == 0) return false;
+            foreach (var s in DedicatedWebhookSinkHosts)
+            {
+                if (HostMatches(h, s)) return true;
+            }
+            return false;
+        }
+
+        public static bool IsCommsExfilHost(string? host)
+        {
+            var h = NormalizeHost(host);
+            if (h.Length == 0) return false;
+            foreach (var s in CommsExfilHosts)
+            {
+                if (h.Equals(s, StringComparison.Ordinal)) return true;
+            }
+            return false;
+        }
+
+        public static bool ContainsWebhookUrl(string? text)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return false;
+            var t = text!.ToLowerInvariant();
+            foreach (var f in WebhookUrlFragments)
+            {
+                if (t.IndexOf(f, StringComparison.Ordinal) >= 0)
+                    return true;
+            }
+            foreach (var s in DedicatedWebhookSinkHosts)
+            {
+                if (t.IndexOf(s, StringComparison.Ordinal) >= 0)
+                    return true;
+            }
+            return false;
+        }
+
+        public enum WebhookKind
+        {
+            None,
+            DedicatedSink,
+            CommsPlatformAbuse,
+            UrlInContent,
+        }
+
+        /// <summary>
+        /// Stealers POST to Discord/Telegram/Slack webhooks or disposable
+        /// callback hosts. No TLS intercept — host identity + process context.
+        /// Browsers and the official comms apps are skipped.
+        /// </summary>
+        public static WebhookKind ClassifyWebhook(
+            string? processName,
+            string? imagePath,
+            bool hasHttps,
+            bool dedicatedDnsRecently,
+            bool commsDnsRecently,
+            bool urlInContent)
+        {
+            if (IsKnownCommsProcess(processName) ||
+                AlwaysOnPolicies.IsProtectedGamePath(imagePath) ||
+                AlwaysOnPolicies.IsProtectedGameProcessName(processName) ||
+                InstallerHeuristics.IsDirectXOrRuntimeRedist(processName, imagePath))
+                return WebhookKind.None;
+            if (IsVpnOrIkeProcess(processName))
+                return WebhookKind.None;
+
+            var n = NormalizeProcessName(processName);
+            if (n.Equals("svchost", StringComparison.OrdinalIgnoreCase) ||
+                n.Equals("system", StringComparison.OrdinalIgnoreCase) ||
+                n.Equals("lsass", StringComparison.OrdinalIgnoreCase))
+                return WebhookKind.None;
+
+            // URL on the command line / script wins even for portable Downloads tools (curl IWR).
+            if (urlInContent)
+                return WebhookKind.UrlInContent;
+
+            if (ShouldSkipWorkSurface(processName, imagePath))
+                return WebhookKind.None;
+
+            bool staging = IsScriptHost(processName) || IsSuspiciousPath(imagePath);
+
+            if (dedicatedDnsRecently && (hasHttps || staging))
+                return WebhookKind.DedicatedSink;
+
+            if (commsDnsRecently && staging && hasHttps)
+                return WebhookKind.CommsPlatformAbuse;
+
+            return WebhookKind.None;
+        }
+
+        public static double ConfidenceFor(WebhookKind k) => k switch
+        {
+            WebhookKind.UrlInContent => 0.80,
+            WebhookKind.DedicatedSink => 0.76,
+            WebhookKind.CommsPlatformAbuse => 0.70,
+            _ => 0,
+        };
     }
 
     /// <summary>
@@ -536,6 +693,65 @@ namespace Sentinel.Core
                 if (kv.Value >= cutoff) return true;
             }
             return false;
+        }
+    }
+
+    /// <summary>
+    /// Recent DNS hits on webhook / bot-API hosts. Written by
+    /// <see cref="DnsQueryMonitor"/>, read by <see cref="CovertWebhookMonitor"/>.
+    /// </summary>
+    internal static class CovertWebhookSightings
+    {
+        private static readonly ConcurrentDictionary<string, long> Dedicated =
+            new(StringComparer.OrdinalIgnoreCase);
+        private static readonly ConcurrentDictionary<int, long> CommsPids = new();
+
+        public static void NoteDomain(string domain, int pid)
+        {
+            if (string.IsNullOrWhiteSpace(domain)) return;
+            long now = DateTime.UtcNow.Ticks;
+            if (UserlandProtocolHeuristics.IsDedicatedWebhookSink(domain))
+                Dedicated[domain] = now;
+            else if (UserlandProtocolHeuristics.IsCommsExfilHost(domain) && pid > 4)
+                CommsPids[pid] = now;
+            else
+                return;
+
+            if (Dedicated.Count > 256)
+            {
+                long cutoff = DateTime.UtcNow.AddMinutes(-15).Ticks;
+                foreach (var kv in Dedicated)
+                {
+                    if (kv.Value < cutoff)
+                        Dedicated.TryRemove(kv.Key, out _);
+                }
+            }
+            if (CommsPids.Count > 512)
+            {
+                long cutoff = DateTime.UtcNow.AddMinutes(-15).Ticks;
+                foreach (var kv in CommsPids)
+                {
+                    if (kv.Value < cutoff)
+                        CommsPids.TryRemove(kv.Key, out _);
+                }
+            }
+        }
+
+        public static bool SeenDedicatedRecently(TimeSpan window)
+        {
+            long cutoff = DateTime.UtcNow.Subtract(window).Ticks;
+            foreach (var kv in Dedicated)
+            {
+                if (kv.Value >= cutoff) return true;
+            }
+            return false;
+        }
+
+        public static bool SeenCommsFor(int pid, TimeSpan window)
+        {
+            if (pid <= 4) return false;
+            if (!CommsPids.TryGetValue(pid, out var ticks)) return false;
+            return ticks >= DateTime.UtcNow.Subtract(window).Ticks;
         }
     }
 
@@ -1435,6 +1651,150 @@ namespace Sentinel.Core
                 ProcessId = pid,
                 SignalType = SignalType.SuspiciousProcess,
                 Metadata = ProtocolEmitMeta.Create(path, "mesh", udpN, weak: false, "UDP+HTTPS"),
+            }).ConfigureAwait(false);
+        }
+
+        private bool ShouldAlert(string key)
+        {
+            lock (_alerted)
+            {
+                if (_alerted.Contains(key)) return false;
+                _alerted.Add(key);
+                if (_alerted.Count > 200) _alerted.Clear();
+                return true;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Stealers' webhook exfil without TLS intercept: DNS to a callback sink
+    /// or Discord/Telegram/Slack bot host, plus HTTPS, from a script host or
+    /// Temp/Downloads. Official Discord/Slack/Telegram and browsers skipped.
+    /// </summary>
+    public sealed class CovertWebhookMonitor : BackgroundService
+    {
+        private readonly DetectionEngine _detectionEngine;
+        private readonly ILogger<CovertWebhookMonitor> _logger;
+        private readonly ProcessAncestryCache? _ancestry;
+        private readonly HashSet<string> _alerted = new(StringComparer.OrdinalIgnoreCase);
+        private static readonly TimeSpan ScanInterval = TimeSpan.FromSeconds(4);
+
+        public CovertWebhookMonitor(
+            DetectionEngine detectionEngine,
+            ILogger<CovertWebhookMonitor> logger,
+            ProcessAncestryCache? ancestry = null)
+        {
+            _detectionEngine = detectionEngine;
+            _logger = logger;
+            _ancestry = ancestry;
+        }
+
+        protected override async Task ExecuteAsync(CancellationToken ct)
+        {
+            _logger.LogInformation("[CovertWebhookMonitor] Started — webhook/bot-API exfil from unexpected processes");
+            try { await Task.Delay(TimeSpan.FromSeconds(12), ct).ConfigureAwait(false); }
+            catch (OperationCanceledException) { return; }
+
+            while (!ct.IsCancellationRequested)
+            {
+                try { await ScanAsync().ConfigureAwait(false); }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
+                catch (Exception ex) { _logger.LogDebug(ex, "[CovertWebhookMonitor] scan error"); }
+
+                try { await Task.Delay(ScanInterval, ct).ConfigureAwait(false); }
+                catch (OperationCanceledException) { break; }
+            }
+        }
+
+        private async Task ScanAsync()
+        {
+            var httpsPids = NativeTcpTable.HttpsOwnerPids();
+            bool dedicatedDns = CovertWebhookSightings.SeenDedicatedRecently(TimeSpan.FromMinutes(10));
+            if (!dedicatedDns && httpsPids.Count == 0)
+                return;
+
+            int myPid = System.Net48Environment.ProcessId;
+            foreach (var pid in httpsPids)
+            {
+                if (pid <= 4 || pid == myPid) continue;
+                var (name, path) = ProtocolProcessLookup.Resolve(pid, _ancestry);
+                bool commsDns = CovertWebhookSightings.SeenCommsFor(pid, TimeSpan.FromMinutes(10));
+                var kind = UserlandProtocolHeuristics.ClassifyWebhook(
+                    name, path, hasHttps: true, dedicatedDns, commsDns, urlInContent: false);
+                if (kind == UserlandProtocolHeuristics.WebhookKind.None) continue;
+
+                await EmitAsync(kind, name, path, pid, https: true, dedicatedDns, commsDns, urlInContent: false)
+                    .ConfigureAwait(false);
+            }
+
+            if (!dedicatedDns) return;
+
+            // Dedicated-sink DNS with no HTTPS yet (lookup then POST). Script hosts only.
+            foreach (var p in Process.GetProcesses())
+            {
+                try
+                {
+                    if (p.Id <= 4 || p.Id == myPid || httpsPids.Contains(p.Id)) continue;
+                    if (!UserlandProtocolHeuristics.IsScriptHost(p.ProcessName)) continue;
+                    var (name, path) = ProtocolProcessLookup.Resolve(p.Id, _ancestry);
+                    var kind = UserlandProtocolHeuristics.ClassifyWebhook(
+                        name, path, hasHttps: false, dedicatedDnsRecently: true,
+                        commsDnsRecently: false, urlInContent: false);
+                    if (kind == UserlandProtocolHeuristics.WebhookKind.None) continue;
+                    await EmitAsync(kind, name, path, p.Id, https: false, dedicatedDns, commsDns: false, urlInContent: false)
+                        .ConfigureAwait(false);
+                }
+                catch { /* process exited */ }
+                finally { p.Dispose(); }
+            }
+        }
+
+        private async Task EmitAsync(
+            UserlandProtocolHeuristics.WebhookKind kind,
+            string name, string? path, int pid, bool https, bool dedicatedDns, bool commsDns, bool urlInContent)
+        {
+            string rule = kind switch
+            {
+                UserlandProtocolHeuristics.WebhookKind.DedicatedSink =>
+                    "Covert Webhook: Disposable Sink",
+                UserlandProtocolHeuristics.WebhookKind.CommsPlatformAbuse =>
+                    "Covert Webhook: Comms Platform from Unexpected Process",
+                UserlandProtocolHeuristics.WebhookKind.UrlInContent =>
+                    "Covert Webhook: URL in Command Line",
+                _ => "Covert Webhook: Exfil",
+            };
+
+            string key = $"{rule}:{pid}";
+            if (!ShouldAlert(key)) return;
+
+            await _detectionEngine.EmitAsync(new DetectionEvent
+            {
+                RuleName = rule,
+                Evidence = $"'{name}' (PID {pid}) https={https} dedicatedSinkDns={dedicatedDns} " +
+                           $"commsDns={commsDns} urlInCmd={urlInContent}" +
+                           (string.IsNullOrEmpty(path) ? "" : $", path={path}"),
+                Reasoning = kind switch
+                {
+                    UserlandProtocolHeuristics.WebhookKind.DedicatedSink =>
+                        "A non-browser process resolved or contacted a disposable HTTP callback host " +
+                        "(webhook.site, interact.sh, requestbin, canarytokens, …). Stealers use these as " +
+                        "one-shot exfil sinks. TLS path is invisible without intercept. LogOnly.",
+                    UserlandProtocolHeuristics.WebhookKind.CommsPlatformAbuse =>
+                        "A script host or Temp/Downloads binary has HTTPS while Discord/Telegram/Slack " +
+                        "bot-API DNS was recent. Official Discord/Telegram/Slack apps are skipped. " +
+                        "The /api/webhooks path is encrypted; host+process is the userland signal. LogOnly.",
+                    UserlandProtocolHeuristics.WebhookKind.UrlInContent =>
+                        "A webhook URL (Discord/Telegram/Slack or a disposable sink) is on the process " +
+                        "command line. That is the curl/IWR stealer shape CampaignIocRule also covers. LogOnly.",
+                    _ => "Webhook-shaped exfil.",
+                },
+                Confidence = UserlandProtocolHeuristics.ConfidenceFor(kind),
+                Tier = DetectionTier.Tier2Indicator,
+                AuthorizedResponse = ResponseAction.LogOnly,
+                ProcessName = name,
+                ProcessId = pid,
+                SignalType = SignalType.SuspiciousProcess,
+                Metadata = ProtocolEmitMeta.Create(path, "webhook", 443, weak: false, "HTTPS"),
             }).ConfigureAwait(false);
         }
 

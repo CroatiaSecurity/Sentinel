@@ -666,7 +666,8 @@ namespace Sentinel.Service
                             ("IcmpAnomalyMonitor",              s => s.GetRequiredService<IcmpAnomalyMonitor>()),
                             ("WfpNetEventMonitor",              s => s.GetRequiredService<WfpNetEventMonitor>()),
                             ("VoipSessionMonitor",              s => s.GetRequiredService<VoipSessionMonitor>()),
-                            ("CovertMeshMonitor",               s => s.GetRequiredService<CovertMeshMonitor>())
+                            ("CovertMeshMonitor",               s => s.GetRequiredService<CovertMeshMonitor>()),
+                            ("CovertWebhookMonitor",            s => s.GetRequiredService<CovertWebhookMonitor>())
                         );
                         return new MonitorGroup(
                             new MonitorGroupConfig
@@ -704,6 +705,7 @@ namespace Sentinel.Service
                     services.AddSingleton<WfpNetEventMonitor>();
                     services.AddSingleton<VoipSessionMonitor>();
                     services.AddSingleton<CovertMeshMonitor>();
+                    services.AddSingleton<CovertWebhookMonitor>();
 
                     // ── Group 5: System Integrity ─────────────────────────────────────
                     // Starts delayed (10s). Monitors OS-level configuration drift.

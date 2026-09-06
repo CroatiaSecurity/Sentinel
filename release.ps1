@@ -1,24 +1,25 @@
 $env:PATH = "C:\Program Files\Git\cmd;C:\Program Files\Git\bin;" + $env:PATH
 $gh = "C:\Program Files\GitHub CLI\gh.exe"
-$installer = "installer\SentinelSetup-2.4.9.exe"
+$installer = "installer\SentinelSetup-2.5.0.exe"
 
 $notes = @"
-## v2.4.9 — ETW category + UDP PID attribution
+## v2.5.0 — webhook-shaped exfil (no TLS intercept)
 
-Patch on 2.4.8 protocol coverage.
+Stealers that POST to Discord/Telegram/Slack webhooks or disposable
+callback hosts (webhook.site, interact.sh, requestbin, canarytokens).
 
-- ``CategorizeDetection`` matches ETW as a token, not the letters inside
-  ``network``, and not only at the start of the rule name. Mid-string names
-  like ``process etw bypass`` stay SecurityEvasion; ``Network UDP:`` stays
-  NetworkAnomaly.
-- Kernel-Network UDP payload PID is used only when ``evt.ProcessId`` is
-  missing. A live event PID is never overwritten.
+- ``CovertWebhookMonitor`` — dedicated-sink DNS + HTTPS from script hosts /
+  Temp/Downloads. Comms-platform DNS is per-PID so Chrome looking up
+  discord.com does not smear onto PowerShell. Official Discord/Slack/
+  Telegram skipped.
+- Command-line and PowerShell 4104 URL path matching expanded.
+- Tier2 / LogOnly observe fuel. Never chain-nuke alone.
 
 Requires .NET Framework 4.8. Run as Administrator.
 "@
 
 if (Test-Path $gh) {
-    & $gh release create v2.4.9 $installer --title "Sentinel 2.4.9" --notes $notes -R CroatiaSecurity/Sentinel
+    & $gh release create v2.5.0 $installer --title "Sentinel 2.5.0" --notes $notes -R CroatiaSecurity/Sentinel
 } else {
-    Write-Host "gh.exe not found - installer is at $installer and releases\2.4.9\"
+    Write-Host "gh.exe not found - installer is at $installer and releases\2.5.0\"
 }
